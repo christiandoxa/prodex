@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 use chrono::{Local, TimeZone};
 use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
@@ -159,7 +160,7 @@ struct UsageResponse {
     plan_type: Option<String>,
     rate_limit: Option<WindowPair>,
     code_review_rate_limit: Option<WindowPair>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     additional_rate_limits: Vec<AdditionalRateLimit>,
 }
 
@@ -195,6 +196,21 @@ struct StoredAuth {
 struct StoredTokens {
     access_token: Option<String>,
     account_id: Option<String>,
+    id_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct IdTokenClaims {
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(rename = "https://api.openai.com/profile", default)]
+    profile: Option<IdTokenProfileClaims>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct IdTokenProfileClaims {
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Debug)]
@@ -688,6 +704,76 @@ fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
 }
 
 fn fetch_profile_email(codex_home: &Path) -> Result<String> {
+    let auth_email_error = match read_profile_email_from_auth(codex_home) {
+        Ok(Some(email)) => return Ok(email),
+        Ok(None) => None,
+        Err(err) => Some(err),
+    };
+
+    match fetch_profile_email_from_usage(codex_home) {
+        Ok(email) => Ok(email),
+        Err(usage_error) => {
+            if let Some(auth_error) = auth_email_error {
+                bail!(
+                    "failed to read account email from auth.json ({auth_error:#}) and quota endpoint ({usage_error:#})"
+                );
+            }
+            Err(usage_error)
+        }
+    }
+}
+
+fn read_profile_email_from_auth(codex_home: &Path) -> Result<Option<String>> {
+    let auth_path = codex_home.join("auth.json");
+    if !auth_path.is_file() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&auth_path)
+        .with_context(|| format!("failed to read {}", auth_path.display()))?;
+    let stored_auth: StoredAuth = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+    let id_token = stored_auth
+        .tokens
+        .as_ref()
+        .and_then(|tokens| tokens.id_token.as_deref())
+        .map(str::trim)
+        .filter(|token| !token.is_empty());
+
+    let Some(id_token) = id_token else {
+        return Ok(None);
+    };
+
+    parse_email_from_id_token(id_token)
+        .with_context(|| format!("failed to parse id_token in {}", auth_path.display()))
+}
+
+fn parse_email_from_id_token(raw_jwt: &str) -> Result<Option<String>> {
+    let mut parts = raw_jwt.split('.');
+    let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
+        (Some(header), Some(payload), Some(signature))
+            if !header.is_empty() && !payload.is_empty() && !signature.is_empty() =>
+        {
+            (header, payload, signature)
+        }
+        _ => bail!("invalid JWT format"),
+    };
+
+    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
+        .context("failed to decode JWT payload")?;
+    let claims: IdTokenClaims =
+        serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")?;
+
+    Ok(claims
+        .email
+        .or_else(|| claims.profile.and_then(|profile| profile.email))
+        .map(|email| email.trim().to_string())
+        .filter(|email| !email.is_empty()))
+}
+
+fn fetch_profile_email_from_usage(codex_home: &Path) -> Result<String> {
     let usage = fetch_usage(codex_home, None)?;
     let email = usage
         .email
@@ -742,6 +828,14 @@ fn find_profile_by_email(state: &mut AppState, email: &str) -> Result<Option<Str
 
 fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
+}
+
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn profile_name_from_email(email: &str) -> String {
@@ -2043,5 +2137,29 @@ mod tests {
             unique_profile_name_for_email(&paths, &state, "main@example.com"),
             "main_example.com-2"
         );
+    }
+
+    #[test]
+    fn parses_email_from_chatgpt_id_token() {
+        let id_token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn19.c2ln";
+
+        assert_eq!(
+            parse_email_from_id_token(id_token).expect("id token should parse"),
+            Some("user@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn usage_response_accepts_null_additional_rate_limits() {
+        let usage: UsageResponse = serde_json::from_value(serde_json::json!({
+            "email": "user@example.com",
+            "plan_type": "plus",
+            "rate_limit": null,
+            "code_review_rate_limit": null,
+            "additional_rate_limits": null
+        }))
+        .expect("usage response should parse");
+
+        assert!(usage.additional_rate_limits.is_empty());
     }
 }

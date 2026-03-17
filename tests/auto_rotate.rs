@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{Read, Write};
@@ -292,7 +293,12 @@ if [ "$1" = "login" ]; then
   mkdir -p "$CODEX_HOME"
   account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
   token="${TEST_LOGIN_ACCESS_TOKEN:-test-token}"
-  printf '{"tokens":{"access_token":"%s","account_id":"%s"}}\n' "$token" "$account_id" > "$CODEX_HOME/auth.json"
+  id_token="${TEST_LOGIN_ID_TOKEN:-}"
+  if [ -n "$id_token" ]; then
+    printf '{"tokens":{"id_token":"%s","access_token":"%s","account_id":"%s"}}\n' "$id_token" "$token" "$account_id" > "$CODEX_HOME/auth.json"
+  else
+    printf '{"tokens":{"access_token":"%s","account_id":"%s"}}\n' "$token" "$account_id" > "$CODEX_HOME/auth.json"
+  fi
 fi
 exit 0
 "#,
@@ -370,6 +376,15 @@ fn active_profile(path: &Path) -> String {
         .as_str()
         .expect("active_profile should be a string")
         .to_string()
+}
+
+fn chatgpt_id_token(email: &str) -> String {
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(format!(r#"{{"email":"{email}"}}"#));
+    let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("sig");
+    format!("{header}.{payload}.{signature}")
 }
 
 #[test]
@@ -594,5 +609,40 @@ fn login_without_profile_adds_suffix_when_email_name_is_taken() {
             .prodex_home
             .join("profiles/main_example.com-2/auth.json")
             .is_file()
+    );
+}
+
+#[test]
+fn login_without_profile_uses_auth_email_before_quota_lookup() {
+    let fixture = setup_fixture();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "profiles": {}
+        }),
+    );
+    let id_token = chatgpt_id_token("token@example.com");
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[
+            ("TEST_LOGIN_ACCOUNT_ID", "main-account"),
+            ("TEST_LOGIN_ID_TOKEN", id_token.as_str()),
+            ("CODEX_CHATGPT_BASE_URL", "http://127.0.0.1:1"),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "token_example.com");
+    assert_eq!(
+        state["profiles"]["token_example.com"]["email"],
+        "token@example.com"
     );
 }

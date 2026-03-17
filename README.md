@@ -55,7 +55,7 @@ prodex login
 This will:
 
 - run `codex login` in a temporary isolated `CODEX_HOME`
-- resolve the logged-in account email from the quota endpoint
+- resolve the logged-in account email from the ChatGPT `id_token` stored in `auth.json`
 - create a managed profile whose name is derived from that email
 - reuse the existing profile instead of creating a duplicate when that email is already registered
 - switch the active profile to the reused or newly created profile
@@ -69,7 +69,7 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Use `prodex login --profile <name>` when you want a fixed profile name, or when you are not using the ChatGPT login flow that exposes an account email through quota.
+Use `prodex login --profile <name>` when you want a fixed profile name, or when you are not using the ChatGPT login flow that writes an email-bearing `id_token`.
 
 `prodex login` still delegates the actual authentication flow to `codex`.
 
@@ -186,7 +186,7 @@ Log in and auto-create or reuse a unique profile based on the email you use:
 prodex login
 ```
 
-This only works when the login flow can later resolve a ChatGPT account email from the quota endpoint.
+This only works when the login flow writes a ChatGPT `id_token` with an email claim into `auth.json`.
 
 Log in to a specific profile:
 
@@ -272,7 +272,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 
 - quota checks are built into `prodex` and use the ChatGPT backend endpoint used by Codex
 - ChatGPT quota can only be read when the profile uses ChatGPT auth, not an API key
-- `prodex login` without `--profile` depends on that same quota-backed email lookup to decide whether to create or reuse a profile
+- `prodex login` without `--profile` depends on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 

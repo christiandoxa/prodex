@@ -37,7 +37,7 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Use `--profile` when you want a fixed profile name, or when the login flow is not the ChatGPT account flow used by quota/email detection.
+Use `--profile` when you want a fixed profile name, or when the login flow is not the ChatGPT account flow that writes an email-bearing `id_token`.
 
 ## Check all profiles and quotas
 
@@ -79,7 +79,7 @@ prodex doctor --quota
 
 - `prodex` is only a wrapper; login is still handled by `codex`
 - `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
-- that auto-create flow relies on being able to read the ChatGPT account email from the quota endpoint after login
+- that auto-create flow relies on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - built-in quota checks only work for profiles using ChatGPT auth
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity
