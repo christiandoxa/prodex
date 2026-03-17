@@ -15,6 +15,7 @@ In short:
 - one `prodex` profile = one `CODEX_HOME` directory
 - login is still handled by `codex`
 - `prodex` manages profiles, the active profile, built-in quota checks, and launching `codex`
+- Prodex-owned screens use a fixed 110-character layout with section headers, wrapped fields, and readable tables
 
 The mental model is similar to browser profiles, but for `codex`.
 
@@ -79,7 +80,9 @@ Use `prodex login --profile <name>` when you want a fixed profile name, or when 
 prodex quota --all
 ```
 
-Example `MAIN` column:
+`prodex quota --all` prints a `Quota Overview` table with a fixed-width layout. The main quota summary now appears in the `REMAINING` column, and each profile gets a wrapped `status:` detail line underneath the row.
+
+Example `REMAINING` value:
 
 ```text
 5h 63% left | weekly 88% left
@@ -160,6 +163,8 @@ List all profiles:
 prodex profile list
 ```
 
+This renders a `Profiles` panel with wrapped fields and one panel per profile.
+
 Select the active profile:
 
 ```bash
@@ -220,6 +225,8 @@ View all profiles at once:
 prodex quota --all
 ```
 
+This renders a `Quota Overview` table with `PROFILE`, `CUR`, `AUTH`, `ACCOUNT`, `PLAN`, and `REMAINING`, plus a `status:` line for each profile.
+
 ### Run `codex`
 
 Run `codex` with the active profile:
@@ -257,7 +264,7 @@ prodex run --profile work --skip-quota-check
 
 Before `prodex run` launches `codex`, `prodex` tries to check quota for the selected profile.
 
-Before a profile is considered safe to use, `prodex` requires both the `5h` and `weekly` quota windows to be present and still below `100/100`.
+Before a profile is considered safe to use, `prodex` requires both the `5h` and `weekly` quota windows to be present and still have remaining capacity.
 
 If that profile does not clearly have remaining required quota:
 
@@ -274,6 +281,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 - ChatGPT quota can only be read when the profile uses ChatGPT auth, not an API key
 - `prodex login` without `--profile` depends on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
+- `profile list`, `current`, `doctor`, `login`, `quota`, and other Prodex-owned screens use the same 110-character layout
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 
 ## Environment Variables

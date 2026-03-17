@@ -12,6 +12,8 @@ cargo install prodex
 prodex
 ```
 
+Prodex-owned commands use a fixed 110-character layout with section headers, wrapped key-value fields, and readable tables.
+
 ## Import your current `codex` login
 
 If `~/.codex` already contains an active login:
@@ -46,6 +48,8 @@ prodex profile list
 prodex quota --all
 ```
 
+`prodex profile list` renders a `Profiles` panel. `prodex quota --all` renders a `Quota Overview` table with a `REMAINING` column and a wrapped `status:` line for each profile.
+
 The `REMAINING` column shows quota left, not quota used.
 
 ## Select the active profile
@@ -54,6 +58,8 @@ The `REMAINING` column shows quota left, not quota used.
 prodex use main
 prodex current
 ```
+
+`prodex current` renders the same fixed-width panel format, which is also used by `prodex doctor`, `prodex login`, and detailed single-profile quota views.
 
 ## Run `codex` through `prodex`
 

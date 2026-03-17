@@ -19,6 +19,9 @@ const DEFAULT_PRODEX_DIR: &str = ".prodex";
 const DEFAULT_CODEX_DIR: &str = ".codex";
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
+const CLI_WIDTH: usize = 110;
+const CLI_LABEL_WIDTH: usize = 16;
+const CLI_TABLE_GAP: &str = "  ";
 
 #[derive(Parser, Debug)]
 #[command(
@@ -238,6 +241,144 @@ struct QuotaReport {
     result: std::result::Result<UsageResponse, String>,
 }
 
+fn section_header(title: &str) -> String {
+    let prefix = format!("[ {title} ] ");
+    let width = text_width(&prefix);
+    if width >= CLI_WIDTH {
+        return prefix;
+    }
+
+    format!("{prefix}{}", "=".repeat(CLI_WIDTH - width))
+}
+
+fn text_width(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn fit_cell(value: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    if text_width(value) <= width {
+        return value.to_string();
+    }
+
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+
+    let mut output = String::new();
+    for ch in value.chars().take(width - 3) {
+        output.push(ch);
+    }
+    output.push_str("...");
+    output
+}
+
+fn chunk_token(token: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+    if token.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for ch in token.chars() {
+        current.push(ch);
+        if text_width(&current) >= width {
+            chunks.push(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
+}
+
+fn wrap_text(input: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+
+    let mut lines = Vec::new();
+    for paragraph in input.lines() {
+        if paragraph.trim().is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            for piece in chunk_token(word, width) {
+                if current.is_empty() {
+                    current.push_str(&piece);
+                } else if text_width(&current) + 1 + text_width(&piece) <= width {
+                    current.push(' ');
+                    current.push_str(&piece);
+                } else {
+                    lines.push(std::mem::take(&mut current));
+                    current.push_str(&piece);
+                }
+            }
+        }
+
+        if !current.is_empty() {
+            lines.push(current);
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
+fn format_field_lines(label: &str, value: &str) -> Vec<String> {
+    let label = format!("{label}:");
+    let value_width = CLI_WIDTH.saturating_sub(CLI_LABEL_WIDTH + 1).max(1);
+    let wrapped = wrap_text(value, value_width);
+    let mut lines = Vec::new();
+
+    for (index, line) in wrapped.into_iter().enumerate() {
+        let field_label = if index == 0 { label.as_str() } else { "" };
+        lines.push(format!(
+            "{field_label:<label_w$} {line}",
+            label_w = CLI_LABEL_WIDTH
+        ));
+    }
+
+    lines
+}
+
+fn print_panel(title: &str, fields: &[(String, String)]) {
+    println!("{}", section_header(title));
+    for (label, value) in fields {
+        for line in format_field_lines(label, value) {
+            println!("{line}");
+        }
+    }
+}
+
+fn render_panel(title: &str, fields: &[(String, String)]) -> String {
+    let mut lines = vec![section_header(title)];
+    for (label, value) in fields {
+        lines.extend(format_field_lines(label, value));
+    }
+    lines.join("\n")
+}
+
+fn print_wrapped_stderr(message: &str) {
+    for line in wrap_text(message, CLI_WIDTH) {
+        eprintln!("{line}");
+    }
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("Error: {err:#}");
@@ -336,18 +477,27 @@ fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
 
     state.save(&paths)?;
 
-    println!("Added profile '{}'.", args.name);
-    println!("CODEX_HOME: {}", codex_home.display());
-    if source_home.is_some() {
-        println!("Source copied into managed profile home.");
+    let storage_message = if source_home.is_some() {
+        "Source copied into managed profile home.".to_string()
     } else if managed {
-        println!("Managed profile home created.");
+        "Managed profile home created.".to_string()
     } else {
-        println!("Existing CODEX_HOME registered.");
-    }
+        "Existing CODEX_HOME registered.".to_string()
+    };
+
+    let mut fields = vec![
+        (
+            "Result".to_string(),
+            format!("Added profile '{}'.", args.name),
+        ),
+        ("Profile".to_string(), args.name.clone()),
+        ("CODEX_HOME".to_string(), codex_home.display().to_string()),
+        ("Storage".to_string(), storage_message),
+    ];
     if state.active_profile.as_deref() == Some(args.name.as_str()) {
-        println!("Active profile: {}", args.name);
+        fields.push(("Active".to_string(), args.name.clone()));
     }
+    print_panel("Profile Added", &fields);
 
     Ok(())
 }
@@ -367,18 +517,31 @@ fn handle_list_profiles() -> Result<()> {
     let state = AppState::load(&paths)?;
 
     if state.profiles.is_empty() {
-        println!("No profiles configured.");
-        println!("Create one with: prodex profile add <name>");
-        println!("To import the current Codex home: prodex profile import-current");
+        let fields = vec![
+            ("Status".to_string(), "No profiles configured.".to_string()),
+            (
+                "Create".to_string(),
+                "prodex profile add <name>".to_string(),
+            ),
+            (
+                "Import".to_string(),
+                "prodex profile import-current".to_string(),
+            ),
+        ];
+        print_panel("Profiles", &fields);
         return Ok(());
     }
 
+    let summary_fields = vec![
+        ("Count".to_string(), state.profiles.len().to_string()),
+        (
+            "Active".to_string(),
+            state.active_profile.as_deref().unwrap_or("-").to_string(),
+        ),
+    ];
+    print_panel("Profiles", &summary_fields);
+
     for (name, profile) in &state.profiles {
-        let active = if state.active_profile.as_deref() == Some(name.as_str()) {
-            "*"
-        } else {
-            " "
-        };
         let auth_state = read_auth_summary(&profile.codex_home);
         let kind = if profile.managed {
             "managed"
@@ -386,11 +549,25 @@ fn handle_list_profiles() -> Result<()> {
             "external"
         };
 
-        println!("{active} {name}");
-        println!("  kind: {kind}");
-        println!("  auth: {}", auth_state.label);
-        println!("  email: {}", profile.email.as_deref().unwrap_or("-"));
-        println!("  path: {}", profile.codex_home.display());
+        println!();
+        let fields = vec![
+            (
+                "Current".to_string(),
+                if state.active_profile.as_deref() == Some(name.as_str()) {
+                    "Yes".to_string()
+                } else {
+                    "No".to_string()
+                },
+            ),
+            ("Kind".to_string(), kind.to_string()),
+            ("Auth".to_string(), auth_state.label),
+            (
+                "Email".to_string(),
+                profile.email.as_deref().unwrap_or("-").to_string(),
+            ),
+            ("Path".to_string(), profile.codex_home.display().to_string()),
+        ];
+        print_panel(&format!("Profile {name}"), &fields);
     }
 
     Ok(())
@@ -423,14 +600,26 @@ fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
 
     state.save(&paths)?;
 
-    println!("Removed profile '{}'.", args.name);
-    if args.delete_home {
-        println!("Deleted managed profile home.");
-    }
-    match &state.active_profile {
-        Some(active) => println!("Active profile: {active}"),
-        None => println!("Active profile cleared."),
-    }
+    let mut fields = vec![(
+        "Result".to_string(),
+        format!("Removed profile '{}'.", args.name),
+    )];
+    fields.push((
+        "Deleted home".to_string(),
+        if args.delete_home {
+            "Yes".to_string()
+        } else {
+            "No".to_string()
+        },
+    ));
+    fields.push((
+        "Active".to_string(),
+        state
+            .active_profile
+            .clone()
+            .unwrap_or_else(|| "cleared".to_string()),
+    ));
+    print_panel("Profile Removed", &fields);
 
     Ok(())
 }
@@ -447,8 +636,14 @@ fn handle_set_active_profile(selector: ProfileSelector) -> Result<()> {
         .get(&name)
         .with_context(|| format!("profile '{}' disappeared from state", name))?;
 
-    println!("Active profile: {name}");
-    println!("CODEX_HOME: {}", profile.codex_home.display());
+    let fields = vec![
+        ("Result".to_string(), format!("Active profile: {name}")),
+        (
+            "CODEX_HOME".to_string(),
+            profile.codex_home.display().to_string(),
+        ),
+    ];
+    print_panel("Active Profile", &fields);
     Ok(())
 }
 
@@ -457,13 +652,17 @@ fn handle_current_profile() -> Result<()> {
     let state = AppState::load(&paths)?;
 
     let Some(active) = state.active_profile.as_deref() else {
-        println!("No active profile.");
+        let mut fields = vec![("Status".to_string(), "No active profile.".to_string())];
         if state.profiles.len() == 1 {
             if let Some((name, profile)) = state.profiles.iter().next() {
-                println!("Only configured profile: {name}");
-                println!("CODEX_HOME: {}", profile.codex_home.display());
+                fields.push(("Only profile".to_string(), name.clone()));
+                fields.push((
+                    "CODEX_HOME".to_string(),
+                    profile.codex_home.display().to_string(),
+                ));
             }
         }
+        print_panel("Active Profile", &fields);
         return Ok(());
     };
 
@@ -472,11 +671,30 @@ fn handle_current_profile() -> Result<()> {
         .get(active)
         .with_context(|| format!("active profile '{}' is missing", active))?;
 
-    println!("{active}");
-    println!("CODEX_HOME: {}", profile.codex_home.display());
-    println!("Managed: {}", profile.managed);
-    println!("Email: {}", profile.email.as_deref().unwrap_or("-"));
-    println!("Auth: {}", read_auth_summary(&profile.codex_home).label);
+    let fields = vec![
+        ("Profile".to_string(), active.to_string()),
+        (
+            "CODEX_HOME".to_string(),
+            profile.codex_home.display().to_string(),
+        ),
+        (
+            "Managed".to_string(),
+            if profile.managed {
+                "Yes".to_string()
+            } else {
+                "No".to_string()
+            },
+        ),
+        (
+            "Email".to_string(),
+            profile.email.as_deref().unwrap_or("-").to_string(),
+        ),
+        (
+            "Auth".to_string(),
+            read_auth_summary(&profile.codex_home).label,
+        ),
+    ];
+    print_panel("Active Profile", &fields);
     Ok(())
 }
 
@@ -485,47 +703,57 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let state = AppState::load(&paths)?;
     let codex_home = default_codex_home()?;
 
-    println!("Prodex root: {}", paths.root.display());
-    println!(
-        "State file: {} ({})",
-        paths.state_file.display(),
-        if paths.state_file.exists() {
-            "exists"
-        } else {
-            "missing"
-        }
-    );
-    println!(
-        "Managed profiles root: {}",
-        paths.managed_profiles_root.display()
-    );
-    println!(
-        "Default CODEX_HOME: {} ({})",
-        codex_home.display(),
-        if codex_home.exists() {
-            "exists"
-        } else {
-            "missing"
-        }
-    );
-    println!("Codex binary: {}", format_binary_resolution(&codex_bin()));
-    println!("Quota endpoint: {}", usage_url(&quota_base_url(None)));
-    println!("Profiles: {}", state.profiles.len());
-    println!(
-        "Active profile: {}",
-        state.active_profile.as_deref().unwrap_or("-")
-    );
+    let summary_fields = vec![
+        ("Prodex root".to_string(), paths.root.display().to_string()),
+        (
+            "State file".to_string(),
+            format!(
+                "{} ({})",
+                paths.state_file.display(),
+                if paths.state_file.exists() {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            ),
+        ),
+        (
+            "Profiles root".to_string(),
+            paths.managed_profiles_root.display().to_string(),
+        ),
+        (
+            "Default CODEX_HOME".to_string(),
+            format!(
+                "{} ({})",
+                codex_home.display(),
+                if codex_home.exists() {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            ),
+        ),
+        (
+            "Codex binary".to_string(),
+            format_binary_resolution(&codex_bin()),
+        ),
+        (
+            "Quota endpoint".to_string(),
+            usage_url(&quota_base_url(None)),
+        ),
+        ("Profiles".to_string(), state.profiles.len().to_string()),
+        (
+            "Active profile".to_string(),
+            state.active_profile.as_deref().unwrap_or("-").to_string(),
+        ),
+    ];
+    print_panel("Doctor", &summary_fields);
 
     if state.profiles.is_empty() {
         return Ok(());
     }
 
     for (name, profile) in &state.profiles {
-        let active = if state.active_profile.as_deref() == Some(name.as_str()) {
-            " [active]"
-        } else {
-            ""
-        };
         let auth = read_auth_summary(&profile.codex_home);
         let kind = if profile.managed {
             "managed"
@@ -534,36 +762,55 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         };
 
         println!();
-        println!("{name}{active}");
-        println!("  kind: {kind}");
-        println!("  auth: {}", auth.label);
-        println!("  email: {}", profile.email.as_deref().unwrap_or("-"));
-        println!("  path: {}", profile.codex_home.display());
-        println!(
-            "  exists: {}",
-            if profile.codex_home.exists() {
-                "yes"
-            } else {
-                "no"
-            }
-        );
+        let mut fields = vec![
+            (
+                "Current".to_string(),
+                if state.active_profile.as_deref() == Some(name.as_str()) {
+                    "Yes".to_string()
+                } else {
+                    "No".to_string()
+                },
+            ),
+            ("Kind".to_string(), kind.to_string()),
+            ("Auth".to_string(), auth.label),
+            (
+                "Email".to_string(),
+                profile.email.as_deref().unwrap_or("-").to_string(),
+            ),
+            ("Path".to_string(), profile.codex_home.display().to_string()),
+            (
+                "Exists".to_string(),
+                if profile.codex_home.exists() {
+                    "Yes".to_string()
+                } else {
+                    "No".to_string()
+                },
+            ),
+        ];
 
         if args.quota {
             match fetch_usage(&profile.codex_home, None) {
                 Ok(usage) => {
                     let blocked = collect_blocked_limits(&usage, false);
-                    if blocked.is_empty() {
-                        println!("  quota: ready");
-                    } else {
-                        println!("  quota: blocked ({})", format_blocked_limits(&blocked));
-                    }
-                    println!("  main: {}", format_main_windows(&usage));
+                    fields.push((
+                        "Quota".to_string(),
+                        if blocked.is_empty() {
+                            "Ready".to_string()
+                        } else {
+                            format!("Blocked ({})", format_blocked_limits(&blocked))
+                        },
+                    ));
+                    fields.push(("Main".to_string(), format_main_windows(&usage)));
                 }
                 Err(err) => {
-                    println!("  quota: error ({})", first_line_of_error(&err.to_string()));
+                    fields.push((
+                        "Quota".to_string(),
+                        format!("Error ({})", first_line_of_error(&err.to_string())),
+                    ));
                 }
             }
         }
+        print_panel(&format!("Profile {name}"), &fields);
     }
 
     Ok(())
@@ -607,8 +854,23 @@ fn login_into_profile(
         }
     }
 
-    state.active_profile = Some(profile_name);
+    let account_email = state
+        .profiles
+        .get(&profile_name)
+        .and_then(|profile| profile.email.clone())
+        .unwrap_or_else(|| "-".to_string());
+    state.active_profile = Some(profile_name.clone());
     state.save(paths)?;
+    let fields = vec![
+        (
+            "Result".to_string(),
+            format!("Logged in successfully for profile '{profile_name}'."),
+        ),
+        ("Account".to_string(), account_email),
+        ("Profile".to_string(), profile_name),
+        ("CODEX_HOME".to_string(), codex_home.display().to_string()),
+    ];
+    print_panel("Login", &fields);
     Ok(status)
 }
 
@@ -646,8 +908,16 @@ fn login_with_auto_profile(
         state.active_profile = Some(profile_name.clone());
         state.save(paths)?;
 
-        println!("Logged in as {email}. Reusing profile '{profile_name}'.");
-        println!("CODEX_HOME: {}", codex_home.display());
+        let fields = vec![
+            (
+                "Result".to_string(),
+                format!("Logged in as {email}. Reusing profile '{profile_name}'."),
+            ),
+            ("Account".to_string(), email),
+            ("Profile".to_string(), profile_name),
+            ("CODEX_HOME".to_string(), codex_home.display().to_string()),
+        ];
+        print_panel("Login", &fields);
         return Ok(status);
     }
 
@@ -666,8 +936,16 @@ fn login_with_auto_profile(
     state.active_profile = Some(profile_name.clone());
     state.save(paths)?;
 
-    println!("Logged in as {email}. Created profile '{profile_name}'.");
-    println!("CODEX_HOME: {}", codex_home.display());
+    let fields = vec![
+        (
+            "Result".to_string(),
+            format!("Logged in as {email}. Created profile '{profile_name}'."),
+        ),
+        ("Account".to_string(), email),
+        ("Profile".to_string(), profile_name),
+        ("CODEX_HOME".to_string(), codex_home.display().to_string()),
+    ];
+    print_panel("Login", &fields);
     Ok(status)
 }
 
@@ -1004,11 +1282,12 @@ fn handle_run(args: RunArgs) -> Result<()> {
                         include_code_review,
                     );
 
-                    eprintln!(
+                    print_wrapped_stderr(&section_header("Quota Preflight"));
+                    print_wrapped_stderr(&format!(
                         "Quota preflight blocked profile '{}': {}",
                         profile_name,
                         format_blocked_limits(&blocked)
-                    );
+                    ));
 
                     if allow_auto_rotate {
                         if let Some(next_profile) = alternatives.first() {
@@ -1021,37 +1300,43 @@ fn handle_run(args: RunArgs) -> Result<()> {
                                 .clone();
                             state.active_profile = Some(next_profile.clone());
                             state.save(&paths)?;
-                            eprintln!("Auto-rotating to profile '{}'.", next_profile);
+                            print_wrapped_stderr(&format!(
+                                "Auto-rotating to profile '{}'.",
+                                next_profile
+                            ));
                         } else {
-                            eprintln!("No other ready profile was found.");
-                            eprintln!(
+                            print_wrapped_stderr("No other ready profile was found.");
+                            print_wrapped_stderr(&format!(
                                 "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
                                 profile_name
-                            );
+                            ));
                             std::process::exit(2);
                         }
                     } else {
                         if !alternatives.is_empty() {
-                            eprintln!(
+                            print_wrapped_stderr(&format!(
                                 "Other profiles that look ready: {}",
                                 alternatives.join(", ")
+                            ));
+                            print_wrapped_stderr(
+                                "Rerun without `--no-auto-rotate` to allow fallback.",
                             );
-                            eprintln!("Rerun without `--no-auto-rotate` to allow fallback.");
                         }
-                        eprintln!(
+                        print_wrapped_stderr(&format!(
                             "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
                             profile_name
-                        );
+                        ));
                         std::process::exit(2);
                     }
                 }
             }
             Err(err) => {
-                eprintln!(
+                print_wrapped_stderr(&section_header("Quota Preflight"));
+                print_wrapped_stderr(&format!(
                     "Warning: quota preflight failed for '{}': {err:#}",
                     profile_name
-                );
-                eprintln!("Continuing without quota gate.");
+                ));
+                print_wrapped_stderr("Continuing without quota gate.");
             }
         }
     }
@@ -1277,15 +1562,14 @@ fn fetch_usage_json(codex_home: &Path, base_url: Option<&str>) -> Result<serde_j
 }
 
 fn print_quota_reports(reports: &[QuotaReport]) {
+    const PROFILE_COL_WIDTH: usize = 24;
+    const CUR_COL_WIDTH: usize = 3;
+    const AUTH_COL_WIDTH: usize = 7;
+    const ACCOUNT_COL_WIDTH: usize = 27;
+    const PLAN_COL_WIDTH: usize = 8;
+    const REMAINING_COL_WIDTH: usize = 31;
+
     let mut rows = Vec::new();
-    let mut widths = [
-        "PROFILE".len(),
-        "CUR".len(),
-        "AUTH".len(),
-        "ACCOUNT".len(),
-        "PLAN".len(),
-        "REMAINING".len(),
-    ];
 
     for report in reports {
         let active = if report.active { "*" } else { "" }.to_string();
@@ -1314,65 +1598,53 @@ fn print_quota_reports(reports: &[QuotaReport]) {
             ),
         };
 
-        widths[0] = widths[0].max(report.name.len());
-        widths[1] = widths[1].max(active.len());
-        widths[2] = widths[2].max(auth.len());
-        widths[3] = widths[3].max(email.len());
-        widths[4] = widths[4].max(plan.len());
-        widths[5] = widths[5].max(main.len());
-
         rows.push((report.name.clone(), active, auth, email, plan, main, status));
     }
 
+    println!("{}", section_header("Quota Overview"));
     let header = format!(
-        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}  STATUS",
+        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}",
         "PROFILE",
         "CUR",
         "AUTH",
         "ACCOUNT",
         "PLAN",
         "REMAINING",
-        name_w = widths[0],
-        act_w = widths[1],
-        auth_w = widths[2],
-        email_w = widths[3],
-        plan_w = widths[4],
-        main_w = widths[5],
+        name_w = PROFILE_COL_WIDTH,
+        act_w = CUR_COL_WIDTH,
+        auth_w = AUTH_COL_WIDTH,
+        email_w = ACCOUNT_COL_WIDTH,
+        plan_w = PLAN_COL_WIDTH,
+        main_w = REMAINING_COL_WIDTH,
     );
     println!("{header}");
-    println!(
-        "{:-<name_w$}  {:-<act_w$}  {:-<auth_w$}  {:-<email_w$}  {:-<plan_w$}  {:-<main_w$}  ------",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        name_w = widths[0],
-        act_w = widths[1],
-        auth_w = widths[2],
-        email_w = widths[3],
-        plan_w = widths[4],
-        main_w = widths[5],
-    );
+    println!("{}", "-".repeat(text_width(&header)));
 
     for (name, active, auth, email, plan, main, status) in rows {
         println!(
-            "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}  {}",
-            name,
-            active,
-            auth,
-            email,
-            plan,
-            main,
-            status,
-            name_w = widths[0],
-            act_w = widths[1],
-            auth_w = widths[2],
-            email_w = widths[3],
-            plan_w = widths[4],
-            main_w = widths[5],
+            "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
+            fit_cell(&name, PROFILE_COL_WIDTH),
+            CLI_TABLE_GAP,
+            fit_cell(&active, CUR_COL_WIDTH),
+            CLI_TABLE_GAP,
+            fit_cell(&auth, AUTH_COL_WIDTH),
+            CLI_TABLE_GAP,
+            fit_cell(&email, ACCOUNT_COL_WIDTH),
+            CLI_TABLE_GAP,
+            fit_cell(&plan, PLAN_COL_WIDTH),
+            CLI_TABLE_GAP,
+            fit_cell(&main, REMAINING_COL_WIDTH),
+            name_w = PROFILE_COL_WIDTH,
+            act_w = CUR_COL_WIDTH,
+            auth_w = AUTH_COL_WIDTH,
+            email_w = ACCOUNT_COL_WIDTH,
+            plan_w = PLAN_COL_WIDTH,
+            main_w = REMAINING_COL_WIDTH,
         );
+        for line in wrap_text(&format!("status: {status}"), CLI_WIDTH - 2) {
+            println!("  {line}");
+        }
+        println!();
     }
 }
 
@@ -1425,14 +1697,7 @@ fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
 }
 
 fn format_named_window_status(label: &str, window: &UsageWindow) -> String {
-    let reset = format_reset_time(window.reset_at);
-    match window.used_percent {
-        Some(used) => {
-            let remaining = remaining_percent(window.used_percent);
-            format!("{label}: {remaining}% left ({used}% used), resets {reset}")
-        }
-        None => format!("{label}: usage unknown, resets {reset}"),
-    }
+    format!("{label}: {}", format_window_details(window))
 }
 
 fn format_window_status(window: &UsageWindow) -> String {
@@ -1447,6 +1712,17 @@ fn format_window_status_compact(window: &UsageWindow) -> String {
             format!("{label} {remaining}% left")
         }
         None => format!("{label} ?"),
+    }
+}
+
+fn format_window_details(window: &UsageWindow) -> String {
+    let reset = format_reset_time(window.reset_at);
+    match window.used_percent {
+        Some(used) => {
+            let remaining = remaining_percent(window.used_percent);
+            format!("{remaining}% left ({used}% used), resets {reset}")
+        }
+        None => format!("usage unknown, resets {reset}"),
     }
 }
 
@@ -1613,38 +1889,38 @@ fn display_optional(value: Option<&str>) -> &str {
 }
 
 fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
-    let mut lines = Vec::new();
     let blocked = collect_blocked_limits(usage, false);
     let status = if blocked.is_empty() {
-        "ready".to_string()
+        "Ready".to_string()
     } else {
-        format!("blocked ({})", format_blocked_limits(&blocked))
+        format!("Blocked ({})", format_blocked_limits(&blocked))
     };
-
-    lines.push(format!("Profile: {profile_name}"));
-    lines.push(format!(
-        "Email: {}",
-        display_optional(usage.email.as_deref())
-    ));
-    lines.push(format!(
-        "Plan: {}",
-        display_optional(usage.plan_type.as_deref())
-    ));
-    lines.push(format!("Status: {status}"));
-    lines.push(format!("Main: {}", format_main_windows(usage)));
+    let mut fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        (
+            "Account".to_string(),
+            display_optional(usage.email.as_deref()).to_string(),
+        ),
+        (
+            "Plan".to_string(),
+            display_optional(usage.plan_type.as_deref()).to_string(),
+        ),
+        ("Status".to_string(), status),
+        ("Main".to_string(), format_main_windows(usage)),
+    ];
 
     if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        lines.push(format!("Code review: {}", format_window_pair(code_review)));
+        fields.push(("Code review".to_string(), format_window_pair(code_review)));
     }
 
-    for line in format_additional_limits(usage) {
-        lines.push(line);
+    for (name, value) in format_additional_limits(usage) {
+        fields.push((name, value));
     }
 
-    lines.join("\n")
+    render_panel(&format!("Quota {profile_name}"), &fields)
 }
 
-fn format_additional_limits(usage: &UsageResponse) -> Vec<String> {
+fn format_additional_limits(usage: &UsageResponse) -> Vec<(String, String)> {
     let mut lines = Vec::new();
 
     for additional in &usage.additional_rate_limits {
@@ -1655,15 +1931,15 @@ fn format_additional_limits(usage: &UsageResponse) -> Vec<String> {
             .unwrap_or("Additional");
 
         if let Some(primary) = additional.rate_limit.primary_window.as_ref() {
-            lines.push(format_named_window_status(
-                &additional_window_label(name, primary),
-                primary,
+            lines.push((
+                additional_window_label(name, primary),
+                format_window_details(primary),
             ));
         }
         if let Some(secondary) = additional.rate_limit.secondary_window.as_ref() {
-            lines.push(format_named_window_status(
-                &additional_window_label(name, secondary),
-                secondary,
+            lines.push((
+                additional_window_label(name, secondary),
+                format_window_details(secondary),
             ));
         }
     }
@@ -1687,14 +1963,21 @@ fn first_line_of_error(input: &str) -> String {
 fn watch_quota(profile_name: &str, codex_home: &Path, base_url: Option<&str>) -> Result<()> {
     loop {
         print!("\x1b[H\x1b[2J");
-        println!("Watching quota for profile '{}'", profile_name);
-        println!("Updated: {}", Local::now().format("%Y-%m-%d %H:%M:%S %Z"));
+        let header = vec![
+            ("Profile".to_string(), profile_name.to_string()),
+            (
+                "Updated".to_string(),
+                Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string(),
+            ),
+        ];
+        println!("{}", render_panel("Quota Watch", &header));
         println!();
 
         match fetch_usage(codex_home, base_url) {
             Ok(usage) => println!("{}", render_profile_quota(profile_name, &usage)),
             Err(err) => {
-                println!("Quota error: {}", first_line_of_error(&err.to_string()));
+                let fields = vec![("Error".to_string(), first_line_of_error(&err.to_string()))];
+                println!("{}", render_panel("Quota Watch", &fields));
             }
         }
 
@@ -2180,5 +2463,20 @@ mod tests {
         .expect("usage response should parse");
 
         assert!(usage.additional_rate_limits.is_empty());
+    }
+
+    #[test]
+    fn section_headers_use_cli_width() {
+        assert_eq!(text_width(&section_header("Quota Overview")), CLI_WIDTH);
+    }
+
+    #[test]
+    fn field_lines_do_not_exceed_cli_width() {
+        let fields = format_field_lines(
+            "Path",
+            "/tmp/some/really/long/path/that/should/still/stay/inside/the/configured/cli/width/when/rendered",
+        );
+
+        assert!(fields.iter().all(|line| text_width(line) <= CLI_WIDTH));
     }
 }
