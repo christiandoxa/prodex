@@ -20,12 +20,24 @@ If `~/.codex` already contains an active login:
 prodex profile import-current main
 ```
 
-## Or create a new profile and log in
+## Or log in and let `prodex` create the profile
+
+```bash
+prodex login
+```
+
+`prodex login` creates a managed profile from the logged-in account email, reuses the same profile if that email is already known, and makes that profile active.
+
+If the email-derived name is already taken by another account, `prodex` adds a numeric suffix instead of merging the two accounts into one profile.
+
+If you want to log in to a specific profile name instead:
 
 ```bash
 prodex profile add second
 prodex login --profile second
 ```
+
+Use `--profile` when you want a fixed profile name, or when the login flow is not the ChatGPT account flow used by quota/email detection.
 
 ## Check all profiles and quotas
 
@@ -66,6 +78,8 @@ prodex doctor --quota
 ## Notes
 
 - `prodex` is only a wrapper; login is still handled by `codex`
+- `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
+- that auto-create flow relies on being able to read the ChatGPT account email from the quota endpoint after login
 - built-in quota checks only work for profiles using ChatGPT auth
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity

@@ -12,7 +12,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PRODEX_DIR: &str = ".prodex";
 const DEFAULT_CODEX_DIR: &str = ".codex";
@@ -142,6 +142,8 @@ struct AppState {
 struct ProfileEntry {
     codex_home: PathBuf,
     managed: bool,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +310,7 @@ fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         ProfileEntry {
             codex_home: codex_home.clone(),
             managed,
+            email: None,
         },
     );
 
@@ -370,6 +373,7 @@ fn handle_list_profiles() -> Result<()> {
         println!("{active} {name}");
         println!("  kind: {kind}");
         println!("  auth: {}", auth_state.label);
+        println!("  email: {}", profile.email.as_deref().unwrap_or("-"));
         println!("  path: {}", profile.codex_home.display());
     }
 
@@ -455,6 +459,7 @@ fn handle_current_profile() -> Result<()> {
     println!("{active}");
     println!("CODEX_HOME: {}", profile.codex_home.display());
     println!("Managed: {}", profile.managed);
+    println!("Email: {}", profile.email.as_deref().unwrap_or("-"));
     println!("Auth: {}", read_auth_summary(&profile.codex_home).label);
     Ok(())
 }
@@ -516,6 +521,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         println!("{name}{active}");
         println!("  kind: {kind}");
         println!("  auth: {}", auth.label);
+        println!("  email: {}", profile.email.as_deref().unwrap_or("-"));
         println!("  path: {}", profile.codex_home.display());
         println!(
             "  exists: {}",
@@ -550,7 +556,21 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
 fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
-    let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
+    let status = if let Some(profile_name) = args.profile.as_deref() {
+        login_into_profile(&paths, &mut state, profile_name, &args.codex_args)?
+    } else {
+        login_with_auto_profile(&paths, &mut state, &args.codex_args)?
+    };
+    exit_with_status(status)
+}
+
+fn login_into_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    profile_name: &str,
+    codex_args: &[OsString],
+) -> Result<ExitStatus> {
+    let profile_name = resolve_profile_name(state, Some(profile_name))?;
     let codex_home = state
         .profiles
         .get(&profile_name)
@@ -560,15 +580,240 @@ fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
 
     create_codex_home_if_missing(&codex_home)?;
 
-    let mut command_args = vec![OsString::from("login")];
-    command_args.extend(args.codex_args);
-
-    let status = run_child(&codex_bin(), &command_args, &codex_home)?;
-    if status.success() {
-        state.active_profile = Some(profile_name.clone());
-        state.save(&paths)?;
+    let status = run_codex_login(&codex_home, codex_args)?;
+    if !status.success() {
+        return Ok(status);
     }
-    exit_with_status(status)
+
+    if let Ok(email) = fetch_profile_email(&codex_home) {
+        if let Some(profile) = state.profiles.get_mut(&profile_name) {
+            profile.email = Some(email);
+        }
+    }
+
+    state.active_profile = Some(profile_name);
+    state.save(paths)?;
+    Ok(status)
+}
+
+fn login_with_auto_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    codex_args: &[OsString],
+) -> Result<ExitStatus> {
+    let login_home = create_temporary_login_home(paths)?;
+    let status = run_codex_login(&login_home, codex_args)?;
+    if !status.success() {
+        remove_dir_if_exists(&login_home)?;
+        return Ok(status);
+    }
+
+    let email = fetch_profile_email(&login_home).with_context(|| {
+        format!(
+            "failed to resolve the logged-in account email from {}",
+            login_home.display()
+        )
+    })?;
+
+    if let Some(profile_name) = find_profile_by_email(state, &email)? {
+        let codex_home = state
+            .profiles
+            .get(&profile_name)
+            .with_context(|| format!("profile '{}' is missing", profile_name))?;
+        let codex_home = codex_home.codex_home.clone();
+        create_codex_home_if_missing(&codex_home)?;
+        copy_directory_contents(&login_home, &codex_home)?;
+        if let Some(profile) = state.profiles.get_mut(&profile_name) {
+            profile.email = Some(email.clone());
+        }
+        remove_dir_if_exists(&login_home)?;
+        state.active_profile = Some(profile_name.clone());
+        state.save(paths)?;
+
+        println!("Logged in as {email}. Reusing profile '{profile_name}'.");
+        println!("CODEX_HOME: {}", codex_home.display());
+        return Ok(status);
+    }
+
+    let profile_name = unique_profile_name_for_email(paths, state, &email);
+    let codex_home = absolutize(paths.managed_profiles_root.join(&profile_name))?;
+    persist_login_home(&login_home, &codex_home)?;
+
+    state.profiles.insert(
+        profile_name.clone(),
+        ProfileEntry {
+            codex_home: codex_home.clone(),
+            managed: true,
+            email: Some(email.clone()),
+        },
+    );
+    state.active_profile = Some(profile_name.clone());
+    state.save(paths)?;
+
+    println!("Logged in as {email}. Created profile '{profile_name}'.");
+    println!("CODEX_HOME: {}", codex_home.display());
+    Ok(status)
+}
+
+fn run_codex_login(codex_home: &Path, codex_args: &[OsString]) -> Result<ExitStatus> {
+    let mut command_args = vec![OsString::from("login")];
+    command_args.extend(codex_args.iter().cloned());
+    run_child(&codex_bin(), &command_args, codex_home)
+}
+
+fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
+    fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
+        format!(
+            "failed to create managed profile root {}",
+            paths.managed_profiles_root.display()
+        )
+    })?;
+
+    for attempt in 0..100 {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let candidate = paths
+            .managed_profiles_root
+            .join(format!(".login-{}-{stamp}-{attempt}", std::process::id()));
+        if candidate.exists() {
+            continue;
+        }
+        create_codex_home_if_missing(&candidate)?;
+        return Ok(candidate);
+    }
+
+    bail!("failed to allocate a temporary CODEX_HOME for login")
+}
+
+fn fetch_profile_email(codex_home: &Path) -> Result<String> {
+    let usage = fetch_usage(codex_home, None)?;
+    let email = usage
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .context("quota endpoint did not return an email")?;
+    Ok(email.to_string())
+}
+
+fn find_profile_by_email(state: &mut AppState, email: &str) -> Result<Option<String>> {
+    let target_email = normalize_email(email);
+    let mut discovered = Vec::new();
+
+    for (name, profile) in &state.profiles {
+        if profile
+            .email
+            .as_deref()
+            .is_some_and(|cached| normalize_email(cached) == target_email)
+        {
+            return Ok(Some(name.clone()));
+        }
+
+        if profile.email.is_some() || !read_auth_summary(&profile.codex_home).quota_compatible {
+            continue;
+        }
+
+        let fetched_email = match fetch_profile_email(&profile.codex_home) {
+            Ok(fetched_email) => fetched_email,
+            Err(_) => continue,
+        };
+
+        let matched = normalize_email(&fetched_email) == target_email;
+        discovered.push((name.clone(), fetched_email));
+        if matched {
+            break;
+        }
+    }
+
+    let mut matched_profile = None;
+    for (name, fetched_email) in discovered {
+        if normalize_email(&fetched_email) == target_email {
+            matched_profile = Some(name.clone());
+        }
+        if let Some(profile) = state.profiles.get_mut(&name) {
+            profile.email = Some(fetched_email);
+        }
+    }
+
+    Ok(matched_profile)
+}
+
+fn normalize_email(email: &str) -> String {
+    email.trim().to_ascii_lowercase()
+}
+
+fn profile_name_from_email(email: &str) -> String {
+    let normalized = normalize_email(email);
+    let mut profile_name = String::new();
+
+    for ch in normalized.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' | '.' | '_' | '-' => profile_name.push(ch),
+            '@' => profile_name.push('_'),
+            _ => profile_name.push('-'),
+        }
+    }
+
+    let profile_name = profile_name
+        .trim_matches(|ch| matches!(ch, '.' | '_' | '-'))
+        .to_string();
+    if profile_name.is_empty() || profile_name == "." || profile_name == ".." {
+        "profile".to_string()
+    } else {
+        profile_name
+    }
+}
+
+fn unique_profile_name_for_email(paths: &AppPaths, state: &AppState, email: &str) -> String {
+    let base_name = profile_name_from_email(email);
+    if is_available_profile_name(paths, state, &base_name) {
+        return base_name;
+    }
+
+    for suffix in 2.. {
+        let candidate = format!("{base_name}-{suffix}");
+        if is_available_profile_name(paths, state, &candidate) {
+            return candidate;
+        }
+    }
+
+    unreachable!("integer suffix space should not be exhausted")
+}
+
+fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
+    !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
+}
+
+fn persist_login_home(source: &Path, destination: &Path) -> Result<()> {
+    if destination.exists() {
+        bail!(
+            "refusing to overwrite existing login destination {}",
+            destination.display()
+        );
+    }
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_codex_home(source, destination)?;
+            remove_dir_if_exists(source)
+        }
+    }
+}
+
+fn remove_dir_if_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_dir_all(path).with_context(|| format!("failed to delete {}", path.display()))
 }
 
 fn handle_codex_logout(selector: ProfileSelector) -> Result<()> {
@@ -1723,6 +1968,7 @@ mod tests {
                     ProfileEntry {
                         codex_home: PathBuf::from("/tmp/alpha"),
                         managed: true,
+                        email: None,
                     },
                 ),
                 (
@@ -1730,6 +1976,7 @@ mod tests {
                     ProfileEntry {
                         codex_home: PathBuf::from("/tmp/beta"),
                         managed: true,
+                        email: None,
                     },
                 ),
                 (
@@ -1737,6 +1984,7 @@ mod tests {
                     ProfileEntry {
                         codex_home: PathBuf::from("/tmp/gamma"),
                         managed: true,
+                        email: None,
                     },
                 ),
             ]),
@@ -1761,6 +2009,39 @@ mod tests {
         assert_eq!(
             usage_url("http://127.0.0.1:8080"),
             "http://127.0.0.1:8080/api/codex/usage"
+        );
+    }
+
+    #[test]
+    fn profile_name_is_derived_from_email() {
+        assert_eq!(
+            profile_name_from_email("Main+Ops@Example.com"),
+            "main-ops_example.com"
+        );
+    }
+
+    #[test]
+    fn unique_profile_name_adds_numeric_suffix() {
+        let state = AppState {
+            active_profile: None,
+            profiles: BTreeMap::from([(
+                "main_example.com".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/existing"),
+                    managed: true,
+                    email: Some("other@example.com".to_string()),
+                },
+            )]),
+        };
+        let paths = AppPaths {
+            root: PathBuf::from("/tmp/prodex-test"),
+            state_file: PathBuf::from("/tmp/prodex-test/state.json"),
+            managed_profiles_root: PathBuf::from("/tmp/prodex-test/profiles"),
+        };
+
+        assert_eq!(
+            unique_profile_name_for_email(&paths, &state, "main@example.com"),
+            "main_example.com-2"
         );
     }
 }

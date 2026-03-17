@@ -44,16 +44,34 @@ This will:
 - store the profile in `~/.prodex/profiles/main`
 - set `main` as the active profile
 
-### 3. Add a new profile and log in
+### 3. Log in and let `prodex` create the profile
 
-If you want a fresh empty profile:
+If you want a fresh login, `prodex` can create or reuse a profile automatically from the account email:
+
+```bash
+prodex login
+```
+
+This will:
+
+- run `codex login` in a temporary isolated `CODEX_HOME`
+- resolve the logged-in account email from the quota endpoint
+- create a managed profile whose name is derived from that email
+- reuse the existing profile instead of creating a duplicate when that email is already registered
+- switch the active profile to the reused or newly created profile
+
+If the email-derived profile name is already taken by a different account, `prodex` keeps the email uniqueness rule and creates a suffixed name such as `main_example.com-2`.
+
+If you want to target a specific existing profile name instead:
 
 ```bash
 prodex profile add second
 prodex login --profile second
 ```
 
-`prodex login` does not handle the OAuth callback itself. It only runs `codex login` with the selected profile's `CODEX_HOME`.
+Use `prodex login --profile <name>` when you want a fixed profile name, or when you are not using the ChatGPT login flow that exposes an account email through quota.
+
+`prodex login` still delegates the actual authentication flow to `codex`.
 
 ### 4. View all quotas
 
@@ -162,6 +180,14 @@ prodex profile remove work --delete-home
 
 ### Login/Logout
 
+Log in and auto-create or reuse a unique profile based on the email you use:
+
+```bash
+prodex login
+```
+
+This only works when the login flow can later resolve a ChatGPT account email from the quota endpoint.
+
 Log in to a specific profile:
 
 ```bash
@@ -246,6 +272,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 
 - quota checks are built into `prodex` and use the ChatGPT backend endpoint used by Codex
 - ChatGPT quota can only be read when the profile uses ChatGPT auth, not an API key
+- `prodex login` without `--profile` depends on that same quota-backed email lookup to decide whether to create or reuse a profile
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 

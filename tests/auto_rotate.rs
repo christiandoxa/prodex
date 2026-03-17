@@ -288,6 +288,12 @@ fn setup_fixture() -> Fixture {
         &codex_bin,
         r#"#!/bin/sh
 printf '%s\n' "$CODEX_HOME" > "$TEST_CODEX_LOG"
+if [ "$1" = "login" ]; then
+  mkdir -p "$CODEX_HOME"
+  account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
+  token="${TEST_LOGIN_ACCESS_TOKEN:-test-token}"
+  printf '{"tokens":{"access_token":"%s","account_id":"%s"}}\n' "$token" "$account_id" > "$CODEX_HOME/auth.json"
+fi
 exit 0
 "#,
     );
@@ -332,6 +338,14 @@ fn write_executable(path: &Path, content: &str) {
 }
 
 fn run_prodex(fixture: &Fixture, args: &[&str]) -> std::process::Output {
+    run_prodex_with_env(fixture, args, &[])
+}
+
+fn run_prodex_with_env(
+    fixture: &Fixture,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> std::process::Output {
     Command::new("cargo")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("CARGO_TARGET_DIR", &fixture.cargo_target_dir)
@@ -339,19 +353,20 @@ fn run_prodex(fixture: &Fixture, args: &[&str]) -> std::process::Output {
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .envs(extra_env.iter().copied())
         .args(["run", "--quiet", "--bin", "prodex", "--"])
         .args(args)
         .output()
         .expect("failed to execute prodex")
 }
 
-fn active_profile(path: &Path) -> String {
-    let state: Value = serde_json::from_slice(
-        &fs::read(path.join("state.json")).expect("failed to read state.json"),
-    )
-    .expect("failed to parse state.json");
+fn read_state(path: &Path) -> Value {
+    serde_json::from_slice(&fs::read(path.join("state.json")).expect("failed to read state.json"))
+        .expect("failed to parse state.json")
+}
 
-    state["active_profile"]
+fn active_profile(path: &Path) -> String {
+    read_state(path)["active_profile"]
         .as_str()
         .expect("active_profile should be a string")
         .to_string()
@@ -440,5 +455,144 @@ fn quota_raw_uses_builtin_usage_client() {
     assert_eq!(
         usage["rate_limit"]["secondary_window"]["limit_window_seconds"],
         604_800
+    );
+}
+
+#[test]
+fn login_without_profile_creates_profile_from_email() {
+    let fixture = setup_fixture();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "profiles": {}
+        }),
+    );
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[("TEST_LOGIN_ACCOUNT_ID", "main-account")],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "main_example.com");
+    assert_eq!(
+        state["profiles"]["main_example.com"]["email"],
+        "main@example.com"
+    );
+    assert_eq!(
+        state["profiles"].as_object().map(|profiles| profiles.len()),
+        Some(1)
+    );
+    assert!(
+        state["profiles"]["main_example.com"]["codex_home"]
+            .as_str()
+            .expect("codex_home should be a string")
+            .ends_with("/profiles/main_example.com")
+    );
+    assert!(
+        fixture
+            .prodex_home
+            .join("profiles/main_example.com/auth.json")
+            .is_file()
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("Logged in as main@example.com. Created profile 'main_example.com'.")
+    );
+}
+
+#[test]
+fn login_without_profile_reuses_existing_profile_for_same_email() {
+    let fixture = setup_fixture();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "active_profile": "primary",
+            "profiles": {
+                "primary": {
+                    "codex_home": fixture.main_home,
+                    "managed": true
+                }
+            }
+        }),
+    );
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[("TEST_LOGIN_ACCOUNT_ID", "main-account")],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "primary");
+    assert_eq!(state["profiles"]["primary"]["email"], "main@example.com");
+    assert_eq!(
+        state["profiles"].as_object().map(|profiles| profiles.len()),
+        Some(1)
+    );
+    assert!(!fixture.prodex_home.join("profiles/primary").exists());
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("Logged in as main@example.com. Reusing profile 'primary'.")
+    );
+}
+
+#[test]
+fn login_without_profile_adds_suffix_when_email_name_is_taken() {
+    let fixture = setup_fixture();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "active_profile": "main_example.com",
+            "profiles": {
+                "main_example.com": {
+                    "codex_home": fixture.second_home,
+                    "managed": true,
+                    "email": "second@example.com"
+                }
+            }
+        }),
+    );
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[("TEST_LOGIN_ACCOUNT_ID", "main-account")],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "main_example.com-2");
+    assert_eq!(
+        state["profiles"]["main_example.com-2"]["email"],
+        "main@example.com"
+    );
+    assert_eq!(
+        state["profiles"]["main_example.com"]["email"],
+        "second@example.com"
+    );
+    assert!(
+        fixture
+            .prodex_home
+            .join("profiles/main_example.com-2/auth.json")
+            .is_file()
     );
 }
