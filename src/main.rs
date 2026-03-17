@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -22,6 +22,10 @@ const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const CLI_WIDTH: usize = 110;
 const CLI_LABEL_WIDTH: usize = 16;
 const CLI_TABLE_GAP: &str = "  ";
+const SHARED_CODEX_DIR_NAMES: &[&str] = &["sessions", "archived_sessions", "shell_snapshots"];
+const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl"];
+const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
+const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 
 #[derive(Parser, Debug)]
 #[command(
@@ -157,6 +161,7 @@ struct AppPaths {
     root: PathBuf,
     state_file: PathBuf,
     managed_profiles_root: PathBuf,
+    shared_codex_root: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -249,6 +254,18 @@ struct QuotaFetchJob {
     active: bool,
     auth: AuthSummary,
     codex_home: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SharedCodexEntryKind {
+    Directory,
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SharedCodexEntry {
+    name: String,
+    kind: SharedCodexEntryKind,
 }
 
 fn section_header(title: &str) -> String {
@@ -469,6 +486,10 @@ fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
             home
         }
     };
+
+    if managed {
+        prepare_managed_codex_home(&paths, &codex_home)?;
+    }
 
     ensure_path_is_unique(&state, &codex_home)?;
 
@@ -844,14 +865,18 @@ fn login_into_profile(
     codex_args: &[OsString],
 ) -> Result<ExitStatus> {
     let profile_name = resolve_profile_name(state, Some(profile_name))?;
-    let codex_home = state
+    let profile = state
         .profiles
         .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?
-        .codex_home
-        .clone();
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    let codex_home = profile.codex_home.clone();
+    let managed = profile.managed;
 
-    create_codex_home_if_missing(&codex_home)?;
+    if managed {
+        prepare_managed_codex_home(paths, &codex_home)?;
+    } else {
+        create_codex_home_if_missing(&codex_home)?;
+    }
 
     let status = run_codex_login(&codex_home, codex_args)?;
     if !status.success() {
@@ -908,9 +933,13 @@ fn login_with_auto_profile(
             .profiles
             .get(&profile_name)
             .with_context(|| format!("profile '{}' is missing", profile_name))?;
+        let managed = codex_home.managed;
         let codex_home = codex_home.codex_home.clone();
         create_codex_home_if_missing(&codex_home)?;
         copy_directory_contents(&login_home, &codex_home)?;
+        if managed {
+            prepare_managed_codex_home(paths, &codex_home)?;
+        }
         if let Some(profile) = state.profiles.get_mut(&profile_name) {
             profile.email = Some(email.clone());
         }
@@ -934,6 +963,7 @@ fn login_with_auto_profile(
     let profile_name = unique_profile_name_for_email(paths, state, &email);
     let codex_home = absolutize(paths.managed_profiles_root.join(&profile_name))?;
     persist_login_home(&login_home, &codex_home)?;
+    prepare_managed_codex_home(paths, &codex_home)?;
 
     state.profiles.insert(
         profile_name.clone(),
@@ -1260,6 +1290,7 @@ fn handle_run(args: RunArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
     let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
+    let mut selected_profile_name = profile_name.clone();
     let allow_auto_rotate = !args.no_auto_rotate;
     let include_code_review = is_review_invocation(&args.codex_args);
     let mut codex_home = state
@@ -1297,6 +1328,7 @@ fn handle_run(args: RunArgs) -> Result<()> {
                                 .with_context(|| format!("profile '{}' is missing", next_profile))?
                                 .codex_home
                                 .clone();
+                            selected_profile_name = next_profile.clone();
                             state.active_profile = Some(next_profile.clone());
                             state.save(&paths)?;
                             print_wrapped_stderr(&format!(
@@ -1338,6 +1370,15 @@ fn handle_run(args: RunArgs) -> Result<()> {
                 print_wrapped_stderr("Continuing without quota gate.");
             }
         }
+    }
+
+    if state
+        .profiles
+        .get(&selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selected_profile_name))?
+        .managed
+    {
+        prepare_managed_codex_home(&paths, &codex_home)?;
     }
 
     let status = run_child(&codex_bin(), &args.codex_args, &codex_home)?;
@@ -1464,6 +1505,315 @@ fn copy_directory_contents(source: &Path, destination: &Path) -> Result<()> {
                 bail!("symlinks are not supported on this platform");
             }
         }
+    }
+
+    Ok(())
+}
+
+fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
+    create_codex_home_if_missing(codex_home)?;
+    fs::create_dir_all(&paths.shared_codex_root)
+        .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
+
+    for entry in shared_codex_entries(paths, codex_home)? {
+        ensure_shared_codex_entry(paths, codex_home, &entry)?;
+    }
+
+    Ok(())
+}
+
+fn shared_codex_entries(paths: &AppPaths, codex_home: &Path) -> Result<Vec<SharedCodexEntry>> {
+    let mut entries = SHARED_CODEX_DIR_NAMES
+        .iter()
+        .map(|name| SharedCodexEntry {
+            name: (*name).to_string(),
+            kind: SharedCodexEntryKind::Directory,
+        })
+        .chain(SHARED_CODEX_FILE_NAMES.iter().map(|name| SharedCodexEntry {
+            name: (*name).to_string(),
+            kind: SharedCodexEntryKind::File,
+        }))
+        .collect::<Vec<_>>();
+
+    let mut sqlite_entries = BTreeSet::new();
+    let mut scan_roots = vec![
+        paths.shared_codex_root.clone(),
+        codex_home.to_path_buf(),
+        default_codex_home()?,
+    ];
+    scan_roots.sort();
+    scan_roots.dedup();
+
+    for root in scan_roots {
+        collect_shared_codex_sqlite_entries(&root, &mut sqlite_entries)?;
+    }
+
+    for name in sqlite_entries {
+        entries.push(SharedCodexEntry {
+            name,
+            kind: SharedCodexEntryKind::File,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn collect_shared_codex_sqlite_entries(root: &Path, names: &mut BTreeSet<String>) -> Result<()> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))? {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", root.display()))?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if is_shared_codex_sqlite_name(&file_name) {
+            names.insert(file_name.into_owned());
+        }
+    }
+
+    Ok(())
+}
+
+fn is_shared_codex_sqlite_name(file_name: &str) -> bool {
+    SHARED_CODEX_SQLITE_PREFIXES
+        .iter()
+        .any(|prefix| file_name.starts_with(prefix))
+        && SHARED_CODEX_SQLITE_SUFFIXES
+            .iter()
+            .any(|suffix| file_name.ends_with(suffix))
+}
+
+fn ensure_shared_codex_entry(
+    paths: &AppPaths,
+    codex_home: &Path,
+    entry: &SharedCodexEntry,
+) -> Result<()> {
+    let local_path = codex_home.join(&entry.name);
+    let shared_path = paths.shared_codex_root.join(&entry.name);
+    if let Some(parent) = shared_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    migrate_shared_codex_entry(&local_path, &shared_path, entry.kind)?;
+
+    if entry.kind == SharedCodexEntryKind::Directory && !shared_path.exists() {
+        create_codex_home_if_missing(&shared_path)?;
+    }
+
+    ensure_symlink_to_shared(&local_path, &shared_path, entry.kind)
+}
+
+fn migrate_shared_codex_entry(
+    local_path: &Path,
+    shared_path: &Path,
+    kind: SharedCodexEntryKind,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(local_path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to inspect {}", local_path.display()));
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        remove_path(local_path)?;
+        return Ok(());
+    }
+
+    match kind {
+        SharedCodexEntryKind::Directory => {
+            if !metadata.is_dir() {
+                bail!(
+                    "expected {} to be a directory for shared Codex session state",
+                    local_path.display()
+                );
+            }
+
+            if !shared_path.exists() {
+                move_directory(local_path, shared_path)?;
+                return Ok(());
+            }
+            if !shared_path.is_dir() {
+                bail!(
+                    "expected {} to be a directory for shared Codex session state",
+                    shared_path.display()
+                );
+            }
+
+            copy_directory_contents(local_path, shared_path)?;
+            fs::remove_dir_all(local_path)
+                .with_context(|| format!("failed to remove {}", local_path.display()))?;
+        }
+        SharedCodexEntryKind::File => {
+            if !metadata.is_file() {
+                bail!(
+                    "expected {} to be a file for shared Codex session state",
+                    local_path.display()
+                );
+            }
+
+            if !shared_path.exists() {
+                move_file(local_path, shared_path)?;
+                return Ok(());
+            }
+            if !shared_path.is_file() {
+                bail!(
+                    "expected {} to be a file for shared Codex session state",
+                    shared_path.display()
+                );
+            }
+
+            append_file_contents(local_path, shared_path)?;
+            fs::remove_file(local_path)
+                .with_context(|| format!("failed to remove {}", local_path.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn move_directory(source: &Path, destination: &Path) -> Result<()> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            create_codex_home_if_missing(destination)?;
+            copy_directory_contents(source, destination)?;
+            fs::remove_dir_all(source)
+                .with_context(|| format!("failed to remove {}", source.display()))
+        }
+    }
+}
+
+fn move_file(source: &Path, destination: &Path) -> Result<()> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            fs::copy(source, destination).with_context(|| {
+                format!(
+                    "failed to copy {} to {}",
+                    source.display(),
+                    destination.display()
+                )
+            })?;
+            fs::remove_file(source)
+                .with_context(|| format!("failed to remove {}", source.display()))
+        }
+    }
+}
+
+fn append_file_contents(source: &Path, destination: &Path) -> Result<()> {
+    let content =
+        fs::read(source).with_context(|| format!("failed to read {}", source.display()))?;
+    if content.is_empty() {
+        return Ok(());
+    }
+
+    use std::io::Write as _;
+
+    let mut destination_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(destination)
+        .with_context(|| format!("failed to open {}", destination.display()))?;
+
+    let destination_len = destination_file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", destination.display()))?
+        .len();
+    if destination_len > 0 {
+        destination_file
+            .write_all(b"\n")
+            .with_context(|| format!("failed to append separator to {}", destination.display()))?;
+    }
+
+    destination_file.write_all(&content).with_context(|| {
+        format!(
+            "failed to append {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
+fn ensure_symlink_to_shared(
+    local_path: &Path,
+    shared_path: &Path,
+    kind: SharedCodexEntryKind,
+) -> Result<()> {
+    if local_path.exists() {
+        remove_path(local_path)?;
+    } else if fs::symlink_metadata(local_path).is_ok() {
+        remove_path(local_path)?;
+    }
+
+    create_symlink(shared_path, local_path, kind)
+}
+
+fn create_symlink(target: &Path, link: &Path, _kind: SharedCodexEntryKind) -> Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).with_context(|| {
+            format!(
+                "failed to link shared Codex session state {} -> {}",
+                link.display(),
+                target.display()
+            )
+        })?;
+    }
+
+    #[cfg(windows)]
+    {
+        match _kind {
+            SharedCodexEntryKind::Directory => std::os::windows::fs::symlink_dir(target, link),
+            SharedCodexEntryKind::File => std::os::windows::fs::symlink_file(target, link),
+        }
+        .with_context(|| {
+            format!(
+                "failed to link shared Codex session state {} -> {}",
+                link.display(),
+                target.display()
+            )
+        })?;
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = _kind;
+        bail!("shared Codex session links are not supported on this platform");
+    }
+
+    Ok(())
+}
+
+fn remove_path(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    let file_type = metadata.file_type();
+
+    if file_type.is_symlink() {
+        fs::remove_file(path)
+            .or_else(|_| fs::remove_dir(path))
+            .with_context(|| format!("failed to remove symbolic link {}", path.display()))?;
+        return Ok(());
+    }
+
+    if metadata.is_dir() {
+        fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))?;
+    } else {
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
 
     Ok(())
@@ -2340,6 +2690,7 @@ impl AppPaths {
         Ok(Self {
             state_file: root.join("state.json"),
             managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
             root,
         })
     }
@@ -2628,6 +2979,7 @@ mod tests {
             root: PathBuf::from("/tmp/prodex-test"),
             state_file: PathBuf::from("/tmp/prodex-test/state.json"),
             managed_profiles_root: PathBuf::from("/tmp/prodex-test/profiles"),
+            shared_codex_root: PathBuf::from("/tmp/prodex-test/shared"),
         };
 
         assert_eq!(

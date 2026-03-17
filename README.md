@@ -295,6 +295,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 - ChatGPT quota can only be read when the profile uses ChatGPT auth, not an API key
 - `prodex login` without `--profile` depends on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
+- managed Prodex profiles share Codex session history, so `/resume` shows the same saved threads across accounts
 - `profile list`, `current`, `doctor`, `login`, `quota`, and other Prodex-owned screens use the same 110-character layout
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 
