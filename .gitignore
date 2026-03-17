@@ -1,0 +1,13 @@
+# Rust build artifacts
+/target/
+
+# JetBrains / IntelliJ
+/.idea/
+*.iml
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
