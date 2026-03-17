@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -41,6 +41,8 @@ impl Drop for TestDir {
 struct UsageServer {
     listen_addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
+    response_delay_ms: Arc<AtomicU64>,
+    max_concurrent_requests: Arc<AtomicUsize>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -55,11 +57,30 @@ impl UsageServer {
             .expect("failed to set usage server nonblocking");
 
         let shutdown = Arc::new(AtomicBool::new(false));
+        let response_delay_ms = Arc::new(AtomicU64::new(0));
+        let active_requests = Arc::new(AtomicUsize::new(0));
+        let max_concurrent_requests = Arc::new(AtomicUsize::new(0));
         let shutdown_flag = Arc::clone(&shutdown);
+        let response_delay_ms_flag = Arc::clone(&response_delay_ms);
+        let active_requests_flag = Arc::clone(&active_requests);
+        let max_concurrent_requests_flag = Arc::clone(&max_concurrent_requests);
         let thread = thread::spawn(move || {
             while !shutdown_flag.load(Ordering::SeqCst) {
                 match listener.accept() {
-                    Ok((stream, _)) => handle_usage_request(stream),
+                    Ok((stream, _)) => {
+                        let response_delay_ms_flag = Arc::clone(&response_delay_ms_flag);
+                        let active_requests_flag = Arc::clone(&active_requests_flag);
+                        let max_concurrent_requests_flag =
+                            Arc::clone(&max_concurrent_requests_flag);
+                        thread::spawn(move || {
+                            handle_usage_request(
+                                stream,
+                                &response_delay_ms_flag,
+                                &active_requests_flag,
+                                &max_concurrent_requests_flag,
+                            );
+                        });
+                    }
                     Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(10));
                     }
@@ -71,12 +92,23 @@ impl UsageServer {
         Self {
             listen_addr,
             shutdown,
+            response_delay_ms,
+            max_concurrent_requests,
             thread: Some(thread),
         }
     }
 
     fn base_url(&self) -> String {
         format!("http://{}/backend-api", self.listen_addr)
+    }
+
+    fn set_delay_ms(&self, delay_ms: u64) {
+        self.response_delay_ms.store(delay_ms, Ordering::SeqCst);
+        self.max_concurrent_requests.store(0, Ordering::SeqCst);
+    }
+
+    fn max_concurrent_requests(&self) -> usize {
+        self.max_concurrent_requests.load(Ordering::SeqCst)
     }
 }
 
@@ -90,11 +122,19 @@ impl Drop for UsageServer {
     }
 }
 
-fn handle_usage_request(mut stream: TcpStream) {
+fn handle_usage_request(
+    mut stream: TcpStream,
+    response_delay_ms: &AtomicU64,
+    active_requests: &AtomicUsize,
+    max_concurrent_requests: &AtomicUsize,
+) {
     let request = match read_http_request(&mut stream) {
         Some(request) => request,
         None => return,
     };
+
+    let concurrent_requests = active_requests.fetch_add(1, Ordering::SeqCst) + 1;
+    max_concurrent_requests.fetch_max(concurrent_requests, Ordering::SeqCst);
 
     let path = request
         .lines()
@@ -118,12 +158,23 @@ fn handle_usage_request(mut stream: TcpStream) {
                 (Some("Bearer test-token"), Some("second-account")) => {
                     ("HTTP/1.1 200 OK", second_usage_body())
                 }
+                (Some("Bearer test-token"), Some("third-account")) => {
+                    ("HTTP/1.1 200 OK", third_usage_body())
+                }
+                (Some("Bearer test-token"), Some("elite-account")) => {
+                    ("HTTP/1.1 200 OK", elite_usage_body())
+                }
                 _ => (
                     "HTTP/1.1 401 Unauthorized",
                     json!({ "error": "unauthorized" }).to_string(),
                 ),
             }
         };
+
+    let delay_ms = response_delay_ms.load(Ordering::SeqCst);
+    if delay_ms > 0 {
+        thread::sleep(Duration::from_millis(delay_ms));
+    }
 
     let response = format!(
         "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -133,6 +184,7 @@ fn handle_usage_request(mut stream: TcpStream) {
 
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
+    active_requests.fetch_sub(1, Ordering::SeqCst);
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Option<String> {
@@ -179,6 +231,14 @@ fn request_header(request: &str, header_name: &str) -> Option<String> {
     })
 }
 
+fn future_epoch(offset_seconds: i64) -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after unix epoch")
+        .as_secs() as i64
+        + offset_seconds
+}
+
 fn main_usage_body() -> String {
     json!({
         "email": "main@example.com",
@@ -186,12 +246,12 @@ fn main_usage_body() -> String {
         "rate_limit": {
             "primary_window": {
                 "used_percent": 100,
-                "reset_at": 1_700_000_000,
+                "reset_at": future_epoch(1_800),
                 "limit_window_seconds": 18_000
             },
             "secondary_window": {
                 "used_percent": 20,
-                "reset_at": 1_700_000_000,
+                "reset_at": future_epoch(432_000),
                 "limit_window_seconds": 604_800
             }
         }
@@ -206,12 +266,52 @@ fn second_usage_body() -> String {
         "rate_limit": {
             "primary_window": {
                 "used_percent": 20,
-                "reset_at": 1_700_000_000,
+                "reset_at": future_epoch(7_200),
                 "limit_window_seconds": 18_000
             },
             "secondary_window": {
                 "used_percent": 30,
-                "reset_at": 1_700_000_000,
+                "reset_at": future_epoch(518_400),
+                "limit_window_seconds": 604_800
+            }
+        }
+    })
+    .to_string()
+}
+
+fn third_usage_body() -> String {
+    json!({
+        "email": "third@example.com",
+        "plan_type": "plus",
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 40,
+                "reset_at": future_epoch(14_400),
+                "limit_window_seconds": 18_000
+            },
+            "secondary_window": {
+                "used_percent": 10,
+                "reset_at": future_epoch(259_200),
+                "limit_window_seconds": 604_800
+            }
+        }
+    })
+    .to_string()
+}
+
+fn elite_usage_body() -> String {
+    json!({
+        "email": "elite@example.com",
+        "plan_type": "team",
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 1,
+                "reset_at": future_epoch(3_600),
+                "limit_window_seconds": 18_000
+            },
+            "secondary_window": {
+                "used_percent": 1,
+                "reset_at": future_epoch(172_800),
                 "limit_window_seconds": 604_800
             }
         }
@@ -221,7 +321,7 @@ fn second_usage_body() -> String {
 
 struct Fixture {
     _temp_dir: TestDir,
-    _usage_server: UsageServer,
+    usage_server: UsageServer,
     usage_base_url: String,
     prodex_home: PathBuf,
     shared_codex_home: PathBuf,
@@ -315,7 +415,7 @@ exit 0
 
     Fixture {
         _temp_dir: temp_dir,
-        _usage_server: usage_server,
+        usage_server,
         usage_base_url,
         prodex_home,
         shared_codex_home,
@@ -389,6 +489,36 @@ fn active_profile(path: &Path) -> String {
         .to_string()
 }
 
+fn add_managed_profile(fixture: &Fixture, name: &str, account_id: &str) -> PathBuf {
+    let home = fixture.prodex_home.join(format!("{name}-home"));
+    fs::create_dir_all(&home).expect("failed to create additional home");
+    write_json(
+        &home.join("auth.json"),
+        &json!({
+            "tokens": {
+                "access_token": "test-token",
+                "account_id": account_id
+            }
+        }),
+    );
+
+    let mut state = read_state(&fixture.prodex_home);
+    let profiles = state
+        .get_mut("profiles")
+        .and_then(Value::as_object_mut)
+        .expect("profiles should be an object");
+    profiles.insert(
+        name.to_string(),
+        json!({
+            "codex_home": home,
+            "managed": true
+        }),
+    );
+    write_json(&fixture.prodex_home.join("state.json"), &state);
+
+    fixture.prodex_home.join(format!("{name}-home"))
+}
+
 fn chatgpt_id_token(email: &str) -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
@@ -409,7 +539,9 @@ fn run_auto_rotates_active_profile_when_current_is_blocked() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Auto-rotating to profile 'second'."));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Quota preflight blocked profile 'main'"));
+    assert!(stderr.contains("profile 'second'"));
     assert_eq!(active_profile(&fixture.prodex_home), "second");
     assert_eq!(
         fs::read_to_string(&fixture.codex_log)
@@ -463,6 +595,71 @@ fn explicit_profile_can_disable_auto_rotate() {
 }
 
 #[test]
+fn run_preflight_checks_fallback_profiles_in_parallel() {
+    let fixture = setup_fixture();
+    add_managed_profile(&fixture, "third", "third-account");
+    fixture.usage_server.set_delay_ms(250);
+
+    let output = run_prodex(&fixture, &["run", "--profile", "main", "--no-auto-rotate"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Other profiles that look ready: third, second")
+    );
+    assert!(
+        fixture.usage_server.max_concurrent_requests() >= 2,
+        "fallback profile checks never overlapped"
+    );
+}
+
+#[test]
+fn run_without_profile_selects_the_best_ready_account() {
+    let fixture = setup_fixture();
+    let elite_home = add_managed_profile(&fixture, "elite", "elite-account");
+    let mut state = read_state(&fixture.prodex_home);
+    state["active_profile"] = Value::String("second".to_string());
+    write_json(&fixture.prodex_home.join("state.json"), &state);
+
+    let output = run_prodex(&fixture, &["run"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(active_profile(&fixture.prodex_home), "elite");
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_log)
+            .expect("failed to read codex log")
+            .trim(),
+        elite_home.display().to_string()
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Auto-selecting profile 'elite' over active profile 'second'")
+    );
+}
+
+#[test]
+fn doctor_quota_checks_profiles_in_parallel() {
+    let fixture = setup_fixture();
+    fixture.usage_server.set_delay_ms(250);
+
+    let output = run_prodex(&fixture, &["doctor", "--quota"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fixture.usage_server.max_concurrent_requests() >= 2,
+        "doctor quota checks never overlapped"
+    );
+}
+
+#[test]
 fn quota_raw_uses_builtin_usage_client() {
     let fixture = setup_fixture();
 
@@ -501,8 +698,8 @@ fn quota_all_detail_shows_main_reset_times() {
     assert!(stdout.contains("REMAINING"));
     assert!(stdout.contains("status: Blocked: 5h exhausted until "));
     assert!(stdout.contains("status: Ready"));
-    assert!(stdout.contains("resets: 5h 2023-11-"));
-    assert!(stdout.contains("| weekly 2023-11-"));
+    assert!(stdout.contains("resets: 5h "));
+    assert!(stdout.contains("| weekly "));
 }
 
 #[test]
@@ -706,6 +903,33 @@ fn login_without_profile_reuses_existing_profile_for_same_email() {
     assert!(
         String::from_utf8_lossy(&output.stdout)
             .contains("Logged in as main@example.com. Reusing profile 'primary'.")
+    );
+}
+
+#[test]
+fn login_without_profile_looks_up_existing_profiles_in_parallel() {
+    let fixture = setup_fixture();
+    add_managed_profile(&fixture, "third", "third-account");
+    fixture.usage_server.set_delay_ms(250);
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[("TEST_LOGIN_ACCOUNT_ID", "main-account")],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("Logged in as main@example.com. Reusing profile 'main'.")
+    );
+    assert!(
+        fixture.usage_server.max_concurrent_requests() >= 2,
+        "login profile lookup never overlapped"
     );
 }
 

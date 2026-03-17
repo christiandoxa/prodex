@@ -5,6 +5,7 @@ use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsString;
@@ -253,8 +254,68 @@ struct QuotaReport {
 struct QuotaFetchJob {
     name: String,
     active: bool,
-    auth: AuthSummary,
     codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+struct ProfileSummaryJob {
+    name: String,
+    active: bool,
+    managed: bool,
+    email: Option<String>,
+    codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+struct ProfileSummaryReport {
+    name: String,
+    active: bool,
+    managed: bool,
+    auth: AuthSummary,
+    email: Option<String>,
+    codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+struct DoctorProfileReport {
+    summary: ProfileSummaryReport,
+    quota: Option<std::result::Result<UsageResponse, String>>,
+}
+
+#[derive(Debug)]
+struct ProfileEmailLookupJob {
+    name: String,
+    codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+struct RunProfileProbeJob {
+    name: String,
+    order_index: usize,
+    codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+struct RunProfileProbeReport {
+    name: String,
+    order_index: usize,
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
+}
+
+#[derive(Debug, Clone)]
+struct ReadyProfileCandidate {
+    name: String,
+    usage: UsageResponse,
+    order_index: usize,
+    preferred: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MainWindowSnapshot {
+    remaining_percent: i64,
+    reset_at: i64,
+    pressure_score: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -573,9 +634,8 @@ fn handle_list_profiles() -> Result<()> {
     ];
     print_panel("Profiles", &summary_fields);
 
-    for (name, profile) in &state.profiles {
-        let auth_state = read_auth_summary(&profile.codex_home);
-        let kind = if profile.managed {
+    for summary in collect_profile_summaries(&state) {
+        let kind = if summary.managed {
             "managed"
         } else {
             "external"
@@ -585,21 +645,21 @@ fn handle_list_profiles() -> Result<()> {
         let fields = vec![
             (
                 "Current".to_string(),
-                if state.active_profile.as_deref() == Some(name.as_str()) {
+                if summary.active {
                     "Yes".to_string()
                 } else {
                     "No".to_string()
                 },
             ),
             ("Kind".to_string(), kind.to_string()),
-            ("Auth".to_string(), auth_state.label),
+            ("Auth".to_string(), summary.auth.label),
             (
                 "Email".to_string(),
-                profile.email.as_deref().unwrap_or("-").to_string(),
+                summary.email.as_deref().unwrap_or("-").to_string(),
             ),
-            ("Path".to_string(), profile.codex_home.display().to_string()),
+            ("Path".to_string(), summary.codex_home.display().to_string()),
         ];
-        print_panel(&format!("Profile {name}"), &fields);
+        print_panel(&format!("Profile {}", summary.name), &fields);
     }
 
     Ok(())
@@ -785,9 +845,8 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         return Ok(());
     }
 
-    for (name, profile) in &state.profiles {
-        let auth = read_auth_summary(&profile.codex_home);
-        let kind = if profile.managed {
+    for report in collect_doctor_profile_reports(&state, args.quota) {
+        let kind = if report.summary.managed {
             "managed"
         } else {
             "external"
@@ -797,22 +856,25 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         let mut fields = vec![
             (
                 "Current".to_string(),
-                if state.active_profile.as_deref() == Some(name.as_str()) {
+                if report.summary.active {
                     "Yes".to_string()
                 } else {
                     "No".to_string()
                 },
             ),
             ("Kind".to_string(), kind.to_string()),
-            ("Auth".to_string(), auth.label),
+            ("Auth".to_string(), report.summary.auth.label),
             (
                 "Email".to_string(),
-                profile.email.as_deref().unwrap_or("-").to_string(),
+                report.summary.email.as_deref().unwrap_or("-").to_string(),
             ),
-            ("Path".to_string(), profile.codex_home.display().to_string()),
+            (
+                "Path".to_string(),
+                report.summary.codex_home.display().to_string(),
+            ),
             (
                 "Exists".to_string(),
-                if profile.codex_home.exists() {
+                if report.summary.codex_home.exists() {
                     "Yes".to_string()
                 } else {
                     "No".to_string()
@@ -820,8 +882,8 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
             ),
         ];
 
-        if args.quota {
-            match fetch_usage(&profile.codex_home, None) {
+        if let Some(quota) = report.quota {
+            match quota {
                 Ok(usage) => {
                     let blocked = collect_blocked_limits(&usage, false);
                     fields.push((
@@ -842,7 +904,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 }
             }
         }
-        print_panel(&format!("Profile {name}"), &fields);
+        print_panel(&format!("Profile {}", report.summary.name), &fields);
     }
 
     Ok(())
@@ -1105,36 +1167,42 @@ fn fetch_profile_email_from_usage(codex_home: &Path) -> Result<String> {
 
 fn find_profile_by_email(state: &mut AppState, email: &str) -> Result<Option<String>> {
     let target_email = normalize_email(email);
-    let mut discovered = Vec::new();
+    let summaries = collect_profile_summaries(state);
 
-    for (name, profile) in &state.profiles {
-        if profile
+    for summary in &summaries {
+        if summary
             .email
             .as_deref()
             .is_some_and(|cached| normalize_email(cached) == target_email)
         {
-            return Ok(Some(name.clone()));
-        }
-
-        if profile.email.is_some() || !read_auth_summary(&profile.codex_home).quota_compatible {
-            continue;
-        }
-
-        let fetched_email = match fetch_profile_email(&profile.codex_home) {
-            Ok(fetched_email) => fetched_email,
-            Err(_) => continue,
-        };
-
-        let matched = normalize_email(&fetched_email) == target_email;
-        discovered.push((name.clone(), fetched_email));
-        if matched {
-            break;
+            return Ok(Some(summary.name.clone()));
         }
     }
 
+    let discovered = map_parallel(
+        summaries
+            .into_iter()
+            .filter_map(|summary| {
+                if summary.email.is_some() || !summary.auth.quota_compatible {
+                    return None;
+                }
+
+                Some(ProfileEmailLookupJob {
+                    name: summary.name,
+                    codex_home: summary.codex_home,
+                })
+            })
+            .collect(),
+        |job| (job.name, fetch_profile_email(&job.codex_home).ok()),
+    );
+
     let mut matched_profile = None;
     for (name, fetched_email) in discovered {
-        if normalize_email(&fetched_email) == target_email {
+        let Some(fetched_email) = fetched_email else {
+            continue;
+        };
+
+        if matched_profile.is_none() && normalize_email(&fetched_email) == target_email {
             matched_profile = Some(name.clone());
         }
         if let Some(profile) = state.profiles.get_mut(&name) {
@@ -1292,6 +1360,7 @@ fn handle_run(args: RunArgs) -> Result<()> {
     let mut state = AppState::load(&paths)?;
     let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
     let mut selected_profile_name = profile_name.clone();
+    let explicit_profile_requested = args.profile.is_some();
     let allow_auto_rotate = !args.no_auto_rotate;
     let include_code_review = is_review_invocation(&args.codex_args);
     let mut codex_home = state
@@ -1302,73 +1371,171 @@ fn handle_run(args: RunArgs) -> Result<()> {
         .clone();
 
     if !args.skip_quota_check {
-        match fetch_usage(&codex_home, args.base_url.as_deref()) {
-            Ok(usage) => {
-                let blocked = collect_blocked_limits(&usage, include_code_review);
-                if !blocked.is_empty() {
-                    let alternatives = find_ready_profiles(
-                        &state,
-                        &profile_name,
-                        args.base_url.as_deref(),
-                        include_code_review,
-                    );
+        if allow_auto_rotate && !explicit_profile_requested && state.profiles.len() > 1 {
+            let reports = collect_run_profile_reports(
+                &state,
+                active_profile_selection_order(&state, &profile_name),
+                args.base_url.as_deref(),
+            );
+            let ready_candidates =
+                ready_profile_candidates(&reports, include_code_review, Some(&profile_name));
+            let selected_report = reports.iter().find(|report| report.name == profile_name);
 
+            if let Some(best_candidate) = ready_candidates.first() {
+                if best_candidate.name != profile_name {
                     print_wrapped_stderr(&section_header("Quota Preflight"));
-                    print_wrapped_stderr(&format!(
-                        "Quota preflight blocked profile '{}': {}",
-                        profile_name,
-                        format_blocked_limits(&blocked)
-                    ));
+                    let mut selection_message = format!(
+                        "Using profile '{}' ({})",
+                        best_candidate.name,
+                        format_main_windows_compact(&best_candidate.usage)
+                    );
+                    if let Some(report) = selected_report {
+                        match &report.result {
+                            Ok(usage) => {
+                                let blocked = collect_blocked_limits(usage, include_code_review);
+                                if !blocked.is_empty() {
+                                    print_wrapped_stderr(&format!(
+                                        "Quota preflight blocked profile '{}': {}",
+                                        profile_name,
+                                        format_blocked_limits(&blocked)
+                                    ));
+                                    selection_message = format!(
+                                        "Auto-rotating to profile '{}' using quota-pressure scoring ({}).",
+                                        best_candidate.name,
+                                        format_main_windows_compact(&best_candidate.usage)
+                                    );
+                                } else {
+                                    selection_message = format!(
+                                        "Auto-selecting profile '{}' over active profile '{}' using quota-pressure scoring ({}).",
+                                        best_candidate.name,
+                                        profile_name,
+                                        format_main_windows_compact(&best_candidate.usage)
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                print_wrapped_stderr(&format!(
+                                    "Warning: quota preflight failed for '{}': {err}",
+                                    profile_name
+                                ));
+                                selection_message = format!(
+                                    "Using ready profile '{}' after quota preflight failed ({})",
+                                    best_candidate.name,
+                                    format_main_windows_compact(&best_candidate.usage)
+                                );
+                            }
+                        }
+                    }
 
-                    if allow_auto_rotate {
-                        if let Some(next_profile) = alternatives.first() {
-                            let next_profile = next_profile.clone();
-                            codex_home = state
-                                .profiles
-                                .get(&next_profile)
-                                .with_context(|| format!("profile '{}' is missing", next_profile))?
-                                .codex_home
-                                .clone();
-                            selected_profile_name = next_profile.clone();
-                            state.active_profile = Some(next_profile.clone());
-                            state.save(&paths)?;
-                            print_wrapped_stderr(&format!(
-                                "Auto-rotating to profile '{}'.",
-                                next_profile
-                            ));
-                        } else {
-                            print_wrapped_stderr("No other ready profile was found.");
-                            print_wrapped_stderr(&format!(
-                                "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
-                                profile_name
-                            ));
-                            std::process::exit(2);
-                        }
-                    } else {
-                        if !alternatives.is_empty() {
-                            print_wrapped_stderr(&format!(
-                                "Other profiles that look ready: {}",
-                                alternatives.join(", ")
-                            ));
-                            print_wrapped_stderr(
-                                "Rerun without `--no-auto-rotate` to allow fallback.",
-                            );
-                        }
+                    codex_home = state
+                        .profiles
+                        .get(&best_candidate.name)
+                        .with_context(|| format!("profile '{}' is missing", best_candidate.name))?
+                        .codex_home
+                        .clone();
+                    selected_profile_name = best_candidate.name.clone();
+                    state.active_profile = Some(best_candidate.name.clone());
+                    state.save(&paths)?;
+                    print_wrapped_stderr(&selection_message);
+                }
+            } else if let Some(report) = selected_report {
+                match &report.result {
+                    Ok(usage) => {
+                        let blocked = collect_blocked_limits(usage, include_code_review);
+                        print_wrapped_stderr(&section_header("Quota Preflight"));
+                        print_wrapped_stderr(&format!(
+                            "Quota preflight blocked profile '{}': {}",
+                            profile_name,
+                            format_blocked_limits(&blocked)
+                        ));
+                        print_wrapped_stderr("No ready profile was found.");
                         print_wrapped_stderr(&format!(
                             "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
                             profile_name
                         ));
                         std::process::exit(2);
                     }
+                    Err(err) => {
+                        print_wrapped_stderr(&section_header("Quota Preflight"));
+                        print_wrapped_stderr(&format!(
+                            "Warning: quota preflight failed for '{}': {err:#}",
+                            profile_name
+                        ));
+                        print_wrapped_stderr("Continuing without quota gate.");
+                    }
                 }
             }
-            Err(err) => {
-                print_wrapped_stderr(&section_header("Quota Preflight"));
-                print_wrapped_stderr(&format!(
-                    "Warning: quota preflight failed for '{}': {err:#}",
-                    profile_name
-                ));
-                print_wrapped_stderr("Continuing without quota gate.");
+        } else {
+            match fetch_usage(&codex_home, args.base_url.as_deref()) {
+                Ok(usage) => {
+                    let blocked = collect_blocked_limits(&usage, include_code_review);
+                    if !blocked.is_empty() {
+                        let alternatives = find_ready_profiles(
+                            &state,
+                            &profile_name,
+                            args.base_url.as_deref(),
+                            include_code_review,
+                        );
+
+                        print_wrapped_stderr(&section_header("Quota Preflight"));
+                        print_wrapped_stderr(&format!(
+                            "Quota preflight blocked profile '{}': {}",
+                            profile_name,
+                            format_blocked_limits(&blocked)
+                        ));
+
+                        if allow_auto_rotate {
+                            if let Some(next_profile) = alternatives.first() {
+                                let next_profile = next_profile.clone();
+                                codex_home = state
+                                    .profiles
+                                    .get(&next_profile)
+                                    .with_context(|| {
+                                        format!("profile '{}' is missing", next_profile)
+                                    })?
+                                    .codex_home
+                                    .clone();
+                                selected_profile_name = next_profile.clone();
+                                state.active_profile = Some(next_profile.clone());
+                                state.save(&paths)?;
+                                print_wrapped_stderr(&format!(
+                                    "Auto-rotating to profile '{}'.",
+                                    next_profile
+                                ));
+                            } else {
+                                print_wrapped_stderr("No other ready profile was found.");
+                                print_wrapped_stderr(&format!(
+                                    "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
+                                    profile_name
+                                ));
+                                std::process::exit(2);
+                            }
+                        } else {
+                            if !alternatives.is_empty() {
+                                print_wrapped_stderr(&format!(
+                                    "Other profiles that look ready: {}",
+                                    alternatives.join(", ")
+                                ));
+                                print_wrapped_stderr(
+                                    "Rerun without `--no-auto-rotate` to allow fallback.",
+                                );
+                            }
+                            print_wrapped_stderr(&format!(
+                                "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
+                                profile_name
+                            ));
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                Err(err) => {
+                    print_wrapped_stderr(&section_header("Quota Preflight"));
+                    print_wrapped_stderr(&format!(
+                        "Warning: quota preflight failed for '{}': {err:#}",
+                        profile_name
+                    ));
+                    print_wrapped_stderr("Continuing without quota gate.");
+                }
             }
         }
     }
@@ -1904,7 +2071,6 @@ fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaR
         .map(|(name, profile)| QuotaFetchJob {
             name: name.clone(),
             active: state.active_profile.as_deref() == Some(name.as_str()),
-            auth: read_auth_summary(&profile.codex_home),
             codex_home: profile.codex_home.clone(),
         })
         .collect();
@@ -1913,9 +2079,180 @@ fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaR
     map_parallel(jobs, |job| QuotaReport {
         name: job.name,
         active: job.active,
-        auth: job.auth,
+        auth: read_auth_summary(&job.codex_home),
         result: fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string()),
     })
+}
+
+fn collect_profile_summaries(state: &AppState) -> Vec<ProfileSummaryReport> {
+    let jobs = state
+        .profiles
+        .iter()
+        .map(|(name, profile)| ProfileSummaryJob {
+            name: name.clone(),
+            active: state.active_profile.as_deref() == Some(name.as_str()),
+            managed: profile.managed,
+            email: profile.email.clone(),
+            codex_home: profile.codex_home.clone(),
+        })
+        .collect();
+
+    map_parallel(jobs, |job| ProfileSummaryReport {
+        name: job.name,
+        active: job.active,
+        managed: job.managed,
+        auth: read_auth_summary(&job.codex_home),
+        email: job.email,
+        codex_home: job.codex_home,
+    })
+}
+
+fn collect_doctor_profile_reports(
+    state: &AppState,
+    include_quota: bool,
+) -> Vec<DoctorProfileReport> {
+    map_parallel(collect_profile_summaries(state), |summary| {
+        DoctorProfileReport {
+            quota: include_quota
+                .then(|| fetch_usage(&summary.codex_home, None).map_err(|err| err.to_string())),
+            summary,
+        }
+    })
+}
+
+fn collect_run_profile_reports(
+    state: &AppState,
+    profile_names: Vec<String>,
+    base_url: Option<&str>,
+) -> Vec<RunProfileProbeReport> {
+    let jobs = profile_names
+        .into_iter()
+        .enumerate()
+        .filter_map(|(order_index, name)| {
+            let profile = state.profiles.get(&name)?;
+            Some(RunProfileProbeJob {
+                name,
+                order_index,
+                codex_home: profile.codex_home.clone(),
+            })
+        })
+        .collect();
+    let base_url = base_url.map(str::to_owned);
+
+    map_parallel(jobs, |job| {
+        let auth = read_auth_summary(&job.codex_home);
+        let result = if auth.quota_compatible {
+            fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
+        } else {
+            Err("auth mode is not quota-compatible".to_string())
+        };
+
+        RunProfileProbeReport {
+            name: job.name,
+            order_index: job.order_index,
+            auth,
+            result,
+        }
+    })
+}
+
+fn ready_profile_candidates(
+    reports: &[RunProfileProbeReport],
+    include_code_review: bool,
+    preferred_profile: Option<&str>,
+) -> Vec<ReadyProfileCandidate> {
+    let mut candidates = reports
+        .iter()
+        .filter_map(|report| {
+            if !report.auth.quota_compatible {
+                return None;
+            }
+
+            let usage = report.result.as_ref().ok()?;
+            if !collect_blocked_limits(usage, include_code_review).is_empty() {
+                return None;
+            }
+
+            Some(ReadyProfileCandidate {
+                name: report.name.clone(),
+                usage: usage.clone(),
+                order_index: report.order_index,
+                preferred: preferred_profile == Some(report.name.as_str()),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by_key(ready_profile_sort_key);
+    candidates
+}
+
+fn ready_profile_sort_key(
+    candidate: &ReadyProfileCandidate,
+) -> (
+    i64,
+    i64,
+    i64,
+    Reverse<i64>,
+    Reverse<i64>,
+    Reverse<i64>,
+    i64,
+    i64,
+    usize,
+    usize,
+) {
+    let weekly = required_main_window_snapshot(&candidate.usage, "weekly");
+    let five_hour = required_main_window_snapshot(&candidate.usage, "5h");
+
+    let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
+    let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
+    let total_pressure = weekly_pressure
+        .saturating_mul(8)
+        .saturating_add(five_hour_pressure);
+    let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
+    let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
+    let reserve_floor = weekly_remaining.min(five_hour_remaining);
+    let weekly_reset_at = weekly.map_or(i64::MAX, |window| window.reset_at);
+    let five_hour_reset_at = five_hour.map_or(i64::MAX, |window| window.reset_at);
+
+    (
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        Reverse(reserve_floor),
+        Reverse(weekly_remaining),
+        Reverse(five_hour_remaining),
+        weekly_reset_at,
+        five_hour_reset_at,
+        if candidate.preferred { 0usize } else { 1usize },
+        candidate.order_index,
+    )
+}
+
+fn required_main_window_snapshot(usage: &UsageResponse, label: &str) -> Option<MainWindowSnapshot> {
+    let window = find_main_window(usage.rate_limit.as_ref()?, label)?;
+    let remaining_percent = remaining_percent(window.used_percent);
+    let reset_at = window.reset_at.unwrap_or(i64::MAX);
+    let seconds_until_reset = if reset_at == i64::MAX {
+        i64::MAX
+    } else {
+        (reset_at - Local::now().timestamp()).max(0)
+    };
+    let pressure_score = seconds_until_reset
+        .saturating_mul(1_000)
+        .checked_div(remaining_percent.max(1))
+        .unwrap_or(i64::MAX);
+
+    Some(MainWindowSnapshot {
+        remaining_percent,
+        reset_at,
+        pressure_score,
+    })
+}
+
+fn active_profile_selection_order(state: &AppState, current_profile: &str) -> Vec<String> {
+    std::iter::once(current_profile.to_string())
+        .chain(profile_rotation_order(state, current_profile))
+        .collect()
 }
 
 fn map_parallel<I, O, F>(inputs: Vec<I>, func: F) -> Vec<O>
@@ -2630,26 +2967,18 @@ fn find_ready_profiles(
     base_url: Option<&str>,
     include_code_review: bool,
 ) -> Vec<String> {
-    let mut ready = Vec::new();
-
-    for name in profile_rotation_order(state, current_profile) {
-        let Some(profile) = state.profiles.get(&name) else {
-            continue;
-        };
-
-        let auth = read_auth_summary(&profile.codex_home);
-        if !auth.quota_compatible {
-            continue;
-        }
-
-        if let Ok(usage) = fetch_usage(&profile.codex_home, base_url) {
-            if collect_blocked_limits(&usage, include_code_review).is_empty() {
-                ready.push(name);
-            }
-        }
-    }
-
-    ready
+    ready_profile_candidates(
+        &collect_run_profile_reports(
+            state,
+            profile_rotation_order(state, current_profile),
+            base_url,
+        ),
+        include_code_review,
+        None,
+    )
+    .into_iter()
+    .map(|candidate| candidate.name)
+    .collect()
 }
 
 fn profile_rotation_order(state: &AppState, current_profile: &str) -> Vec<String> {
@@ -2793,6 +3122,33 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use std::time::{Duration, Instant};
+
+    fn usage_with_main_windows(
+        five_hour_remaining: i64,
+        five_hour_reset_offset_seconds: i64,
+        weekly_remaining: i64,
+        weekly_reset_offset_seconds: i64,
+    ) -> UsageResponse {
+        let now = Local::now().timestamp();
+        UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some((100 - five_hour_remaining).clamp(0, 100)),
+                    reset_at: Some(now + five_hour_reset_offset_seconds),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some((100 - weekly_remaining).clamp(0, 100)),
+                    reset_at: Some(now + weekly_reset_offset_seconds),
+                    limit_window_seconds: Some(604_800),
+                }),
+            }),
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        }
+    }
 
     #[test]
     fn validates_profile_names() {
@@ -2951,6 +3307,50 @@ mod tests {
             "parallel execution took too long: {:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn ready_profile_ranking_prefers_soon_recovering_weekly_capacity() {
+        let candidates = vec![
+            ReadyProfileCandidate {
+                name: "slow".to_string(),
+                usage: usage_with_main_windows(100, 18_000, 100, 604_800),
+                order_index: 0,
+                preferred: false,
+            },
+            ReadyProfileCandidate {
+                name: "fast".to_string(),
+                usage: usage_with_main_windows(80, 18_000, 80, 86_400),
+                order_index: 1,
+                preferred: false,
+            },
+        ];
+
+        let mut ranked = candidates.clone();
+        ranked.sort_by_key(ready_profile_sort_key);
+        assert_eq!(ranked[0].name, "fast");
+    }
+
+    #[test]
+    fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
+        let candidates = vec![
+            ReadyProfileCandidate {
+                name: "thin".to_string(),
+                usage: usage_with_main_windows(65, 18_000, 70, 604_800),
+                order_index: 0,
+                preferred: false,
+            },
+            ReadyProfileCandidate {
+                name: "deep".to_string(),
+                usage: usage_with_main_windows(95, 18_000, 98, 604_800),
+                order_index: 1,
+                preferred: false,
+            },
+        ];
+
+        let mut ranked = candidates.clone();
+        ranked.sort_by_key(ready_profile_sort_key);
+        assert_eq!(ranked[0].name, "deep");
     }
 
     #[test]
