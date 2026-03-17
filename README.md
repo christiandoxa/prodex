@@ -1,16 +1,16 @@
 # prodex
 
-`prodex` adalah wrapper CLI untuk `codex` yang memisahkan banyak profile lewat `CODEX_HOME` terpisah.
+`prodex` is a CLI wrapper for `codex` that separates multiple profiles by giving each one its own `CODEX_HOME`.
 
-Butuh versi singkatnya saja: lihat [QUICKSTART.md](./QUICKSTART.md).
+For the shorter version, see [QUICKSTART.md](./QUICKSTART.md).
 
-Intinya:
+In short:
 
-- satu profile `prodex` = satu folder `CODEX_HOME`
-- login tetap dijalankan oleh `codex`
-- `prodex` mengelola profile, active profile, quota check via `cq`, dan launcher ke `codex`
+- one `prodex` profile = one `CODEX_HOME` directory
+- login is still handled by `codex`
+- `prodex` manages profiles, the active profile, quota checks via `cq`, and launching `codex`
 
-Model mentalnya mirip profile di browser, tapi untuk `codex`.
+The mental model is similar to browser profiles, but for `codex`.
 
 ## Quick Start
 
@@ -20,57 +20,57 @@ Model mentalnya mirip profile di browser, tapi untuk `codex`.
 cargo build --release
 ```
 
-Binary akan ada di:
+The binary will be available at:
 
 ```bash
 ./target/release/prodex
 ```
 
-### 2. Import profile `codex` yang sekarang
+### 2. Import your current `codex` profile
 
-Kalau kamu sudah punya login aktif di `~/.codex`:
+If you already have an active login in `~/.codex`:
 
 ```bash
 ./target/release/prodex profile import-current main
 ```
 
-Ini akan:
+This will:
 
-- copy `~/.codex` ke managed profile baru
-- menyimpan profile di `~/.prodex/profiles/main`
-- menjadikan `main` sebagai active profile
+- copy `~/.codex` into a new managed profile
+- store the profile in `~/.prodex/profiles/main`
+- set `main` as the active profile
 
-### 3. Tambah profile baru dan login
+### 3. Add a new profile and log in
 
-Kalau mau profile baru yang kosong:
+If you want a fresh empty profile:
 
 ```bash
 ./target/release/prodex profile add second
 ./target/release/prodex login --profile second
 ```
 
-`prodex login` tidak meng-handle OAuth callback sendiri. Ia hanya menjalankan `codex login` dengan `CODEX_HOME` profile yang dipilih.
+`prodex login` does not handle the OAuth callback itself. It only runs `codex login` with the selected profile's `CODEX_HOME`.
 
-### 4. Lihat semua quota
+### 4. View all quotas
 
 ```bash
 ./target/release/prodex quota --all
 ```
 
-Contoh kolom `MAIN`:
+Example `MAIN` column:
 
 ```text
 5h 37/100 used | weekly 12/100 used
 ```
 
-### 5. Pilih profile aktif dan jalankan `codex`
+### 5. Select the active profile and run `codex`
 
 ```bash
 ./target/release/prodex use main
 ./target/release/prodex run
 ```
 
-Atau jalankan langsung dengan profile tertentu:
+Or run directly with a specific profile:
 
 ```bash
 ./target/release/prodex run --profile second
@@ -78,89 +78,89 @@ Atau jalankan langsung dengan profile tertentu:
 
 ## Requirements
 
-`prodex` mengandalkan binary berikut:
+`prodex` relies on the following binaries:
 
 - `codex`
 - `cq`
 
-Cek cepat:
+Quick check:
 
 ```bash
 codex --help
 cq --help
 ```
 
-Kalau mau audit environment `prodex`:
+If you want to audit the `prodex` environment:
 
 ```bash
 ./target/release/prodex doctor
 ./target/release/prodex doctor --quota
 ```
 
-## Cara Kerja
+## How It Works
 
-`prodex` menyimpan state sendiri di:
+`prodex` stores its own state in:
 
 ```text
 ~/.prodex
 ```
 
-Struktur utamanya:
+The main structure is:
 
-- `state.json`: daftar profile dan active profile
-- `profiles/<name>`: managed `CODEX_HOME` per profile
+- `state.json`: the list of profiles and the active profile
+- `profiles/<name>`: the managed `CODEX_HOME` for each profile
 
-Auth tetap disimpan oleh `codex` di dalam `auth.json` milik masing-masing profile.
+Authentication is still stored by `codex` inside each profile's `auth.json`.
 
-## Command yang Paling Sering Dipakai
+## Most Common Commands
 
-### Profile management
+### Profile Management
 
-Tambah profile kosong:
+Add an empty profile:
 
 ```bash
 ./target/release/prodex profile add work
 ```
 
-Import dari `~/.codex`:
+Import from `~/.codex`:
 
 ```bash
 ./target/release/prodex profile import-current work
 ```
 
-Daftar semua profile:
+List all profiles:
 
 ```bash
 ./target/release/prodex profile list
 ```
 
-Pilih active profile:
+Select the active profile:
 
 ```bash
 ./target/release/prodex use work
 ```
 
-Hapus profile:
+Remove a profile:
 
 ```bash
 ./target/release/prodex profile remove work
 ```
 
-Hapus profile sekaligus managed home-nya:
+Remove a profile and its managed home:
 
 ```bash
 ./target/release/prodex profile remove work --delete-home
 ```
 
-### Login/logout
+### Login/Logout
 
-Login ke profile tertentu:
+Log in to a specific profile:
 
 ```bash
 ./target/release/prodex login --profile work
 ```
 
-Logout profile tertentu:
+Log out from a specific profile:
 
 ```bash
 ./target/release/prodex logout --profile work
@@ -168,19 +168,19 @@ Logout profile tertentu:
 
 ### Quota
 
-Render quota satu profile:
+Show quota for one profile:
 
 ```bash
 ./target/release/prodex quota --profile work
 ```
 
-Render raw JSON quota:
+Show raw quota JSON:
 
 ```bash
 ./target/release/prodex quota --profile work --raw
 ```
 
-Lihat semua profile sekaligus:
+View all profiles at once:
 
 ```bash
 ./target/release/prodex quota --all
@@ -188,26 +188,32 @@ Lihat semua profile sekaligus:
 
 ### Run `codex`
 
-Jalankan `codex` dengan active profile:
+Run `codex` with the active profile:
 
 ```bash
 ./target/release/prodex run
 ```
 
-Jalankan `codex` dengan argumen:
+Run `codex` with arguments:
 
 ```bash
 ./target/release/prodex run -- --version
 ./target/release/prodex run exec "review this repo"
 ```
 
-Jalankan dengan profile spesifik:
+Run with a specific profile:
 
 ```bash
 ./target/release/prodex run --profile work
 ```
 
-Lewati quota preflight:
+Temporarily disable auto-rotate:
+
+```bash
+./target/release/prodex run --profile work --no-auto-rotate
+```
+
+Skip quota preflight:
 
 ```bash
 ./target/release/prodex run --profile work --skip-quota-check
@@ -215,38 +221,41 @@ Lewati quota preflight:
 
 ## Quota Behavior
 
-Sebelum `prodex run` menjalankan `codex`, `prodex` akan coba check quota profile yang dipakai.
+Before `prodex run` launches `codex`, `prodex` tries to check quota for the selected profile.
 
-Kalau profile itu kelihatan sedang kena limit:
+Before a profile is considered safe to use, `prodex` requires both the `5h` and `weekly` quota windows to be present and still below `100/100`.
 
-- `prodex` akan block eksekusi
-- menampilkan limit yang sedang penuh
-- memberi saran profile lain yang terlihat siap, kalau ada
+If that profile does not clearly have remaining required quota:
 
-`prodex` tidak melakukan auto-switch profile.
+- `prodex run` tries to rotate to the next ready profile by default, including when you pass `--profile`
+- if you want the command to stay blocked on that profile instead, use `--no-auto-rotate`
+- it prints the missing, unknown, or exhausted quota reasons
+- it suggests other profiles that appear ready, when available
 
-## Catatan Penting
+If auto-rotate succeeds, the active profile is updated to the profile that was used.
 
-- `quota --all` dan quota preflight bergantung pada `cq`
-- quota ChatGPT hanya bisa dibaca kalau profile itu login dengan mode ChatGPT, bukan API key
-- kalau auth profile adalah API key, `quota --all` akan tampil `error` untuk profile itu
-- `prodex` tidak menggantikan `codex`; dia hanya menjadi launcher dan profile manager
+## Important Notes
+
+- `quota --all` and quota preflight depend on `cq`
+- ChatGPT quota can only be read when the profile uses ChatGPT auth, not an API key
+- if a profile uses API key auth, `quota --all` will show `error` for that profile
+- `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 
 ## Environment Variables
 
-Override lokasi state `prodex`:
+Override the `prodex` state location:
 
 ```bash
 PRODEX_HOME=/path/to/prodex-home
 ```
 
-Override binary `codex`:
+Override the `codex` binary:
 
 ```bash
 PRODEX_CODEX_BIN=/path/to/codex
 ```
 
-Override binary `cq`:
+Override the `cq` binary:
 
 ```bash
 PRODEX_CQ_BIN=/path/to/cq
@@ -254,7 +263,7 @@ PRODEX_CQ_BIN=/path/to/cq
 
 ## Development
 
-Run saat development:
+Run during development:
 
 ```bash
 cargo run -- profile list
@@ -262,7 +271,7 @@ cargo run -- quota --all
 cargo run -- doctor
 ```
 
-Test:
+Tests:
 
 ```bash
 cargo test

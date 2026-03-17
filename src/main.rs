@@ -113,6 +113,10 @@ struct DoctorArgs {
 struct RunArgs {
     #[arg(short, long)]
     profile: Option<String>,
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    auto_rotate: bool,
+    #[arg(long)]
+    no_auto_rotate: bool,
     #[arg(long)]
     skip_quota_check: bool,
     #[arg(long)]
@@ -186,8 +190,7 @@ struct StoredTokens {
 
 #[derive(Debug)]
 struct BlockedLimit {
-    label: String,
-    reset_at: Option<i64>,
+    message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -625,10 +628,11 @@ fn handle_quota(args: QuotaArgs) -> Result<()> {
 
 fn handle_run(args: RunArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let mut state = AppState::load(&paths)?;
     let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
+    let allow_auto_rotate = !args.no_auto_rotate;
     let include_code_review = is_review_invocation(&args.codex_args);
-    let codex_home = state
+    let mut codex_home = state
         .profiles
         .get(&profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?
@@ -640,31 +644,53 @@ fn handle_run(args: RunArgs) -> Result<()> {
             Ok(usage) => {
                 let blocked = collect_blocked_limits(&usage, include_code_review);
                 if !blocked.is_empty() {
-                    eprintln!(
-                        "Quota preflight blocked profile '{}': {}",
-                        profile_name,
-                        format_blocked_limits(&blocked)
-                    );
                     let alternatives = find_ready_profiles(
                         &state,
                         &profile_name,
                         args.base_url.as_deref(),
                         include_code_review,
                     );
-                    if !alternatives.is_empty() {
-                        eprintln!(
-                            "Other profiles that look ready: {}",
-                            alternatives.join(", ")
-                        );
-                        eprintln!(
-                            "Switch manually with `prodex use <name>` or rerun with `prodex run --profile <name> ...`."
-                        );
-                    }
+
                     eprintln!(
-                        "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
-                        profile_name
+                        "Quota preflight blocked profile '{}': {}",
+                        profile_name,
+                        format_blocked_limits(&blocked)
                     );
-                    std::process::exit(2);
+
+                    if allow_auto_rotate {
+                        if let Some(next_profile) = alternatives.first() {
+                            let next_profile = next_profile.clone();
+                            codex_home = state
+                                .profiles
+                                .get(&next_profile)
+                                .with_context(|| format!("profile '{}' is missing", next_profile))?
+                                .codex_home
+                                .clone();
+                            state.active_profile = Some(next_profile.clone());
+                            state.save(&paths)?;
+                            eprintln!("Auto-rotating to profile '{}'.", next_profile);
+                        } else {
+                            eprintln!("No other ready profile was found.");
+                            eprintln!(
+                                "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
+                                profile_name
+                            );
+                            std::process::exit(2);
+                        }
+                    } else {
+                        if !alternatives.is_empty() {
+                            eprintln!(
+                                "Other profiles that look ready: {}",
+                                alternatives.join(", ")
+                            );
+                            eprintln!("Rerun without `--no-auto-rotate` to allow fallback.");
+                        }
+                        eprintln!(
+                            "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
+                            profile_name
+                        );
+                        std::process::exit(2);
+                    }
                 }
             }
             Err(err) => {
@@ -1014,8 +1040,15 @@ fn collect_blocked_limits(usage: &UsageResponse, include_code_review: bool) -> V
     let mut blocked = Vec::new();
 
     if let Some(main) = usage.rate_limit.as_ref() {
-        push_blocked_window(&mut blocked, None, main.primary_window.as_ref());
-        push_blocked_window(&mut blocked, None, main.secondary_window.as_ref());
+        push_required_main_window(&mut blocked, main, "5h");
+        push_required_main_window(&mut blocked, main, "weekly");
+    } else {
+        blocked.push(BlockedLimit {
+            message: "5h quota unavailable".to_string(),
+        });
+        blocked.push(BlockedLimit {
+            message: "weekly quota unavailable".to_string(),
+        });
     }
 
     for additional in &usage.additional_rate_limits {
@@ -1053,6 +1086,39 @@ fn collect_blocked_limits(usage: &UsageResponse, include_code_review: bool) -> V
     blocked
 }
 
+fn push_required_main_window(
+    blocked: &mut Vec<BlockedLimit>,
+    main: &WindowPair,
+    required_label: &str,
+) {
+    let Some(window) = find_main_window(main, required_label) else {
+        blocked.push(BlockedLimit {
+            message: format!("{required_label} quota unavailable"),
+        });
+        return;
+    };
+
+    match window.used_percent {
+        Some(used) if used < 100 => {}
+        Some(_) => blocked.push(BlockedLimit {
+            message: format!(
+                "{required_label} exhausted until {}",
+                format_reset_time(window.reset_at)
+            ),
+        }),
+        None => blocked.push(BlockedLimit {
+            message: format!("{required_label} quota unknown"),
+        }),
+    }
+}
+
+fn find_main_window<'a>(main: &'a WindowPair, expected_label: &str) -> Option<&'a UsageWindow> {
+    [main.primary_window.as_ref(), main.secondary_window.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|window| window_label(window.limit_window_seconds) == expected_label)
+}
+
 fn push_blocked_window(
     blocked: &mut Vec<BlockedLimit>,
     name: Option<&str>,
@@ -1076,21 +1142,17 @@ fn push_blocked_window(
     };
 
     blocked.push(BlockedLimit {
-        label,
-        reset_at: window.reset_at,
+        message: format!(
+            "{label} exhausted until {}",
+            format_reset_time(window.reset_at)
+        ),
     });
 }
 
 fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
     blocked
         .iter()
-        .map(|limit| {
-            format!(
-                "{} until {}",
-                limit.label,
-                format_reset_time(limit.reset_at)
-            )
-        })
+        .map(|limit| limit.message.clone())
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -1214,10 +1276,10 @@ fn find_ready_profiles(
 ) -> Vec<String> {
     let mut ready = Vec::new();
 
-    for (name, profile) in &state.profiles {
-        if name == current_profile {
+    for name in profile_rotation_order(state, current_profile) {
+        let Some(profile) = state.profiles.get(&name) else {
             continue;
-        }
+        };
 
         let auth = read_auth_summary(&profile.codex_home);
         if !auth.quota_compatible {
@@ -1226,12 +1288,29 @@ fn find_ready_profiles(
 
         if let Ok(usage) = fetch_usage(&profile.codex_home, base_url) {
             if collect_blocked_limits(&usage, include_code_review).is_empty() {
-                ready.push(name.clone());
+                ready.push(name);
             }
         }
     }
 
     ready
+}
+
+fn profile_rotation_order(state: &AppState, current_profile: &str) -> Vec<String> {
+    let names: Vec<String> = state.profiles.keys().cloned().collect();
+    let Some(index) = names.iter().position(|name| name == current_profile) else {
+        return names
+            .into_iter()
+            .filter(|name| name != current_profile)
+            .collect();
+    };
+
+    names
+        .iter()
+        .skip(index + 1)
+        .chain(names.iter().take(index))
+        .cloned()
+        .collect()
 }
 
 fn format_binary_resolution(binary: &OsString) -> String {
@@ -1381,8 +1460,31 @@ mod tests {
         };
 
         let blocked = collect_blocked_limits(&usage, false);
+        assert_eq!(blocked.len(), 2);
+        assert!(blocked[0].message.starts_with("5h exhausted until "));
+        assert_eq!(blocked[1].message, "weekly quota unavailable");
+    }
+
+    #[test]
+    fn blocks_when_weekly_window_is_missing() {
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(20),
+                    reset_at: Some(1_700_000_000),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: None,
+            }),
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        };
+
+        let blocked = collect_blocked_limits(&usage, false);
         assert_eq!(blocked.len(), 1);
-        assert_eq!(blocked[0].label, "5h");
+        assert_eq!(blocked[0].message, "weekly quota unavailable");
     }
 
     #[test]
@@ -1396,5 +1498,40 @@ mod tests {
         assert_eq!(format_window_status_compact(&window), "5h 37/100 used");
         assert!(format_window_status(&window).contains("used 37/100"));
         assert!(format_window_status(&window).contains("left 63/100"));
+    }
+
+    #[test]
+    fn rotates_profiles_after_current_profile() {
+        let state = AppState {
+            active_profile: Some("beta".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "alpha".to_string(),
+                    ProfileEntry {
+                        codex_home: PathBuf::from("/tmp/alpha"),
+                        managed: true,
+                    },
+                ),
+                (
+                    "beta".to_string(),
+                    ProfileEntry {
+                        codex_home: PathBuf::from("/tmp/beta"),
+                        managed: true,
+                    },
+                ),
+                (
+                    "gamma".to_string(),
+                    ProfileEntry {
+                        codex_home: PathBuf::from("/tmp/gamma"),
+                        managed: true,
+                    },
+                ),
+            ]),
+        };
+
+        assert_eq!(
+            profile_rotation_order(&state, "beta"),
+            vec!["gamma".to_string(), "alpha".to_string()]
+        );
     }
 }
