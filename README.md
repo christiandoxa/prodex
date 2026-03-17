@@ -2,36 +2,40 @@
 
 `prodex` is a CLI wrapper for `codex` that separates multiple profiles by giving each one its own `CODEX_HOME`.
 
+Install from [crates.io](https://crates.io/crates/prodex):
+
+```bash
+cargo install prodex
+```
+
 For the shorter version, see [QUICKSTART.md](./QUICKSTART.md).
 
 In short:
 
 - one `prodex` profile = one `CODEX_HOME` directory
 - login is still handled by `codex`
-- `prodex` manages profiles, the active profile, quota checks via `cq`, and launching `codex`
+- `prodex` manages profiles, the active profile, built-in quota checks, and launching `codex`
 
 The mental model is similar to browser profiles, but for `codex`.
 
 ## Quick Start
 
-### 1. Build
+### 1. Install
 
 ```bash
-cargo build --release
+cargo install prodex
 ```
 
-The binary will be available at:
+Package page:
 
-```bash
-./target/release/prodex
-```
+[https://crates.io/crates/prodex](https://crates.io/crates/prodex)
 
 ### 2. Import your current `codex` profile
 
 If you already have an active login in `~/.codex`:
 
 ```bash
-./target/release/prodex profile import-current main
+prodex profile import-current main
 ```
 
 This will:
@@ -45,8 +49,8 @@ This will:
 If you want a fresh empty profile:
 
 ```bash
-./target/release/prodex profile add second
-./target/release/prodex login --profile second
+prodex profile add second
+prodex login --profile second
 ```
 
 `prodex login` does not handle the OAuth callback itself. It only runs `codex login` with the selected profile's `CODEX_HOME`.
@@ -54,7 +58,7 @@ If you want a fresh empty profile:
 ### 4. View all quotas
 
 ```bash
-./target/release/prodex quota --all
+prodex quota --all
 ```
 
 Example `MAIN` column:
@@ -66,14 +70,14 @@ Example `MAIN` column:
 ### 5. Select the active profile and run `codex`
 
 ```bash
-./target/release/prodex use main
-./target/release/prodex run
+prodex use main
+prodex run
 ```
 
 Or run directly with a specific profile:
 
 ```bash
-./target/release/prodex run --profile second
+prodex run --profile second
 ```
 
 ## Requirements
@@ -81,20 +85,18 @@ Or run directly with a specific profile:
 `prodex` relies on the following binaries:
 
 - `codex`
-- `cq`
 
 Quick check:
 
 ```bash
 codex --help
-cq --help
 ```
 
 If you want to audit the `prodex` environment:
 
 ```bash
-./target/release/prodex doctor
-./target/release/prodex doctor --quota
+prodex doctor
+prodex doctor --quota
 ```
 
 ## How It Works
@@ -116,40 +118,46 @@ Authentication is still stored by `codex` inside each profile's `auth.json`.
 
 ### Profile Management
 
+Install from crates.io:
+
+```bash
+cargo install prodex
+```
+
 Add an empty profile:
 
 ```bash
-./target/release/prodex profile add work
+prodex profile add work
 ```
 
 Import from `~/.codex`:
 
 ```bash
-./target/release/prodex profile import-current work
+prodex profile import-current work
 ```
 
 List all profiles:
 
 ```bash
-./target/release/prodex profile list
+prodex profile list
 ```
 
 Select the active profile:
 
 ```bash
-./target/release/prodex use work
+prodex use work
 ```
 
 Remove a profile:
 
 ```bash
-./target/release/prodex profile remove work
+prodex profile remove work
 ```
 
 Remove a profile and its managed home:
 
 ```bash
-./target/release/prodex profile remove work --delete-home
+prodex profile remove work --delete-home
 ```
 
 ### Login/Logout
@@ -157,13 +165,13 @@ Remove a profile and its managed home:
 Log in to a specific profile:
 
 ```bash
-./target/release/prodex login --profile work
+prodex login --profile work
 ```
 
 Log out from a specific profile:
 
 ```bash
-./target/release/prodex logout --profile work
+prodex logout --profile work
 ```
 
 ### Quota
@@ -171,19 +179,19 @@ Log out from a specific profile:
 Show quota for one profile:
 
 ```bash
-./target/release/prodex quota --profile work
+prodex quota --profile work
 ```
 
 Show raw quota JSON:
 
 ```bash
-./target/release/prodex quota --profile work --raw
+prodex quota --profile work --raw
 ```
 
 View all profiles at once:
 
 ```bash
-./target/release/prodex quota --all
+prodex quota --all
 ```
 
 ### Run `codex`
@@ -191,32 +199,32 @@ View all profiles at once:
 Run `codex` with the active profile:
 
 ```bash
-./target/release/prodex run
+prodex run
 ```
 
 Run `codex` with arguments:
 
 ```bash
-./target/release/prodex run -- --version
-./target/release/prodex run exec "review this repo"
+prodex run -- --version
+prodex run exec "review this repo"
 ```
 
 Run with a specific profile:
 
 ```bash
-./target/release/prodex run --profile work
+prodex run --profile work
 ```
 
 Temporarily disable auto-rotate:
 
 ```bash
-./target/release/prodex run --profile work --no-auto-rotate
+prodex run --profile work --no-auto-rotate
 ```
 
 Skip quota preflight:
 
 ```bash
-./target/release/prodex run --profile work --skip-quota-check
+prodex run --profile work --skip-quota-check
 ```
 
 ## Quota Behavior
@@ -236,7 +244,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 
 ## Important Notes
 
-- `quota --all` and quota preflight depend on `cq`
+- quota checks are built into `prodex` and use the ChatGPT backend endpoint used by Codex
 - ChatGPT quota can only be read when the profile uses ChatGPT auth, not an API key
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
@@ -255,10 +263,10 @@ Override the `codex` binary:
 PRODEX_CODEX_BIN=/path/to/codex
 ```
 
-Override the `cq` binary:
+Override the default ChatGPT quota base URL:
 
 ```bash
-PRODEX_CQ_BIN=/path/to/cq
+CODEX_CHATGPT_BASE_URL=https://chatgpt.com/backend-api
 ```
 
 ## Development

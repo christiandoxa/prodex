@@ -1,8 +1,15 @@
 use serde_json::{Value, json};
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct TestDir {
     path: PathBuf,
@@ -30,19 +37,203 @@ impl Drop for TestDir {
     }
 }
 
+struct UsageServer {
+    listen_addr: SocketAddr,
+    shutdown: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl UsageServer {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind usage server");
+        let listen_addr = listener
+            .local_addr()
+            .expect("failed to resolve usage server address");
+        listener
+            .set_nonblocking(true)
+            .expect("failed to set usage server nonblocking");
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_flag = Arc::clone(&shutdown);
+        let thread = thread::spawn(move || {
+            while !shutdown_flag.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => handle_usage_request(stream),
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Self {
+            listen_addr,
+            shutdown,
+            thread: Some(thread),
+        }
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://{}/backend-api", self.listen_addr)
+    }
+}
+
+impl Drop for UsageServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.listen_addr);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn handle_usage_request(mut stream: TcpStream) {
+    let request = match read_http_request(&mut stream) {
+        Some(request) => request,
+        None => return,
+    };
+
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("/");
+    let authorization = request_header(&request, "Authorization");
+    let account_id = request_header(&request, "ChatGPT-Account-Id");
+
+    let (status_line, body) =
+        if !(path.ends_with("/backend-api/wham/usage") || path.ends_with("/api/codex/usage")) {
+            (
+                "HTTP/1.1 404 Not Found",
+                json!({ "error": "not_found" }).to_string(),
+            )
+        } else {
+            match (authorization.as_deref(), account_id.as_deref()) {
+                (Some("Bearer test-token"), Some("main-account")) => {
+                    ("HTTP/1.1 200 OK", main_usage_body())
+                }
+                (Some("Bearer test-token"), Some("second-account")) => {
+                    ("HTTP/1.1 200 OK", second_usage_body())
+                }
+                _ => (
+                    "HTTP/1.1 401 Unauthorized",
+                    json!({ "error": "unauthorized" }).to_string(),
+                ),
+            }
+        };
+
+    let response = format!(
+        "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.flush();
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Option<String> {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    let mut buffer = [0_u8; 1024];
+    let mut request = Vec::new();
+
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break;
+            }
+            Err(_) => return None,
+        }
+    }
+
+    if request.is_empty() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&request).into_owned())
+}
+
+fn request_header(request: &str, header_name: &str) -> Option<String> {
+    request.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.trim().eq_ignore_ascii_case(header_name) {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn main_usage_body() -> String {
+    json!({
+        "email": "main@example.com",
+        "plan_type": "plus",
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 100,
+                "reset_at": 1_700_000_000,
+                "limit_window_seconds": 18_000
+            },
+            "secondary_window": {
+                "used_percent": 20,
+                "reset_at": 1_700_000_000,
+                "limit_window_seconds": 604_800
+            }
+        }
+    })
+    .to_string()
+}
+
+fn second_usage_body() -> String {
+    json!({
+        "email": "second@example.com",
+        "plan_type": "plus",
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 20,
+                "reset_at": 1_700_000_000,
+                "limit_window_seconds": 18_000
+            },
+            "secondary_window": {
+                "used_percent": 30,
+                "reset_at": 1_700_000_000,
+                "limit_window_seconds": 604_800
+            }
+        }
+    })
+    .to_string()
+}
+
 struct Fixture {
     _temp_dir: TestDir,
+    _usage_server: UsageServer,
+    usage_base_url: String,
     prodex_home: PathBuf,
     cargo_target_dir: PathBuf,
     main_home: PathBuf,
     second_home: PathBuf,
     codex_log: PathBuf,
     codex_bin: PathBuf,
-    cq_bin: PathBuf,
 }
 
 fn setup_fixture() -> Fixture {
     let temp_dir = TestDir::new();
+    let usage_server = UsageServer::start();
+    let usage_base_url = usage_server.base_url();
     let prodex_home = temp_dir.path.join("prodex-home");
     let cargo_target_dir = temp_dir.path.join("cargo-target");
     let homes_root = temp_dir.path.join("homes");
@@ -51,7 +242,6 @@ fn setup_fixture() -> Fixture {
     let second_home = homes_root.join("second");
     let codex_log = temp_dir.path.join("codex-home.log");
     let codex_bin = bin_root.join("codex");
-    let cq_bin = bin_root.join("cq");
 
     fs::create_dir_all(&prodex_home).expect("failed to create prodex home");
     fs::create_dir_all(&main_home).expect("failed to create main home");
@@ -75,13 +265,24 @@ fn setup_fixture() -> Fixture {
         }),
     );
 
-    let auth = json!({
-        "tokens": {
-            "access_token": "test-token"
-        }
-    });
-    write_json(&main_home.join("auth.json"), &auth);
-    write_json(&second_home.join("auth.json"), &auth);
+    write_json(
+        &main_home.join("auth.json"),
+        &json!({
+            "tokens": {
+                "access_token": "test-token",
+                "account_id": "main-account"
+            }
+        }),
+    );
+    write_json(
+        &second_home.join("auth.json"),
+        &json!({
+            "tokens": {
+                "access_token": "test-token",
+                "account_id": "second-account"
+            }
+        }),
+    );
 
     write_executable(
         &codex_bin,
@@ -91,28 +292,16 @@ exit 0
 "#,
     );
 
-    write_executable(
-        &cq_bin,
-        r#"#!/bin/sh
-profile="$(basename "$CODEX_HOME")"
-if [ "$profile" = "main" ]; then
-  printf '%s\n' '{"rate_limit":{"primary_window":{"used_percent":100,"reset_at":1700000000,"limit_window_seconds":18000},"secondary_window":{"used_percent":20,"reset_at":1700000000,"limit_window_seconds":604800}}}'
-else
-  printf '%s\n' '{"rate_limit":{"primary_window":{"used_percent":20,"reset_at":1700000000,"limit_window_seconds":18000},"secondary_window":{"used_percent":30,"reset_at":1700000000,"limit_window_seconds":604800}}}'
-fi
-exit 0
-"#,
-    );
-
     Fixture {
         _temp_dir: temp_dir,
+        _usage_server: usage_server,
+        usage_base_url,
         prodex_home,
         cargo_target_dir,
         main_home,
         second_home,
         codex_log,
         codex_bin,
-        cq_bin,
     }
 }
 
@@ -148,7 +337,7 @@ fn run_prodex(fixture: &Fixture, args: &[&str]) -> std::process::Output {
         .env("CARGO_TARGET_DIR", &fixture.cargo_target_dir)
         .env("PRODEX_HOME", &fixture.prodex_home)
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
-        .env("PRODEX_CQ_BIN", &fixture.cq_bin)
+        .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
         .args(["run", "--quiet", "--bin", "prodex", "--"])
         .args(args)
@@ -229,5 +418,27 @@ fn explicit_profile_can_disable_auto_rotate() {
     assert_eq!(
         fixture.main_home.file_name().and_then(|name| name.to_str()),
         Some("main")
+    );
+}
+
+#[test]
+fn quota_raw_uses_builtin_usage_client() {
+    let fixture = setup_fixture();
+
+    let output = run_prodex(&fixture, &["quota", "--profile", "second", "--raw"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let usage: Value =
+        serde_json::from_slice(&output.stdout).expect("failed to parse raw quota output");
+    assert_eq!(usage["email"], "second@example.com");
+    assert_eq!(usage["plan_type"], "plus");
+    assert_eq!(
+        usage["rate_limit"]["secondary_window"]["limit_window_seconds"],
+        604_800
     );
 }

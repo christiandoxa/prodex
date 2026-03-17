@@ -12,5 +12,6 @@ anyhow = "1.0.102"
 chrono = { version = "0.4.44", features = ["clock"] }
 clap = { version = "4.6.0", features = ["derive"] }
 dirs = "6.0.0"
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

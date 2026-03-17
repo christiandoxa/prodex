@@ -2,16 +2,22 @@ use anyhow::{Context, Result, bail};
 use chrono::{Local, TimeZone};
 use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use std::thread;
+use std::time::Duration;
 
 const DEFAULT_PRODEX_DIR: &str = ".prodex";
 const DEFAULT_CODEX_DIR: &str = ".codex";
+const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
+const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -186,6 +192,7 @@ struct StoredAuth {
 #[derive(Debug, Clone, Deserialize)]
 struct StoredTokens {
     access_token: Option<String>,
+    account_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -197,6 +204,12 @@ struct BlockedLimit {
 struct AuthSummary {
     label: String,
     quota_compatible: bool,
+}
+
+#[derive(Debug, Clone)]
+struct UsageAuth {
+    access_token: String,
+    account_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -475,7 +488,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         }
     );
     println!("Codex binary: {}", format_binary_resolution(&codex_bin()));
-    println!("CQ binary: {}", format_binary_resolution(&cq_bin()));
+    println!("Quota endpoint: {}", usage_url(&quota_base_url(None)));
     println!("Profiles: {}", state.profiles.len());
     println!(
         "Active profile: {}",
@@ -609,21 +622,22 @@ fn handle_quota(args: QuotaArgs) -> Result<()> {
         .codex_home
         .clone();
 
-    let mut command_args = if args.raw {
-        vec![OsString::from("--raw")]
-    } else if args.watch {
-        Vec::new()
-    } else {
-        vec![OsString::from("--once")]
-    };
-
-    if let Some(base_url) = args.base_url {
-        command_args.push(OsString::from("--base-url"));
-        command_args.push(OsString::from(base_url));
+    if args.raw {
+        let usage = fetch_usage_json(&codex_home, args.base_url.as_deref())?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?
+        );
+        return Ok(());
     }
 
-    let status = run_child(&cq_bin(), &command_args, &codex_home)?;
-    exit_with_status(status)
+    if args.watch {
+        return watch_quota(&profile_name, &codex_home, args.base_url.as_deref());
+    }
+
+    let usage = fetch_usage(&codex_home, args.base_url.as_deref())?;
+    println!("{}", render_profile_quota(&profile_name, &usage));
+    Ok(())
 }
 
 fn handle_run(args: RunArgs) -> Result<()> {
@@ -866,28 +880,59 @@ fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 fn fetch_usage(codex_home: &Path, base_url: Option<&str>) -> Result<UsageResponse> {
-    let mut command = Command::new(cq_bin());
-    command.arg("--raw").env("CODEX_HOME", codex_home);
-    if let Some(url) = base_url {
-        command.arg("--base-url").arg(url);
+    let usage: UsageResponse = serde_json::from_value(fetch_usage_json(codex_home, base_url)?)
+        .with_context(|| {
+            format!(
+                "invalid JSON returned by quota backend for {}",
+                codex_home.display()
+            )
+        })?;
+    Ok(usage)
+}
+
+fn fetch_usage_json(codex_home: &Path, base_url: Option<&str>) -> Result<serde_json::Value> {
+    let auth = read_usage_auth(codex_home)?;
+    let usage_url = usage_url(&quota_base_url(base_url));
+    let client = Client::builder()
+        .build()
+        .context("failed to build quota HTTP client")?;
+
+    let mut request = client
+        .get(&usage_url)
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .header("User-Agent", "codex-cli");
+
+    if let Some(account_id) = auth.account_id.as_deref() {
+        request = request.header("ChatGPT-Account-Id", account_id);
     }
 
-    let output = command
-        .output()
-        .with_context(|| format!("failed to execute {}", cq_bin().to_string_lossy()))?;
+    let response = request
+        .send()
+        .with_context(|| format!("failed to request quota endpoint {}", usage_url))?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .context("failed to read quota response body")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            format!("cq exited with status {}", output.status)
-        } else {
-            stderr
-        };
-        bail!("{message}");
+    if !status.is_success() {
+        let body_text = format_response_body(&body);
+        if body_text.is_empty() {
+            bail!("request failed (HTTP {}) to {}", status.as_u16(), usage_url);
+        }
+        bail!(
+            "request failed (HTTP {}) to {}: {}",
+            status.as_u16(),
+            usage_url,
+            body_text
+        );
     }
 
-    let usage: UsageResponse = serde_json::from_slice(&output.stdout)
-        .with_context(|| format!("invalid JSON returned by cq for {}", codex_home.display()))?;
+    let usage = serde_json::from_slice(&body).with_context(|| {
+        format!(
+            "invalid JSON returned by quota backend for {}",
+            codex_home.display()
+        )
+    })?;
 
     Ok(usage)
 }
@@ -977,10 +1022,22 @@ fn print_quota_reports(reports: &[QuotaReport]) {
 }
 
 fn format_main_windows(usage: &UsageResponse) -> String {
-    let Some(rate_limit) = usage.rate_limit.as_ref() else {
-        return "-".to_string();
-    };
+    usage
+        .rate_limit
+        .as_ref()
+        .map(format_window_pair)
+        .unwrap_or_else(|| "-".to_string())
+}
 
+fn format_main_windows_compact(usage: &UsageResponse) -> String {
+    usage
+        .rate_limit
+        .as_ref()
+        .map(format_window_pair_compact)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn format_window_pair(rate_limit: &WindowPair) -> String {
     let mut parts = Vec::new();
     if let Some(primary) = rate_limit.primary_window.as_ref() {
         parts.push(format_window_status(primary));
@@ -996,11 +1053,7 @@ fn format_main_windows(usage: &UsageResponse) -> String {
     }
 }
 
-fn format_main_windows_compact(usage: &UsageResponse) -> String {
-    let Some(rate_limit) = usage.rate_limit.as_ref() else {
-        return "-".to_string();
-    };
-
+fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
     let mut parts = Vec::new();
     if let Some(primary) = rate_limit.primary_window.as_ref() {
         parts.push(format_window_status_compact(primary));
@@ -1016,8 +1069,7 @@ fn format_main_windows_compact(usage: &UsageResponse) -> String {
     }
 }
 
-fn format_window_status(window: &UsageWindow) -> String {
-    let label = window_label(window.limit_window_seconds);
+fn format_named_window_status(label: &str, window: &UsageWindow) -> String {
     let reset = format_reset_time(window.reset_at);
     match window.used_percent {
         Some(used) => {
@@ -1026,6 +1078,10 @@ fn format_window_status(window: &UsageWindow) -> String {
         }
         None => format!("{label}: usage unknown, resets {reset}"),
     }
+}
+
+fn format_window_status(window: &UsageWindow) -> String {
+    format_named_window_status(&window_label(window.limit_window_seconds), window)
 }
 
 fn format_window_status_compact(window: &UsageWindow) -> String {
@@ -1198,6 +1254,69 @@ fn display_optional(value: Option<&str>) -> &str {
     value.unwrap_or("-")
 }
 
+fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
+    let mut lines = Vec::new();
+    let blocked = collect_blocked_limits(usage, false);
+    let status = if blocked.is_empty() {
+        "ready".to_string()
+    } else {
+        format!("blocked ({})", format_blocked_limits(&blocked))
+    };
+
+    lines.push(format!("Profile: {profile_name}"));
+    lines.push(format!(
+        "Email: {}",
+        display_optional(usage.email.as_deref())
+    ));
+    lines.push(format!(
+        "Plan: {}",
+        display_optional(usage.plan_type.as_deref())
+    ));
+    lines.push(format!("Status: {status}"));
+    lines.push(format!("Main: {}", format_main_windows(usage)));
+
+    if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
+        lines.push(format!("Code review: {}", format_window_pair(code_review)));
+    }
+
+    for line in format_additional_limits(usage) {
+        lines.push(line);
+    }
+
+    lines.join("\n")
+}
+
+fn format_additional_limits(usage: &UsageResponse) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    for additional in &usage.additional_rate_limits {
+        let name = additional
+            .limit_name
+            .as_deref()
+            .or(additional.metered_feature.as_deref())
+            .unwrap_or("Additional");
+
+        if let Some(primary) = additional.rate_limit.primary_window.as_ref() {
+            lines.push(format_named_window_status(
+                &additional_window_label(name, primary),
+                primary,
+            ));
+        }
+        if let Some(secondary) = additional.rate_limit.secondary_window.as_ref() {
+            lines.push(format_named_window_status(
+                &additional_window_label(name, secondary),
+                secondary,
+            ));
+        }
+    }
+
+    lines
+}
+
+fn additional_window_label(base: &str, window: &UsageWindow) -> String {
+    format!("{base} {}", window_label(window.limit_window_seconds))
+}
+
 fn first_line_of_error(input: &str) -> String {
     input
         .lines()
@@ -1205,6 +1324,27 @@ fn first_line_of_error(input: &str) -> String {
         .unwrap_or("-")
         .trim()
         .to_string()
+}
+
+fn watch_quota(profile_name: &str, codex_home: &Path, base_url: Option<&str>) -> Result<()> {
+    loop {
+        print!("\x1b[H\x1b[2J");
+        println!("Watching quota for profile '{}'", profile_name);
+        println!("Updated: {}", Local::now().format("%Y-%m-%d %H:%M:%S %Z"));
+        println!();
+
+        match fetch_usage(codex_home, base_url) {
+            Ok(usage) => println!("{}", render_profile_quota(profile_name, &usage)),
+            Err(err) => {
+                println!("Quota error: {}", first_line_of_error(&err.to_string()));
+            }
+        }
+
+        io::stdout()
+            .flush()
+            .context("failed to flush quota watch output")?;
+        thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+    }
 }
 
 fn read_auth_summary(codex_home: &Path) -> AuthSummary {
@@ -1266,6 +1406,83 @@ fn read_auth_summary(codex_home: &Path) -> AuthSummary {
             .unwrap_or_else(|| "auth-present".to_string()),
         quota_compatible: false,
     }
+}
+
+fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
+    let auth_path = codex_home.join("auth.json");
+    if !auth_path.is_file() {
+        bail!(
+            "auth file not found at {}. Run `codex login` first.",
+            auth_path.display()
+        );
+    }
+
+    let content = fs::read_to_string(&auth_path)
+        .with_context(|| format!("failed to read {}", auth_path.display()))?;
+    let stored_auth: StoredAuth = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+
+    let has_api_key = stored_auth
+        .openai_api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty());
+    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+        bail!("quota endpoint requires a ChatGPT access token. Run `codex login` first.");
+    }
+
+    let tokens = stored_auth
+        .tokens
+        .as_ref()
+        .context("auth tokens are missing from auth.json")?;
+    let access_token = tokens
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .context("access token not found in auth.json")?
+        .to_string();
+    let account_id = tokens
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|account_id| !account_id.is_empty())
+        .map(ToOwned::to_owned);
+
+    Ok(UsageAuth {
+        access_token,
+        account_id,
+    })
+}
+
+fn quota_base_url(explicit: Option<&str>) -> String {
+    explicit
+        .map(ToOwned::to_owned)
+        .or_else(|| env::var("CODEX_CHATGPT_BASE_URL").ok())
+        .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn usage_url(base_url: &str) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    if base_url.contains("/backend-api") {
+        format!("{base_url}/wham/usage")
+    } else {
+        format!("{base_url}/api/codex/usage")
+    }
+}
+
+fn format_response_body(body: &[u8]) -> String {
+    if body.is_empty() {
+        return String::new();
+    }
+
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        return serde_json::to_string_pretty(&value)
+            .unwrap_or_else(|_| String::from_utf8_lossy(body).trim().to_string());
+    }
+
+    String::from_utf8_lossy(body).trim().to_string()
 }
 
 fn find_ready_profiles(
@@ -1420,10 +1637,6 @@ fn codex_bin() -> OsString {
     env::var_os("PRODEX_CODEX_BIN").unwrap_or_else(|| OsString::from("codex"))
 }
 
-fn cq_bin() -> OsString {
-    env::var_os("PRODEX_CQ_BIN").unwrap_or_else(|| OsString::from("cq"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1532,6 +1745,22 @@ mod tests {
         assert_eq!(
             profile_rotation_order(&state, "beta"),
             vec!["gamma".to_string(), "alpha".to_string()]
+        );
+    }
+
+    #[test]
+    fn backend_api_base_url_maps_to_wham_usage() {
+        assert_eq!(
+            usage_url("https://chatgpt.com/backend-api"),
+            "https://chatgpt.com/backend-api/wham/usage"
+        );
+    }
+
+    #[test]
+    fn custom_base_url_maps_to_codex_usage() {
+        assert_eq!(
+            usage_url("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080/api/codex/usage"
         );
     }
 }
