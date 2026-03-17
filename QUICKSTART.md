@@ -46,6 +46,8 @@ prodex profile list
 prodex quota --all
 ```
 
+The `REMAINING` column shows quota left, not quota used.
+
 ## Select the active profile
 
 ```bash

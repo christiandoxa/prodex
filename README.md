@@ -82,7 +82,7 @@ prodex quota --all
 Example `MAIN` column:
 
 ```text
-5h 37/100 used | weekly 12/100 used
+5h 63% left | weekly 88% left
 ```
 
 ### 5. Select the active profile and run `codex`

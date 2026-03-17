@@ -1279,12 +1279,12 @@ fn fetch_usage_json(codex_home: &Path, base_url: Option<&str>) -> Result<serde_j
 fn print_quota_reports(reports: &[QuotaReport]) {
     let mut rows = Vec::new();
     let mut widths = [
-        "NAME".len(),
-        "ACT".len(),
+        "PROFILE".len(),
+        "CUR".len(),
         "AUTH".len(),
-        "EMAIL".len(),
+        "ACCOUNT".len(),
         "PLAN".len(),
-        "MAIN".len(),
+        "REMAINING".len(),
     ];
 
     for report in reports {
@@ -1295,9 +1295,9 @@ fn print_quota_reports(reports: &[QuotaReport]) {
             Ok(usage) => {
                 let blocked = collect_blocked_limits(usage, false);
                 let status = if blocked.is_empty() {
-                    "ready".to_string()
+                    "Ready".to_string()
                 } else {
-                    format!("blocked: {}", format_blocked_limits(&blocked))
+                    format!("Blocked: {}", format_blocked_limits(&blocked))
                 };
                 (
                     display_optional(usage.email.as_deref()).to_string(),
@@ -1310,7 +1310,7 @@ fn print_quota_reports(reports: &[QuotaReport]) {
                 "-".to_string(),
                 "-".to_string(),
                 "-".to_string(),
-                format!("error: {}", first_line_of_error(err)),
+                format!("Error: {}", first_line_of_error(err)),
             ),
         };
 
@@ -1324,14 +1324,30 @@ fn print_quota_reports(reports: &[QuotaReport]) {
         rows.push((report.name.clone(), active, auth, email, plan, main, status));
     }
 
-    println!(
+    let header = format!(
         "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}  STATUS",
-        "NAME",
-        "ACT",
+        "PROFILE",
+        "CUR",
         "AUTH",
-        "EMAIL",
+        "ACCOUNT",
         "PLAN",
-        "MAIN",
+        "REMAINING",
+        name_w = widths[0],
+        act_w = widths[1],
+        auth_w = widths[2],
+        email_w = widths[3],
+        plan_w = widths[4],
+        main_w = widths[5],
+    );
+    println!("{header}");
+    println!(
+        "{:-<name_w$}  {:-<act_w$}  {:-<auth_w$}  {:-<email_w$}  {:-<plan_w$}  {:-<main_w$}  ------",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
         name_w = widths[0],
         act_w = widths[1],
         auth_w = widths[2],
@@ -1413,7 +1429,7 @@ fn format_named_window_status(label: &str, window: &UsageWindow) -> String {
     match window.used_percent {
         Some(used) => {
             let remaining = remaining_percent(window.used_percent);
-            format!("{label}: used {used}/100, left {remaining}/100, resets {reset}")
+            format!("{label}: {remaining}% left ({used}% used), resets {reset}")
         }
         None => format!("{label}: usage unknown, resets {reset}"),
     }
@@ -1426,7 +1442,10 @@ fn format_window_status(window: &UsageWindow) -> String {
 fn format_window_status_compact(window: &UsageWindow) -> String {
     let label = window_label(window.limit_window_seconds);
     match window.used_percent {
-        Some(used) => format!("{label} {used}/100 used"),
+        Some(used) => {
+            let remaining = remaining_percent(Some(used));
+            format!("{label} {remaining}% left")
+        }
         None => format!("{label} ?"),
     }
 }
@@ -2047,9 +2066,9 @@ mod tests {
             limit_window_seconds: Some(18_000),
         };
 
-        assert_eq!(format_window_status_compact(&window), "5h 37/100 used");
-        assert!(format_window_status(&window).contains("used 37/100"));
-        assert!(format_window_status(&window).contains("left 63/100"));
+        assert_eq!(format_window_status_compact(&window), "5h 63% left");
+        assert!(format_window_status(&window).contains("63% left"));
+        assert!(format_window_status(&window).contains("37% used"));
     }
 
     #[test]
