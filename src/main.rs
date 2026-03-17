@@ -2347,7 +2347,7 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
 
     let mut rows = Vec::new();
 
-    for report in reports {
+    for report in sort_quota_reports_for_display(reports) {
         let active = if report.active { "*" } else { "" }.to_string();
         let auth = report.auth.label.clone();
 
@@ -2440,6 +2440,44 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
         }
         println!();
     }
+}
+
+fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
+    let mut sorted = reports.iter().collect::<Vec<_>>();
+    sorted.sort_by(|left, right| {
+        quota_report_sort_key(left)
+            .cmp(&quota_report_sort_key(right))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    sorted
+}
+
+fn quota_report_sort_key(report: &QuotaReport) -> (usize, i64) {
+    (
+        quota_report_status_rank(report),
+        quota_report_earliest_main_reset_epoch(report).unwrap_or(i64::MAX),
+    )
+}
+
+fn quota_report_status_rank(report: &QuotaReport) -> usize {
+    match &report.result {
+        Ok(usage) if collect_blocked_limits(usage, false).is_empty() => 0,
+        Ok(_) => 1,
+        Err(_) => 2,
+    }
+}
+
+fn quota_report_earliest_main_reset_epoch(report: &QuotaReport) -> Option<i64> {
+    earliest_required_main_reset_epoch(report.result.as_ref().ok()?)
+}
+
+fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
+    ["5h", "weekly"]
+        .into_iter()
+        .filter_map(|label| {
+            find_main_window(usage.rate_limit.as_ref()?, label).and_then(|window| window.reset_at)
+        })
+        .min()
 }
 
 fn format_main_windows(usage: &UsageResponse) -> String {
@@ -3351,6 +3389,55 @@ mod tests {
         let mut ranked = candidates.clone();
         ranked.sort_by_key(ready_profile_sort_key);
         assert_eq!(ranked[0].name, "deep");
+    }
+
+    #[test]
+    fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
+        let reports = vec![
+            QuotaReport {
+                name: "blocked".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            },
+            QuotaReport {
+                name: "ready-late".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            },
+            QuotaReport {
+                name: "error".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Err("boom".to_string()),
+            },
+            QuotaReport {
+                name: "ready-early".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            },
+        ];
+
+        let names = sort_quota_reports_for_display(&reports)
+            .into_iter()
+            .map(|report| report.name.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["ready-early", "ready-late", "blocked", "error"]);
     }
 
     #[test]

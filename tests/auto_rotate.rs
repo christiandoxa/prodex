@@ -703,6 +703,56 @@ fn quota_all_detail_shows_main_reset_times() {
 }
 
 #[test]
+fn quota_all_detail_sorts_by_status_then_nearest_main_reset() {
+    let fixture = setup_fixture();
+    add_managed_profile(&fixture, "third", "third-account");
+
+    let output = run_prodex(&fixture, &["quota", "--all", "--detail"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let profile_lines = stdout
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("second") {
+                Some(("second", index))
+            } else if trimmed.starts_with("third") {
+                Some(("third", index))
+            } else if trimmed.starts_with("main") {
+                Some(("main", index))
+            } else {
+                None
+            }
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let second_index = *profile_lines
+        .get("second")
+        .expect("second profile should be rendered");
+    let third_index = *profile_lines
+        .get("third")
+        .expect("third profile should be rendered");
+    let main_index = *profile_lines
+        .get("main")
+        .expect("main profile should be rendered");
+
+    assert!(
+        second_index < third_index,
+        "ready profile with sooner reset should sort first"
+    );
+    assert!(
+        third_index < main_index,
+        "blocked profiles should sort after ready profiles"
+    );
+}
+
+#[test]
 fn run_shares_resume_history_across_managed_profiles() {
     let fixture = setup_fixture();
     let seeded_session_dir = fixture.main_home.join("sessions/2026/03");
