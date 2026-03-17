@@ -52,6 +52,8 @@ prodex quota --all
 
 The `REMAINING` column shows quota left, not quota used.
 
+Use `prodex quota --all --detail` when you want the exact local reset timestamp for the `5h` and `weekly` windows under each profile row.
+
 ## Select the active profile
 
 ```bash

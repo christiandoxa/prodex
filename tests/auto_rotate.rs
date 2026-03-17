@@ -474,6 +474,27 @@ fn quota_raw_uses_builtin_usage_client() {
 }
 
 #[test]
+fn quota_all_detail_shows_main_reset_times() {
+    let fixture = setup_fixture();
+
+    let output = run_prodex(&fixture, &["quota", "--all", "--detail"]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Quota Overview"));
+    assert!(stdout.contains("REMAINING"));
+    assert!(stdout.contains("status: Blocked: 5h exhausted until "));
+    assert!(stdout.contains("status: Ready"));
+    assert!(stdout.contains("resets: 5h 2023-11-"));
+    assert!(stdout.contains("| weekly 2023-11-"));
+}
+
+#[test]
 fn login_without_profile_creates_profile_from_email() {
     let fixture = setup_fixture();
     write_json(

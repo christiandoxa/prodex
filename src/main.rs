@@ -106,6 +106,8 @@ struct QuotaArgs {
     #[arg(long)]
     all: bool,
     #[arg(long)]
+    detail: bool,
+    #[arg(long)]
     raw: bool,
     #[arg(long)]
     watch: bool,
@@ -239,6 +241,14 @@ struct QuotaReport {
     active: bool,
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
+}
+
+#[derive(Debug)]
+struct QuotaFetchJob {
+    name: String,
+    active: bool,
+    auth: AuthSummary,
+    codex_home: PathBuf,
 }
 
 fn section_header(title: &str) -> String {
@@ -1215,19 +1225,8 @@ fn handle_quota(args: QuotaArgs) -> Result<()> {
         if state.profiles.is_empty() {
             bail!("no profiles configured");
         }
-        let mut reports = Vec::new();
-        for (name, profile) in &state.profiles {
-            let auth = read_auth_summary(&profile.codex_home);
-            let result = fetch_usage(&profile.codex_home, args.base_url.as_deref())
-                .map_err(|err| err.to_string());
-            reports.push(QuotaReport {
-                name: name.clone(),
-                active: state.active_profile.as_deref() == Some(name.as_str()),
-                auth,
-                result,
-            });
-        }
-        print_quota_reports(&reports);
+        let reports = collect_quota_reports(&state, args.base_url.as_deref());
+        print_quota_reports(&reports, args.detail);
         return Ok(());
     }
 
@@ -1503,6 +1502,51 @@ fn exit_with_status(status: ExitStatus) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
+fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
+    let jobs = state
+        .profiles
+        .iter()
+        .map(|(name, profile)| QuotaFetchJob {
+            name: name.clone(),
+            active: state.active_profile.as_deref() == Some(name.as_str()),
+            auth: read_auth_summary(&profile.codex_home),
+            codex_home: profile.codex_home.clone(),
+        })
+        .collect();
+    let base_url = base_url.map(str::to_owned);
+
+    map_parallel(jobs, |job| QuotaReport {
+        name: job.name,
+        active: job.active,
+        auth: job.auth,
+        result: fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string()),
+    })
+}
+
+fn map_parallel<I, O, F>(inputs: Vec<I>, func: F) -> Vec<O>
+where
+    I: Send,
+    O: Send,
+    F: Fn(I) -> O + Sync,
+{
+    if inputs.len() <= 1 {
+        return inputs.into_iter().map(func).collect();
+    }
+
+    thread::scope(|scope| {
+        let func = &func;
+        let mut handles = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            handles.push(scope.spawn(move || func(input)));
+        }
+
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("parallel worker panicked"))
+            .collect()
+    })
+}
+
 fn fetch_usage(codex_home: &Path, base_url: Option<&str>) -> Result<UsageResponse> {
     let usage: UsageResponse = serde_json::from_value(fetch_usage_json(codex_home, base_url)?)
         .with_context(|| {
@@ -1561,7 +1605,7 @@ fn fetch_usage_json(codex_home: &Path, base_url: Option<&str>) -> Result<serde_j
     Ok(usage)
 }
 
-fn print_quota_reports(reports: &[QuotaReport]) {
+fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
     const PROFILE_COL_WIDTH: usize = 24;
     const CUR_COL_WIDTH: usize = 3;
     const AUTH_COL_WIDTH: usize = 7;
@@ -1575,7 +1619,7 @@ fn print_quota_reports(reports: &[QuotaReport]) {
         let active = if report.active { "*" } else { "" }.to_string();
         let auth = report.auth.label.clone();
 
-        let (email, plan, main, status) = match &report.result {
+        let (email, plan, main, status, resets) = match &report.result {
             Ok(usage) => {
                 let blocked = collect_blocked_limits(usage, false);
                 let status = if blocked.is_empty() {
@@ -1588,6 +1632,7 @@ fn print_quota_reports(reports: &[QuotaReport]) {
                     display_optional(usage.plan_type.as_deref()).to_string(),
                     format_main_windows_compact(usage),
                     status,
+                    Some(format!("resets: {}", format_main_reset_summary(usage))),
                 )
             }
             Err(err) => (
@@ -1595,10 +1640,20 @@ fn print_quota_reports(reports: &[QuotaReport]) {
                 "-".to_string(),
                 "-".to_string(),
                 format!("Error: {}", first_line_of_error(err)),
+                Some("resets: unavailable".to_string()),
             ),
         };
 
-        rows.push((report.name.clone(), active, auth, email, plan, main, status));
+        rows.push((
+            report.name.clone(),
+            active,
+            auth,
+            email,
+            plan,
+            main,
+            status,
+            resets,
+        ));
     }
 
     println!("{}", section_header("Quota Overview"));
@@ -1620,7 +1675,7 @@ fn print_quota_reports(reports: &[QuotaReport]) {
     println!("{header}");
     println!("{}", "-".repeat(text_width(&header)));
 
-    for (name, active, auth, email, plan, main, status) in rows {
+    for (name, active, auth, email, plan, main, status, resets) in rows {
         println!(
             "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
             fit_cell(&name, PROFILE_COL_WIDTH),
@@ -1644,6 +1699,13 @@ fn print_quota_reports(reports: &[QuotaReport]) {
         for line in wrap_text(&format!("status: {status}"), CLI_WIDTH - 2) {
             println!("  {line}");
         }
+        if detail {
+            if let Some(resets) = resets.as_deref() {
+                for line in wrap_text(resets, CLI_WIDTH - 2) {
+                    println!("  {line}");
+                }
+            }
+        }
         println!();
     }
 }
@@ -1662,6 +1724,35 @@ fn format_main_windows_compact(usage: &UsageResponse) -> String {
         .as_ref()
         .map(format_window_pair_compact)
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn format_main_reset_summary(usage: &UsageResponse) -> String {
+    usage
+        .rate_limit
+        .as_ref()
+        .map(format_main_reset_pair)
+        .unwrap_or_else(|| "5h unavailable | weekly unavailable".to_string())
+}
+
+fn format_main_reset_pair(rate_limit: &WindowPair) -> String {
+    [
+        format_main_reset_window(rate_limit, "5h"),
+        format_main_reset_window(rate_limit, "weekly"),
+    ]
+    .join(" | ")
+}
+
+fn format_main_reset_window(rate_limit: &WindowPair, label: &str) -> String {
+    match find_main_window(rate_limit, label) {
+        Some(window) => {
+            let reset = window
+                .reset_at
+                .map(|epoch| format_precise_reset_time(Some(epoch)))
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("{label} {reset}")
+        }
+        None => format!("{label} unavailable"),
+    }
 }
 
 fn format_window_pair(rate_limit: &WindowPair) -> String {
@@ -1881,6 +1972,18 @@ fn format_reset_time(epoch: Option<i64>) -> String {
         .timestamp_opt(epoch, 0)
         .single()
         .map(|dt| dt.format("%Y-%m-%d %H:%M %Z").to_string())
+        .unwrap_or_else(|| epoch.to_string())
+}
+
+fn format_precise_reset_time(epoch: Option<i64>) -> String {
+    let Some(epoch) = epoch else {
+        return "-".to_string();
+    };
+
+    Local
+        .timestamp_opt(epoch, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S %Z").to_string())
         .unwrap_or_else(|| epoch.to_string())
 }
 
@@ -2281,6 +2384,11 @@ fn codex_bin() -> OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::time::{Duration, Instant};
 
     #[test]
     fn validates_profile_names() {
@@ -2352,6 +2460,93 @@ mod tests {
         assert_eq!(format_window_status_compact(&window), "5h 63% left");
         assert!(format_window_status(&window).contains("63% left"));
         assert!(format_window_status(&window).contains("37% used"));
+    }
+
+    #[test]
+    fn main_reset_summary_lists_required_windows() {
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(20),
+                    reset_at: Some(1_700_000_000),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some(30),
+                    reset_at: Some(1_700_000_000),
+                    limit_window_seconds: Some(604_800),
+                }),
+            }),
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        };
+
+        let summary = format_main_reset_summary(&usage);
+        assert!(summary.starts_with("5h "));
+        assert!(summary.contains(" | weekly "));
+        assert!(summary.contains(&format_precise_reset_time(Some(1_700_000_000))));
+    }
+
+    #[test]
+    fn main_reset_summary_marks_missing_required_window() {
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(20),
+                    reset_at: Some(1_700_000_000),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: None,
+            }),
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        };
+
+        assert_eq!(
+            format_main_reset_summary(&usage),
+            format!(
+                "5h {} | weekly unavailable",
+                format_precise_reset_time(Some(1_700_000_000))
+            )
+        );
+    }
+
+    #[test]
+    fn map_parallel_runs_jobs_concurrently_and_preserves_order() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(Mutex::new(0usize));
+        let started = Instant::now();
+
+        let output = map_parallel(vec![1, 2, 3, 4], {
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            move |value| {
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                {
+                    let mut seen_max = max_active.lock().expect("max_active poisoned");
+                    *seen_max = (*seen_max).max(current);
+                }
+
+                thread::sleep(Duration::from_millis(50));
+                active.fetch_sub(1, Ordering::SeqCst);
+                value * 10
+            }
+        });
+
+        assert_eq!(output, vec![10, 20, 30, 40]);
+        assert!(
+            *max_active.lock().expect("max_active poisoned") >= 2,
+            "parallel worker count never exceeded one"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(150),
+            "parallel execution took too long: {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

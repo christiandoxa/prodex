@@ -82,6 +82,14 @@ prodex quota --all
 
 `prodex quota --all` prints a `Quota Overview` table with a fixed-width layout. The main quota summary now appears in the `REMAINING` column, and each profile gets a wrapped `status:` detail line underneath the row.
 
+If you also want the exact reset timestamps for the required main windows:
+
+```bash
+prodex quota --all --detail
+```
+
+This adds a `resets:` line under each profile row, including the full local timestamp for both `5h` and `weekly`.
+
 Example `REMAINING` value:
 
 ```text
@@ -226,6 +234,12 @@ prodex quota --all
 ```
 
 This renders a `Quota Overview` table with `PROFILE`, `CUR`, `AUTH`, `ACCOUNT`, `PLAN`, and `REMAINING`, plus a `status:` line for each profile.
+
+Add `--detail` to include exact local reset timestamps for `5h` and `weekly` under each row:
+
+```bash
+prodex quota --all --detail
+```
 
 ### Run `codex`
 

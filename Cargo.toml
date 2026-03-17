@@ -1,6 +1,6 @@
 [package]
 name = "prodex"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2024"
 description = "A multi-profile wrapper for Codex CLI with isolated CODEX_HOME state and quota checks"
 license = "MIT"
