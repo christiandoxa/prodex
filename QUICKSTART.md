@@ -91,7 +91,7 @@ prodex doctor --quota
 - `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
 - that auto-create flow relies on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - built-in quota checks only work for profiles using ChatGPT auth
-- managed Prodex profiles share Codex session history, so `/resume` shows the same saved threads across accounts
+- managed Prodex profiles share the default `~/.codex` session history store, so `/resume` shows the same saved threads across accounts
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity
 - `prodex run` auto-rotates to the next ready profile when the current one hits a limit, including when you pass `--profile`

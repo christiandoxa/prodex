@@ -162,6 +162,7 @@ struct AppPaths {
     state_file: PathBuf,
     managed_profiles_root: PathBuf,
     shared_codex_root: PathBuf,
+    legacy_shared_codex_root: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1512,11 +1513,52 @@ fn copy_directory_contents(source: &Path, destination: &Path) -> Result<()> {
 
 fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
+    migrate_legacy_shared_codex_root(paths)?;
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
 
     for entry in shared_codex_entries(paths, codex_home)? {
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_legacy_shared_codex_root(paths: &AppPaths) -> Result<()> {
+    if same_path(&paths.shared_codex_root, &paths.legacy_shared_codex_root)
+        || !paths.legacy_shared_codex_root.exists()
+    {
+        return Ok(());
+    }
+
+    fs::create_dir_all(&paths.shared_codex_root)
+        .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
+
+    let mut entries = SHARED_CODEX_DIR_NAMES
+        .iter()
+        .map(|name| SharedCodexEntry {
+            name: (*name).to_string(),
+            kind: SharedCodexEntryKind::Directory,
+        })
+        .chain(SHARED_CODEX_FILE_NAMES.iter().map(|name| SharedCodexEntry {
+            name: (*name).to_string(),
+            kind: SharedCodexEntryKind::File,
+        }))
+        .collect::<Vec<_>>();
+
+    let mut sqlite_entries = BTreeSet::new();
+    collect_shared_codex_sqlite_entries(&paths.legacy_shared_codex_root, &mut sqlite_entries)?;
+    for name in sqlite_entries {
+        entries.push(SharedCodexEntry {
+            name,
+            kind: SharedCodexEntryKind::File,
+        });
+    }
+
+    for entry in entries {
+        let legacy_path = paths.legacy_shared_codex_root.join(&entry.name);
+        let shared_path = paths.shared_codex_root.join(&entry.name);
+        migrate_shared_codex_entry(&legacy_path, &shared_path, entry.kind)?;
     }
 
     Ok(())
@@ -1536,11 +1578,7 @@ fn shared_codex_entries(paths: &AppPaths, codex_home: &Path) -> Result<Vec<Share
         .collect::<Vec<_>>();
 
     let mut sqlite_entries = BTreeSet::new();
-    let mut scan_roots = vec![
-        paths.shared_codex_root.clone(),
-        codex_home.to_path_buf(),
-        default_codex_home()?,
-    ];
+    let mut scan_roots = vec![paths.shared_codex_root.clone(), codex_home.to_path_buf()];
     scan_roots.sort();
     scan_roots.dedup();
 
@@ -1666,7 +1704,14 @@ fn migrate_shared_codex_entry(
                 );
             }
 
-            append_file_contents(local_path, shared_path)?;
+            if local_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "history.jsonl")
+            {
+                append_file_contents(local_path, shared_path)?;
+            }
+
             fs::remove_file(local_path)
                 .with_context(|| format!("failed to remove {}", local_path.display()))?;
         }
@@ -2678,6 +2723,13 @@ fn default_codex_home() -> Result<PathBuf> {
         .join(DEFAULT_CODEX_DIR))
 }
 
+fn shared_codex_root() -> Result<PathBuf> {
+    match env::var_os("PRODEX_SHARED_CODEX_HOME") {
+        Some(path) => absolutize(PathBuf::from(path)),
+        None => default_codex_home(),
+    }
+}
+
 impl AppPaths {
     fn discover() -> Result<Self> {
         let root = match env::var_os("PRODEX_HOME") {
@@ -2690,7 +2742,8 @@ impl AppPaths {
         Ok(Self {
             state_file: root.join("state.json"),
             managed_profiles_root: root.join("profiles"),
-            shared_codex_root: root.join("shared"),
+            shared_codex_root: shared_codex_root()?,
+            legacy_shared_codex_root: root.join("shared"),
             root,
         })
     }
@@ -2979,7 +3032,8 @@ mod tests {
             root: PathBuf::from("/tmp/prodex-test"),
             state_file: PathBuf::from("/tmp/prodex-test/state.json"),
             managed_profiles_root: PathBuf::from("/tmp/prodex-test/profiles"),
-            shared_codex_root: PathBuf::from("/tmp/prodex-test/shared"),
+            shared_codex_root: PathBuf::from("/tmp/prodex-test/default-codex"),
+            legacy_shared_codex_root: PathBuf::from("/tmp/prodex-test/shared"),
         };
 
         assert_eq!(

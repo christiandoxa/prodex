@@ -224,6 +224,7 @@ struct Fixture {
     _usage_server: UsageServer,
     usage_base_url: String,
     prodex_home: PathBuf,
+    shared_codex_home: PathBuf,
     cargo_target_dir: PathBuf,
     main_home: PathBuf,
     second_home: PathBuf,
@@ -236,6 +237,7 @@ fn setup_fixture() -> Fixture {
     let usage_server = UsageServer::start();
     let usage_base_url = usage_server.base_url();
     let prodex_home = temp_dir.path.join("prodex-home");
+    let shared_codex_home = temp_dir.path.join("shared-codex-home");
     let cargo_target_dir = temp_dir.path.join("cargo-target");
     let homes_root = temp_dir.path.join("homes");
     let bin_root = temp_dir.path.join("bin");
@@ -245,6 +247,7 @@ fn setup_fixture() -> Fixture {
     let codex_bin = bin_root.join("codex");
 
     fs::create_dir_all(&prodex_home).expect("failed to create prodex home");
+    fs::create_dir_all(&shared_codex_home).expect("failed to create shared codex home");
     fs::create_dir_all(&main_home).expect("failed to create main home");
     fs::create_dir_all(&second_home).expect("failed to create second home");
     fs::create_dir_all(&bin_root).expect("failed to create bin dir");
@@ -315,6 +318,7 @@ exit 0
         _usage_server: usage_server,
         usage_base_url,
         prodex_home,
+        shared_codex_home,
         cargo_target_dir,
         main_home,
         second_home,
@@ -362,6 +366,7 @@ fn run_prodex_with_env(
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("CARGO_TARGET_DIR", &fixture.cargo_target_dir)
         .env("PRODEX_HOME", &fixture.prodex_home)
+        .env("PRODEX_SHARED_CODEX_HOME", &fixture.shared_codex_home)
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
@@ -565,6 +570,26 @@ fn run_shares_resume_history_across_managed_profiles() {
 
     #[cfg(unix)]
     {
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("history.jsonl"))
+                .expect("failed to read main history link"),
+            fixture.shared_codex_home.join("history.jsonl")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("history.jsonl"))
+                .expect("failed to read second history link"),
+            fixture.shared_codex_home.join("history.jsonl")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("sessions"))
+                .expect("failed to read main sessions link"),
+            fixture.shared_codex_home.join("sessions")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("sessions"))
+                .expect("failed to read second sessions link"),
+            fixture.shared_codex_home.join("sessions")
+        );
         assert!(
             fs::symlink_metadata(fixture.main_home.join("history.jsonl"))
                 .expect("failed to inspect main history")
