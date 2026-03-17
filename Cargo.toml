@@ -2,6 +2,10 @@
 name = "prodex"
 version = "0.1.0"
 edition = "2024"
+description = "A multi-profile wrapper for Codex CLI with isolated CODEX_HOME state and quota checks"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/christiandoxa/prodex"
 
 [dependencies]
 anyhow = "1.0.100"
