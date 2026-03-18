@@ -43,6 +43,7 @@ const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 const RESPONSE_PROFILE_BINDING_LIMIT: usize = 16_384;
+const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else { 30 };
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
@@ -394,6 +395,7 @@ struct RuntimeRotationState {
     upstream_base_url: String,
     include_code_review: bool,
     current_profile: String,
+    turn_state_bindings: BTreeMap<String, ResponseProfileBinding>,
     profile_probe_cache: BTreeMap<String, RuntimeProfileProbeCacheEntry>,
     profile_retry_backoff_until: BTreeMap<String, i64>,
 }
@@ -478,7 +480,10 @@ enum RuntimeUpstreamFailureResponse {
 
 #[derive(Debug)]
 enum RuntimeWebsocketConnectResult {
-    Connected(RuntimeUpstreamWebSocket),
+    Connected {
+        socket: RuntimeUpstreamWebSocket,
+        turn_state: Option<String>,
+    },
     QuotaBlocked(RuntimeWebsocketErrorPayload),
 }
 
@@ -2346,6 +2351,7 @@ fn start_runtime_rotation_proxy(
             upstream_base_url,
             include_code_review,
             current_profile: current_profile.to_string(),
+            turn_state_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
         })),
@@ -2525,6 +2531,14 @@ fn runtime_request_previous_response_id_from_value(value: &serde_json::Value) ->
         .map(str::to_string)
 }
 
+fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
+    request.headers.iter().find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("x-codex-turn-state")
+            .then(|| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
 fn runtime_response_bound_profile(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: &str,
@@ -2539,6 +2553,55 @@ fn runtime_response_bound_profile(
         .get(previous_response_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
+}
+
+fn runtime_turn_state_bound_profile(
+    shared: &RuntimeRotationProxyShared,
+    turn_state: &str,
+) -> Result<Option<String>> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime
+        .turn_state_bindings
+        .get(turn_state)
+        .map(|binding| binding.profile_name.clone())
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
+}
+
+fn remember_runtime_turn_state(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    turn_state: Option<&str>,
+) -> Result<()> {
+    let Some(turn_state) = turn_state.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let bound_at = Local::now().timestamp();
+    let should_update = runtime
+        .turn_state_bindings
+        .get(turn_state)
+        .is_none_or(|binding| binding.profile_name != profile_name);
+    if should_update {
+        runtime.turn_state_bindings.insert(
+            turn_state.to_string(),
+            ResponseProfileBinding {
+                profile_name: profile_name.to_string(),
+                bound_at,
+            },
+        );
+        prune_profile_bindings(
+            &mut runtime.turn_state_bindings,
+            TURN_STATE_PROFILE_BINDING_LIMIT,
+        );
+    }
+    Ok(())
 }
 
 fn remember_runtime_response_ids(
@@ -2574,7 +2637,10 @@ fn remember_runtime_response_ids(
         }
     }
     if changed {
-        prune_response_profile_bindings(&mut runtime.state.response_profile_bindings);
+        prune_profile_bindings(
+            &mut runtime.state.response_profile_bindings,
+            RESPONSE_PROFILE_BINDING_LIMIT,
+        );
         runtime.state.save(&runtime.paths).with_context(|| {
             format!(
                 "failed to persist runtime response affinity bindings for '{}'",
@@ -2585,12 +2651,15 @@ fn remember_runtime_response_ids(
     Ok(())
 }
 
-fn prune_response_profile_bindings(bindings: &mut BTreeMap<String, ResponseProfileBinding>) {
-    if bindings.len() <= RESPONSE_PROFILE_BINDING_LIMIT {
+fn prune_profile_bindings(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
+    max_entries: usize,
+) {
+    if bindings.len() <= max_entries {
         return;
     }
 
-    let excess = bindings.len() - RESPONSE_PROFILE_BINDING_LIMIT;
+    let excess = bindings.len() - max_entries;
     let mut oldest = bindings
         .iter()
         .map(|(response_id, binding)| (response_id.clone(), binding.bound_at))
@@ -2613,9 +2682,16 @@ fn select_runtime_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     pinned_profile: Option<&str>,
+    turn_state_profile: Option<&str>,
     discover_previous_response_owner: bool,
 ) -> Result<Option<String>> {
     if let Some(profile_name) = pinned_profile.filter(|name| !excluded_profiles.contains(*name)) {
+        return Ok(Some(profile_name.to_string()));
+    }
+
+    if let Some(profile_name) =
+        turn_state_profile.filter(|name| !excluded_profiles.contains(*name))
+    {
         return Ok(Some(profile_name.to_string()));
     }
 
@@ -2780,9 +2856,15 @@ fn proxy_runtime_websocket_text_message(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<()> {
     let previous_response_id = runtime_request_previous_response_id_from_text(request_text);
+    let turn_state = runtime_request_turn_state(handshake_request);
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
+        .transpose()?
+        .flatten();
+    let mut turn_state_profile = turn_state
+        .as_deref()
+        .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
     let mut pinned_profile = bound_profile.clone().or_else(|| {
@@ -2799,6 +2881,7 @@ fn proxy_runtime_websocket_text_message(
             shared,
             &excluded_profiles,
             pinned_profile.as_deref(),
+            turn_state_profile.as_deref(),
             previous_response_id.is_some(),
         )?
         else {
@@ -2839,6 +2922,9 @@ fn proxy_runtime_websocket_text_message(
                     pinned_profile = None;
                     previous_response_retry_index = 0;
                 }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
+                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
@@ -2858,6 +2944,9 @@ fn proxy_runtime_websocket_text_message(
                     pinned_profile = None;
                     previous_response_retry_index = 0;
                 }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
+                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
@@ -2872,9 +2961,9 @@ fn attempt_runtime_websocket_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeWebsocketAttempt> {
-    let mut upstream_socket =
+    let (mut upstream_socket, upstream_turn_state) =
         match connect_runtime_proxy_upstream_websocket(handshake_request, shared, profile_name)? {
-            RuntimeWebsocketConnectResult::Connected(socket) => socket,
+            RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (socket, turn_state),
             RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
                 return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
                     profile_name: profile_name.to_string(),
@@ -2910,6 +2999,11 @@ fn attempt_runtime_websocket_request(
                 }
 
                 if !committed {
+                    remember_runtime_turn_state(
+                        shared,
+                        profile_name,
+                        upstream_turn_state.as_deref(),
+                    )?;
                     commit_runtime_proxy_profile_selection_with_notice(shared, profile_name)?;
                     committed = true;
                 }
@@ -2928,6 +3022,11 @@ fn attempt_runtime_websocket_request(
             }
             Ok(WsMessage::Binary(payload)) => {
                 if !committed {
+                    remember_runtime_turn_state(
+                        shared,
+                        profile_name,
+                        upstream_turn_state.as_deref(),
+                    )?;
                     commit_runtime_proxy_profile_selection_with_notice(shared, profile_name)?;
                     committed = true;
                 }
@@ -3013,7 +3112,13 @@ fn connect_runtime_proxy_upstream_websocket(
     }
 
     match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
-        Ok((socket, _response)) => Ok(RuntimeWebsocketConnectResult::Connected(socket)),
+        Ok((socket, response)) => Ok(RuntimeWebsocketConnectResult::Connected {
+            socket,
+            turn_state: runtime_proxy_tungstenite_header_value(
+                response.headers(),
+                "x-codex-turn-state",
+            ),
+        }),
         Err(WsError::Http(response)) => {
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
@@ -3174,9 +3279,15 @@ fn proxy_runtime_responses_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
     let previous_response_id = runtime_request_previous_response_id(request);
+    let turn_state = runtime_request_turn_state(request);
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
+        .transpose()?
+        .flatten();
+    let mut turn_state_profile = turn_state
+        .as_deref()
+        .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
     let mut pinned_profile = bound_profile.clone().or_else(|| {
@@ -3193,6 +3304,7 @@ fn proxy_runtime_responses_request(
             shared,
             &excluded_profiles,
             pinned_profile.as_deref(),
+            turn_state_profile.as_deref(),
             previous_response_id.is_some(),
         )?
         else {
@@ -3226,6 +3338,9 @@ fn proxy_runtime_responses_request(
                     pinned_profile = None;
                     previous_response_retry_index = 0;
                 }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
+                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
             }
@@ -3244,6 +3359,9 @@ fn proxy_runtime_responses_request(
                     }
                     pinned_profile = None;
                     previous_response_retry_index = 0;
+                }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
@@ -3613,12 +3731,14 @@ fn prepare_runtime_proxy_responses_success(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeResponsesAttempt> {
+    let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     let is_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.contains("text/event-stream"));
     if !is_sse {
+        remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
             response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
@@ -3661,6 +3781,7 @@ fn prepare_runtime_proxy_responses_success(
             });
         }
     };
+    remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
     remember_runtime_response_ids(shared, profile_name, &response_ids)?;
 
     Ok(RuntimeResponsesAttempt::Success {
@@ -3794,6 +3915,27 @@ fn build_runtime_proxy_text_response(status: u16, message: &str) -> tiny_http::R
         response = response.with_header(header);
     }
     response.boxed()
+}
+
+fn runtime_proxy_header_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn runtime_proxy_tungstenite_header_value(
+    headers: &tungstenite::http::HeaderMap,
+    name: &str,
+) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn is_runtime_proxy_transport_failure(err: &anyhow::Error) -> bool {
@@ -6528,6 +6670,7 @@ mod tests {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::from([(
                 "second".to_string(),
@@ -6543,6 +6686,80 @@ mod tests {
         assert_eq!(
             next_runtime_previous_response_candidate(&shared, &excluded)
                 .expect("candidate selection should succeed"),
+            Some("second".to_string())
+        );
+    }
+
+    #[test]
+    fn turn_state_affinity_prefers_bound_profile() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::from([(
+                "turn-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )]),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            client: Client::builder().build().expect("client"),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+        let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
+            .expect("turn-state lookup should succeed");
+
+        assert_eq!(
+            select_runtime_response_candidate(
+                &shared,
+                &BTreeSet::new(),
+                None,
+                turn_state_profile.as_deref(),
+                false,
+            )
+            .expect("candidate selection should succeed"),
             Some("second".to_string())
         );
     }
