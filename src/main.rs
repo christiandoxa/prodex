@@ -20,6 +20,9 @@ const DEFAULT_PRODEX_DIR: &str = ".prodex";
 const DEFAULT_CODEX_DIR: &str = ".codex";
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
+const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
+const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
+const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 const CLI_WIDTH: usize = 110;
 const CLI_LABEL_WIDTH: usize = 16;
 const CLI_TABLE_GAP: &str = "  ";
@@ -147,6 +150,8 @@ struct AppState {
     active_profile: Option<String>,
     #[serde(default)]
     profiles: BTreeMap<String, ProfileEntry>,
+    #[serde(default)]
+    last_run_selected_at: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +321,18 @@ struct MainWindowSnapshot {
     remaining_percent: i64,
     reset_at: i64,
     pressure_score: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ReadyProfileScore {
+    total_pressure: i64,
+    weekly_pressure: i64,
+    five_hour_pressure: i64,
+    reserve_floor: i64,
+    weekly_remaining: i64,
+    five_hour_remaining: i64,
+    weekly_reset_at: i64,
+    five_hour_reset_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -685,6 +702,8 @@ fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
                 .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
         }
     }
+
+    state.last_run_selected_at.remove(&args.name);
 
     if state.active_profile.as_deref() == Some(args.name.as_str()) {
         state.active_profile = state.profiles.keys().next().cloned();
@@ -1377,8 +1396,12 @@ fn handle_run(args: RunArgs) -> Result<()> {
                 active_profile_selection_order(&state, &profile_name),
                 args.base_url.as_deref(),
             );
-            let ready_candidates =
-                ready_profile_candidates(&reports, include_code_review, Some(&profile_name));
+            let ready_candidates = ready_profile_candidates(
+                &reports,
+                include_code_review,
+                Some(&profile_name),
+                &state,
+            );
             let selected_report = reports.iter().find(|report| report.name == profile_name);
 
             if let Some(best_candidate) = ready_candidates.first() {
@@ -1540,6 +1563,9 @@ fn handle_run(args: RunArgs) -> Result<()> {
         }
     }
 
+    record_run_selection(&mut state, &selected_profile_name);
+    state.save(&paths)?;
+
     if state
         .profiles
         .get(&selected_profile_name)
@@ -1551,6 +1577,15 @@ fn handle_run(args: RunArgs) -> Result<()> {
 
     let status = run_child(&codex_bin(), &args.codex_args, &codex_home)?;
     exit_with_status(status)
+}
+
+fn record_run_selection(state: &mut AppState, profile_name: &str) {
+    state
+        .last_run_selected_at
+        .retain(|name, _| state.profiles.contains_key(name));
+    state
+        .last_run_selected_at
+        .insert(profile_name.to_string(), Local::now().timestamp());
 }
 
 fn resolve_profile_name(state: &AppState, requested: Option<&str>) -> Result<String> {
@@ -2160,8 +2195,9 @@ fn ready_profile_candidates(
     reports: &[RunProfileProbeReport],
     include_code_review: bool,
     preferred_profile: Option<&str>,
+    state: &AppState,
 ) -> Vec<ReadyProfileCandidate> {
-    let mut candidates = reports
+    let candidates = reports
         .iter()
         .filter_map(|report| {
             if !report.auth.quota_compatible {
@@ -2182,8 +2218,99 @@ fn ready_profile_candidates(
         })
         .collect::<Vec<_>>();
 
-    candidates.sort_by_key(ready_profile_sort_key);
+    schedule_ready_profile_candidates(candidates, state, preferred_profile)
+}
+
+fn schedule_ready_profile_candidates(
+    mut candidates: Vec<ReadyProfileCandidate>,
+    state: &AppState,
+    preferred_profile: Option<&str>,
+) -> Vec<ReadyProfileCandidate> {
+    if candidates.len() <= 1 {
+        return candidates;
+    }
+
+    let now = Local::now().timestamp();
+    let best_total_pressure = candidates
+        .iter()
+        .map(|candidate| ready_profile_score(candidate).total_pressure)
+        .min()
+        .unwrap_or(i64::MAX);
+
+    candidates.sort_by_key(|candidate| {
+        ready_profile_runtime_sort_key(candidate, state, best_total_pressure, now)
+    });
+
+    if let Some(preferred_name) = preferred_profile {
+        if let Some(preferred_index) = candidates.iter().position(|candidate| {
+            candidate.name == preferred_name
+                && !profile_in_run_selection_cooldown(state, &candidate.name, now)
+        }) {
+            let preferred_score = ready_profile_score(&candidates[preferred_index]).total_pressure;
+            let selected_score = ready_profile_score(&candidates[0]).total_pressure;
+
+            if preferred_index > 0
+                && score_within_bps(
+                    preferred_score,
+                    selected_score,
+                    RUN_SELECTION_HYSTERESIS_BPS,
+                )
+            {
+                let preferred_candidate = candidates.remove(preferred_index);
+                candidates.insert(0, preferred_candidate);
+            }
+        }
+    }
+
     candidates
+}
+
+fn ready_profile_runtime_sort_key(
+    candidate: &ReadyProfileCandidate,
+    state: &AppState,
+    best_total_pressure: i64,
+    now: i64,
+) -> (
+    usize,
+    usize,
+    i64,
+    (
+        i64,
+        i64,
+        i64,
+        Reverse<i64>,
+        Reverse<i64>,
+        Reverse<i64>,
+        i64,
+        i64,
+        usize,
+        usize,
+    ),
+) {
+    let score = ready_profile_score(candidate);
+    let near_optimal = score_within_bps(
+        score.total_pressure,
+        best_total_pressure,
+        RUN_SELECTION_NEAR_OPTIMAL_BPS,
+    );
+    let recently_used =
+        near_optimal && profile_in_run_selection_cooldown(state, &candidate.name, now);
+    let last_selected_at = if near_optimal {
+        state
+            .last_run_selected_at
+            .get(&candidate.name)
+            .copied()
+            .unwrap_or(i64::MIN)
+    } else {
+        i64::MIN
+    };
+
+    (
+        if near_optimal { 0usize } else { 1usize },
+        if recently_used { 1usize } else { 0usize },
+        last_selected_at,
+        ready_profile_sort_key(candidate),
+    )
 }
 
 fn ready_profile_sort_key(
@@ -2200,32 +2327,61 @@ fn ready_profile_sort_key(
     usize,
     usize,
 ) {
+    let score = ready_profile_score(candidate);
+
+    (
+        score.total_pressure,
+        score.weekly_pressure,
+        score.five_hour_pressure,
+        Reverse(score.reserve_floor),
+        Reverse(score.weekly_remaining),
+        Reverse(score.five_hour_remaining),
+        score.weekly_reset_at,
+        score.five_hour_reset_at,
+        if candidate.preferred { 0usize } else { 1usize },
+        candidate.order_index,
+    )
+}
+
+fn ready_profile_score(candidate: &ReadyProfileCandidate) -> ReadyProfileScore {
     let weekly = required_main_window_snapshot(&candidate.usage, "weekly");
     let five_hour = required_main_window_snapshot(&candidate.usage, "5h");
 
     let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
     let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
-    let total_pressure = weekly_pressure
-        .saturating_mul(8)
-        .saturating_add(five_hour_pressure);
     let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
     let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
-    let reserve_floor = weekly_remaining.min(five_hour_remaining);
-    let weekly_reset_at = weekly.map_or(i64::MAX, |window| window.reset_at);
-    let five_hour_reset_at = five_hour.map_or(i64::MAX, |window| window.reset_at);
 
-    (
-        total_pressure,
+    ReadyProfileScore {
+        total_pressure: weekly_pressure
+            .saturating_mul(8)
+            .saturating_add(five_hour_pressure),
         weekly_pressure,
         five_hour_pressure,
-        Reverse(reserve_floor),
-        Reverse(weekly_remaining),
-        Reverse(five_hour_remaining),
-        weekly_reset_at,
-        five_hour_reset_at,
-        if candidate.preferred { 0usize } else { 1usize },
-        candidate.order_index,
-    )
+        reserve_floor: weekly_remaining.min(five_hour_remaining),
+        weekly_remaining,
+        five_hour_remaining,
+        weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
+        five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
+    }
+}
+
+fn profile_in_run_selection_cooldown(state: &AppState, profile_name: &str, now: i64) -> bool {
+    let Some(last_selected_at) = state.last_run_selected_at.get(profile_name).copied() else {
+        return false;
+    };
+
+    now.saturating_sub(last_selected_at) < RUN_SELECTION_COOLDOWN_SECONDS
+}
+
+fn score_within_bps(candidate_score: i64, best_score: i64, bps: i64) -> bool {
+    if candidate_score <= best_score {
+        return true;
+    }
+
+    let lhs = i128::from(candidate_score).saturating_mul(10_000);
+    let rhs = i128::from(best_score).saturating_mul(i128::from(10_000 + bps));
+    lhs <= rhs
 }
 
 fn required_main_window_snapshot(usage: &UsageResponse, label: &str) -> Option<MainWindowSnapshot> {
@@ -3013,6 +3169,7 @@ fn find_ready_profiles(
         ),
         include_code_review,
         None,
+        state,
     )
     .into_iter()
     .map(|candidate| candidate.name)
@@ -3392,6 +3549,89 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_prefers_rested_profile_within_near_optimal_band() {
+        let now = Local::now().timestamp();
+        let state = AppState {
+            active_profile: None,
+            profiles: BTreeMap::new(),
+            last_run_selected_at: BTreeMap::from([
+                ("fresh".to_string(), now),
+                ("rested".to_string(), now - 3_600),
+            ]),
+        };
+        let candidates = vec![
+            ReadyProfileCandidate {
+                name: "fresh".to_string(),
+                usage: usage_with_main_windows(100, 18_000, 100, 604_800),
+                order_index: 0,
+                preferred: false,
+            },
+            ReadyProfileCandidate {
+                name: "rested".to_string(),
+                usage: usage_with_main_windows(96, 18_000, 96, 604_800),
+                order_index: 1,
+                preferred: false,
+            },
+        ];
+
+        let ranked = schedule_ready_profile_candidates(candidates, &state, None);
+        assert_eq!(ranked[0].name, "rested");
+    }
+
+    #[test]
+    fn scheduler_keeps_preferred_profile_when_gain_is_small() {
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::new(),
+            last_run_selected_at: BTreeMap::new(),
+        };
+        let candidates = vec![
+            ReadyProfileCandidate {
+                name: "better".to_string(),
+                usage: usage_with_main_windows(100, 18_000, 100, 604_800),
+                order_index: 0,
+                preferred: false,
+            },
+            ReadyProfileCandidate {
+                name: "active".to_string(),
+                usage: usage_with_main_windows(96, 18_000, 96, 604_800),
+                order_index: 1,
+                preferred: true,
+            },
+        ];
+
+        let ranked = schedule_ready_profile_candidates(candidates, &state, Some("active"));
+        assert_eq!(ranked[0].name, "active");
+    }
+
+    #[test]
+    fn scheduler_allows_switch_when_preferred_profile_is_in_cooldown() {
+        let now = Local::now().timestamp();
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::new(),
+            last_run_selected_at: BTreeMap::from([("active".to_string(), now)]),
+        };
+        let candidates = vec![
+            ReadyProfileCandidate {
+                name: "better".to_string(),
+                usage: usage_with_main_windows(100, 18_000, 100, 604_800),
+                order_index: 0,
+                preferred: false,
+            },
+            ReadyProfileCandidate {
+                name: "active".to_string(),
+                usage: usage_with_main_windows(96, 18_000, 96, 604_800),
+                order_index: 1,
+                preferred: true,
+            },
+        ];
+
+        let ranked = schedule_ready_profile_candidates(candidates, &state, Some("active"));
+        assert_eq!(ranked[0].name, "better");
+    }
+
+    #[test]
     fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
         let reports = vec![
             QuotaReport {
@@ -3470,6 +3710,7 @@ mod tests {
                     },
                 ),
             ]),
+            last_run_selected_at: BTreeMap::new(),
         };
 
         assert_eq!(
@@ -3514,6 +3755,7 @@ mod tests {
                     email: Some("other@example.com".to_string()),
                 },
             )]),
+            last_run_selected_at: BTreeMap::new(),
         };
         let paths = AppPaths {
             root: PathBuf::from("/tmp/prodex-test"),
