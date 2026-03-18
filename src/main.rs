@@ -44,7 +44,14 @@ const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 const RESPONSE_PROFILE_BINDING_LIMIT: usize = 4_096;
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
-const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = 15_000;
+const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else { 30 };
+const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
+const QUOTA_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
+const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
+const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
+const RUNTIME_PROXY_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 12_000 };
+const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
+const RUNTIME_PROXY_WEBSOCKET_IO_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 12_000 };
 const CLI_WIDTH: usize = 110;
 const CLI_LABEL_WIDTH: usize = 16;
 const CLI_TABLE_GAP: &str = "  ";
@@ -387,6 +394,15 @@ struct RuntimeRotationState {
     upstream_base_url: String,
     include_code_review: bool,
     current_profile: String,
+    profile_probe_cache: BTreeMap<String, RuntimeProfileProbeCacheEntry>,
+    profile_retry_backoff_until: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeProfileProbeCacheEntry {
+    checked_at: i64,
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
 }
 
 struct RuntimeRotationProxy {
@@ -406,11 +422,11 @@ enum RuntimeResponsesAttempt {
     },
     QuotaBlocked {
         profile_name: String,
-        message: String,
+        response: RuntimeResponsesReply,
     },
     PreviousResponseNotFound {
         profile_name: String,
-        message: String,
+        response: RuntimeResponsesReply,
     },
 }
 
@@ -420,8 +436,8 @@ enum RuntimeSseInspection {
         prelude: Vec<u8>,
         response_ids: Vec<String>,
     },
-    QuotaBlocked(String),
-    PreviousResponseNotFound(String),
+    QuotaBlocked(Vec<u8>),
+    PreviousResponseNotFound(Vec<u8>),
 }
 
 #[derive(Default)]
@@ -447,25 +463,30 @@ enum RuntimeWebsocketAttempt {
     Delivered,
     QuotaBlocked {
         profile_name: String,
-        message: String,
+        payload: RuntimeWebsocketErrorPayload,
     },
     PreviousResponseNotFound {
         profile_name: String,
-        message: String,
+        payload: RuntimeWebsocketErrorPayload,
     },
 }
 
-#[derive(Debug, Clone)]
-struct RuntimeProxyFailure {
-    status: u16,
-    code: &'static str,
-    message: String,
+enum RuntimeUpstreamFailureResponse {
+    Http(RuntimeResponsesReply),
+    Websocket(RuntimeWebsocketErrorPayload),
 }
 
 #[derive(Debug)]
 enum RuntimeWebsocketConnectResult {
     Connected(RuntimeUpstreamWebSocket),
-    QuotaBlocked(String),
+    QuotaBlocked(RuntimeWebsocketErrorPayload),
+}
+
+#[derive(Debug, Clone)]
+enum RuntimeWebsocketErrorPayload {
+    Text(String),
+    Binary(Vec<u8>),
+    Empty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2315,6 +2336,8 @@ fn start_runtime_rotation_proxy(
         .context("runtime auto-rotate proxy did not expose a TCP listen address")?;
     let shared = RuntimeRotationProxyShared {
         client: Client::builder()
+            .connect_timeout(Duration::from_millis(RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS))
+            .timeout(Duration::from_millis(RUNTIME_PROXY_HTTP_READ_TIMEOUT_MS))
             .build()
             .context("failed to build runtime auto-rotate HTTP client")?,
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
@@ -2323,6 +2346,8 @@ fn start_runtime_rotation_proxy(
             upstream_base_url,
             include_code_review,
             current_profile: current_profile.to_string(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
         })),
     };
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -2336,7 +2361,10 @@ fn start_runtime_rotation_proxy(
         worker_threads.push(thread::spawn(move || {
             while !shutdown.load(Ordering::SeqCst) {
                 match server.recv_timeout(Duration::from_millis(200)) {
-                    Ok(Some(request)) => handle_runtime_rotation_proxy_request(request, &shared),
+                    Ok(Some(request)) => {
+                        let shared = shared.clone();
+                        thread::spawn(move || handle_runtime_rotation_proxy_request(request, &shared));
+                    }
                     Ok(None) => {}
                     Err(_) if shutdown.load(Ordering::SeqCst) => break,
                     Err(_) => {}
@@ -2385,10 +2413,19 @@ fn handle_runtime_rotation_proxy_request(
     if is_runtime_responses_path(&captured.path_and_query) {
         let response = match proxy_runtime_responses_request(&captured, shared) {
             Ok(response) => response,
-            Err(err) => RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
-                502,
-                &err.to_string(),
-            )),
+            Err(err) => {
+                if is_runtime_proxy_transport_failure(&err) {
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
+                        504,
+                        "Runtime upstream transport timed out.",
+                    ))
+                } else {
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
+                        502,
+                        &err.to_string(),
+                    ))
+                }
+            }
         };
         match response {
             RuntimeResponsesReply::Buffered(response) => {
@@ -2407,7 +2444,13 @@ fn handle_runtime_rotation_proxy_request(
         proxy_runtime_standard_request(&captured, shared, &profile_name)
     })() {
         Ok(response) => response,
-        Err(err) => build_runtime_proxy_text_response(502, &err.to_string()),
+        Err(err) => {
+            if is_runtime_proxy_transport_failure(&err) {
+                build_runtime_proxy_text_response(504, "Runtime upstream transport timed out.")
+            } else {
+                build_runtime_proxy_text_response(502, &err.to_string())
+            }
+        }
     };
     let _ = request.respond(response);
 }
@@ -2580,35 +2623,64 @@ fn select_runtime_response_candidate(
         return next_runtime_previous_response_candidate(shared, excluded_profiles);
     }
 
-    Ok(
-        next_runtime_response_candidate(shared, excluded_profiles)?.or_else(|| {
-            runtime_proxy_current_profile(shared)
-                .ok()
-                .filter(|name| !excluded_profiles.contains(name))
-        }),
-    )
+    if let Some(profile_name) = runtime_proxy_optimistic_current_candidate(shared, excluded_profiles)?
+    {
+        return Ok(Some(profile_name));
+    }
+
+    next_runtime_response_candidate(shared, excluded_profiles)
 }
 
 fn next_runtime_previous_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
 ) -> Result<Option<String>> {
-    let runtime = shared
+    let mut runtime = shared
         .runtime
         .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-        .clone();
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    prune_runtime_profile_retry_backoff(&mut runtime, now);
 
     Ok(
         active_profile_selection_order(&runtime.state, &runtime.current_profile)
             .into_iter()
             .find(|name| {
                 !excluded_profiles.contains(name)
+                    && !runtime_profile_in_retry_backoff(&runtime, name, now)
                     && runtime.state.profiles.get(name).is_some_and(|profile| {
                         read_auth_summary(&profile.codex_home).quota_compatible
                     })
             }),
     )
+}
+
+fn runtime_proxy_optimistic_current_candidate(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+) -> Result<Option<String>> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    prune_runtime_profile_retry_backoff(&mut runtime, now);
+
+    if excluded_profiles.contains(&runtime.current_profile) {
+        return Ok(None);
+    }
+
+    let Some(profile) = runtime.state.profiles.get(&runtime.current_profile) else {
+        return Ok(None);
+    };
+    if !read_auth_summary(&profile.codex_home).quota_compatible {
+        return Ok(None);
+    }
+    if runtime_profile_in_retry_backoff(&runtime, &runtime.current_profile, now) {
+        return Ok(None);
+    }
+
+    Ok(Some(runtime.current_profile.clone()))
 }
 
 fn proxy_runtime_responses_websocket_request(
@@ -2733,17 +2805,19 @@ fn proxy_runtime_websocket_text_message(
             previous_response_id.is_some(),
         )?
         else {
-            let failure = last_failure.unwrap_or(RuntimeProxyFailure {
-                status: 429,
-                code: "insufficient_quota",
-                message: "All runtime auto-rotate candidates are currently blocked.".to_string(),
-            });
-            send_runtime_proxy_websocket_error(
-                local_socket,
-                failure.status,
-                failure.code,
-                &failure.message,
-            )?;
+            match last_failure {
+                Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
+                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                }
+                _ => {
+                    send_runtime_proxy_websocket_error(
+                        local_socket,
+                        429,
+                        "insufficient_quota",
+                        "All runtime auto-rotate candidates are currently blocked.",
+                    )?;
+                }
+            }
             return Ok(());
         };
 
@@ -2757,15 +2831,11 @@ fn proxy_runtime_websocket_text_message(
             RuntimeWebsocketAttempt::Delivered => return Ok(()),
             RuntimeWebsocketAttempt::QuotaBlocked {
                 profile_name,
-                message,
+                payload,
             } => {
+                mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    send_runtime_proxy_websocket_error(
-                        local_socket,
-                        429,
-                        "insufficient_quota",
-                        &message,
-                    )?;
+                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                     return Ok(());
                 }
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
@@ -2773,26 +2843,18 @@ fn proxy_runtime_websocket_text_message(
                     previous_response_retry_index = 0;
                 }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeProxyFailure {
-                    status: 429,
-                    code: "insufficient_quota",
-                    message,
-                });
+                last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
                 profile_name,
-                message,
+                payload,
             } => {
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     if let Some(delay) =
                         runtime_previous_response_retry_delay(previous_response_retry_index)
                     {
                         previous_response_retry_index += 1;
-                        last_failure = Some(RuntimeProxyFailure {
-                            status: 400,
-                            code: "previous_response_not_found",
-                            message,
-                        });
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                         thread::sleep(delay);
                         continue;
                     }
@@ -2800,11 +2862,7 @@ fn proxy_runtime_websocket_text_message(
                     previous_response_retry_index = 0;
                 }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeProxyFailure {
-                    status: 400,
-                    code: "previous_response_not_found",
-                    message,
-                });
+                last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
         }
     }
@@ -2820,10 +2878,10 @@ fn attempt_runtime_websocket_request(
     let mut upstream_socket =
         match connect_runtime_proxy_upstream_websocket(handshake_request, shared, profile_name)? {
             RuntimeWebsocketConnectResult::Connected(socket) => socket,
-            RuntimeWebsocketConnectResult::QuotaBlocked(message) => {
+            RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
                 return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
                     profile_name: profile_name.to_string(),
-                    message,
+                    payload,
                 });
             }
         };
@@ -2837,20 +2895,18 @@ fn attempt_runtime_websocket_request(
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
                 match runtime_proxy_websocket_retry_action(text.as_ref()) {
-                    Some(RuntimeWebsocketAttempt::QuotaBlocked { message, .. }) if !committed => {
+                    Some(RuntimeWebsocketAttempt::QuotaBlocked { .. }) if !committed => {
                         let _ = upstream_socket.close(None);
                         return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
                             profile_name: profile_name.to_string(),
-                            message,
+                            payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                         });
                     }
-                    Some(RuntimeWebsocketAttempt::PreviousResponseNotFound { message, .. })
-                        if !committed =>
-                    {
+                    Some(RuntimeWebsocketAttempt::PreviousResponseNotFound { .. }) if !committed => {
                         let _ = upstream_socket.close(None);
                         return Ok(RuntimeWebsocketAttempt::PreviousResponseNotFound {
                             profile_name: profile_name.to_string(),
-                            message,
+                            payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                         });
                     }
                     _ => {}
@@ -2964,16 +3020,27 @@ fn connect_runtime_proxy_upstream_websocket(
         Err(WsError::Http(response)) => {
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
-            if matches!(status, 403 | 429)
-                && let Some(message) = extract_runtime_proxy_quota_message(&body)
-            {
-                return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(message));
+            if matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&body).is_some() {
+                return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(
+                    runtime_websocket_error_payload_from_http_body(&body),
+                ));
             }
             bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
         }
         Err(err) => Err(anyhow::anyhow!(
             "failed to connect runtime websocket upstream: {err}"
         )),
+    }
+}
+
+fn runtime_websocket_error_payload_from_http_body(body: &[u8]) -> RuntimeWebsocketErrorPayload {
+    if body.is_empty() {
+        return RuntimeWebsocketErrorPayload::Empty;
+    }
+
+    match std::str::from_utf8(body) {
+        Ok(text) => RuntimeWebsocketErrorPayload::Text(text.to_string()),
+        Err(_) => RuntimeWebsocketErrorPayload::Binary(body.to_vec()),
     }
 }
 
@@ -3009,17 +3076,18 @@ fn connect_runtime_proxy_upstream_tcp_stream(
         Some("wss") => 443,
         _ => 80,
     });
-    let timeout = Duration::from_millis(RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS);
+    let connect_timeout = Duration::from_millis(RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS);
+    let io_timeout = Duration::from_millis(RUNTIME_PROXY_WEBSOCKET_IO_TIMEOUT_MS);
     let addrs = (host, port).to_socket_addrs().map_err(WsError::Io)?;
 
     for addr in addrs {
-        if let Ok(stream) = TcpStream::connect_timeout(&addr, timeout) {
+        if let Ok(stream) = TcpStream::connect_timeout(&addr, connect_timeout) {
             stream.set_nodelay(true).map_err(WsError::Io)?;
             stream
-                .set_read_timeout(Some(timeout))
+                .set_read_timeout(Some(io_timeout))
                 .map_err(WsError::Io)?;
             stream
-                .set_write_timeout(Some(timeout))
+                .set_write_timeout(Some(io_timeout))
                 .map_err(WsError::Io)?;
             return Ok(stream);
         }
@@ -3048,18 +3116,35 @@ fn send_runtime_proxy_websocket_error(
         .context("failed to send runtime websocket error frame")
 }
 
+fn forward_runtime_proxy_websocket_error(
+    local_socket: &mut RuntimeLocalWebSocket,
+    payload: &RuntimeWebsocketErrorPayload,
+) -> Result<()> {
+    match payload {
+        RuntimeWebsocketErrorPayload::Text(text) => local_socket
+            .send(WsMessage::Text(text.clone().into()))
+            .context("failed to forward runtime websocket text error frame"),
+        RuntimeWebsocketErrorPayload::Binary(bytes) => local_socket
+            .send(WsMessage::Binary(bytes.clone().into()))
+            .context("failed to forward runtime websocket binary error frame"),
+        RuntimeWebsocketErrorPayload::Empty => Ok(()),
+    }
+}
+
 fn runtime_proxy_websocket_retry_action(payload: &str) -> Option<RuntimeWebsocketAttempt> {
     let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
     if let Some(message) = extract_runtime_proxy_previous_response_message_from_value(&value) {
+        let _ = message;
         return Some(RuntimeWebsocketAttempt::PreviousResponseNotFound {
             profile_name: String::new(),
-            message,
+            payload: RuntimeWebsocketErrorPayload::Text(payload.to_string()),
         });
     }
     if let Some(message) = extract_runtime_proxy_quota_message_from_value(&value) {
+        let _ = message;
         return Some(RuntimeWebsocketAttempt::QuotaBlocked {
             profile_name: String::new(),
-            message,
+            payload: RuntimeWebsocketErrorPayload::Text(payload.to_string()),
         });
     }
 
@@ -3114,18 +3199,14 @@ fn proxy_runtime_responses_request(
             previous_response_id.is_some(),
         )?
         else {
-            let failure = last_failure.unwrap_or(RuntimeProxyFailure {
-                status: 429,
-                code: "insufficient_quota",
-                message: "All runtime auto-rotate candidates are currently blocked.".to_string(),
+            return Ok(match last_failure {
+                Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
+                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                    429,
+                    "insufficient_quota",
+                    "All runtime auto-rotate candidates are currently blocked.",
+                )),
             });
-            return Ok(RuntimeResponsesReply::Buffered(
-                build_runtime_proxy_json_error_response(
-                    failure.status,
-                    failure.code,
-                    &failure.message,
-                ),
-            ));
         };
 
         match attempt_runtime_responses_request(request, shared, &candidate_name)? {
@@ -3138,42 +3219,29 @@ fn proxy_runtime_responses_request(
             }
             RuntimeResponsesAttempt::QuotaBlocked {
                 profile_name,
-                message,
+                response,
             } => {
+                mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    return Ok(RuntimeResponsesReply::Buffered(
-                        build_runtime_proxy_json_error_response(
-                            429,
-                            "insufficient_quota",
-                            &message,
-                        ),
-                    ));
+                    return Ok(response);
                 }
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     pinned_profile = None;
                     previous_response_retry_index = 0;
                 }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeProxyFailure {
-                    status: 429,
-                    code: "insufficient_quota",
-                    message,
-                });
+                last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
             }
             RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name,
-                message,
+                response,
             } => {
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     if let Some(delay) =
                         runtime_previous_response_retry_delay(previous_response_retry_index)
                     {
                         previous_response_retry_index += 1;
-                        last_failure = Some(RuntimeProxyFailure {
-                            status: 400,
-                            code: "previous_response_not_found",
-                            message,
-                        });
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
                         thread::sleep(delay);
                         continue;
                     }
@@ -3181,11 +3249,7 @@ fn proxy_runtime_responses_request(
                     previous_response_retry_index = 0;
                 }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeProxyFailure {
-                    status: 400,
-                    code: "previous_response_not_found",
-                    message,
-                });
+                last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
             }
         }
     }
@@ -3197,16 +3261,31 @@ fn attempt_runtime_responses_request(
     profile_name: &str,
 ) -> Result<RuntimeResponsesAttempt> {
     let mut response = send_runtime_proxy_upstream_request(request, shared, profile_name)?;
-    if let Some(message) = extract_runtime_proxy_quota_http_failure(&mut response)? {
-        return Ok(RuntimeResponsesAttempt::QuotaBlocked {
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let parts = buffer_runtime_proxy_response_parts(&mut response, Vec::new())?;
+        let retryable_quota = matches!(status, 403 | 429)
+            && extract_runtime_proxy_quota_message(&parts.body).is_some();
+        let retryable_previous = status == 400
+            && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+        let response = RuntimeResponsesReply::Buffered(build_runtime_proxy_response_from_parts(parts));
+
+        if retryable_quota {
+            return Ok(RuntimeResponsesAttempt::QuotaBlocked {
+                profile_name: profile_name.to_string(),
+                response,
+            });
+        }
+        if retryable_previous {
+            return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
+                profile_name: profile_name.to_string(),
+                response,
+            });
+        }
+
+        return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
-            message,
-        });
-    }
-    if let Some(message) = extract_runtime_proxy_previous_response_http_failure(&mut response)? {
-        return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
-            profile_name: profile_name.to_string(),
-            message,
+            response,
         });
     }
     prepare_runtime_proxy_responses_success(response, shared, profile_name)
@@ -3216,27 +3295,106 @@ fn next_runtime_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
 ) -> Result<Option<String>> {
-    let runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-        .clone();
-    let reports = collect_run_profile_reports(
-        &runtime.state,
-        active_profile_selection_order(&runtime.state, &runtime.current_profile),
-        Some(runtime.upstream_base_url.as_str()),
-    );
+    let now = Local::now().timestamp();
+    let (state, current_profile, include_code_review, upstream_base_url, cached_reports) = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_retry_backoff(&mut runtime, now);
+        (
+            runtime.state.clone(),
+            runtime.current_profile.clone(),
+            runtime.include_code_review,
+            runtime.upstream_base_url.clone(),
+            runtime.profile_probe_cache.clone(),
+        )
+    };
+
+    let mut reports = Vec::new();
+    let mut probe_jobs = Vec::new();
+    for (order_index, name) in active_profile_selection_order(&state, &current_profile)
+        .into_iter()
+        .enumerate()
+    {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        if let Some(entry) = cached_reports.get(&name)
+            && runtime_profile_probe_cache_is_fresh(entry, now)
+        {
+            reports.push(RunProfileProbeReport {
+                name,
+                order_index,
+                auth: entry.auth.clone(),
+                result: entry.result.clone(),
+            });
+            continue;
+        }
+
+        let Some(profile) = state.profiles.get(&name) else {
+            continue;
+        };
+        probe_jobs.push(RunProfileProbeJob {
+            name,
+            order_index,
+            codex_home: profile.codex_home.clone(),
+        });
+    }
+
+    if !probe_jobs.is_empty() {
+        let base_url = Some(upstream_base_url.clone());
+        let fresh_reports = map_parallel(probe_jobs, |job| {
+            let auth = read_auth_summary(&job.codex_home);
+            let result = if auth.quota_compatible {
+                fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
+            } else {
+                Err("auth mode is not quota-compatible".to_string())
+            };
+
+            RunProfileProbeReport {
+                name: job.name,
+                order_index: job.order_index,
+                auth,
+                result,
+            }
+        });
+
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        for report in &fresh_reports {
+            runtime.profile_probe_cache.insert(
+                report.name.clone(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: report.auth.clone(),
+                    result: report.result.clone(),
+                },
+            );
+        }
+        drop(runtime);
+
+        reports.extend(fresh_reports);
+    }
+
+    reports.sort_by_key(|report| report.order_index);
     let candidates = ready_profile_candidates(
         &reports,
-        runtime.include_code_review,
-        Some(runtime.current_profile.as_str()),
-        &runtime.state,
+        include_code_review,
+        Some(current_profile.as_str()),
+        &state,
     );
 
     Ok(candidates
         .into_iter()
         .map(|candidate| candidate.name)
         .find(|name| !excluded_profiles.contains(name)))
+}
+
+fn runtime_profile_probe_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
+    now.saturating_sub(entry.checked_at) < RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS
 }
 
 fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {
@@ -3248,6 +3406,42 @@ fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<
         .clone())
 }
 
+fn runtime_profile_in_retry_backoff(
+    runtime: &RuntimeRotationState,
+    profile_name: &str,
+    now: i64,
+) -> bool {
+    runtime
+        .profile_retry_backoff_until
+        .get(profile_name)
+        .copied()
+        .is_some_and(|until| until > now)
+}
+
+fn prune_runtime_profile_retry_backoff(runtime: &mut RuntimeRotationState, now: i64) {
+    runtime
+        .profile_retry_backoff_until
+        .retain(|_, until| *until > now);
+}
+
+fn mark_runtime_profile_retry_backoff(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    prune_runtime_profile_retry_backoff(&mut runtime, now);
+    runtime.profile_probe_cache.remove(profile_name);
+    runtime.profile_retry_backoff_until.insert(
+        profile_name.to_string(),
+        now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS),
+    );
+    Ok(())
+}
+
 fn commit_runtime_proxy_profile_selection(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -3257,6 +3451,7 @@ fn commit_runtime_proxy_profile_selection(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let switched = runtime.current_profile != profile_name;
+    runtime.profile_retry_backoff_until.remove(profile_name);
     runtime.current_profile = profile_name.to_string();
     runtime.state.active_profile = Some(profile_name.to_string());
     record_run_selection(&mut runtime.state, profile_name);
@@ -3452,16 +3647,20 @@ fn prepare_runtime_proxy_responses_success(
             prelude,
             response_ids,
         } => (prelude, response_ids),
-        RuntimeSseInspection::QuotaBlocked(message) => {
+        RuntimeSseInspection::QuotaBlocked(prelude) => {
             return Ok(RuntimeResponsesAttempt::QuotaBlocked {
                 profile_name: profile_name.to_string(),
-                message,
+                response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
+                    response, prelude,
+                )?),
             });
         }
-        RuntimeSseInspection::PreviousResponseNotFound(message) => {
+        RuntimeSseInspection::PreviousResponseNotFound(prelude) => {
             return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name: profile_name.to_string(),
-                message,
+                response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
+                    response, prelude,
+                )?),
             });
         }
     };
@@ -3600,6 +3799,18 @@ fn build_runtime_proxy_text_response(status: u16, message: &str) -> tiny_http::R
     response.boxed()
 }
 
+fn is_runtime_proxy_transport_failure(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string().to_ascii_lowercase();
+        message.contains("timed out")
+            || message.contains("timeout")
+            || message.contains("connection reset")
+            || message.contains("broken pipe")
+            || message.contains("unexpected eof")
+            || message.contains("connection aborted")
+    })
+}
+
 fn build_runtime_proxy_json_error_response(
     status: u16,
     code: &str,
@@ -3619,6 +3830,12 @@ fn build_runtime_proxy_json_error_response(
     response.boxed()
 }
 
+struct RuntimeBufferedResponseParts {
+    status: u16,
+    headers: Vec<(String, Vec<u8>)>,
+    body: Vec<u8>,
+}
+
 fn is_runtime_responses_path(path_and_query: &str) -> bool {
     path_without_query(path_and_query).ends_with("/codex/responses")
 }
@@ -3628,46 +3845,6 @@ fn path_without_query(path_and_query: &str) -> &str {
         .split_once('?')
         .map(|(path, _)| path)
         .unwrap_or(path_and_query)
-}
-
-fn extract_runtime_proxy_quota_http_failure(
-    response: &mut reqwest::blocking::Response,
-) -> Result<Option<String>> {
-    if response.status().is_success() {
-        return Ok(None);
-    }
-
-    let status = response.status().as_u16();
-    if !matches!(status, 403 | 429) {
-        return Ok(None);
-    }
-
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read runtime auto-rotate error response body")?;
-    Ok(Some(
-        extract_runtime_proxy_quota_message(&body).unwrap_or_else(|| {
-            format!(
-                "Upstream Codex request was rejected with HTTP {} during runtime auto-rotate.",
-                status
-            )
-        }),
-    ))
-}
-
-fn extract_runtime_proxy_previous_response_http_failure(
-    response: &mut reqwest::blocking::Response,
-) -> Result<Option<String>> {
-    if response.status().as_u16() != 400 {
-        return Ok(None);
-    }
-
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read runtime previous_response error response body")?;
-    Ok(extract_runtime_proxy_previous_response_message(&body))
 }
 
 fn inspect_runtime_sse_prelude(
@@ -3720,12 +3897,14 @@ fn inspect_runtime_sse_prelude(
         let trimmed = line_text.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
             if let Some(message) = extract_runtime_proxy_quota_message_from_sse(&data_lines) {
-                return Ok(RuntimeSseInspection::QuotaBlocked(message));
+                let _ = message;
+                return Ok(RuntimeSseInspection::QuotaBlocked(buffered));
             }
             if let Some(message) =
                 extract_runtime_proxy_previous_response_message_from_sse(&data_lines)
             {
-                return Ok(RuntimeSseInspection::PreviousResponseNotFound(message));
+                let _ = message;
+                return Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered));
             }
             if !data_lines.is_empty() {
                 return Ok(RuntimeSseInspection::Commit {
@@ -3743,6 +3922,48 @@ fn inspect_runtime_sse_prelude(
         }
         line.clear();
     }
+}
+
+fn buffer_runtime_proxy_response_parts(
+    response: &mut reqwest::blocking::Response,
+    mut prelude: Vec<u8>,
+) -> Result<RuntimeBufferedResponseParts> {
+    let status = response.status().as_u16();
+    let mut headers = Vec::new();
+    for (name, value) in response.headers() {
+        if should_skip_runtime_response_header(name.as_str()) {
+            continue;
+        }
+        headers.push((name.as_str().to_string(), value.as_bytes().to_vec()));
+    }
+    response
+        .read_to_end(&mut prelude)
+        .context("failed to read upstream runtime response body")?;
+    Ok(RuntimeBufferedResponseParts {
+        status,
+        headers,
+        body: prelude,
+    })
+}
+
+fn build_runtime_proxy_response_from_parts(
+    parts: RuntimeBufferedResponseParts,
+) -> tiny_http::ResponseBox {
+    let status = TinyStatusCode(parts.status);
+    let headers = parts
+        .headers
+        .into_iter()
+        .filter_map(|(name, value)| TinyHeader::from_bytes(name.as_bytes(), value).ok())
+        .collect::<Vec<_>>();
+    let body_len = parts.body.len();
+    TinyResponse::new(
+        status,
+        headers,
+        Box::new(Cursor::new(parts.body)),
+        Some(body_len),
+        None,
+    )
+    .boxed()
 }
 
 fn extract_runtime_proxy_quota_message_from_sse(data_lines: &[String]) -> Option<String> {
@@ -4216,6 +4437,8 @@ fn fetch_usage_json(codex_home: &Path, base_url: Option<&str>) -> Result<serde_j
     let auth = read_usage_auth(codex_home)?;
     let usage_url = usage_url(&quota_base_url(base_url));
     let client = Client::builder()
+        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
         .build()
         .context("failed to build quota HTTP client")?;
 
@@ -5165,18 +5388,29 @@ mod tests {
         addr: SocketAddr,
         shutdown: Arc<AtomicBool>,
         responses_accounts: Arc<Mutex<Vec<String>>>,
+        usage_accounts: Arc<Mutex<Vec<String>>>,
         thread: Option<JoinHandle<()>>,
     }
 
     #[derive(Clone, Copy)]
     enum RuntimeProxyBackendMode {
         HttpOnly,
+        HttpOnlyInitialBodyStall,
+        HttpOnlySlowStream,
         Websocket,
     }
 
     impl RuntimeProxyBackend {
         fn start() -> Self {
             Self::start_with_mode(RuntimeProxyBackendMode::HttpOnly)
+        }
+
+        fn start_http_initial_body_stall() -> Self {
+            Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+        }
+
+        fn start_http_slow_stream() -> Self {
+            Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySlowStream)
         }
 
         fn start_websocket() -> Self {
@@ -5195,13 +5429,16 @@ mod tests {
 
             let shutdown = Arc::new(AtomicBool::new(false));
             let responses_accounts = Arc::new(Mutex::new(Vec::new()));
+            let usage_accounts = Arc::new(Mutex::new(Vec::new()));
             let shutdown_flag = Arc::clone(&shutdown);
             let responses_accounts_flag = Arc::clone(&responses_accounts);
+            let usage_accounts_flag = Arc::clone(&usage_accounts);
             let thread = thread::spawn(move || {
                 while !shutdown_flag.load(Ordering::SeqCst) {
                     match listener.accept() {
                         Ok((stream, _)) => {
                             let responses_accounts_flag = Arc::clone(&responses_accounts_flag);
+                            let usage_accounts_flag = Arc::clone(&usage_accounts_flag);
                             let websocket_enabled =
                                 matches!(mode, RuntimeProxyBackendMode::Websocket);
                             thread::spawn(move || {
@@ -5217,6 +5454,7 @@ mod tests {
                                     handle_runtime_proxy_backend_request(
                                         stream,
                                         &responses_accounts_flag,
+                                        &usage_accounts_flag,
                                         mode,
                                     );
                                 }
@@ -5234,6 +5472,7 @@ mod tests {
                 addr,
                 shutdown,
                 responses_accounts,
+                usage_accounts,
                 thread: Some(thread),
             }
         }
@@ -5246,6 +5485,13 @@ mod tests {
             self.responses_accounts
                 .lock()
                 .expect("responses_accounts poisoned")
+                .clone()
+        }
+
+        fn usage_accounts(&self) -> Vec<String> {
+            self.usage_accounts
+                .lock()
+                .expect("usage_accounts poisoned")
                 .clone()
         }
     }
@@ -5263,6 +5509,7 @@ mod tests {
     fn handle_runtime_proxy_backend_request(
         mut stream: TcpStream,
         responses_accounts: &Arc<Mutex<Vec<String>>>,
+        usage_accounts: &Arc<Mutex<Vec<String>>>,
         _mode: RuntimeProxyBackendMode,
     ) {
         let request = match read_http_request(&mut stream) {
@@ -5277,9 +5524,13 @@ mod tests {
             .unwrap_or("/");
         let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
 
-        let (status_line, content_type, body, initial_body_stall) = if path
+        let (status_line, content_type, body, initial_body_stall, chunk_delay) = if path
             .ends_with("/backend-api/wham/usage")
         {
+            usage_accounts
+                .lock()
+                .expect("usage_accounts poisoned")
+                .push(account_id.clone());
             let body = match account_id.as_str() {
                 "main-account" => runtime_proxy_usage_body("main@example.com"),
                 "second-account" => runtime_proxy_usage_body("second@example.com"),
@@ -5294,7 +5545,7 @@ mod tests {
             } else {
                 "HTTP/1.1 401 Unauthorized"
             };
-            (status, "application/json", body, None)
+            (status, "application/json", body, None, None)
         } else if path.ends_with("/backend-api/codex/responses") {
             responses_accounts
                 .lock()
@@ -5311,7 +5562,10 @@ mod tests {
                         "\r\n"
                     )
                     .to_string(),
-                    None,
+                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        .then_some(Duration::from_millis(750)),
+                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                        .then_some(Duration::from_millis(100)),
                 ),
                 "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
                     (
@@ -5326,7 +5580,10 @@ mod tests {
                             "\r\n"
                         )
                         .to_string(),
-                        None,
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                            .then_some(Duration::from_millis(750)),
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                            .then_some(Duration::from_millis(100)),
                     )
                 }
                 "second-account" if previous_response_id.is_some() => (
@@ -5345,6 +5602,8 @@ mod tests {
                         }
                     })
                     .to_string(),
+                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        .then_some(Duration::from_millis(750)),
                     None,
                 ),
                 "second-account" => (
@@ -5357,9 +5616,12 @@ mod tests {
                         "event: response.completed\r\n",
                         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n",
                         "\r\n"
-                    )
-                    .to_string(),
-                    None,
+                        )
+                        .to_string(),
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                            .then_some(Duration::from_millis(750)),
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                            .then_some(Duration::from_millis(100)),
                 ),
                 "third-account" if previous_response_id.is_some() => (
                     "HTTP/1.1 400 Bad Request",
@@ -5377,6 +5639,8 @@ mod tests {
                         }
                     })
                     .to_string(),
+                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        .then_some(Duration::from_millis(750)),
                     None,
                 ),
                 "third-account" => (
@@ -5389,9 +5653,12 @@ mod tests {
                         "event: response.completed\r\n",
                         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-third\"}}\r\n",
                         "\r\n"
-                    )
-                    .to_string(),
-                    None,
+                        )
+                        .to_string(),
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                            .then_some(Duration::from_millis(750)),
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                            .then_some(Duration::from_millis(100)),
                 ),
                 _ => (
                     "HTTP/1.1 200 OK",
@@ -5400,9 +5667,12 @@ mod tests {
                         "event: response.failed\r\n",
                         "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"unexpected account\"}}}\r\n",
                         "\r\n"
-                    )
-                    .to_string(),
-                    None,
+                        )
+                        .to_string(),
+                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        .then_some(Duration::from_millis(750)),
+                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                        .then_some(Duration::from_millis(100)),
                 ),
             }
         } else {
@@ -5410,6 +5680,7 @@ mod tests {
                 "HTTP/1.1 404 Not Found",
                 "application/json",
                 serde_json::json!({ "error": "not_found" }).to_string(),
+                None,
                 None,
             )
         };
@@ -5423,8 +5694,20 @@ mod tests {
         if let Some(delay) = initial_body_stall {
             thread::sleep(delay);
         }
-        let _ = stream.write_all(body.as_bytes());
-        let _ = stream.flush();
+        if content_type == "text/event-stream" && let Some(delay) = chunk_delay {
+            let body_bytes = body.as_bytes();
+            let chunk_size = body_bytes.len().max(1).div_ceil(4);
+            for (index, chunk) in body_bytes.chunks(chunk_size).enumerate() {
+                let _ = stream.write_all(chunk);
+                let _ = stream.flush();
+                if index + 1 < body_bytes.chunks(chunk_size).len() {
+                    thread::sleep(delay);
+                }
+            }
+        } else {
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
     }
 
     fn runtime_proxy_backend_is_websocket_upgrade(stream: &TcpStream) -> bool {
@@ -6319,6 +6602,322 @@ mod tests {
     }
 
     #[test]
+    fn runtime_proxy_uses_current_profile_without_runtime_quota_probe() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        state.save(&paths).expect("failed to save initial state");
+
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+                .expect("runtime proxy should start");
+
+        let response = Client::builder()
+            .build()
+            .expect("client")
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let body = response.text().expect("response body should be readable");
+
+        assert!(body.contains("\"response.created\""));
+        assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+        assert!(backend.usage_accounts().is_empty());
+    }
+
+    #[test]
+    fn runtime_proxy_reuses_rotated_profile_without_reprobing_quota() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        state.save(&paths).expect("failed to save initial state");
+
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+                .expect("runtime proxy should start");
+        let client = Client::builder().build().expect("client");
+
+        let first = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("first runtime proxy request should succeed");
+        let first_body = first.text().expect("first response body should be readable");
+        assert!(first_body.contains("\"response.created\""));
+        assert_eq!(backend.usage_accounts(), vec!["second-account".to_string()]);
+
+        let second = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("second runtime proxy request should succeed");
+        let second_body = second
+            .text()
+            .expect("second response body should be readable");
+        assert!(second_body.contains("\"response.created\""));
+
+        assert_eq!(
+            backend.responses_accounts(),
+            vec![
+                "main-account".to_string(),
+                "second-account".to_string(),
+                "second-account".to_string(),
+            ]
+        );
+        assert_eq!(backend.usage_accounts(), vec!["second-account".to_string()]);
+    }
+
+    #[test]
+    fn runtime_proxy_passes_through_upstream_http_error_response() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("runtime proxy should start");
+
+        let response = Client::builder()
+            .build()
+            .expect("client")
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let body = response.text().expect("response body should be readable");
+
+        assert_eq!(status, reqwest::StatusCode::OK);
+        assert!(content_type.contains("text/event-stream"));
+        assert!(body.contains("\"type\":\"response.failed\""));
+        assert!(body.contains("\"code\":\"insufficient_quota\""));
+        assert!(body.contains("main quota exhausted"));
+    }
+
+    #[test]
+    fn runtime_proxy_aborts_stalled_http_fallback_before_long_hang() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start_http_initial_body_stall();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("runtime proxy should start");
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .expect("client");
+        let started = std::time::Instant::now();
+        let result = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send();
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "stalled HTTP fallback took too long: {elapsed:?}"
+        );
+        match result {
+            Ok(response) => assert!(
+                !response.status().is_success(),
+                "stalled HTTP fallback unexpectedly succeeded with status {}",
+                response.status()
+            ),
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start_http_slow_stream();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([(
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+                .expect("runtime proxy should start");
+
+        let client = Client::builder().build().expect("client");
+        let started = std::time::Instant::now();
+        let response = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let body = response.text().expect("response body should be readable");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(300),
+            "slow healthy stream completed too quickly to cover multi-chunk runtime read: {elapsed:?}"
+        );
+        assert!(body.contains("\"response.completed\""));
+        assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    }
+
+    #[test]
     fn runtime_proxies_bind_distinct_local_ports() {
         let backend = RuntimeProxyBackend::start();
         let temp_dir = TestDir::new();
@@ -6474,6 +7073,60 @@ mod tests {
 
         let persisted = AppState::load(&paths).expect("state should reload");
         assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn runtime_proxy_passes_through_upstream_websocket_error_payload() {
+        let backend = RuntimeProxyBackend::start_websocket();
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("runtime proxy should start");
+
+        let (mut socket, _response) = ws_connect(format!(
+            "ws://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .expect("runtime proxy websocket handshake should succeed");
+        socket
+            .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+            .expect("runtime proxy websocket request should be sent");
+
+        let payload = socket
+            .read()
+            .expect("runtime proxy websocket should return an upstream error payload");
+        let text = payload
+            .into_text()
+            .expect("upstream error payload should stay text")
+            .to_string();
+
+        assert!(text.contains("\"type\":\"error\""));
+        assert!(text.contains("\"status\":429"));
+        assert!(text.contains("\"code\":\"insufficient_quota\""));
+        assert!(text.contains("main quota exhausted"));
     }
 
     #[test]
