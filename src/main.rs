@@ -42,7 +42,7 @@ const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
-const RESPONSE_PROFILE_BINDING_LIMIT: usize = 4_096;
+const RESPONSE_PROFILE_BINDING_LIMIT: usize = 16_384;
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else { 30 };
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
@@ -2635,19 +2635,16 @@ fn next_runtime_previous_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
 ) -> Result<Option<String>> {
-    let mut runtime = shared
+    let runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let now = Local::now().timestamp();
-    prune_runtime_profile_retry_backoff(&mut runtime, now);
 
     Ok(
         active_profile_selection_order(&runtime.state, &runtime.current_profile)
             .into_iter()
             .find(|name| {
                 !excluded_profiles.contains(name)
-                    && !runtime_profile_in_retry_backoff(&runtime, name, now)
                     && runtime.state.profiles.get(name).is_some_and(|profile| {
                         read_auth_summary(&profile.codex_home).quota_compatible
                     })
@@ -6485,6 +6482,69 @@ mod tests {
         .expect("usage response should parse");
 
         assert!(usage.additional_rate_limits.is_empty());
+    }
+
+    #[test]
+    fn previous_response_owner_discovery_ignores_retry_backoff() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::from([(
+                "second".to_string(),
+                Local::now().timestamp().saturating_add(60),
+            )]),
+        };
+        let shared = RuntimeRotationProxyShared {
+            client: Client::builder().build().expect("client"),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+        let excluded = BTreeSet::from(["main".to_string()]);
+
+        assert_eq!(
+            next_runtime_previous_response_candidate(&shared, &excluded)
+                .expect("candidate selection should succeed"),
+            Some("second".to_string())
+        );
     }
 
     #[test]
