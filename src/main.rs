@@ -56,6 +56,8 @@ const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 
 const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 15_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
+const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
+const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const CLI_WIDTH: usize = 110;
 const CLI_LABEL_WIDTH: usize = 16;
 const CLI_TABLE_GAP: &str = "  ";
@@ -64,6 +66,55 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl"];
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn create_runtime_proxy_log_path() -> PathBuf {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    env::temp_dir().join(format!(
+        "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}.log",
+        std::process::id()
+    ))
+}
+
+fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
+    env::temp_dir().join(RUNTIME_PROXY_LATEST_LOG_POINTER)
+}
+
+fn initialize_runtime_proxy_log_path() -> PathBuf {
+    let log_path = create_runtime_proxy_log_path();
+    let _ = fs::write(
+        runtime_proxy_latest_log_pointer_path(),
+        format!("{}\n", log_path.display()),
+    );
+    runtime_proxy_log_to_path(
+        &log_path,
+        &format!(
+            "runtime proxy log initialized pid={} cwd={}",
+            std::process::id(),
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        ),
+    );
+    log_path
+}
+
+fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
+    let sanitized = message.replace(['\r', '\n'], " ");
+    let line = format!("[{timestamp}] {sanitized}\n");
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        let _ = file.write_all(line.as_bytes());
+        let _ = file.flush();
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -389,6 +440,8 @@ struct RuntimeProxyRequest {
 struct RuntimeRotationProxyShared {
     client: Client,
     runtime: Arc<Mutex<RuntimeRotationState>>,
+    log_path: PathBuf,
+    request_sequence: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone)]
@@ -462,6 +515,9 @@ struct RuntimeStreamingResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: Box<dyn Read + Send>,
+    request_id: u64,
+    profile_name: String,
+    log_path: PathBuf,
 }
 
 enum RuntimePrefetchChunk {
@@ -515,6 +571,14 @@ enum RuntimeWebsocketErrorPayload {
     Text(String),
     Binary(Vec<u8>),
     Empty,
+}
+
+fn runtime_proxy_log(shared: &RuntimeRotationProxyShared, message: impl AsRef<str>) {
+    runtime_proxy_log_to_path(&shared.log_path, message.as_ref());
+}
+
+fn runtime_proxy_next_request_id(shared: &RuntimeRotationProxyShared) -> u64 {
+    shared.request_sequence.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2398,6 +2462,7 @@ fn start_runtime_rotation_proxy(
         .server_addr()
         .to_ip()
         .context("runtime auto-rotate proxy did not expose a TCP listen address")?;
+    let log_path = initialize_runtime_proxy_log_path();
     let shared = RuntimeRotationProxyShared {
         client: Client::builder()
             .connect_timeout(Duration::from_millis(
@@ -2405,10 +2470,12 @@ fn start_runtime_rotation_proxy(
             ))
             .build()
             .context("failed to build runtime auto-rotate HTTP client")?,
+        log_path: log_path.clone(),
+        request_sequence: Arc::new(AtomicU64::new(1)),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths: paths.clone(),
             state: state.clone(),
-            upstream_base_url,
+            upstream_base_url: upstream_base_url.clone(),
             include_code_review,
             current_profile: current_profile.to_string(),
             turn_state_bindings: BTreeMap::new(),
@@ -2416,6 +2483,12 @@ fn start_runtime_rotation_proxy(
             profile_retry_backoff_until: BTreeMap::new(),
         })),
     };
+    runtime_proxy_log_to_path(
+        &log_path,
+        &format!(
+            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} upstream_base_url={upstream_base_url}"
+        ),
+    );
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
     let worker_count = state.profiles.len().clamp(2, 4);
@@ -2460,26 +2533,58 @@ fn handle_runtime_rotation_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) {
+    let request_id = runtime_proxy_next_request_id(shared);
     if is_tiny_http_websocket_upgrade(&request) {
-        proxy_runtime_responses_websocket_request(request, shared);
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket upgrade path={}",
+                request.url()
+            ),
+        );
+        proxy_runtime_responses_websocket_request(request_id, request, shared);
         return;
     }
 
     let captured = match capture_runtime_proxy_request(&mut request) {
         Ok(captured) => captured,
         Err(err) => {
+            runtime_proxy_log(
+                shared,
+                format!("request={request_id} transport=http capture_error={err}"),
+            );
             let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
             return;
         }
     };
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http path={} previous_response_id={:?} turn_state={:?} body_bytes={}",
+            captured.path_and_query,
+            runtime_request_previous_response_id(&captured),
+            runtime_request_turn_state(&captured),
+            captured.body.len()
+        ),
+    );
 
     if is_runtime_responses_path(&captured.path_and_query) {
-        let response = match proxy_runtime_responses_request(&captured, shared) {
+        let response = match proxy_runtime_responses_request(request_id, &captured, shared) {
             Ok(response) => response,
             Err(err) => {
                 if is_runtime_proxy_transport_failure(&err) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http responses_transport_failure={err:#}"
+                        ),
+                    );
                     return;
                 } else {
+                    runtime_proxy_log(
+                        shared,
+                        format!("request={request_id} transport=http responses_error={err:#}"),
+                    );
                     RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
                         502,
                         &err.to_string(),
@@ -2501,13 +2606,23 @@ fn handle_runtime_rotation_proxy_request(
 
     let response = match (|| -> Result<tiny_http::ResponseBox> {
         let profile_name = runtime_proxy_current_profile(shared)?;
-        proxy_runtime_standard_request(&captured, shared, &profile_name)
+        proxy_runtime_standard_request(request_id, &captured, shared, &profile_name)
     })() {
         Ok(response) => response,
         Err(err) => {
             if is_runtime_proxy_transport_failure(&err) {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http standard_transport_failure={err:#}"
+                    ),
+                );
                 return;
             } else {
+                runtime_proxy_log(
+                    shared,
+                    format!("request={request_id} transport=http standard_error={err:#}"),
+                );
                 build_runtime_proxy_text_response(502, &err.to_string())
             }
         }
@@ -2654,6 +2769,10 @@ fn remember_runtime_turn_state(
             &mut runtime.turn_state_bindings,
             TURN_STATE_PROFILE_BINDING_LIMIT,
         );
+        runtime_proxy_log(
+            shared,
+            format!("binding turn_state profile={profile_name} value={turn_state}"),
+        );
     }
     Ok(())
 }
@@ -2701,6 +2820,14 @@ fn remember_runtime_response_ids(
                 profile_name
             )
         })?;
+        runtime_proxy_log(
+            shared,
+            format!(
+                "binding response_ids profile={profile_name} count={} first={:?}",
+                response_ids.len(),
+                response_ids.first()
+            ),
+        );
     }
     Ok(())
 }
@@ -2811,10 +2938,18 @@ fn runtime_proxy_optimistic_current_candidate(
 }
 
 fn proxy_runtime_responses_websocket_request(
+    request_id: u64,
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) {
     if !is_runtime_responses_path(request.url()) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket unsupported_path={}",
+                request.url()
+            ),
+        );
         let _ = request.respond(build_runtime_proxy_text_response(
             404,
             "Runtime websocket proxy only supports Codex responses endpoints.",
@@ -2824,6 +2959,13 @@ fn proxy_runtime_responses_websocket_request(
 
     let handshake_request = capture_runtime_proxy_websocket_request(&request);
     let Some(websocket_key) = runtime_proxy_websocket_key(&handshake_request) else {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket missing_sec_websocket_key path={}",
+                handshake_request.path_and_query
+            ),
+        );
         let _ = request.respond(build_runtime_proxy_text_response(
             400,
             "Missing Sec-WebSocket-Key header for runtime auto-rotate websocket proxy.",
@@ -2834,7 +2976,25 @@ fn proxy_runtime_responses_websocket_request(
     let response = build_runtime_proxy_websocket_upgrade_response(&websocket_key);
     let upgraded = request.upgrade("websocket", response);
     let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
-    if run_runtime_proxy_websocket_session(&mut local_socket, &handshake_request, shared).is_err() {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=websocket upgraded path={} previous_response_id={:?} turn_state={:?}",
+            handshake_request.path_and_query,
+            runtime_request_previous_response_id(&handshake_request),
+            runtime_request_turn_state(&handshake_request)
+        ),
+    );
+    if let Err(err) = run_runtime_proxy_websocket_session(
+        request_id,
+        &mut local_socket,
+        &handshake_request,
+        shared,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!("request={request_id} transport=websocket session_error={err:#}"),
+        );
         let _ = local_socket.close(None);
     }
 }
@@ -2903,6 +3063,7 @@ impl RuntimeWebsocketSessionState {
 }
 
 fn run_runtime_proxy_websocket_session(
+    session_id: u64,
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
@@ -2911,7 +3072,19 @@ fn run_runtime_proxy_websocket_session(
     loop {
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
+                let message_id = runtime_proxy_next_request_id(shared);
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={message_id} websocket_session={session_id} inbound_text previous_response_id={:?} turn_state={:?} bytes={}",
+                        runtime_request_previous_response_id_from_text(text.as_ref()),
+                        runtime_request_turn_state(handshake_request),
+                        text.len()
+                    ),
+                );
                 proxy_runtime_websocket_text_message(
+                    session_id,
+                    message_id,
                     local_socket,
                     handshake_request,
                     text.as_ref(),
@@ -2920,6 +3093,10 @@ fn run_runtime_proxy_websocket_session(
                 )?;
             }
             Ok(WsMessage::Binary(_)) => {
+                runtime_proxy_log(
+                    shared,
+                    format!("websocket_session={session_id} inbound_binary_rejected"),
+                );
                 send_runtime_proxy_websocket_error(
                     local_socket,
                     400,
@@ -2934,15 +3111,27 @@ fn run_runtime_proxy_websocket_session(
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
             Ok(WsMessage::Close(frame)) => {
+                runtime_proxy_log(
+                    shared,
+                    format!("websocket_session={session_id} local_close"),
+                );
                 websocket_session.close();
                 let _ = local_socket.close(frame);
                 break;
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
+                runtime_proxy_log(
+                    shared,
+                    format!("websocket_session={session_id} local_connection_closed"),
+                );
                 websocket_session.close();
                 break;
             }
             Err(err) => {
+                runtime_proxy_log(
+                    shared,
+                    format!("websocket_session={session_id} local_read_error={err}"),
+                );
                 websocket_session.close();
                 return Err(anyhow::anyhow!(
                     "runtime websocket session ended unexpectedly: {err}"
@@ -2955,6 +3144,8 @@ fn run_runtime_proxy_websocket_session(
 }
 
 fn proxy_runtime_websocket_text_message(
+    session_id: u64,
+    request_id: u64,
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     request_text: &str,
@@ -2999,6 +3190,17 @@ fn proxy_runtime_websocket_text_message(
             previous_response_id.is_some(),
         )?
         else {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} websocket_session={session_id} candidate_exhausted last_failure={}",
+                    match &last_failure {
+                        Some(RuntimeUpstreamFailureResponse::Websocket(_)) => "websocket",
+                        Some(RuntimeUpstreamFailureResponse::Http(_)) => "http",
+                        None => "none",
+                    }
+                ),
+            );
             match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
@@ -3020,8 +3222,20 @@ fn proxy_runtime_websocket_text_message(
             } else {
                 request_turn_state.as_deref()
             };
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} websocket_session={session_id} candidate={} pinned={:?} turn_state_profile={:?} turn_state_override={:?} excluded_count={}",
+                candidate_name,
+                pinned_profile,
+                turn_state_profile,
+                turn_state_override,
+                excluded_profiles.len()
+            ),
+        );
 
         match attempt_runtime_websocket_request(
+            request_id,
             local_socket,
             handshake_request,
             request_text,
@@ -3035,6 +3249,12 @@ fn proxy_runtime_websocket_text_message(
                 profile_name,
                 payload,
             } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} quota_blocked profile={profile_name}"
+                    ),
+                );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
@@ -3059,6 +3279,13 @@ fn proxy_runtime_websocket_text_message(
                 payload,
                 turn_state,
             } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
+                        turn_state
+                    ),
+                );
                 if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
                     previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
@@ -3095,6 +3322,7 @@ fn proxy_runtime_websocket_text_message(
 }
 
 fn attempt_runtime_websocket_request(
+    request_id: u64,
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     request_text: &str,
@@ -3106,6 +3334,13 @@ fn attempt_runtime_websocket_request(
     let (mut upstream_socket, mut upstream_turn_state) = if websocket_session
         .can_reuse(profile_name, turn_state_override)
     {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket upstream_session=reuse profile={profile_name} turn_state_override={:?}",
+                turn_state_override
+            ),
+        );
         (
             websocket_session
                 .take_socket()
@@ -3114,7 +3349,15 @@ fn attempt_runtime_websocket_request(
         )
     } else {
         websocket_session.close();
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket upstream_session=connect profile={profile_name} turn_state_override={:?}",
+                turn_state_override
+            ),
+        );
         match connect_runtime_proxy_upstream_websocket(
+            request_id,
             handshake_request,
             shared,
             profile_name,
@@ -3133,6 +3376,12 @@ fn attempt_runtime_websocket_request(
     if let Err(err) = upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
         let _ = upstream_socket.close(None);
         websocket_session.reset();
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket upstream_send_error profile={profile_name} error={err}"
+            ),
+        );
         return Err(anyhow::anyhow!(
             "failed to send runtime websocket request upstream: {err}"
         ));
@@ -3176,6 +3425,12 @@ fn attempt_runtime_websocket_request(
                         upstream_turn_state.as_deref(),
                     )?;
                     commit_runtime_proxy_profile_selection_with_notice(shared, profile_name)?;
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=websocket committed profile={profile_name}"
+                        ),
+                    );
                     committed = true;
                 }
                 remember_runtime_response_ids(
@@ -3190,6 +3445,12 @@ fn attempt_runtime_websocket_request(
                         "failed to forward runtime websocket text frame"
                     })?;
                 if is_runtime_terminal_event(text.as_ref()) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=websocket terminal_event profile={profile_name}"
+                        ),
+                    );
                     websocket_session.store(upstream_socket, profile_name, upstream_turn_state);
                     return Ok(RuntimeWebsocketAttempt::Delivered);
                 }
@@ -3202,6 +3463,12 @@ fn attempt_runtime_websocket_request(
                         upstream_turn_state.as_deref(),
                     )?;
                     commit_runtime_proxy_profile_selection_with_notice(shared, profile_name)?;
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=websocket committed_binary profile={profile_name}"
+                        ),
+                    );
                     committed = true;
                 }
                 local_socket
@@ -3219,15 +3486,33 @@ fn attempt_runtime_websocket_request(
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
             Ok(WsMessage::Close(frame)) => {
                 websocket_session.reset();
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=websocket upstream_close_before_completed profile={profile_name}"
+                    ),
+                );
                 let _ = local_socket.close(frame);
                 bail!("runtime websocket upstream closed before response.completed");
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
                 websocket_session.reset();
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=websocket upstream_connection_closed profile={profile_name}"
+                    ),
+                );
                 bail!("runtime websocket upstream closed before response.completed");
             }
             Err(err) => {
                 websocket_session.reset();
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=websocket upstream_read_error profile={profile_name} error={err}"
+                    ),
+                );
                 return Err(anyhow::anyhow!(
                     "runtime websocket upstream failed before response.completed: {err}"
                 ));
@@ -3237,6 +3522,7 @@ fn attempt_runtime_websocket_request(
 }
 
 fn connect_runtime_proxy_upstream_websocket(
+    request_id: u64,
     handshake_request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -3302,17 +3588,42 @@ fn connect_runtime_proxy_upstream_websocket(
         );
     }
 
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=websocket upstream_connect_start profile={profile_name} url={upstream_url} turn_state_override={:?}",
+            turn_state_override
+        ),
+    );
     match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
         Ok((socket, response)) => Ok(RuntimeWebsocketConnectResult::Connected {
             socket,
-            turn_state: runtime_proxy_tungstenite_header_value(
-                response.headers(),
-                "x-codex-turn-state",
-            ),
+            turn_state: {
+                let turn_state = runtime_proxy_tungstenite_header_value(
+                    response.headers(),
+                    "x-codex-turn-state",
+                );
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=websocket upstream_connect_ok profile={profile_name} status={} turn_state={:?}",
+                        response.status().as_u16(),
+                        turn_state
+                    ),
+                );
+                turn_state
+            },
         }),
         Err(WsError::Http(response)) => {
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=websocket upstream_connect_http profile={profile_name} status={status} body_bytes={}",
+                    body.len()
+                ),
+            );
             if matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&body).is_some() {
                 return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(
                     runtime_websocket_error_payload_from_http_body(&body),
@@ -3320,9 +3631,17 @@ fn connect_runtime_proxy_upstream_websocket(
             }
             bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
         }
-        Err(err) => Err(anyhow::anyhow!(
-            "failed to connect runtime websocket upstream: {err}"
-        )),
+        Err(err) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=websocket upstream_connect_error profile={profile_name} error={err}"
+                ),
+            );
+            Err(anyhow::anyhow!(
+                "failed to connect runtime websocket upstream: {err}"
+            ))
+        }
     }
 }
 
@@ -3458,15 +3777,18 @@ fn is_runtime_terminal_event(payload: &str) -> bool {
 }
 
 fn proxy_runtime_standard_request(
+    request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<tiny_http::ResponseBox> {
-    let response = send_runtime_proxy_upstream_request(request, shared, profile_name, None)?;
+    let response =
+        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)?;
     forward_runtime_proxy_response(response, Vec::new())
 }
 
 fn proxy_runtime_responses_request(
+    request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
@@ -3503,6 +3825,17 @@ fn proxy_runtime_responses_request(
             previous_response_id.is_some(),
         )?
         else {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http candidate_exhausted last_failure={}",
+                    match &last_failure {
+                        Some(RuntimeUpstreamFailureResponse::Http(_)) => "http",
+                        Some(RuntimeUpstreamFailureResponse::Websocket(_)) => "websocket",
+                        None => "none",
+                    }
+                ),
+            );
             return Ok(match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
                 _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
@@ -3518,8 +3851,20 @@ fn proxy_runtime_responses_request(
             } else {
                 request_turn_state.as_deref()
             };
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http candidate={} pinned={:?} turn_state_profile={:?} turn_state_override={:?} excluded_count={}",
+                candidate_name,
+                pinned_profile,
+                turn_state_profile,
+                turn_state_override,
+                excluded_profiles.len()
+            ),
+        );
 
         match attempt_runtime_responses_request(
+            request_id,
             request,
             shared,
             &candidate_name,
@@ -3530,12 +3875,22 @@ fn proxy_runtime_responses_request(
                 response,
             } => {
                 commit_runtime_proxy_profile_selection_with_notice(shared, &profile_name)?;
+                runtime_proxy_log(
+                    shared,
+                    format!("request={request_id} transport=http committed profile={profile_name}"),
+                );
                 return Ok(response);
             }
             RuntimeResponsesAttempt::QuotaBlocked {
                 profile_name,
                 response,
             } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http quota_blocked profile={profile_name}"
+                    ),
+                );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
                     return Ok(response);
@@ -3559,6 +3914,13 @@ fn proxy_runtime_responses_request(
                 response,
                 turn_state,
             } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
+                        turn_state
+                    ),
+                );
                 if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
                     previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
@@ -3595,13 +3957,19 @@ fn proxy_runtime_responses_request(
 }
 
 fn attempt_runtime_responses_request(
+    request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
-    let mut response =
-        send_runtime_proxy_upstream_request(request, shared, profile_name, turn_state_override)?;
+    let mut response = send_runtime_proxy_upstream_request(
+        request_id,
+        request,
+        shared,
+        profile_name,
+        turn_state_override,
+    )?;
     let response_turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     if !response.status().is_success() {
         let status = response.status().as_u16();
@@ -3632,7 +4000,7 @@ fn attempt_runtime_responses_request(
             response,
         });
     }
-    prepare_runtime_proxy_responses_success(response, shared, profile_name)
+    prepare_runtime_proxy_responses_success(request_id, response, shared, profile_name)
 }
 
 fn next_runtime_response_candidate(
@@ -3783,6 +4151,13 @@ fn mark_runtime_profile_retry_backoff(
         profile_name.to_string(),
         now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS),
     );
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_retry_backoff profile={profile_name} until={}",
+            now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS)
+        ),
+    );
     Ok(())
 }
 
@@ -3802,6 +4177,10 @@ fn commit_runtime_proxy_profile_selection(
     runtime.state.save(&runtime.paths).with_context(|| {
         format!("failed to save runtime auto-rotate state for '{profile_name}'")
     })?;
+    runtime_proxy_log(
+        shared,
+        format!("profile_commit profile={profile_name} switched={switched}"),
+    );
     Ok(switched)
 }
 
@@ -3814,6 +4193,7 @@ fn commit_runtime_proxy_profile_selection_with_notice(
 }
 
 fn send_runtime_proxy_upstream_request(
+    request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -3862,12 +4242,34 @@ fn send_runtime_proxy_upstream_request(
         upstream_request = upstream_request.header("ChatGPT-Account-Id", account_id);
     }
 
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http upstream_start profile={profile_name} method={} url={} turn_state_override={:?} previous_response_id={:?}",
+            request.method,
+            upstream_url,
+            turn_state_override,
+            runtime_request_previous_response_id(request)
+        ),
+    );
     let response = upstream_request.send().with_context(|| {
         format!(
             "failed to proxy runtime request for profile '{}' to {}",
             profile_name, upstream_url
         )
     })?;
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http upstream_response profile={profile_name} status={} content_type={:?} turn_state={:?}",
+            response.status().as_u16(),
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
+        ),
+    );
     Ok(response)
 }
 
@@ -3963,6 +4365,7 @@ fn forward_runtime_proxy_response(
 }
 
 fn prepare_runtime_proxy_responses_success(
+    request_id: u64,
     response: reqwest::blocking::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -3974,6 +4377,13 @@ fn prepare_runtime_proxy_responses_success(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.contains("text/event-stream"));
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http prepare_success profile={profile_name} sse={is_sse} turn_state={:?}",
+            turn_state
+        ),
+    );
     if !is_sse {
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
@@ -3995,31 +4405,61 @@ fn prepare_runtime_proxy_responses_success(
         }
     }
 
-    let mut prefetch = RuntimePrefetchStream::spawn(response);
-    let lookahead = inspect_runtime_sse_lookahead(&mut prefetch)?;
+    let mut prefetch = RuntimePrefetchStream::spawn(response, shared.log_path.clone(), request_id);
+    let lookahead = inspect_runtime_sse_lookahead(&mut prefetch, &shared.log_path, request_id)?;
 
     let (prelude, response_ids) = match lookahead {
         RuntimeSseInspection::Commit {
             prelude,
             response_ids,
-        } => (prelude, response_ids),
+        } => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http sse_commit profile={profile_name} prelude_bytes={} response_ids={}",
+                    prelude.len(),
+                    response_ids.len()
+                ),
+            );
+            (prelude, response_ids)
+        }
         RuntimeSseInspection::QuotaBlocked(prelude) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http sse_quota_blocked profile={profile_name} prelude_bytes={}",
+                    prelude.len()
+                ),
+            );
             return Ok(RuntimeResponsesAttempt::QuotaBlocked {
                 profile_name: profile_name.to_string(),
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
                     status,
                     headers: headers.clone(),
                     body: Box::new(prefetch.into_reader(prelude)),
+                    request_id,
+                    profile_name: profile_name.to_string(),
+                    log_path: shared.log_path.clone(),
                 }),
             });
         }
         RuntimeSseInspection::PreviousResponseNotFound(prelude) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http sse_previous_response_not_found profile={profile_name} prelude_bytes={}",
+                    prelude.len()
+                ),
+            );
             return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name: profile_name.to_string(),
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
                     status,
                     headers: headers.clone(),
                     body: Box::new(prefetch.into_reader(prelude)),
+                    request_id,
+                    profile_name: profile_name.to_string(),
+                    log_path: shared.log_path.clone(),
                 }),
                 turn_state,
             });
@@ -4039,6 +4479,9 @@ fn prepare_runtime_proxy_responses_success(
                 &prelude,
                 &response_ids,
             )),
+            request_id,
+            profile_name: profile_name.to_string(),
+            log_path: shared.log_path.clone(),
         }),
     })
 }
@@ -4178,6 +4621,13 @@ fn write_runtime_streaming_response(
     mut response: RuntimeStreamingResponse,
 ) -> io::Result<()> {
     let mut writer = writer;
+    runtime_proxy_log_to_path(
+        &response.log_path,
+        &format!(
+            "request={} transport=http stream_start profile={} status={}",
+            response.request_id, response.profile_name, response.status
+        ),
+    );
     let status = reqwest::StatusCode::from_u16(response.status)
         .ok()
         .and_then(|status| status.canonical_reason().map(str::to_string))
@@ -4194,10 +4644,44 @@ fn write_runtime_streaming_response(
     writer.flush()?;
 
     let mut buffer = [0_u8; 8192];
+    let mut total_bytes = 0usize;
+    let mut chunk_count = 0usize;
+    let started_at = Instant::now();
     loop {
-        let read = response.body.read(&mut buffer)?;
+        let read = match response.body.read(&mut buffer) {
+            Ok(read) => read,
+            Err(err) => {
+                runtime_proxy_log_to_path(
+                    &response.log_path,
+                    &format!(
+                        "request={} transport=http stream_read_error profile={} chunks={} bytes={} elapsed_ms={} error={}",
+                        response.request_id,
+                        response.profile_name,
+                        chunk_count,
+                        total_bytes,
+                        started_at.elapsed().as_millis(),
+                        err
+                    ),
+                );
+                return Err(err);
+            }
+        };
         if read == 0 {
             break;
+        }
+        chunk_count += 1;
+        total_bytes += read;
+        if chunk_count == 1 {
+            runtime_proxy_log_to_path(
+                &response.log_path,
+                &format!(
+                    "request={} transport=http first_local_chunk profile={} bytes={} elapsed_ms={}",
+                    response.request_id,
+                    response.profile_name,
+                    read,
+                    started_at.elapsed().as_millis()
+                ),
+            );
         }
         write!(writer, "{:X}\r\n", read)?;
         writer.write_all(&buffer[..read])?;
@@ -4206,6 +4690,17 @@ fn write_runtime_streaming_response(
     }
     writer.write_all(b"0\r\n\r\n")?;
     writer.flush()?;
+    runtime_proxy_log_to_path(
+        &response.log_path,
+        &format!(
+            "request={} transport=http stream_complete profile={} chunks={} bytes={} elapsed_ms={}",
+            response.request_id,
+            response.profile_name,
+            chunk_count,
+            total_bytes,
+            started_at.elapsed().as_millis()
+        ),
+    );
     Ok(())
 }
 
@@ -4287,10 +4782,14 @@ fn path_without_query(path_and_query: &str) -> &str {
 }
 
 impl RuntimePrefetchStream {
-    fn spawn(mut response: reqwest::blocking::Response) -> Self {
+    fn spawn(
+        mut response: reqwest::blocking::Response,
+        log_path: PathBuf,
+        request_id: u64,
+    ) -> Self {
         let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(8);
         thread::spawn(move || {
-            runtime_prefetch_response_chunks(&mut response, sender);
+            runtime_prefetch_response_chunks(&mut response, sender, log_path, request_id);
         });
         Self {
             receiver,
@@ -4325,23 +4824,54 @@ impl RuntimePrefetchStream {
 fn runtime_prefetch_response_chunks(
     response: &mut reqwest::blocking::Response,
     sender: SyncSender<RuntimePrefetchChunk>,
+    log_path: PathBuf,
+    request_id: u64,
 ) {
     let mut buffer = [0_u8; 8192];
+    let mut saw_data = false;
     loop {
         match response.read(&mut buffer) {
             Ok(0) => {
+                runtime_proxy_log_to_path(
+                    &log_path,
+                    &format!(
+                        "request={request_id} transport=http upstream_stream_end saw_data={saw_data}"
+                    ),
+                );
                 let _ = sender.send(RuntimePrefetchChunk::End);
                 break;
             }
             Ok(read) => {
+                if !saw_data {
+                    saw_data = true;
+                    runtime_proxy_log_to_path(
+                        &log_path,
+                        &format!(
+                            "request={request_id} transport=http first_upstream_chunk bytes={read}"
+                        ),
+                    );
+                }
                 if sender
                     .send(RuntimePrefetchChunk::Data(buffer[..read].to_vec()))
                     .is_err()
                 {
+                    runtime_proxy_log_to_path(
+                        &log_path,
+                        &format!(
+                            "request={request_id} transport=http prefetch_receiver_disconnected"
+                        ),
+                    );
                     break;
                 }
             }
             Err(err) => {
+                runtime_proxy_log_to_path(
+                    &log_path,
+                    &format!(
+                        "request={request_id} transport=http upstream_stream_error kind={:?} error={err}",
+                        err.kind()
+                    ),
+                );
                 let _ = sender.send(RuntimePrefetchChunk::Error(err.kind(), err.to_string()));
                 break;
             }
@@ -4351,6 +4881,8 @@ fn runtime_prefetch_response_chunks(
 
 fn inspect_runtime_sse_lookahead(
     prefetch: &mut RuntimePrefetchStream,
+    log_path: &Path,
+    request_id: u64,
 ) -> Result<RuntimeSseInspection> {
     let deadline = Instant::now() + Duration::from_millis(runtime_proxy_sse_lookahead_timeout_ms());
     let mut buffered = Vec::new();
@@ -4371,26 +4903,67 @@ fn inspect_runtime_sse_lookahead(
                     RuntimeSseInspection::Commit { response_ids, .. }
                         if !response_ids.is_empty() =>
                     {
+                        runtime_proxy_log_to_path(
+                            log_path,
+                            &format!(
+                                "request={request_id} transport=http lookahead_commit_with_response_ids bytes={} response_ids={}",
+                                buffered.len(),
+                                response_ids.len()
+                            ),
+                        );
                         return Ok(RuntimeSseInspection::Commit {
                             prelude: buffered,
                             response_ids,
                         });
                     }
                     RuntimeSseInspection::Commit { .. } => {}
-                    other => return Ok(other),
+                    other => {
+                        runtime_proxy_log_to_path(
+                            log_path,
+                            &format!(
+                                "request={request_id} transport=http lookahead_retryable_signal bytes={}",
+                                buffered.len()
+                            ),
+                        );
+                        return Ok(other);
+                    }
                 }
             }
             Ok(RuntimePrefetchChunk::End) => break,
             Ok(RuntimePrefetchChunk::Error(kind, message)) => {
                 if buffered.is_empty() {
+                    runtime_proxy_log_to_path(
+                        log_path,
+                        &format!(
+                            "request={request_id} transport=http lookahead_error_before_bytes kind={kind:?} error={message}"
+                        ),
+                    );
                     return Err(anyhow::Error::new(io::Error::new(kind, message))
                         .context("failed to inspect runtime auto-rotate SSE stream"));
                 }
                 prefetch.push_backlog(RuntimePrefetchChunk::Error(kind, message));
                 break;
             }
-            Err(RecvTimeoutError::Timeout) => break,
-            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                runtime_proxy_log_to_path(
+                    log_path,
+                    &format!(
+                        "request={request_id} transport=http lookahead_timeout bytes={}",
+                        buffered.len()
+                    ),
+                );
+                break;
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                runtime_proxy_log_to_path(
+                    log_path,
+                    &format!(
+                        "request={request_id} transport=http lookahead_channel_disconnected bytes={}",
+                        buffered.len()
+                    ),
+                );
+                break;
+            }
         }
     }
 
@@ -7219,6 +7792,8 @@ mod tests {
         };
         let shared = RuntimeRotationProxyShared {
             client: Client::builder().build().expect("client"),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let excluded = BTreeSet::from(["main".to_string()]);
@@ -7286,6 +7861,8 @@ mod tests {
         };
         let shared = RuntimeRotationProxyShared {
             client: Client::builder().build().expect("client"),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
@@ -7342,6 +7919,8 @@ mod tests {
         };
         let shared = RuntimeRotationProxyShared {
             client: Client::builder().build().expect("client"),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
