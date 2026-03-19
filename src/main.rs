@@ -3,6 +3,7 @@ use base64::Engine;
 use chrono::{Local, TimeZone};
 use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
+use fs2::FileExt;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
@@ -15,7 +16,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -49,6 +50,7 @@ const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else { 30 };
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
+const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
 const QUOTA_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
 // Match Codex's default Responses stream idle timeout so the local proxy stays transport-transparent.
@@ -110,6 +112,17 @@ fn runtime_proxy_worker_count() -> usize {
     (parallelism.saturating_mul(4)).clamp(8, 32)
 }
 
+fn runtime_proxy_long_lived_worker_count() -> usize {
+    let parallelism = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4);
+    parallelism.clamp(2, 8)
+}
+
+fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
+    worker_count.saturating_mul(4).clamp(8, 64)
+}
+
 fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
     let sanitized = message.replace(['\r', '\n'], " ");
@@ -134,22 +147,10 @@ fn schedule_runtime_state_save(
     let latest_revision = Arc::clone(&shared.state_save_revision);
     let log_path = shared.log_path.clone();
     let reason = reason.to_string();
+    let runtime = Arc::clone(&shared.async_runtime);
 
-    thread::spawn(move || {
-        let json = match serde_json::to_string_pretty(&state) {
-            Ok(json) => json,
-            Err(err) => {
-                runtime_proxy_log_to_path(
-                    &log_path,
-                    &format!(
-                        "state_save_error revision={revision} reason={reason} stage=serialize error={err}"
-                    ),
-                );
-                return;
-            }
-        };
-
-        match save_runtime_state_snapshot_if_latest(&paths, &json, revision, &latest_revision) {
+    drop(runtime.spawn_blocking(move || {
+        match save_runtime_state_snapshot_if_latest(&paths, &state, revision, &latest_revision) {
             Ok(true) => runtime_proxy_log_to_path(
                 &log_path,
                 &format!("state_save_ok revision={revision} reason={reason}"),
@@ -165,12 +166,128 @@ fn schedule_runtime_state_save(
                 ),
             ),
         }
-    });
+    }));
+}
+
+fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
+    fs::create_dir_all(&paths.root)
+        .with_context(|| format!("failed to create {}", paths.root.display()))?;
+    let lock_path = state_lock_file_path(&paths.state_file);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open {}", lock_path.display()))?;
+    file.lock_exclusive()
+        .with_context(|| format!("failed to lock {}", lock_path.display()))?;
+    Ok(StateFileLock { file })
+}
+
+fn state_lock_file_path(state_file: &Path) -> PathBuf {
+    state_file.with_extension("json.lock")
+}
+
+fn merge_last_run_selection(
+    existing: &BTreeMap<String, i64>,
+    incoming: &BTreeMap<String, i64>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> BTreeMap<String, i64> {
+    let mut merged = existing.clone();
+    for (profile_name, timestamp) in incoming {
+        merged
+            .entry(profile_name.clone())
+            .and_modify(|current| *current = (*current).max(*timestamp))
+            .or_insert(*timestamp);
+    }
+    merged.retain(|profile_name, _| profiles.contains_key(profile_name));
+    merged
+}
+
+fn merge_response_profile_bindings(
+    existing: &BTreeMap<String, ResponseProfileBinding>,
+    incoming: &BTreeMap<String, ResponseProfileBinding>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> BTreeMap<String, ResponseProfileBinding> {
+    let mut merged = existing.clone();
+    for (response_id, binding) in incoming {
+        let should_replace = merged
+            .get(response_id)
+            .is_none_or(|current| current.bound_at <= binding.bound_at);
+        if should_replace {
+            merged.insert(response_id.clone(), binding.clone());
+        }
+    }
+    merged.retain(|_, binding| profiles.contains_key(&binding.profile_name));
+    prune_profile_bindings(&mut merged, RESPONSE_PROFILE_BINDING_LIMIT);
+    merged
+}
+
+fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppState {
+    let profiles = if existing.profiles.is_empty() {
+        snapshot.profiles.clone()
+    } else {
+        existing.profiles.clone()
+    };
+    let active_profile = snapshot
+        .active_profile
+        .clone()
+        .or(existing.active_profile.clone())
+        .filter(|profile_name| profiles.contains_key(profile_name));
+
+    AppState {
+        active_profile,
+        profiles: profiles.clone(),
+        last_run_selected_at: merge_last_run_selection(
+            &existing.last_run_selected_at,
+            &snapshot.last_run_selected_at,
+            &profiles,
+        ),
+        response_profile_bindings: merge_response_profile_bindings(
+            &existing.response_profile_bindings,
+            &snapshot.response_profile_bindings,
+            &profiles,
+        ),
+    }
+}
+
+fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
+    let active_profile = desired
+        .active_profile
+        .clone()
+        .filter(|profile_name| desired.profiles.contains_key(profile_name));
+    AppState {
+        active_profile,
+        profiles: desired.profiles.clone(),
+        last_run_selected_at: merge_last_run_selection(
+            &existing.last_run_selected_at,
+            &desired.last_run_selected_at,
+            &desired.profiles,
+        ),
+        response_profile_bindings: merge_response_profile_bindings(
+            &existing.response_profile_bindings,
+            &desired.response_profile_bindings,
+            &desired.profiles,
+        ),
+    }
+}
+
+fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()> {
+    let temp_file = unique_state_temp_file_path(&paths.state_file);
+    fs::write(&temp_file, json)
+        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    fs::rename(&temp_file, &paths.state_file).with_context(|| {
+        format!(
+            "failed to replace state file {}",
+            paths.state_file.display()
+        )
+    })?;
+    Ok(())
 }
 
 fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
-    json: &str,
+    snapshot: &AppState,
     revision: u64,
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
@@ -178,23 +295,21 @@ fn save_runtime_state_snapshot_if_latest(
         return Ok(false);
     }
 
-    fs::create_dir_all(&paths.root)
-        .with_context(|| format!("failed to create {}", paths.root.display()))?;
-    let temp_file = unique_state_temp_file_path(&paths.state_file);
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    let _lock = acquire_state_file_lock(paths)?;
 
     if latest_revision.load(Ordering::SeqCst) != revision {
-        let _ = fs::remove_file(&temp_file);
         return Ok(false);
     }
 
-    fs::rename(&temp_file, &paths.state_file).with_context(|| {
-        format!(
-            "failed to replace state file {}",
-            paths.state_file.display()
-        )
-    })?;
+    let existing = AppState::load(paths)?;
+    let merged = merge_runtime_state_snapshot(existing, snapshot);
+    let json = serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
+
+    if latest_revision.load(Ordering::SeqCst) != revision {
+        return Ok(false);
+    }
+
+    write_state_json_atomic(paths, &json)?;
     Ok(true)
 }
 
@@ -528,6 +643,16 @@ struct RuntimeRotationProxyShared {
     state_save_revision: Arc<AtomicU64>,
 }
 
+struct StateFileLock {
+    file: fs::File,
+}
+
+impl Drop for StateFileLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RuntimeRotationState {
     paths: AppPaths,
@@ -551,6 +676,7 @@ struct RuntimeRotationProxy {
     server: Arc<TinyServer>,
     shutdown: Arc<AtomicBool>,
     worker_threads: Vec<thread::JoinHandle<()>>,
+    accept_worker_count: usize,
     listen_addr: std::net::SocketAddr,
 }
 
@@ -2597,15 +2723,46 @@ fn start_runtime_rotation_proxy(
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
     let worker_count = runtime_proxy_worker_count();
+    let long_lived_worker_count = runtime_proxy_long_lived_worker_count();
+    let long_lived_queue_capacity =
+        runtime_proxy_long_lived_queue_capacity(long_lived_worker_count);
+    let (long_lived_sender, long_lived_receiver) =
+        mpsc::sync_channel::<tiny_http::Request>(long_lived_queue_capacity);
+    let long_lived_receiver = Arc::new(Mutex::new(long_lived_receiver));
     runtime_proxy_log_to_path(
         &log_path,
-        &format!("runtime proxy worker_count={worker_count}"),
+        &format!(
+            "runtime proxy worker_count={worker_count} long_lived_worker_count={long_lived_worker_count} long_lived_queue_capacity={long_lived_queue_capacity}"
+        ),
     );
+
+    for _ in 0..long_lived_worker_count {
+        let shutdown = Arc::clone(&shutdown);
+        let shared = shared.clone();
+        let receiver = Arc::clone(&long_lived_receiver);
+        worker_threads.push(thread::spawn(move || {
+            while !shutdown.load(Ordering::SeqCst) {
+                let request = {
+                    let guard = receiver.lock();
+                    let Ok(receiver) = guard else {
+                        break;
+                    };
+                    receiver.recv_timeout(Duration::from_millis(200))
+                };
+                match request {
+                    Ok(request) => handle_runtime_rotation_proxy_request(request, &shared),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        }));
+    }
 
     for _ in 0..worker_count {
         let server: Arc<TinyServer> = Arc::clone(&server);
         let shutdown = Arc::clone(&shutdown);
         let shared = shared.clone();
+        let long_lived_sender = long_lived_sender.clone();
         worker_threads.push(thread::spawn(move || {
             while !shutdown.load(Ordering::SeqCst) {
                 match server.recv_timeout(Duration::from_millis(200)) {
@@ -2613,10 +2770,13 @@ fn start_runtime_rotation_proxy(
                         let long_lived = is_tiny_http_websocket_upgrade(&request)
                             || is_runtime_responses_path(request.url());
                         if long_lived {
-                            let shared = shared.clone();
-                            thread::spawn(move || {
-                                handle_runtime_rotation_proxy_request(request, &shared)
-                            });
+                            match long_lived_sender.try_send(request) {
+                                Ok(()) => {}
+                                Err(TrySendError::Full(request))
+                                | Err(TrySendError::Disconnected(request)) => {
+                                    handle_runtime_rotation_proxy_request(request, &shared);
+                                }
+                            }
                         } else {
                             handle_runtime_rotation_proxy_request(request, &shared);
                         }
@@ -2633,6 +2793,7 @@ fn start_runtime_rotation_proxy(
         server,
         shutdown,
         worker_threads,
+        accept_worker_count: worker_count,
         listen_addr,
     })
 }
@@ -2640,7 +2801,7 @@ fn start_runtime_rotation_proxy(
 impl Drop for RuntimeRotationProxy {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        for _ in 0..self.worker_threads.len() {
+        for _ in 0..self.accept_worker_count {
             self.server.unblock();
         }
         for worker in self.worker_threads.drain(..) {
@@ -3510,15 +3671,21 @@ fn attempt_runtime_websocket_request(
     if let Err(err) = upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
         let _ = upstream_socket.close(None);
         websocket_session.reset();
+        let transport_error =
+            anyhow::anyhow!("failed to send runtime websocket request upstream: {err}");
+        note_runtime_profile_transport_failure(
+            shared,
+            profile_name,
+            "websocket_upstream_send",
+            &transport_error,
+        );
         runtime_proxy_log(
             shared,
             format!(
                 "request={request_id} transport=websocket upstream_send_error profile={profile_name} error={err}"
             ),
         );
-        return Err(anyhow::anyhow!(
-            "failed to send runtime websocket request upstream: {err}"
-        ));
+        return Err(transport_error);
     }
 
     let mut committed = false;
@@ -3627,7 +3794,15 @@ fn attempt_runtime_websocket_request(
                     ),
                 );
                 let _ = frame;
-                bail!("runtime websocket upstream closed before response.completed");
+                let transport_error =
+                    anyhow::anyhow!("runtime websocket upstream closed before response.completed");
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    "websocket_upstream_close",
+                    &transport_error,
+                );
+                return Err(transport_error);
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
                 websocket_session.reset();
@@ -3637,7 +3812,15 @@ fn attempt_runtime_websocket_request(
                         "request={request_id} transport=websocket upstream_connection_closed profile={profile_name}"
                     ),
                 );
-                bail!("runtime websocket upstream closed before response.completed");
+                let transport_error =
+                    anyhow::anyhow!("runtime websocket upstream closed before response.completed");
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    "websocket_upstream_connection_closed",
+                    &transport_error,
+                );
+                return Err(transport_error);
             }
             Err(err) => {
                 websocket_session.reset();
@@ -3647,9 +3830,16 @@ fn attempt_runtime_websocket_request(
                         "request={request_id} transport=websocket upstream_read_error profile={profile_name} error={err}"
                     ),
                 );
-                return Err(anyhow::anyhow!(
+                let transport_error = anyhow::anyhow!(
                     "runtime websocket upstream failed before response.completed: {err}"
-                ));
+                );
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    "websocket_upstream_read",
+                    &transport_error,
+                );
+                return Err(transport_error);
             }
         }
     }
@@ -3774,9 +3964,15 @@ fn connect_runtime_proxy_upstream_websocket(
                     "request={request_id} transport=websocket upstream_connect_error profile={profile_name} error={err}"
                 ),
             );
-            Err(anyhow::anyhow!(
-                "failed to connect runtime websocket upstream: {err}"
-            ))
+            let transport_error =
+                anyhow::anyhow!("failed to connect runtime websocket upstream: {err}");
+            note_runtime_profile_transport_failure(
+                shared,
+                profile_name,
+                "websocket_connect",
+                &transport_error,
+            );
+            Err(transport_error)
         }
     }
 }
@@ -4014,8 +4210,25 @@ fn proxy_runtime_standard_request_for_profile(
     profile_name: &str,
 ) -> Result<tiny_http::ResponseBox> {
     let response =
-        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)?;
-    forward_runtime_proxy_response(shared, response, Vec::new())
+        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
+            .map_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    "standard_upstream_request",
+                    &err,
+                );
+                err
+            })?;
+    forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
+        note_runtime_profile_transport_failure(
+            shared,
+            profile_name,
+            "standard_forward_response",
+            &err,
+        );
+        err
+    })
 }
 
 fn attempt_runtime_standard_request(
@@ -4025,16 +4238,44 @@ fn attempt_runtime_standard_request(
     profile_name: &str,
 ) -> Result<RuntimeStandardAttempt> {
     let response =
-        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)?;
+        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
+            .map_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    "compact_upstream_request",
+                    &err,
+                );
+                err
+            })?;
     if !is_runtime_compact_path(&request.path_and_query) || response.status().is_success() {
         return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
-            response: forward_runtime_proxy_response(shared, response, Vec::new())?,
+            response: forward_runtime_proxy_response(shared, response, Vec::new()).map_err(
+                |err| {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        "compact_forward_response",
+                        &err,
+                    );
+                    err
+                },
+            )?,
         });
     }
 
     let status = response.status().as_u16();
-    let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
+    let parts =
+        buffer_runtime_proxy_async_response_parts(shared, response, Vec::new()).map_err(|err| {
+            note_runtime_profile_transport_failure(
+                shared,
+                profile_name,
+                "compact_buffer_response",
+                &err,
+            );
+            err
+        })?;
     let retryable_quota =
         matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
     let retryable_overload = extract_runtime_proxy_overload_message(status, &parts.body).is_some();
@@ -4235,11 +4476,29 @@ fn attempt_runtime_responses_request(
         shared,
         profile_name,
         turn_state_override,
-    )?;
+    )
+    .map_err(|err| {
+        note_runtime_profile_transport_failure(
+            shared,
+            profile_name,
+            "responses_upstream_request",
+            &err,
+        );
+        err
+    })?;
     let response_turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     if !response.status().is_success() {
         let status = response.status().as_u16();
-        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
+        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+            .map_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    "responses_buffer_response",
+                    &err,
+                );
+                err
+            })?;
         let retryable_quota = matches!(status, 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
         let retryable_previous =
@@ -4266,7 +4525,17 @@ fn attempt_runtime_responses_request(
             response,
         });
     }
-    prepare_runtime_proxy_responses_success(request_id, response, shared, profile_name)
+    prepare_runtime_proxy_responses_success(request_id, response, shared, profile_name).map_err(
+        |err| {
+            note_runtime_profile_transport_failure(
+                shared,
+                profile_name,
+                "responses_prepare_success",
+                &err,
+            );
+            err
+        },
+    )
 }
 
 fn next_runtime_response_candidate(
@@ -4425,6 +4694,43 @@ fn mark_runtime_profile_retry_backoff(
         ),
     );
     Ok(())
+}
+
+fn mark_runtime_profile_transport_backoff(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    context: &str,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    prune_runtime_profile_retry_backoff(&mut runtime, now);
+    runtime.profile_probe_cache.remove(profile_name);
+    let until = now.saturating_add(RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS);
+    runtime
+        .profile_retry_backoff_until
+        .entry(profile_name.to_string())
+        .and_modify(|current| *current = (*current).max(until))
+        .or_insert(until);
+    runtime_proxy_log(
+        shared,
+        format!("profile_transport_backoff profile={profile_name} until={until} context={context}"),
+    );
+    Ok(())
+}
+
+fn note_runtime_profile_transport_failure(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    context: &str,
+    err: &anyhow::Error,
+) {
+    if !is_runtime_proxy_transport_failure(err) {
+        return;
+    }
+    let _ = mark_runtime_profile_transport_backoff(shared, profile_name, context);
 }
 
 fn commit_runtime_proxy_profile_selection(
@@ -4968,7 +5274,20 @@ impl RuntimeSseTapReader {
 
 impl Read for RuntimeSseTapReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let read = self.inner.read(buf)?;
+        let read = match self.inner.read(buf) {
+            Ok(read) => read,
+            Err(err) => {
+                let transport_error =
+                    anyhow::Error::new(io::Error::new(err.kind(), err.to_string()));
+                note_runtime_profile_transport_failure(
+                    &self.shared,
+                    &self.profile_name,
+                    "sse_read",
+                    &transport_error,
+                );
+                return Err(err);
+            }
+        };
         if read == 0 {
             self.state.finish(&self.shared, &self.profile_name);
             return Ok(0);
@@ -6818,20 +7137,12 @@ impl AppState {
     }
 
     fn save(&self, paths: &AppPaths) -> Result<()> {
-        fs::create_dir_all(&paths.root)
-            .with_context(|| format!("failed to create {}", paths.root.display()))?;
-
+        let _lock = acquire_state_file_lock(paths)?;
+        let existing = Self::load(paths)?;
+        let merged = merge_app_state_for_save(existing, self);
         let json =
-            serde_json::to_string_pretty(self).context("failed to serialize prodex state")?;
-        let temp_file = unique_state_temp_file_path(&paths.state_file);
-        fs::write(&temp_file, json)
-            .with_context(|| format!("failed to write {}", temp_file.display()))?;
-        fs::rename(&temp_file, &paths.state_file).with_context(|| {
-            format!(
-                "failed to replace state file {}",
-                paths.state_file.display()
-            )
-        })?;
+            serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
+        write_state_json_atomic(paths, &json)?;
         Ok(())
     }
 }
@@ -8306,6 +8617,209 @@ mod tests {
                 .expect("candidate selection should succeed"),
             Some("second".to_string())
         );
+    }
+
+    #[test]
+    fn optimistic_current_candidate_skips_transport_backoff() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        mark_runtime_profile_transport_backoff(&shared, "main", "test")
+            .expect("transport backoff should be recorded");
+
+        assert_eq!(
+            runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
+                .expect("candidate lookup should succeed"),
+            None
+        );
+    }
+
+    #[test]
+    fn app_state_save_merges_existing_runtime_bindings() {
+        let temp_dir = TestDir::new();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let existing = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: temp_dir.path.join("homes/main"),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: temp_dir.path.join("homes/second"),
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::from([("main".to_string(), 10)]),
+            response_profile_bindings: BTreeMap::from([(
+                "resp-existing".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: 10,
+                },
+            )]),
+        };
+        existing
+            .save(&paths)
+            .expect("initial state save should succeed");
+
+        let desired = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: existing.profiles.clone(),
+            last_run_selected_at: BTreeMap::from([("second".to_string(), 20)]),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        desired
+            .save(&paths)
+            .expect("merged state save should succeed");
+
+        let loaded = AppState::load(&paths).expect("state should reload");
+        assert_eq!(loaded.active_profile.as_deref(), Some("second"));
+        assert_eq!(
+            loaded
+                .response_profile_bindings
+                .get("resp-existing")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("main")
+        );
+        assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(10));
+        assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(20));
+    }
+
+    #[test]
+    fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
+        let temp_dir = TestDir::new();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let existing = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: temp_dir.path.join("homes/main"),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: temp_dir.path.join("homes/second"),
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::from([("second".to_string(), 30)]),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        existing
+            .save(&paths)
+            .expect("initial state save should succeed");
+
+        let snapshot = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: temp_dir.path.join("homes/main"),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::from([("main".to_string(), 40)]),
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: 40,
+                },
+            )]),
+        };
+        let revision = AtomicU64::new(1);
+        assert!(
+            save_runtime_state_snapshot_if_latest(&paths, &snapshot, 1, &revision)
+                .expect("runtime snapshot save should succeed")
+        );
+
+        let loaded = AppState::load(&paths).expect("state should reload");
+        assert_eq!(loaded.active_profile.as_deref(), Some("main"));
+        assert!(loaded.profiles.contains_key("second"));
+        assert_eq!(
+            loaded
+                .response_profile_bindings
+                .get("resp-main")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("main")
+        );
+        assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(30));
+        assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(40));
     }
 
     #[test]
