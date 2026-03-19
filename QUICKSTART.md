@@ -78,12 +78,38 @@ prodex run --profile second
 prodex run --profile second --no-auto-rotate
 ```
 
+`prodex run` uses a local runtime proxy for the session. The proxy keeps WebSocket and HTTP/SSE behavior as close as possible to direct `codex`, while handling safe account rotation before a request or stream is committed.
+
+In practice, that means:
+
+- existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
+- temporary quota, overload, and transport failures are tracked separately
+- flaky profiles can be deprioritized briefly without rotating mid-stream
+- pre-commit retry/selection is bounded so the proxy does not keep spinning too long when every candidate is currently bad
+- `/responses/compact` also gets the same safe retry/rotate treatment for temporary overload or quota exhaustion
+
 ## Debug the Environment
 
 ```bash
 prodex doctor
 prodex doctor --quota
 ```
+
+If a runtime session looks stalled, inspect the latest proxy log:
+
+```bash
+tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
+```
+
+Good markers to look for:
+
+- `profile_retry_backoff`
+- `profile_transport_backoff`
+- `profile_health`
+- `precommit_budget_exhausted`
+- `first_upstream_chunk`
+- `first_local_chunk`
+- `stream_read_error`
 
 ## Notes
 
@@ -96,3 +122,4 @@ prodex doctor --quota
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity
 - `prodex run` auto-rotates to the next ready profile when the current one hits a limit, including when you pass `--profile`
 - use `--no-auto-rotate` if you want the selected profile to stay blocked instead
+- runtime proxy diagnostics are written to `/tmp/prodex-runtime-*.log`, with the latest path stored in `/tmp/prodex-runtime-latest.path`

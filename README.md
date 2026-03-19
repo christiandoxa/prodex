@@ -15,6 +15,7 @@ In short:
 - one `prodex` profile = one `CODEX_HOME` directory
 - login is still handled by `codex`
 - `prodex` manages profiles, the active profile, built-in quota checks, and launching `codex`
+- `prodex run` uses a local runtime proxy that keeps Codex transport behavior as intact as possible while rotating accounts safely
 - Prodex-owned screens use a fixed 110-character layout with section headers, wrapped fields, and readable tables
 
 The mental model is similar to browser profiles, but for `codex`.
@@ -274,6 +275,17 @@ Skip quota preflight:
 prodex run --profile work --skip-quota-check
 ```
 
+At runtime, `prodex` keeps the transport side as close as possible to direct `codex`:
+
+- WebSocket and HTTP/SSE traffic still follow Codex reconnect and fallback behavior
+- account rotation happens inside the proxy, but only before a request or stream is committed
+- existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
+- temporary quota, overload, or transport failures can move later requests to another ready profile without rotating mid-stream
+- the current profile is still tried optimistically first when it looks healthy
+- quota backoff, transport backoff, and short-lived profile health penalties are tracked separately so the proxy can stop hammering a flaky account without weakening hard affinity
+- pre-commit candidate selection is bounded, so when all candidates are currently bad the proxy fails fast instead of spinning in the background for too long
+- the unary compact path (`/responses/compact`) is also eligible for safe retry and rotation on temporary overload or quota exhaustion
+
 ## Quota Behavior
 
 Before `prodex run` launches `codex`, `prodex` tries to check quota for the selected profile.
@@ -289,6 +301,30 @@ If that profile does not clearly have remaining required quota:
 
 If auto-rotate succeeds, the active profile is updated to the profile that was used.
 
+## Runtime Diagnostics
+
+If a session appears stalled or reconnect-heavy, inspect the latest runtime proxy log:
+
+```bash
+cat /tmp/prodex-runtime-latest.path
+tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
+```
+
+Useful files:
+
+- `/tmp/prodex-runtime-latest.path`: pointer to the latest runtime log
+- `/tmp/prodex-runtime-*.log`: per-run transport, fallback, and rotation diagnostics
+
+Useful log markers:
+
+- `profile_retry_backoff`
+- `profile_transport_backoff`
+- `profile_health`
+- `precommit_budget_exhausted`
+- `first_upstream_chunk`
+- `first_local_chunk`
+- `stream_read_error`
+
 ## Important Notes
 
 - quota checks are built into `prodex` and use the ChatGPT backend endpoint used by Codex
@@ -297,6 +333,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
 - managed Prodex profiles share the default `~/.codex` session history store, so `/resume` shows the same saved threads across accounts
 - `profile list`, `current`, `doctor`, `login`, `quota`, and other Prodex-owned screens use the same 110-character layout
+- runtime proxy diagnostics are written to `/tmp`, not to the Codex TUI
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 
 ## Environment Variables
