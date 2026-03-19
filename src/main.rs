@@ -520,7 +520,6 @@ struct RuntimeProxyRequest {
 
 #[derive(Debug, Clone)]
 struct RuntimeRotationProxyShared {
-    client: Client,
     async_client: reqwest::Client,
     async_runtime: Arc<TokioRuntime>,
     runtime: Arc<Mutex<RuntimeRotationState>>,
@@ -2567,12 +2566,6 @@ fn start_runtime_rotation_proxy(
             .context("failed to build runtime auto-rotate async runtime")?,
     );
     let shared = RuntimeRotationProxyShared {
-        client: Client::builder()
-            .connect_timeout(Duration::from_millis(
-                runtime_proxy_http_connect_timeout_ms(),
-            ))
-            .build()
-            .context("failed to build runtime auto-rotate HTTP client")?,
         async_client: reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(
                 runtime_proxy_http_connect_timeout_ms(),
@@ -4022,7 +4015,7 @@ fn proxy_runtime_standard_request_for_profile(
 ) -> Result<tiny_http::ResponseBox> {
     let response =
         send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)?;
-    forward_runtime_proxy_response(response, Vec::new())
+    forward_runtime_proxy_response(shared, response, Vec::new())
 }
 
 fn attempt_runtime_standard_request(
@@ -4036,12 +4029,12 @@ fn attempt_runtime_standard_request(
     if !is_runtime_compact_path(&request.path_and_query) || response.status().is_success() {
         return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
-            response: forward_runtime_proxy_response(response, Vec::new())?,
+            response: forward_runtime_proxy_response(shared, response, Vec::new())?,
         });
     }
 
     let status = response.status().as_u16();
-    let parts = buffer_runtime_proxy_blocking_response_parts(response, Vec::new())?;
+    let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
     let retryable_quota =
         matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
     let retryable_overload = extract_runtime_proxy_overload_message(status, &parts.body).is_some();
@@ -4477,7 +4470,7 @@ fn send_runtime_proxy_upstream_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
-) -> Result<reqwest::blocking::Response> {
+) -> Result<reqwest::Response> {
     let runtime = shared
         .runtime
         .lock()
@@ -4498,7 +4491,7 @@ fn send_runtime_proxy_upstream_request(
         )
     })?;
 
-    let mut upstream_request = shared.client.request(method, &upstream_url);
+    let mut upstream_request = shared.async_client.request(method, &upstream_url);
     for (name, value) in &request.headers {
         if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
             continue;
@@ -4536,12 +4529,15 @@ fn send_runtime_proxy_upstream_request(
             runtime_request_previous_response_id(request)
         ),
     );
-    let response = upstream_request.send().with_context(|| {
-        format!(
-            "failed to proxy runtime request for profile '{}' to {}",
-            profile_name, upstream_url
-        )
-    })?;
+    let response = shared
+        .async_runtime
+        .block_on(async move { upstream_request.send().await })
+        .with_context(|| {
+            format!(
+                "failed to proxy runtime request for profile '{}' to {}",
+                profile_name, upstream_url
+            )
+        })?;
     runtime_proxy_log(
         shared,
         format!(
@@ -4718,31 +4714,12 @@ fn should_skip_runtime_response_header(name: &str) -> bool {
 }
 
 fn forward_runtime_proxy_response(
-    response: reqwest::blocking::Response,
+    shared: &RuntimeRotationProxyShared,
+    response: reqwest::Response,
     prelude: Vec<u8>,
 ) -> Result<tiny_http::ResponseBox> {
-    let status = TinyStatusCode(response.status().as_u16());
-    let mut headers = Vec::new();
-    for (name, value) in response.headers() {
-        if should_skip_runtime_response_header(name.as_str()) {
-            continue;
-        }
-        if let Ok(header) = TinyHeader::from_bytes(name.as_str(), value.as_bytes()) {
-            headers.push(header);
-        }
-    }
-
-    let content_length = response
-        .content_length()
-        .and_then(|length| usize::try_from(length).ok())
-        .and_then(|length| length.checked_add(prelude.len()));
-    let reader: Box<dyn Read + Send> = if prelude.is_empty() {
-        Box::new(response)
-    } else {
-        Box::new(Cursor::new(prelude).chain(response))
-    };
-
-    Ok(TinyResponse::new(status, headers, reader, content_length, None).boxed())
+    let parts = buffer_runtime_proxy_async_response_parts(shared, response, prelude)?;
+    Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
 fn prepare_runtime_proxy_responses_success(
@@ -5423,28 +5400,6 @@ fn buffer_runtime_proxy_async_response_parts(
         .block_on(async move { response.bytes().await })
         .context("failed to read upstream runtime response body")?;
     prelude.extend_from_slice(&body);
-    Ok(RuntimeBufferedResponseParts {
-        status,
-        headers,
-        body: prelude,
-    })
-}
-
-fn buffer_runtime_proxy_blocking_response_parts(
-    mut response: reqwest::blocking::Response,
-    mut prelude: Vec<u8>,
-) -> Result<RuntimeBufferedResponseParts> {
-    let status = response.status().as_u16();
-    let mut headers = Vec::new();
-    for (name, value) in response.headers() {
-        if should_skip_runtime_response_header(name.as_str()) {
-            continue;
-        }
-        headers.push((name.as_str().to_string(), value.as_bytes().to_vec()));
-    }
-    response
-        .read_to_end(&mut prelude)
-        .context("failed to read upstream runtime response body")?;
     Ok(RuntimeBufferedResponseParts {
         status,
         headers,
@@ -8331,7 +8286,6 @@ mod tests {
             )]),
         };
         let shared = RuntimeRotationProxyShared {
-            client: Client::builder().build().expect("client"),
             async_client: reqwest::Client::builder().build().expect("async client"),
             async_runtime: Arc::new(
                 TokioRuntimeBuilder::new_multi_thread()
@@ -8409,7 +8363,6 @@ mod tests {
             profile_retry_backoff_until: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
-            client: Client::builder().build().expect("client"),
             async_client: reqwest::Client::builder().build().expect("async client"),
             async_runtime: Arc::new(
                 TokioRuntimeBuilder::new_multi_thread()
@@ -8476,7 +8429,6 @@ mod tests {
             profile_retry_backoff_until: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
-            client: Client::builder().build().expect("client"),
             async_client: reqwest::Client::builder().build().expect("async client"),
             async_runtime: Arc::new(
                 TokioRuntimeBuilder::new_multi_thread()
