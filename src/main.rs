@@ -429,6 +429,7 @@ enum RuntimeResponsesAttempt {
     PreviousResponseNotFound {
         profile_name: String,
         response: RuntimeResponsesReply,
+        turn_state: Option<String>,
     },
 }
 
@@ -460,6 +461,11 @@ struct RuntimeStreamingResponse {
     body: Box<dyn Read + Send>,
 }
 
+struct RuntimeTransportAbortReader {
+    message: &'static str,
+    emitted: bool,
+}
+
 #[derive(Debug)]
 enum RuntimeWebsocketAttempt {
     Delivered,
@@ -470,6 +476,7 @@ enum RuntimeWebsocketAttempt {
     PreviousResponseNotFound {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
+        turn_state: Option<String>,
     },
 }
 
@@ -2454,10 +2461,7 @@ fn handle_runtime_rotation_proxy_request(
             Ok(response) => response,
             Err(err) => {
                 if is_runtime_proxy_transport_failure(&err) {
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
-                        504,
-                        "Runtime upstream transport timed out.",
-                    ))
+                    build_runtime_proxy_transport_abort_reply()
                 } else {
                     RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
                         502,
@@ -2492,6 +2496,20 @@ fn handle_runtime_rotation_proxy_request(
         }
     };
     let _ = request.respond(response);
+}
+
+fn build_runtime_proxy_transport_abort_reply() -> RuntimeResponsesReply {
+    RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
+        status: 200,
+        headers: vec![(
+            "Content-Type".to_string(),
+            "text/event-stream".to_string(),
+        )],
+        body: Box::new(RuntimeTransportAbortReader {
+            message: "runtime upstream transport timed out",
+            emitted: false,
+        }),
+    })
 }
 
 fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bool {
@@ -2889,13 +2907,13 @@ fn proxy_runtime_websocket_text_message(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<()> {
     let previous_response_id = runtime_request_previous_response_id_from_text(request_text);
-    let turn_state = runtime_request_turn_state(handshake_request);
+    let request_turn_state = runtime_request_turn_state(handshake_request);
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
         .transpose()?
         .flatten();
-    let mut turn_state_profile = turn_state
+    let mut turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
@@ -2907,7 +2925,10 @@ fn proxy_runtime_websocket_text_message(
     });
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
+    let mut previous_response_retry_candidate: Option<String> = None;
     let mut previous_response_retry_index = 0usize;
+    let mut candidate_turn_state_retry_profile: Option<String> = None;
+    let mut candidate_turn_state_retry_value: Option<String> = None;
 
     loop {
         let Some(candidate_name) = select_runtime_response_candidate(
@@ -2933,6 +2954,13 @@ fn proxy_runtime_websocket_text_message(
             }
             return Ok(());
         };
+        let turn_state_override = if candidate_turn_state_retry_profile.as_deref()
+            == Some(candidate_name.as_str())
+        {
+            candidate_turn_state_retry_value.as_deref()
+        } else {
+            request_turn_state.as_deref()
+        };
 
         match attempt_runtime_websocket_request(
             local_socket,
@@ -2940,6 +2968,7 @@ fn proxy_runtime_websocket_text_message(
             request_text,
             shared,
             &candidate_name,
+            turn_state_override,
         )? {
             RuntimeWebsocketAttempt::Delivered => return Ok(()),
             RuntimeWebsocketAttempt::QuotaBlocked {
@@ -2950,6 +2979,10 @@ fn proxy_runtime_websocket_text_message(
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                     return Ok(());
+                }
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
                 }
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     pinned_profile = None;
@@ -2964,18 +2997,31 @@ fn proxy_runtime_websocket_text_message(
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
                 profile_name,
                 payload,
+                turn_state,
             } => {
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    if let Some(delay) =
-                        runtime_previous_response_retry_delay(previous_response_retry_index)
-                    {
-                        previous_response_retry_index += 1;
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                        thread::sleep(delay);
-                        continue;
-                    }
-                    pinned_profile = None;
+                if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
+                    previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
+                }
+                if turn_state.is_some() {
+                    candidate_turn_state_retry_profile = Some(profile_name.clone());
+                    candidate_turn_state_retry_value = turn_state;
+                }
+                if let Some(delay) = runtime_previous_response_retry_delay(previous_response_retry_index)
+                {
+                    previous_response_retry_index += 1;
+                    last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                    thread::sleep(delay);
+                    continue;
+                }
+                previous_response_retry_candidate = None;
+                previous_response_retry_index = 0;
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                }
+                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                    pinned_profile = None;
                 }
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
@@ -2993,9 +3039,15 @@ fn attempt_runtime_websocket_request(
     request_text: &str,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
     let (mut upstream_socket, upstream_turn_state) =
-        match connect_runtime_proxy_upstream_websocket(handshake_request, shared, profile_name)? {
+        match connect_runtime_proxy_upstream_websocket(
+            handshake_request,
+            shared,
+            profile_name,
+            turn_state_override,
+        )? {
             RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (socket, turn_state),
             RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
                 return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
@@ -3028,6 +3080,7 @@ fn attempt_runtime_websocket_request(
                         return Ok(RuntimeWebsocketAttempt::PreviousResponseNotFound {
                             profile_name: profile_name.to_string(),
                             payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
+                            turn_state: upstream_turn_state.clone(),
                         });
                     }
                     _ => {}
@@ -3095,6 +3148,7 @@ fn connect_runtime_proxy_upstream_websocket(
     handshake_request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketConnectResult> {
     let runtime = shared
         .runtime
@@ -3117,6 +3171,9 @@ fn connect_runtime_proxy_upstream_websocket(
         .with_context(|| format!("failed to build runtime websocket request for {upstream_url}"))?;
 
     for (name, value) in &handshake_request.headers {
+        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+            continue;
+        }
         if should_skip_runtime_request_header(name) {
             continue;
         }
@@ -3127,6 +3184,13 @@ fn connect_runtime_proxy_upstream_websocket(
             continue;
         };
         request.headers_mut().insert(header_name, header_value);
+    }
+    if let Some(turn_state) = turn_state_override {
+        request.headers_mut().insert(
+            WsHeaderName::from_static("x-codex-turn-state"),
+            WsHeaderValue::from_str(turn_state)
+                .context("failed to encode websocket turn-state header")?,
+        );
     }
 
     request.headers_mut().insert(
@@ -3275,6 +3339,7 @@ fn runtime_proxy_websocket_retry_action(payload: &str) -> Option<RuntimeWebsocke
         return Some(RuntimeWebsocketAttempt::PreviousResponseNotFound {
             profile_name: String::new(),
             payload: RuntimeWebsocketErrorPayload::Text(payload.to_string()),
+            turn_state: None,
         });
     }
     if let Some(message) = extract_runtime_proxy_quota_message_from_value(&value) {
@@ -3305,7 +3370,7 @@ fn proxy_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<tiny_http::ResponseBox> {
-    let response = send_runtime_proxy_upstream_request(request, shared, profile_name)?;
+    let response = send_runtime_proxy_upstream_request(request, shared, profile_name, None)?;
     forward_runtime_proxy_response(response, Vec::new())
 }
 
@@ -3314,13 +3379,13 @@ fn proxy_runtime_responses_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
     let previous_response_id = runtime_request_previous_response_id(request);
-    let turn_state = runtime_request_turn_state(request);
+    let request_turn_state = runtime_request_turn_state(request);
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
         .transpose()?
         .flatten();
-    let mut turn_state_profile = turn_state
+    let mut turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
@@ -3332,7 +3397,10 @@ fn proxy_runtime_responses_request(
     });
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
+    let mut previous_response_retry_candidate: Option<String> = None;
     let mut previous_response_retry_index = 0usize;
+    let mut candidate_turn_state_retry_profile: Option<String> = None;
+    let mut candidate_turn_state_retry_value: Option<String> = None;
 
     loop {
         let Some(candidate_name) = select_runtime_response_candidate(
@@ -3352,8 +3420,16 @@ fn proxy_runtime_responses_request(
                 )),
             });
         };
+        let turn_state_override = if candidate_turn_state_retry_profile.as_deref()
+            == Some(candidate_name.as_str())
+        {
+            candidate_turn_state_retry_value.as_deref()
+        } else {
+            request_turn_state.as_deref()
+        };
 
-        match attempt_runtime_responses_request(request, shared, &candidate_name)? {
+        match attempt_runtime_responses_request(request, shared, &candidate_name, turn_state_override)?
+        {
             RuntimeResponsesAttempt::Success {
                 profile_name,
                 response,
@@ -3369,6 +3445,10 @@ fn proxy_runtime_responses_request(
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
                     return Ok(response);
                 }
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                }
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     pinned_profile = None;
                     previous_response_retry_index = 0;
@@ -3382,18 +3462,31 @@ fn proxy_runtime_responses_request(
             RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name,
                 response,
+                turn_state,
             } => {
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    if let Some(delay) =
-                        runtime_previous_response_retry_delay(previous_response_retry_index)
-                    {
-                        previous_response_retry_index += 1;
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
-                        thread::sleep(delay);
-                        continue;
-                    }
-                    pinned_profile = None;
+                if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
+                    previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
+                }
+                if turn_state.is_some() {
+                    candidate_turn_state_retry_profile = Some(profile_name.clone());
+                    candidate_turn_state_retry_value = turn_state;
+                }
+                if let Some(delay) = runtime_previous_response_retry_delay(previous_response_retry_index)
+                {
+                    previous_response_retry_index += 1;
+                    last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                    thread::sleep(delay);
+                    continue;
+                }
+                previous_response_retry_candidate = None;
+                previous_response_retry_index = 0;
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                }
+                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                    pinned_profile = None;
                 }
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
@@ -3409,8 +3502,11 @@ fn attempt_runtime_responses_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
-    let mut response = send_runtime_proxy_upstream_request(request, shared, profile_name)?;
+    let mut response =
+        send_runtime_proxy_upstream_request(request, shared, profile_name, turn_state_override)?;
+    let response_turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let parts = buffer_runtime_proxy_response_parts(&mut response, Vec::new())?;
@@ -3431,6 +3527,7 @@ fn attempt_runtime_responses_request(
             return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name: profile_name.to_string(),
                 response,
+                turn_state: response_turn_state,
             });
         }
 
@@ -3624,6 +3721,7 @@ fn send_runtime_proxy_upstream_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    turn_state_override: Option<&str>,
 ) -> Result<reqwest::blocking::Response> {
     let runtime = shared
         .runtime
@@ -3647,10 +3745,16 @@ fn send_runtime_proxy_upstream_request(
 
     let mut upstream_request = shared.client.request(method, &upstream_url);
     for (name, value) in &request.headers {
+        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+            continue;
+        }
         if should_skip_runtime_request_header(name) {
             continue;
         }
         upstream_request = upstream_request.header(name.as_str(), value.as_str());
+    }
+    if let Some(turn_state) = turn_state_override {
+        upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
     }
 
     upstream_request = upstream_request
@@ -3814,6 +3918,7 @@ fn prepare_runtime_proxy_responses_success(
                 response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
                     response, prelude,
                 )?),
+                turn_state,
             });
         }
     };
@@ -3915,6 +4020,17 @@ impl Read for RuntimeSseTapReader {
         self.state
             .observe(&self.shared, &self.profile_name, &buf[..read]);
         Ok(read)
+    }
+}
+
+impl Read for RuntimeTransportAbortReader {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        if self.emitted {
+            return Ok(0);
+        }
+
+        self.emitted = true;
+        Err(io::Error::new(io::ErrorKind::TimedOut, self.message))
     }
 }
 
@@ -5577,7 +5693,9 @@ mod tests {
         HttpOnly,
         HttpOnlyInitialBodyStall,
         HttpOnlySlowStream,
+        HttpOnlyPreviousResponseNeedsTurnState,
         Websocket,
+        WebsocketPreviousResponseNeedsTurnState,
     }
 
     impl RuntimeProxyBackend {
@@ -5593,8 +5711,16 @@ mod tests {
             Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySlowStream)
         }
 
+        fn start_http_previous_response_needs_turn_state() -> Self {
+            Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState)
+        }
+
         fn start_websocket() -> Self {
             Self::start_with_mode(RuntimeProxyBackendMode::Websocket)
+        }
+
+        fn start_websocket_previous_response_needs_turn_state() -> Self {
+            Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState)
         }
 
         fn start_with_mode(mode: RuntimeProxyBackendMode) -> Self {
@@ -5619,8 +5745,11 @@ mod tests {
                         Ok((stream, _)) => {
                             let responses_accounts_flag = Arc::clone(&responses_accounts_flag);
                             let usage_accounts_flag = Arc::clone(&usage_accounts_flag);
-                            let websocket_enabled =
-                                matches!(mode, RuntimeProxyBackendMode::Websocket);
+                            let websocket_enabled = matches!(
+                                mode,
+                                RuntimeProxyBackendMode::Websocket
+                                    | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                            );
                             thread::spawn(move || {
                                 if websocket_enabled
                                     && runtime_proxy_backend_is_websocket_upgrade(&stream)
@@ -5703,8 +5832,16 @@ mod tests {
             .and_then(|line| line.split_whitespace().nth(1))
             .unwrap_or("/");
         let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
+        let turn_state = request_header(&request, "x-codex-turn-state");
 
-        let (status_line, content_type, body, initial_body_stall, chunk_delay) = if path
+        let (
+            status_line,
+            content_type,
+            body,
+            response_turn_state,
+            initial_body_stall,
+            chunk_delay,
+        ) = if path
             .ends_with("/backend-api/wham/usage")
         {
             usage_accounts
@@ -5725,7 +5862,7 @@ mod tests {
             } else {
                 "HTTP/1.1 401 Unauthorized"
             };
-            (status, "application/json", body, None, None)
+            (status, "application/json", body, None, None, None)
         } else if path.ends_with("/backend-api/codex/responses") {
             responses_accounts
                 .lock()
@@ -5742,11 +5879,40 @@ mod tests {
                         "\r\n"
                     )
                     .to_string(),
+                    None,
                     matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
                     matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                         .then_some(Duration::from_millis(100)),
                 ),
+                "second-account"
+                    if matches!(
+                        _mode,
+                        RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState
+                    ) && previous_response_id.as_deref() == Some("resp-second")
+                        && turn_state.as_deref() != Some("turn-second") =>
+                {
+                    (
+                        "HTTP/1.1 400 Bad Request",
+                        "application/json",
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "code": "previous_response_not_found",
+                                "message": format!(
+                                    "Previous response with id '{}' not found.",
+                                    previous_response_id.as_deref().unwrap_or_default()
+                                ),
+                                "param": "previous_response_id",
+                            }
+                        })
+                        .to_string(),
+                        Some("turn-second".to_string()),
+                        None,
+                        None,
+                    )
+                }
                 "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
                     (
                         "HTTP/1.1 200 OK",
@@ -5760,6 +5926,7 @@ mod tests {
                             "\r\n"
                         )
                         .to_string(),
+                        None,
                         matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
                         matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
@@ -5782,6 +5949,7 @@ mod tests {
                         }
                     })
                     .to_string(),
+                    None,
                     matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
                     None,
@@ -5798,6 +5966,7 @@ mod tests {
                         "\r\n"
                         )
                         .to_string(),
+                        None,
                         matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
                         matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
@@ -5819,6 +5988,7 @@ mod tests {
                         }
                     })
                     .to_string(),
+                    None,
                     matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
                     None,
@@ -5835,6 +6005,7 @@ mod tests {
                         "\r\n"
                         )
                         .to_string(),
+                        None,
                         matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
                         matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
@@ -5849,6 +6020,7 @@ mod tests {
                         "\r\n"
                         )
                         .to_string(),
+                    None,
                     matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
                     matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
@@ -5862,13 +6034,18 @@ mod tests {
                 serde_json::json!({ "error": "not_found" }).to_string(),
                 None,
                 None,
+                None,
             )
         };
 
-        let headers = format!(
-            "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        let mut headers = format!(
+            "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
             body.len(),
         );
+        if let Some(turn_state) = response_turn_state.as_deref() {
+            headers.push_str(&format!("x-codex-turn-state: {turn_state}\r\n"));
+        }
+        headers.push_str("\r\n");
         let _ = stream.write_all(headers.as_bytes());
         let _ = stream.flush();
         if let Some(delay) = initial_body_stall {
@@ -5907,11 +6084,14 @@ mod tests {
     fn handle_runtime_proxy_backend_websocket(
         stream: TcpStream,
         responses_accounts: &Arc<Mutex<Vec<String>>>,
-        _mode: RuntimeProxyBackendMode,
+        mode: RuntimeProxyBackendMode,
     ) {
         let account_id = Arc::new(Mutex::new(String::new()));
+        let request_turn_state = Arc::new(Mutex::new(None::<String>));
         let captured_account_id = Arc::clone(&account_id);
-        let callback = move |req: &tungstenite::handshake::server::Request, response| {
+        let captured_turn_state = Arc::clone(&request_turn_state);
+        let callback = move |req: &tungstenite::handshake::server::Request,
+                             response: tungstenite::handshake::server::Response| {
             if let Some(value) = req
                 .headers()
                 .get("ChatGPT-Account-Id")
@@ -5921,11 +6101,39 @@ mod tests {
                     .lock()
                     .expect("captured_account_id poisoned") = value.to_string();
             }
+            if let Some(value) = req
+                .headers()
+                .get("x-codex-turn-state")
+                .and_then(|value| value.to_str().ok())
+            {
+                *captured_turn_state
+                    .lock()
+                    .expect("captured_turn_state poisoned") = Some(value.to_string());
+            }
+            let mut response = response;
+            if matches!(
+                mode,
+                RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+            ) && req
+                .headers()
+                .get("ChatGPT-Account-Id")
+                .and_then(|value| value.to_str().ok())
+                == Some("second-account")
+            {
+                response.headers_mut().insert(
+                    tungstenite::http::header::HeaderName::from_static("x-codex-turn-state"),
+                    tungstenite::http::HeaderValue::from_static("turn-second"),
+                );
+            }
             Ok(response)
         };
         let mut websocket = tungstenite::accept_hdr(stream, callback)
             .expect("backend websocket handshake should succeed");
         let account_id = account_id.lock().expect("account_id poisoned").clone();
+        let request_turn_state = request_turn_state
+            .lock()
+            .expect("request_turn_state poisoned")
+            .clone();
         responses_accounts
             .lock()
             .expect("responses_accounts poisoned")
@@ -5960,6 +6168,32 @@ mod tests {
                         .into(),
                     ))
                     .expect("quota error should be sent");
+            }
+            "second-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                ) && previous_response_id.as_deref() == Some("resp-second")
+                    && request_turn_state.as_deref() != Some("turn-second") =>
+            {
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "code": "previous_response_not_found",
+                                "message": format!(
+                                    "Previous response with id '{}' not found.",
+                                    previous_response_id.as_deref().unwrap_or_default()
+                                ),
+                                "param": "previous_response_id",
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("previous_response_not_found should be sent");
             }
             "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
                 websocket
@@ -7246,11 +7480,27 @@ mod tests {
             "stalled HTTP fallback took too long: {elapsed:?}"
         );
         match result {
-            Ok(response) => assert!(
-                !response.status().is_success(),
-                "stalled HTTP fallback unexpectedly succeeded with status {}",
-                response.status()
-            ),
+            Ok(response) => {
+                assert_eq!(
+                    response.status(),
+                    reqwest::StatusCode::OK,
+                    "runtime proxy should surface a dropped stream, not a synthetic HTTP error"
+                );
+                let content_type = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                assert!(
+                    content_type.contains("text/event-stream"),
+                    "runtime proxy should keep responses transport semantics on failure"
+                );
+                assert!(
+                    response.text().is_err(),
+                    "aborted runtime stream should fail while reading the body"
+                );
+            }
             Err(_) => {}
         }
     }
@@ -7929,6 +8179,141 @@ mod tests {
                 "main-account".to_string(),
                 "second-account".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_retries_previous_response_with_upstream_turn_state_http() {
+        let backend = RuntimeProxyBackend::start_http_previous_response_needs_turn_state();
+        let temp_dir = TestDir::new();
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([(
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+                .expect("runtime proxy should start");
+        let client = Client::builder().build().expect("client");
+
+        let response = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let body = response.text().expect("response body should be readable");
+
+        assert!(
+            body.contains("\"resp-second-next\""),
+            "unexpected HTTP retry body: {body}"
+        );
+        assert_eq!(
+            backend.responses_accounts(),
+            vec!["second-account".to_string(), "second-account".to_string()]
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() {
+        let backend = RuntimeProxyBackend::start_websocket_previous_response_needs_turn_state();
+        let temp_dir = TestDir::new();
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([(
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+                .expect("runtime proxy should start");
+
+        let (mut socket, _response) = ws_connect(format!(
+            "ws://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .expect("runtime proxy websocket handshake should succeed");
+        socket
+            .send(WsMessage::Text(
+                "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+                    .to_string()
+                    .into(),
+            ))
+            .expect("runtime proxy websocket request should be sent");
+
+        let mut payloads = Vec::new();
+        loop {
+            match socket
+                .read()
+                .expect("runtime proxy websocket should stay open")
+            {
+                WsMessage::Text(text) => {
+                    let text = text.to_string();
+                    let done = is_runtime_terminal_event(&text);
+                    payloads.push(text);
+                    if done {
+                        break;
+                    }
+                }
+                WsMessage::Ping(payload) => {
+                    socket
+                        .send(WsMessage::Pong(payload))
+                        .expect("pong should be sent");
+                }
+                WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+                other => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+
+        assert!(
+            payloads
+                .iter()
+                .any(|payload| payload.contains("\"resp-second-next\"")),
+            "unexpected websocket retry payloads: {payloads:?}"
+        );
+        assert_eq!(
+            backend.responses_accounts(),
+            vec!["second-account".to_string(), "second-account".to_string()]
         );
     }
 
