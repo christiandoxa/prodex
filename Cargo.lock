@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.2.23"
+version = "0.2.24"
 dependencies = [
  "anyhow",
  "base64",
@@ -898,6 +898,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tiny_http",
+ "tokio",
  "tungstenite",
 ]
 

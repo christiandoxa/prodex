@@ -23,6 +23,7 @@ use tiny_http::{
     Header as TinyHeader, ReadWrite as TinyReadWrite, Response as TinyResponse,
     Server as TinyServer, StatusCode as TinyStatusCode,
 };
+use tokio::runtime::{Builder as TokioRuntimeBuilder, Runtime as TokioRuntime};
 use tungstenite::client::IntoClientRequest;
 #[cfg(test)]
 use tungstenite::connect as ws_connect;
@@ -439,6 +440,8 @@ struct RuntimeProxyRequest {
 #[derive(Debug, Clone)]
 struct RuntimeRotationProxyShared {
     client: Client,
+    async_client: reqwest::Client,
+    async_runtime: Arc<TokioRuntime>,
     runtime: Arc<Mutex<RuntimeRotationState>>,
     log_path: PathBuf,
     request_sequence: Arc<AtomicU64>,
@@ -2463,6 +2466,13 @@ fn start_runtime_rotation_proxy(
         .to_ip()
         .context("runtime auto-rotate proxy did not expose a TCP listen address")?;
     let log_path = initialize_runtime_proxy_log_path();
+    let async_runtime = Arc::new(
+        TokioRuntimeBuilder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .context("failed to build runtime auto-rotate async runtime")?,
+    );
     let shared = RuntimeRotationProxyShared {
         client: Client::builder()
             .connect_timeout(Duration::from_millis(
@@ -2470,6 +2480,14 @@ fn start_runtime_rotation_proxy(
             ))
             .build()
             .context("failed to build runtime auto-rotate HTTP client")?,
+        async_client: reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(
+                runtime_proxy_http_connect_timeout_ms(),
+            ))
+            .read_timeout(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms()))
+            .build()
+            .context("failed to build runtime auto-rotate async HTTP client")?,
+        async_runtime,
         log_path: log_path.clone(),
         request_sequence: Arc::new(AtomicU64::new(1)),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
@@ -3963,7 +3981,7 @@ fn attempt_runtime_responses_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
-    let mut response = send_runtime_proxy_upstream_request(
+    let response = send_runtime_proxy_upstream_responses_request(
         request_id,
         request,
         shared,
@@ -3973,7 +3991,7 @@ fn attempt_runtime_responses_request(
     let response_turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     if !response.status().is_success() {
         let status = response.status().as_u16();
-        let parts = buffer_runtime_proxy_response_parts(&mut response, Vec::new())?;
+        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
         let retryable_quota = matches!(status, 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
         let retryable_previous =
@@ -4273,6 +4291,90 @@ fn send_runtime_proxy_upstream_request(
     Ok(response)
 }
 
+fn send_runtime_proxy_upstream_responses_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    turn_state_override: Option<&str>,
+) -> Result<reqwest::Response> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+        .clone();
+    let profile = runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    let auth = read_usage_auth(&profile.codex_home)?;
+    let upstream_url =
+        runtime_proxy_upstream_url(&runtime.upstream_base_url, &request.path_and_query);
+    let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
+        format!(
+            "failed to proxy unsupported HTTP method '{}' for runtime auto-rotate",
+            request.method
+        )
+    })?;
+
+    let mut upstream_request = shared.async_client.request(method, &upstream_url);
+    for (name, value) in &request.headers {
+        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+            continue;
+        }
+        if should_skip_runtime_request_header(name) {
+            continue;
+        }
+        upstream_request = upstream_request.header(name.as_str(), value.as_str());
+    }
+    if let Some(turn_state) = turn_state_override {
+        upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
+    }
+
+    upstream_request = upstream_request
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .header("User-Agent", "codex-cli")
+        .body(request.body.clone());
+
+    if let Some(account_id) = auth.account_id.as_deref() {
+        upstream_request = upstream_request.header("ChatGPT-Account-Id", account_id);
+    }
+
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http upstream_async_start profile={profile_name} method={} url={} turn_state_override={:?} previous_response_id={:?}",
+            request.method,
+            upstream_url,
+            turn_state_override,
+            runtime_request_previous_response_id(request)
+        ),
+    );
+    let response = shared
+        .async_runtime
+        .block_on(async move { upstream_request.send().await })
+        .with_context(|| {
+            format!(
+                "failed to proxy runtime request for profile '{}' to {}",
+                profile_name, upstream_url
+            )
+        })?;
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http upstream_async_response profile={profile_name} status={} content_type={:?} turn_state={:?}",
+            response.status().as_u16(),
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
+        ),
+    );
+    Ok(response)
+}
+
 fn runtime_proxy_upstream_url(base_url: &str, path_and_query: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
     if base_url.contains("/backend-api")
@@ -4366,7 +4468,7 @@ fn forward_runtime_proxy_response(
 
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
-    response: reqwest::blocking::Response,
+    response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeResponsesAttempt> {
@@ -4385,12 +4487,12 @@ fn prepare_runtime_proxy_responses_success(
         ),
     );
     if !is_sse {
+        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
-            response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
-                response,
-                Vec::new(),
-            )?),
+            response: RuntimeResponsesReply::Buffered(build_runtime_proxy_response_from_parts(
+                parts,
+            )),
         });
     }
 
@@ -4405,7 +4507,12 @@ fn prepare_runtime_proxy_responses_success(
         }
     }
 
-    let mut prefetch = RuntimePrefetchStream::spawn(response, shared.log_path.clone(), request_id);
+    let mut prefetch = RuntimePrefetchStream::spawn(
+        response,
+        Arc::clone(&shared.async_runtime),
+        shared.log_path.clone(),
+        request_id,
+    );
     let lookahead = inspect_runtime_sse_lookahead(&mut prefetch, &shared.log_path, request_id)?;
 
     let (prelude, response_ids) = match lookahead {
@@ -4783,13 +4890,14 @@ fn path_without_query(path_and_query: &str) -> &str {
 
 impl RuntimePrefetchStream {
     fn spawn(
-        mut response: reqwest::blocking::Response,
+        response: reqwest::Response,
+        async_runtime: Arc<TokioRuntime>,
         log_path: PathBuf,
         request_id: u64,
     ) -> Self {
         let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(8);
-        thread::spawn(move || {
-            runtime_prefetch_response_chunks(&mut response, sender, log_path, request_id);
+        async_runtime.spawn(async move {
+            runtime_prefetch_response_chunks(response, sender, log_path, request_id).await;
         });
         Self {
             receiver,
@@ -4821,17 +4929,16 @@ impl RuntimePrefetchStream {
     }
 }
 
-fn runtime_prefetch_response_chunks(
-    response: &mut reqwest::blocking::Response,
+async fn runtime_prefetch_response_chunks(
+    mut response: reqwest::Response,
     sender: SyncSender<RuntimePrefetchChunk>,
     log_path: PathBuf,
     request_id: u64,
 ) {
-    let mut buffer = [0_u8; 8192];
     let mut saw_data = false;
     loop {
-        match response.read(&mut buffer) {
-            Ok(0) => {
+        match response.chunk().await {
+            Ok(None) => {
                 runtime_proxy_log_to_path(
                     &log_path,
                     &format!(
@@ -4841,18 +4948,19 @@ fn runtime_prefetch_response_chunks(
                 let _ = sender.send(RuntimePrefetchChunk::End);
                 break;
             }
-            Ok(read) => {
+            Ok(Some(chunk)) => {
                 if !saw_data {
                     saw_data = true;
                     runtime_proxy_log_to_path(
                         &log_path,
                         &format!(
-                            "request={request_id} transport=http first_upstream_chunk bytes={read}"
+                            "request={request_id} transport=http first_upstream_chunk bytes={}",
+                            chunk.len()
                         ),
                     );
                 }
                 if sender
-                    .send(RuntimePrefetchChunk::Data(buffer[..read].to_vec()))
+                    .send(RuntimePrefetchChunk::Data(chunk.to_vec()))
                     .is_err()
                 {
                     runtime_proxy_log_to_path(
@@ -4865,14 +4973,14 @@ fn runtime_prefetch_response_chunks(
                 }
             }
             Err(err) => {
+                let kind = runtime_reqwest_error_kind(&err);
                 runtime_proxy_log_to_path(
                     &log_path,
                     &format!(
-                        "request={request_id} transport=http upstream_stream_error kind={:?} error={err}",
-                        err.kind()
+                        "request={request_id} transport=http upstream_stream_error kind={kind:?} error={err}"
                     ),
                 );
-                let _ = sender.send(RuntimePrefetchChunk::Error(err.kind(), err.to_string()));
+                let _ = sender.send(RuntimePrefetchChunk::Error(kind, err.to_string()));
                 break;
             }
         }
@@ -5012,8 +5120,9 @@ fn inspect_runtime_sse_buffer(buffered: Vec<u8>) -> Result<RuntimeSseInspection>
     })
 }
 
-fn buffer_runtime_proxy_response_parts(
-    response: &mut reqwest::blocking::Response,
+fn buffer_runtime_proxy_async_response_parts(
+    shared: &RuntimeRotationProxyShared,
+    response: reqwest::Response,
     mut prelude: Vec<u8>,
 ) -> Result<RuntimeBufferedResponseParts> {
     let status = response.status().as_u16();
@@ -5024,14 +5133,33 @@ fn buffer_runtime_proxy_response_parts(
         }
         headers.push((name.as_str().to_string(), value.as_bytes().to_vec()));
     }
-    response
-        .read_to_end(&mut prelude)
+    let body = shared
+        .async_runtime
+        .block_on(async move { response.bytes().await })
         .context("failed to read upstream runtime response body")?;
+    prelude.extend_from_slice(&body);
     Ok(RuntimeBufferedResponseParts {
         status,
         headers,
         body: prelude,
     })
+}
+
+fn runtime_reqwest_error_kind(err: &reqwest::Error) -> io::ErrorKind {
+    let message = err.to_string().to_ascii_lowercase();
+    if err.is_timeout() || message.contains("timed out") || message.contains("timeout") {
+        io::ErrorKind::TimedOut
+    } else if message.contains("connection reset") {
+        io::ErrorKind::ConnectionReset
+    } else if message.contains("broken pipe") {
+        io::ErrorKind::BrokenPipe
+    } else if message.contains("connection aborted") {
+        io::ErrorKind::ConnectionAborted
+    } else if message.contains("unexpected eof") {
+        io::ErrorKind::UnexpectedEof
+    } else {
+        io::ErrorKind::Other
+    }
 }
 
 fn build_runtime_proxy_response_from_parts(
@@ -7792,6 +7920,14 @@ mod tests {
         };
         let shared = RuntimeRotationProxyShared {
             client: Client::builder().build().expect("client"),
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             runtime: Arc::new(Mutex::new(runtime)),
@@ -7861,6 +7997,14 @@ mod tests {
         };
         let shared = RuntimeRotationProxyShared {
             client: Client::builder().build().expect("client"),
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             runtime: Arc::new(Mutex::new(runtime)),
@@ -7919,6 +8063,14 @@ mod tests {
         };
         let shared = RuntimeRotationProxyShared {
             client: Client::builder().build().expect("client"),
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             runtime: Arc::new(Mutex::new(runtime)),
