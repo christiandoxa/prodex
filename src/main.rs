@@ -50,7 +50,8 @@ const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else 
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
 const QUOTA_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
-const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 30_000 };
+// Match Codex's default Responses stream idle timeout so the local proxy stays transport-transparent.
+const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 300_000 };
 const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 15_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
@@ -2402,7 +2403,6 @@ fn start_runtime_rotation_proxy(
             .connect_timeout(Duration::from_millis(
                 runtime_proxy_http_connect_timeout_ms(),
             ))
-            .timeout(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms()))
             .build()
             .context("failed to build runtime auto-rotate HTTP client")?,
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
@@ -2858,11 +2858,56 @@ fn build_runtime_proxy_websocket_upgrade_response(key: &str) -> TinyResponse<std
         )
 }
 
+#[derive(Default)]
+struct RuntimeWebsocketSessionState {
+    upstream_socket: Option<RuntimeUpstreamWebSocket>,
+    profile_name: Option<String>,
+    turn_state: Option<String>,
+}
+
+impl RuntimeWebsocketSessionState {
+    fn can_reuse(&self, profile_name: &str, turn_state_override: Option<&str>) -> bool {
+        self.upstream_socket.is_some()
+            && self.profile_name.as_deref() == Some(profile_name)
+            && turn_state_override.is_none_or(|value| self.turn_state.as_deref() == Some(value))
+    }
+
+    fn take_socket(&mut self) -> Option<RuntimeUpstreamWebSocket> {
+        self.upstream_socket.take()
+    }
+
+    fn store(
+        &mut self,
+        socket: RuntimeUpstreamWebSocket,
+        profile_name: &str,
+        turn_state: Option<String>,
+    ) {
+        self.upstream_socket = Some(socket);
+        self.profile_name = Some(profile_name.to_string());
+        self.turn_state = turn_state;
+    }
+
+    fn reset(&mut self) {
+        self.upstream_socket = None;
+        self.profile_name = None;
+        self.turn_state = None;
+    }
+
+    fn close(&mut self) {
+        if let Some(mut socket) = self.upstream_socket.take() {
+            let _ = socket.close(None);
+        }
+        self.profile_name = None;
+        self.turn_state = None;
+    }
+}
+
 fn run_runtime_proxy_websocket_session(
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<()> {
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
     loop {
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
@@ -2871,6 +2916,7 @@ fn run_runtime_proxy_websocket_session(
                     handshake_request,
                     text.as_ref(),
                     shared,
+                    &mut websocket_session,
                 )?;
             }
             Ok(WsMessage::Binary(_)) => {
@@ -2888,11 +2934,16 @@ fn run_runtime_proxy_websocket_session(
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
             Ok(WsMessage::Close(frame)) => {
+                websocket_session.close();
                 let _ = local_socket.close(frame);
                 break;
             }
-            Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => break,
+            Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
+                websocket_session.close();
+                break;
+            }
             Err(err) => {
+                websocket_session.close();
                 return Err(anyhow::anyhow!(
                     "runtime websocket session ended unexpectedly: {err}"
                 ));
@@ -2908,6 +2959,7 @@ fn proxy_runtime_websocket_text_message(
     handshake_request: &RuntimeProxyRequest,
     request_text: &str,
     shared: &RuntimeRotationProxyShared,
+    websocket_session: &mut RuntimeWebsocketSessionState,
 ) -> Result<()> {
     let previous_response_id = runtime_request_previous_response_id_from_text(request_text);
     let request_turn_state = runtime_request_turn_state(handshake_request);
@@ -2921,7 +2973,12 @@ fn proxy_runtime_websocket_text_message(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let mut pinned_profile = bound_profile.clone().or_else(|| {
+    let session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+        websocket_session.profile_name.clone()
+    } else {
+        None
+    };
+    let mut pinned_profile = bound_profile.clone().or(session_profile).or_else(|| {
         previous_response_id
             .as_ref()
             .and_then(|_| runtime_proxy_current_profile(shared).ok())
@@ -2957,19 +3014,19 @@ fn proxy_runtime_websocket_text_message(
             }
             return Ok(());
         };
-        let turn_state_override = if candidate_turn_state_retry_profile.as_deref()
-            == Some(candidate_name.as_str())
-        {
-            candidate_turn_state_retry_value.as_deref()
-        } else {
-            request_turn_state.as_deref()
-        };
+        let turn_state_override =
+            if candidate_turn_state_retry_profile.as_deref() == Some(candidate_name.as_str()) {
+                candidate_turn_state_retry_value.as_deref()
+            } else {
+                request_turn_state.as_deref()
+            };
 
         match attempt_runtime_websocket_request(
             local_socket,
             handshake_request,
             request_text,
             shared,
+            websocket_session,
             &candidate_name,
             turn_state_override,
         )? {
@@ -3010,7 +3067,8 @@ fn proxy_runtime_websocket_text_message(
                     candidate_turn_state_retry_profile = Some(profile_name.clone());
                     candidate_turn_state_retry_value = turn_state;
                 }
-                if let Some(delay) = runtime_previous_response_retry_delay(previous_response_retry_index)
+                if let Some(delay) =
+                    runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
                     last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
@@ -3041,10 +3099,21 @@ fn attempt_runtime_websocket_request(
     handshake_request: &RuntimeProxyRequest,
     request_text: &str,
     shared: &RuntimeRotationProxyShared,
+    websocket_session: &mut RuntimeWebsocketSessionState,
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
-    let (mut upstream_socket, upstream_turn_state) =
+    let (mut upstream_socket, mut upstream_turn_state) = if websocket_session
+        .can_reuse(profile_name, turn_state_override)
+    {
+        (
+            websocket_session
+                .take_socket()
+                .expect("runtime websocket session should keep its upstream socket"),
+            websocket_session.turn_state.clone(),
+        )
+    } else {
+        websocket_session.close();
         match connect_runtime_proxy_upstream_websocket(
             handshake_request,
             shared,
@@ -3058,19 +3127,29 @@ fn attempt_runtime_websocket_request(
                     payload,
                 });
             }
-        };
+        }
+    };
 
-    upstream_socket
-        .send(WsMessage::Text(request_text.to_string().into()))
-        .context("failed to send runtime websocket request upstream")?;
+    if let Err(err) = upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
+        let _ = upstream_socket.close(None);
+        websocket_session.reset();
+        return Err(anyhow::anyhow!(
+            "failed to send runtime websocket request upstream: {err}"
+        ));
+    }
 
     let mut committed = false;
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
+                if let Some(turn_state) = extract_runtime_turn_state_from_payload(text.as_ref()) {
+                    remember_runtime_turn_state(shared, profile_name, Some(turn_state.as_str()))?;
+                    upstream_turn_state = Some(turn_state);
+                }
                 match runtime_proxy_websocket_retry_action(text.as_ref()) {
                     Some(RuntimeWebsocketAttempt::QuotaBlocked { .. }) if !committed => {
                         let _ = upstream_socket.close(None);
+                        websocket_session.reset();
                         return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
                             profile_name: profile_name.to_string(),
                             payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
@@ -3080,6 +3159,7 @@ fn attempt_runtime_websocket_request(
                         if !committed =>
                     {
                         let _ = upstream_socket.close(None);
+                        websocket_session.reset();
                         return Ok(RuntimeWebsocketAttempt::PreviousResponseNotFound {
                             profile_name: profile_name.to_string(),
                             payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
@@ -3105,9 +3185,12 @@ fn attempt_runtime_websocket_request(
                 )?;
                 local_socket
                     .send(WsMessage::Text(text.clone()))
-                    .context("failed to forward runtime websocket text frame")?;
+                    .with_context(|| {
+                        websocket_session.reset();
+                        "failed to forward runtime websocket text frame"
+                    })?;
                 if is_runtime_terminal_event(text.as_ref()) {
-                    let _ = upstream_socket.close(None);
+                    websocket_session.store(upstream_socket, profile_name, upstream_turn_state);
                     return Ok(RuntimeWebsocketAttempt::Delivered);
                 }
             }
@@ -3123,7 +3206,10 @@ fn attempt_runtime_websocket_request(
                 }
                 local_socket
                     .send(WsMessage::Binary(payload))
-                    .context("failed to forward runtime websocket binary frame")?;
+                    .with_context(|| {
+                        websocket_session.reset();
+                        "failed to forward runtime websocket binary frame"
+                    })?;
             }
             Ok(WsMessage::Ping(payload)) => {
                 upstream_socket
@@ -3132,13 +3218,16 @@ fn attempt_runtime_websocket_request(
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
             Ok(WsMessage::Close(frame)) => {
+                websocket_session.reset();
                 let _ = local_socket.close(frame);
                 bail!("runtime websocket upstream closed before response.completed");
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
+                websocket_session.reset();
                 bail!("runtime websocket upstream closed before response.completed");
             }
             Err(err) => {
+                websocket_session.reset();
                 return Err(anyhow::anyhow!(
                     "runtime websocket upstream failed before response.completed: {err}"
                 ));
@@ -3423,16 +3512,19 @@ fn proxy_runtime_responses_request(
                 )),
             });
         };
-        let turn_state_override = if candidate_turn_state_retry_profile.as_deref()
-            == Some(candidate_name.as_str())
-        {
-            candidate_turn_state_retry_value.as_deref()
-        } else {
-            request_turn_state.as_deref()
-        };
+        let turn_state_override =
+            if candidate_turn_state_retry_profile.as_deref() == Some(candidate_name.as_str()) {
+                candidate_turn_state_retry_value.as_deref()
+            } else {
+                request_turn_state.as_deref()
+            };
 
-        match attempt_runtime_responses_request(request, shared, &candidate_name, turn_state_override)?
-        {
+        match attempt_runtime_responses_request(
+            request,
+            shared,
+            &candidate_name,
+            turn_state_override,
+        )? {
             RuntimeResponsesAttempt::Success {
                 profile_name,
                 response,
@@ -3475,7 +3567,8 @@ fn proxy_runtime_responses_request(
                     candidate_turn_state_retry_profile = Some(profile_name.clone());
                     candidate_turn_state_retry_value = turn_state;
                 }
-                if let Some(delay) = runtime_previous_response_retry_delay(previous_response_retry_index)
+                if let Some(delay) =
+                    runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
                     last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
@@ -4012,9 +4105,10 @@ impl Read for RuntimePrefetchReader {
             let next = if let Some(chunk) = self.backlog.pop_front() {
                 Some(chunk)
             } else {
-                match self.receiver.recv_timeout(Duration::from_millis(
-                    runtime_proxy_stream_idle_timeout_ms(),
-                )) {
+                match self
+                    .receiver
+                    .recv_timeout(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms()))
+                {
                     Ok(chunk) => Some(chunk),
                     Err(RecvTimeoutError::Timeout) => {
                         self.finished = true;
@@ -4204,7 +4298,10 @@ impl RuntimePrefetchStream {
         }
     }
 
-    fn recv_timeout(&mut self, timeout: Duration) -> std::result::Result<RuntimePrefetchChunk, RecvTimeoutError> {
+    fn recv_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> std::result::Result<RuntimePrefetchChunk, RecvTimeoutError> {
         if let Some(chunk) = self.backlog.pop_front() {
             return Ok(chunk);
         }
@@ -4252,9 +4349,10 @@ fn runtime_prefetch_response_chunks(
     }
 }
 
-fn inspect_runtime_sse_lookahead(prefetch: &mut RuntimePrefetchStream) -> Result<RuntimeSseInspection> {
-    let deadline = Instant::now()
-        + Duration::from_millis(runtime_proxy_sse_lookahead_timeout_ms());
+fn inspect_runtime_sse_lookahead(
+    prefetch: &mut RuntimePrefetchStream,
+) -> Result<RuntimeSseInspection> {
+    let deadline = Instant::now() + Duration::from_millis(runtime_proxy_sse_lookahead_timeout_ms());
     let mut buffered = Vec::new();
 
     loop {
@@ -4481,6 +4579,12 @@ fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn extract_runtime_turn_state_from_payload(payload: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| extract_runtime_turn_state_from_value(&value))
+}
+
 fn extract_runtime_response_ids_from_value(value: &serde_json::Value) -> Vec<String> {
     value
         .get("response")
@@ -4488,6 +4592,36 @@ fn extract_runtime_response_ids_from_value(value: &serde_json::Value) -> Vec<Str
         .and_then(serde_json::Value::as_str)
         .map(|id| vec![id.to_string()])
         .unwrap_or_default()
+}
+
+fn extract_runtime_turn_state_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("response")
+        .and_then(|response| response.get("headers"))
+        .and_then(extract_runtime_turn_state_from_headers_value)
+        .or_else(|| {
+            value
+                .get("headers")
+                .and_then(extract_runtime_turn_state_from_headers_value)
+        })
+}
+
+fn extract_runtime_turn_state_from_headers_value(value: &serde_json::Value) -> Option<String> {
+    let headers = value.as_object()?;
+    headers.iter().find_map(|(name, value)| {
+        if name.eq_ignore_ascii_case("x-codex-turn-state") {
+            match value {
+                serde_json::Value::String(value) => Some(value.clone()),
+                serde_json::Value::Array(items) => items.iter().find_map(|item| match item {
+                    serde_json::Value::String(value) => Some(value.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })
 }
 
 fn run_child(binary: &OsString, args: &[OsString], codex_home: &Path) -> Result<ExitStatus> {
@@ -5955,42 +6089,34 @@ mod tests {
         let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
         let turn_state = request_header(&request, "x-codex-turn-state");
 
-        let (
-            status_line,
-            content_type,
-            body,
-            response_turn_state,
-            initial_body_stall,
-            chunk_delay,
-        ) = if path
-            .ends_with("/backend-api/wham/usage")
-        {
-            usage_accounts
-                .lock()
-                .expect("usage_accounts poisoned")
-                .push(account_id.clone());
-            let body = match account_id.as_str() {
-                "main-account" => runtime_proxy_usage_body("main@example.com"),
-                "second-account" => runtime_proxy_usage_body("second@example.com"),
-                "third-account" => runtime_proxy_usage_body("third@example.com"),
-                _ => serde_json::json!({ "error": "unauthorized" }).to_string(),
-            };
-            let status = if matches!(
-                account_id.as_str(),
-                "main-account" | "second-account" | "third-account"
-            ) {
-                "HTTP/1.1 200 OK"
-            } else {
-                "HTTP/1.1 401 Unauthorized"
-            };
-            (status, "application/json", body, None, None, None)
-        } else if path.ends_with("/backend-api/codex/responses") {
-            responses_accounts
-                .lock()
-                .expect("responses_accounts poisoned")
-                .push(account_id.clone());
-            let previous_response_id = request_previous_response_id(&request);
-            match account_id.as_str() {
+        let (status_line, content_type, body, response_turn_state, initial_body_stall, chunk_delay) =
+            if path.ends_with("/backend-api/wham/usage") {
+                usage_accounts
+                    .lock()
+                    .expect("usage_accounts poisoned")
+                    .push(account_id.clone());
+                let body = match account_id.as_str() {
+                    "main-account" => runtime_proxy_usage_body("main@example.com"),
+                    "second-account" => runtime_proxy_usage_body("second@example.com"),
+                    "third-account" => runtime_proxy_usage_body("third@example.com"),
+                    _ => serde_json::json!({ "error": "unauthorized" }).to_string(),
+                };
+                let status = if matches!(
+                    account_id.as_str(),
+                    "main-account" | "second-account" | "third-account"
+                ) {
+                    "HTTP/1.1 200 OK"
+                } else {
+                    "HTTP/1.1 401 Unauthorized"
+                };
+                (status, "application/json", body, None, None, None)
+            } else if path.ends_with("/backend-api/codex/responses") {
+                responses_accounts
+                    .lock()
+                    .expect("responses_accounts poisoned")
+                    .push(account_id.clone());
+                let previous_response_id = request_previous_response_id(&request);
+                match account_id.as_str() {
                 "main-account" => (
                     "HTTP/1.1 200 OK",
                     "text/event-stream",
@@ -6148,16 +6274,16 @@ mod tests {
                         .then_some(Duration::from_millis(100)),
                 ),
             }
-        } else {
-            (
-                "HTTP/1.1 404 Not Found",
-                "application/json",
-                serde_json::json!({ "error": "not_found" }).to_string(),
-                None,
-                None,
-                None,
-            )
-        };
+            } else {
+                (
+                    "HTTP/1.1 404 Not Found",
+                    "application/json",
+                    serde_json::json!({ "error": "not_found" }).to_string(),
+                    None,
+                    None,
+                    None,
+                )
+            };
 
         let mut headers = format!(
             "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -6211,47 +6337,48 @@ mod tests {
         let request_turn_state = Arc::new(Mutex::new(None::<String>));
         let captured_account_id = Arc::clone(&account_id);
         let captured_turn_state = Arc::clone(&request_turn_state);
-        let callback = move |req: &tungstenite::handshake::server::Request,
-                             response: tungstenite::handshake::server::Response| {
-            if let Some(value) = req
-                .headers()
-                .get("ChatGPT-Account-Id")
-                .and_then(|value| value.to_str().ok())
-            {
-                *captured_account_id
-                    .lock()
-                    .expect("captured_account_id poisoned") = value.to_string();
-            }
-            if let Some(value) = req
-                .headers()
-                .get("x-codex-turn-state")
-                .and_then(|value| value.to_str().ok())
-            {
-                *captured_turn_state
-                    .lock()
-                    .expect("captured_turn_state poisoned") = Some(value.to_string());
-            }
-            let mut response = response;
-            if matches!(
-                mode,
-                RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
-            ) && req
-                .headers()
-                .get("ChatGPT-Account-Id")
-                .and_then(|value| value.to_str().ok())
-                == Some("second-account")
-            {
-                response.headers_mut().insert(
-                    tungstenite::http::header::HeaderName::from_static("x-codex-turn-state"),
-                    tungstenite::http::HeaderValue::from_static("turn-second"),
-                );
-            }
-            Ok(response)
-        };
+        let callback =
+            move |req: &tungstenite::handshake::server::Request,
+                  response: tungstenite::handshake::server::Response| {
+                if let Some(value) = req
+                    .headers()
+                    .get("ChatGPT-Account-Id")
+                    .and_then(|value| value.to_str().ok())
+                {
+                    *captured_account_id
+                        .lock()
+                        .expect("captured_account_id poisoned") = value.to_string();
+                }
+                if let Some(value) = req
+                    .headers()
+                    .get("x-codex-turn-state")
+                    .and_then(|value| value.to_str().ok())
+                {
+                    *captured_turn_state
+                        .lock()
+                        .expect("captured_turn_state poisoned") = Some(value.to_string());
+                }
+                let mut response = response;
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                ) && req
+                    .headers()
+                    .get("ChatGPT-Account-Id")
+                    .and_then(|value| value.to_str().ok())
+                    == Some("second-account")
+                {
+                    response.headers_mut().insert(
+                        tungstenite::http::header::HeaderName::from_static("x-codex-turn-state"),
+                        tungstenite::http::HeaderValue::from_static("turn-second"),
+                    );
+                }
+                Ok(response)
+            };
         let mut websocket = tungstenite::accept_hdr(stream, callback)
             .expect("backend websocket handshake should succeed");
         let account_id = account_id.lock().expect("account_id poisoned").clone();
-        let request_turn_state = request_turn_state
+        let mut effective_turn_state = request_turn_state
             .lock()
             .expect("request_turn_state poisoned")
             .clone();
@@ -6259,196 +6386,211 @@ mod tests {
             .lock()
             .expect("responses_accounts poisoned")
             .push(account_id.clone());
+        let response_turn_state = (matches!(
+            mode,
+            RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+        ) && account_id == "second-account")
+            .then(|| "turn-second".to_string());
 
-        let request = websocket
-            .read()
-            .expect("backend websocket should read request");
-        assert!(
-            request.is_text(),
-            "backend websocket expects a text request"
-        );
-        let request_text = request
-            .into_text()
-            .expect("backend websocket request should be text")
-            .to_string();
-        let previous_response_id = runtime_request_previous_response_id_from_text(&request_text);
+        loop {
+            let request = match websocket.read() {
+                Ok(WsMessage::Text(text)) => text.to_string(),
+                Ok(WsMessage::Ping(payload)) => {
+                    websocket
+                        .send(WsMessage::Pong(payload))
+                        .expect("backend websocket pong should be sent");
+                    continue;
+                }
+                Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => continue,
+                Ok(WsMessage::Close(_))
+                | Err(WsError::ConnectionClosed)
+                | Err(WsError::AlreadyClosed) => break,
+                Ok(other) => panic!("backend websocket expects text requests, got {other:?}"),
+                Err(err) => panic!("backend websocket failed to read request: {err}"),
+            };
+            let previous_response_id = runtime_request_previous_response_id_from_text(&request);
 
-        match account_id.as_str() {
-            "main-account" => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "status": 429,
-                            "error": {
-                                "code": "insufficient_quota",
-                                "message": "main quota exhausted",
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("quota error should be sent");
+            match account_id.as_str() {
+                "main-account" => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "error",
+                                "status": 429,
+                                "error": {
+                                    "code": "insufficient_quota",
+                                    "message": "main quota exhausted",
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("quota error should be sent");
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                    ) && previous_response_id.as_deref() == Some("resp-second")
+                        && effective_turn_state.as_deref() != Some("turn-second") =>
+                {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "error",
+                                "status": 400,
+                                "error": {
+                                    "code": "previous_response_not_found",
+                                    "message": format!(
+                                        "Previous response with id '{}' not found.",
+                                        previous_response_id.as_deref().unwrap_or_default()
+                                    ),
+                                    "param": "previous_response_id",
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("previous_response_not_found should be sent");
+                }
+                "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.created",
+                                "response": {
+                                    "id": "resp-second-next"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.created should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.completed",
+                                "response": {
+                                    "id": "resp-second-next"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.completed should be sent");
+                }
+                "second-account" if previous_response_id.is_some() => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "error",
+                                "status": 400,
+                                "error": {
+                                    "code": "previous_response_not_found",
+                                    "message": format!(
+                                        "Previous response with id '{}' not found.",
+                                        previous_response_id.as_deref().unwrap_or_default()
+                                    ),
+                                    "param": "previous_response_id",
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("previous_response_not_found should be sent");
+                }
+                "second-account" => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.created",
+                                "response": {
+                                    "id": "resp-second"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.created should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.completed",
+                                "response": {
+                                    "id": "resp-second"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.completed should be sent");
+                }
+                "third-account" if previous_response_id.is_some() => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "error",
+                                "status": 400,
+                                "error": {
+                                    "code": "previous_response_not_found",
+                                    "message": format!(
+                                        "Previous response with id '{}' not found.",
+                                        previous_response_id.as_deref().unwrap_or_default()
+                                    ),
+                                    "param": "previous_response_id",
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("previous_response_not_found should be sent");
+                }
+                "third-account" => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.created",
+                                "response": {
+                                    "id": "resp-third"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.created should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.completed",
+                                "response": {
+                                    "id": "resp-third"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.completed should be sent");
+                }
+                _ => {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "error",
+                                "status": 429,
+                                "error": {
+                                    "code": "rate_limit_exceeded",
+                                    "message": "unexpected account",
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("unexpected account error should be sent");
+                }
             }
-            "second-account"
-                if matches!(
-                    mode,
-                    RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
-                ) && previous_response_id.as_deref() == Some("resp-second")
-                    && request_turn_state.as_deref() != Some("turn-second") =>
-            {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "status": 400,
-                            "error": {
-                                "code": "previous_response_not_found",
-                                "message": format!(
-                                    "Previous response with id '{}' not found.",
-                                    previous_response_id.as_deref().unwrap_or_default()
-                                ),
-                                "param": "previous_response_id",
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("previous_response_not_found should be sent");
-            }
-            "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.created",
-                            "response": {
-                                "id": "resp-second-next"
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.created should be sent");
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.completed",
-                            "response": {
-                                "id": "resp-second-next"
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.completed should be sent");
-            }
-            "second-account" if previous_response_id.is_some() => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "status": 400,
-                            "error": {
-                                "code": "previous_response_not_found",
-                                "message": format!(
-                                    "Previous response with id '{}' not found.",
-                                    previous_response_id.as_deref().unwrap_or_default()
-                                ),
-                                "param": "previous_response_id",
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("previous_response_not_found should be sent");
-            }
-            "second-account" => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.created",
-                            "response": {
-                                "id": "resp-second"
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.created should be sent");
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.completed",
-                            "response": {
-                                "id": "resp-second"
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.completed should be sent");
-            }
-            "third-account" if previous_response_id.is_some() => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "status": 400,
-                            "error": {
-                                "code": "previous_response_not_found",
-                                "message": format!(
-                                    "Previous response with id '{}' not found.",
-                                    previous_response_id.as_deref().unwrap_or_default()
-                                ),
-                                "param": "previous_response_id",
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("previous_response_not_found should be sent");
-            }
-            "third-account" => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.created",
-                            "response": {
-                                "id": "resp-third"
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.created should be sent");
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.completed",
-                            "response": {
-                                "id": "resp-third"
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.completed should be sent");
-            }
-            _ => {
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "error",
-                            "status": 429,
-                            "error": {
-                                "code": "rate_limit_exceeded",
-                                "message": "unexpected account",
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("unexpected account error should be sent");
+
+            if response_turn_state.is_some() {
+                effective_turn_state = response_turn_state.clone();
             }
         }
     }
@@ -8570,11 +8712,7 @@ mod tests {
         );
         assert_eq!(
             backend.responses_accounts(),
-            vec![
-                "main-account".to_string(),
-                "second-account".to_string(),
-                "second-account".to_string(),
-            ]
+            vec!["main-account".to_string(), "second-account".to_string()]
         );
     }
 }
