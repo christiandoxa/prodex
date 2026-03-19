@@ -6,7 +6,7 @@ use dirs::home_dir;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -15,9 +15,10 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{
     Header as TinyHeader, ReadWrite as TinyReadWrite, Response as TinyResponse,
     Server as TinyServer, StatusCode as TinyStatusCode,
@@ -49,9 +50,10 @@ const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else 
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
 const QUOTA_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
-const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 300_000 };
+const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 30_000 };
 const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 15_000 };
+const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const CLI_WIDTH: usize = 110;
 const CLI_LABEL_WIDTH: usize = 16;
@@ -461,9 +463,22 @@ struct RuntimeStreamingResponse {
     body: Box<dyn Read + Send>,
 }
 
-struct RuntimeTransportAbortReader {
-    message: &'static str,
-    emitted: bool,
+enum RuntimePrefetchChunk {
+    Data(Vec<u8>),
+    End,
+    Error(io::ErrorKind, String),
+}
+
+struct RuntimePrefetchStream {
+    receiver: Receiver<RuntimePrefetchChunk>,
+    backlog: VecDeque<RuntimePrefetchChunk>,
+}
+
+struct RuntimePrefetchReader {
+    receiver: Receiver<RuntimePrefetchChunk>,
+    backlog: VecDeque<RuntimePrefetchChunk>,
+    pending: Cursor<Vec<u8>>,
+    finished: bool,
 }
 
 #[derive(Debug)]
@@ -670,6 +685,13 @@ fn runtime_proxy_stream_idle_timeout_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS",
         RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
+    )
+}
+
+fn runtime_proxy_sse_lookahead_timeout_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS",
+        RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
     )
 }
 
@@ -2405,12 +2427,7 @@ fn start_runtime_rotation_proxy(
         worker_threads.push(thread::spawn(move || {
             while !shutdown.load(Ordering::SeqCst) {
                 match server.recv_timeout(Duration::from_millis(200)) {
-                    Ok(Some(request)) => {
-                        let shared = shared.clone();
-                        thread::spawn(move || {
-                            handle_runtime_rotation_proxy_request(request, &shared)
-                        });
-                    }
+                    Ok(Some(request)) => handle_runtime_rotation_proxy_request(request, &shared),
                     Ok(None) => {}
                     Err(_) if shutdown.load(Ordering::SeqCst) => break,
                     Err(_) => {}
@@ -2461,7 +2478,7 @@ fn handle_runtime_rotation_proxy_request(
             Ok(response) => response,
             Err(err) => {
                 if is_runtime_proxy_transport_failure(&err) {
-                    build_runtime_proxy_transport_abort_reply()
+                    return;
                 } else {
                     RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
                         502,
@@ -2489,27 +2506,13 @@ fn handle_runtime_rotation_proxy_request(
         Ok(response) => response,
         Err(err) => {
             if is_runtime_proxy_transport_failure(&err) {
-                build_runtime_proxy_text_response(504, "Runtime upstream transport timed out.")
+                return;
             } else {
                 build_runtime_proxy_text_response(502, &err.to_string())
             }
         }
     };
     let _ = request.respond(response);
-}
-
-fn build_runtime_proxy_transport_abort_reply() -> RuntimeResponsesReply {
-    RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
-        status: 200,
-        headers: vec![(
-            "Content-Type".to_string(),
-            "text/event-stream".to_string(),
-        )],
-        body: Box::new(RuntimeTransportAbortReader {
-            message: "runtime upstream transport timed out",
-            emitted: false,
-        }),
-    })
 }
 
 fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bool {
@@ -3867,18 +3870,18 @@ fn forward_runtime_proxy_response(
 }
 
 fn prepare_runtime_proxy_responses_success(
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeResponsesAttempt> {
     let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
+    remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
     let is_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.contains("text/event-stream"));
     if !is_sse {
-        remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
             response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
@@ -3899,7 +3902,10 @@ fn prepare_runtime_proxy_responses_success(
         }
     }
 
-    let (prelude, response_ids) = match inspect_runtime_sse_prelude(&mut response)? {
+    let mut prefetch = RuntimePrefetchStream::spawn(response);
+    let lookahead = inspect_runtime_sse_lookahead(&mut prefetch)?;
+
+    let (prelude, response_ids) = match lookahead {
         RuntimeSseInspection::Commit {
             prelude,
             response_ids,
@@ -3907,22 +3913,25 @@ fn prepare_runtime_proxy_responses_success(
         RuntimeSseInspection::QuotaBlocked(prelude) => {
             return Ok(RuntimeResponsesAttempt::QuotaBlocked {
                 profile_name: profile_name.to_string(),
-                response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
-                    response, prelude,
-                )?),
+                response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
+                    status,
+                    headers: headers.clone(),
+                    body: Box::new(prefetch.into_reader(prelude)),
+                }),
             });
         }
         RuntimeSseInspection::PreviousResponseNotFound(prelude) => {
             return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name: profile_name.to_string(),
-                response: RuntimeResponsesReply::Buffered(forward_runtime_proxy_response(
-                    response, prelude,
-                )?),
+                response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
+                    status,
+                    headers: headers.clone(),
+                    body: Box::new(prefetch.into_reader(prelude)),
+                }),
                 turn_state,
             });
         }
     };
-    remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
     remember_runtime_response_ids(shared, profile_name, &response_ids)?;
 
     Ok(RuntimeResponsesAttempt::Success {
@@ -3931,7 +3940,7 @@ fn prepare_runtime_proxy_responses_success(
             status,
             headers,
             body: Box::new(RuntimeSseTapReader::new(
-                Cursor::new(prelude.clone()).chain(response),
+                prefetch.into_reader(prelude.clone()),
                 shared.clone(),
                 profile_name.to_string(),
                 &prelude,
@@ -3988,6 +3997,53 @@ struct RuntimeSseTapReader {
     state: RuntimeSseTapState,
 }
 
+impl Read for RuntimePrefetchReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.finished {
+            return Ok(0);
+        }
+
+        loop {
+            let read = self.pending.read(buf)?;
+            if read > 0 {
+                return Ok(read);
+            }
+
+            let next = if let Some(chunk) = self.backlog.pop_front() {
+                Some(chunk)
+            } else {
+                match self.receiver.recv_timeout(Duration::from_millis(
+                    runtime_proxy_stream_idle_timeout_ms(),
+                )) {
+                    Ok(chunk) => Some(chunk),
+                    Err(RecvTimeoutError::Timeout) => {
+                        self.finished = true;
+                        return Err(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "runtime upstream stream idle timed out",
+                        ));
+                    }
+                    Err(RecvTimeoutError::Disconnected) => None,
+                }
+            };
+
+            match next {
+                Some(RuntimePrefetchChunk::Data(chunk)) => {
+                    self.pending = Cursor::new(chunk);
+                }
+                Some(RuntimePrefetchChunk::End) | None => {
+                    self.finished = true;
+                    return Ok(0);
+                }
+                Some(RuntimePrefetchChunk::Error(kind, message)) => {
+                    self.finished = true;
+                    return Err(io::Error::new(kind, message));
+                }
+            }
+        }
+    }
+}
+
 impl RuntimeSseTapReader {
     fn new(
         inner: impl Read + Send + 'static,
@@ -4020,17 +4076,6 @@ impl Read for RuntimeSseTapReader {
         self.state
             .observe(&self.shared, &self.profile_name, &buf[..read]);
         Ok(read)
-    }
-}
-
-impl Read for RuntimeTransportAbortReader {
-    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        if self.emitted {
-            return Ok(0);
-        }
-
-        self.emitted = true;
-        Err(io::Error::new(io::ErrorKind::TimedOut, self.message))
     }
 }
 
@@ -4147,32 +4192,108 @@ fn path_without_query(path_and_query: &str) -> &str {
         .unwrap_or(path_and_query)
 }
 
-fn inspect_runtime_sse_prelude(
-    response: &mut reqwest::blocking::Response,
-) -> Result<RuntimeSseInspection> {
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    if !content_type.contains("text/event-stream") {
-        return Ok(RuntimeSseInspection::Commit {
-            prelude: Vec::new(),
-            response_ids: Vec::new(),
+impl RuntimePrefetchStream {
+    fn spawn(mut response: reqwest::blocking::Response) -> Self {
+        let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(8);
+        thread::spawn(move || {
+            runtime_prefetch_response_chunks(&mut response, sender);
         });
+        Self {
+            receiver,
+            backlog: VecDeque::new(),
+        }
     }
 
-    let mut buffered = vec![0_u8; RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES];
-    let read = response
-        .read(&mut buffered)
-        .context("failed to inspect runtime auto-rotate SSE stream")?;
-    buffered.truncate(read);
+    fn recv_timeout(&mut self, timeout: Duration) -> std::result::Result<RuntimePrefetchChunk, RecvTimeoutError> {
+        if let Some(chunk) = self.backlog.pop_front() {
+            return Ok(chunk);
+        }
+        self.receiver.recv_timeout(timeout)
+    }
 
-    if buffered.is_empty() {
-        return Ok(RuntimeSseInspection::Commit {
-            prelude: buffered,
-            response_ids: Vec::new(),
-        });
+    fn push_backlog(&mut self, chunk: RuntimePrefetchChunk) {
+        self.backlog.push_back(chunk);
+    }
+
+    fn into_reader(self, prelude: Vec<u8>) -> RuntimePrefetchReader {
+        RuntimePrefetchReader {
+            receiver: self.receiver,
+            backlog: self.backlog,
+            pending: Cursor::new(prelude),
+            finished: false,
+        }
+    }
+}
+
+fn runtime_prefetch_response_chunks(
+    response: &mut reqwest::blocking::Response,
+    sender: SyncSender<RuntimePrefetchChunk>,
+) {
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match response.read(&mut buffer) {
+            Ok(0) => {
+                let _ = sender.send(RuntimePrefetchChunk::End);
+                break;
+            }
+            Ok(read) => {
+                if sender
+                    .send(RuntimePrefetchChunk::Data(buffer[..read].to_vec()))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(err) => {
+                let _ = sender.send(RuntimePrefetchChunk::Error(err.kind(), err.to_string()));
+                break;
+            }
+        }
+    }
+}
+
+fn inspect_runtime_sse_lookahead(prefetch: &mut RuntimePrefetchStream) -> Result<RuntimeSseInspection> {
+    let deadline = Instant::now()
+        + Duration::from_millis(runtime_proxy_sse_lookahead_timeout_ms());
+    let mut buffered = Vec::new();
+
+    loop {
+        if buffered.len() >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
+            break;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        match prefetch.recv_timeout(remaining) {
+            Ok(RuntimePrefetchChunk::Data(chunk)) => {
+                buffered.extend_from_slice(&chunk);
+                match inspect_runtime_sse_buffer(buffered.clone())? {
+                    RuntimeSseInspection::Commit { response_ids, .. }
+                        if !response_ids.is_empty() =>
+                    {
+                        return Ok(RuntimeSseInspection::Commit {
+                            prelude: buffered,
+                            response_ids,
+                        });
+                    }
+                    RuntimeSseInspection::Commit { .. } => {}
+                    other => return Ok(other),
+                }
+            }
+            Ok(RuntimePrefetchChunk::End) => break,
+            Ok(RuntimePrefetchChunk::Error(kind, message)) => {
+                if buffered.is_empty() {
+                    return Err(anyhow::Error::new(io::Error::new(kind, message))
+                        .context("failed to inspect runtime auto-rotate SSE stream"));
+                }
+                prefetch.push_backlog(RuntimePrefetchChunk::Error(kind, message));
+                break;
+            }
+            Err(RecvTimeoutError::Timeout) => break,
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
     }
 
     inspect_runtime_sse_buffer(buffered)
@@ -7496,10 +7617,13 @@ mod tests {
                     content_type.contains("text/event-stream"),
                     "runtime proxy should keep responses transport semantics on failure"
                 );
-                assert!(
-                    response.text().is_err(),
-                    "aborted runtime stream should fail while reading the body"
-                );
+                match response.text() {
+                    Ok(body) => assert!(
+                        body.is_empty(),
+                        "aborted runtime stream should terminate without a synthetic payload"
+                    ),
+                    Err(_) => {}
+                }
             }
             Err(_) => {}
         }
