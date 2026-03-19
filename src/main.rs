@@ -3825,11 +3825,13 @@ fn prepare_runtime_proxy_responses_success(
         response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
             status,
             headers,
-            body: Box::new(Cursor::new(prelude).chain(RuntimeSseTapReader::new(
-                response,
+            body: Box::new(RuntimeSseTapReader::new(
+                Cursor::new(prelude.clone()).chain(response),
                 shared.clone(),
                 profile_name.to_string(),
-            ))),
+                &prelude,
+                &response_ids,
+            )),
         }),
     })
 }
@@ -3875,7 +3877,7 @@ impl RuntimeSseTapState {
 }
 
 struct RuntimeSseTapReader {
-    inner: reqwest::blocking::Response,
+    inner: Box<dyn Read + Send>,
     shared: RuntimeRotationProxyShared,
     profile_name: String,
     state: RuntimeSseTapState,
@@ -3883,15 +3885,22 @@ struct RuntimeSseTapReader {
 
 impl RuntimeSseTapReader {
     fn new(
-        inner: reqwest::blocking::Response,
+        inner: impl Read + Send + 'static,
         shared: RuntimeRotationProxyShared,
         profile_name: String,
+        prelude: &[u8],
+        remembered_response_ids: &[String],
     ) -> Self {
+        let mut state = RuntimeSseTapState {
+            remembered_response_ids: remembered_response_ids.iter().cloned().collect(),
+            ..RuntimeSseTapState::default()
+        };
+        state.observe(&shared, &profile_name, prelude);
         Self {
-            inner,
+            inner: Box::new(inner),
             shared,
             profile_name,
-            state: RuntimeSseTapState::default(),
+            state,
         }
     }
 }
@@ -6795,6 +6804,73 @@ mod tests {
             )
             .expect("candidate selection should succeed"),
             Some("second".to_string())
+        );
+    }
+
+    #[test]
+    fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
+        let temp_dir = TestDir::new();
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([(
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths: paths.clone(),
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "second".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            client: Client::builder().build().expect("client"),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        let prelude =
+            b"event: response.created\r\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second";
+        let remainder =
+            b"\"}}\r\n\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n\r\n";
+        let mut reader = RuntimeSseTapReader::new(
+            Cursor::new(prelude.to_vec()).chain(Cursor::new(remainder.to_vec())),
+            shared.clone(),
+            "second".to_string(),
+            prelude,
+            &[],
+        );
+        let mut body = Vec::new();
+        reader
+            .read_to_end(&mut body)
+            .expect("split SSE payload should be readable");
+
+        let persisted = AppState::load(&paths).expect("state should reload");
+        assert_eq!(
+            persisted
+                .response_profile_bindings
+                .get("resp-second")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("second")
         );
     }
 
