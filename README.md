@@ -281,6 +281,7 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 - WebSocket and HTTP/SSE traffic still follow Codex reconnect and fallback behavior
 - account rotation happens inside the proxy, but only before a request or stream is committed
 - existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
+- session-scoped unary routes such as `/responses/compact` also honor `session_id -> profile` affinity when a session owner is already known
 - temporary quota, overload, or transport failures can move later requests to another ready profile without rotating mid-stream
 - the current profile is still tried optimistically first when it looks healthy
 - new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active at once
@@ -295,6 +296,7 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 - generic upstream `429 Too Many Requests` responses are passed through; they are not treated as account-specific quota unless the upstream payload explicitly reports `insufficient_quota` or `rate_limit_exceeded`
 - if the proxy cannot secure a healthy upstream profile before any upstream response exists, it now fails with local `503 service_unavailable` instead of synthesizing a local quota `429`
 - the unary compact path (`/responses/compact`) is also eligible for safe retry and rotation on temporary overload or quota exhaustion
+- `session_id` affinity is persisted in Prodex state, so compact and other session-scoped unary routes can keep using the owning profile after a proxy restart
 
 ## Quota Behavior
 

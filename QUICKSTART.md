@@ -83,6 +83,7 @@ prodex run --profile second --no-auto-rotate
 In practice, that means:
 
 - existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
+- session-scoped unary routes such as `/responses/compact` also honor `session_id -> profile` affinity when a session owner is already known
 - temporary quota, overload, and transport failures are tracked separately
 - short-lived profile health penalties are endpoint-specific, so compact or websocket flakiness does not automatically poison fresh responses selection
 - new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active
@@ -96,6 +97,7 @@ In practice, that means:
 - generic upstream `429 Too Many Requests` responses are passed through; they only trigger safe rotation when the upstream payload explicitly reports `insufficient_quota` or `rate_limit_exceeded`
 - if no healthy upstream profile can be secured before any upstream response exists, the proxy returns local `503 service_unavailable` instead of synthesizing a quota `429`
 - `/responses/compact` also gets the same safe retry/rotate treatment for temporary overload or quota exhaustion
+- `session_id` affinity is persisted in Prodex state, so compact and other session-scoped unary routes can keep using the owning profile after a proxy restart
 
 ## Debug the Environment
 

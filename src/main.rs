@@ -47,6 +47,7 @@ const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 const RESPONSE_PROFILE_BINDING_LIMIT: usize = 16_384;
 const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
+const SESSION_ID_PROFILE_BINDING_LIMIT: usize = 4_096;
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
 const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_000 };
@@ -391,10 +392,11 @@ fn merge_last_run_selection(
     merged
 }
 
-fn merge_response_profile_bindings(
+fn merge_profile_bindings(
     existing: &BTreeMap<String, ResponseProfileBinding>,
     incoming: &BTreeMap<String, ResponseProfileBinding>,
     profiles: &BTreeMap<String, ProfileEntry>,
+    max_entries: usize,
 ) -> BTreeMap<String, ResponseProfileBinding> {
     let mut merged = existing.clone();
     for (response_id, binding) in incoming {
@@ -406,7 +408,7 @@ fn merge_response_profile_bindings(
         }
     }
     merged.retain(|_, binding| profiles.contains_key(&binding.profile_name));
-    prune_profile_bindings(&mut merged, RESPONSE_PROFILE_BINDING_LIMIT);
+    prune_profile_bindings(&mut merged, max_entries);
     merged
 }
 
@@ -430,10 +432,17 @@ fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppS
             &snapshot.last_run_selected_at,
             &profiles,
         ),
-        response_profile_bindings: merge_response_profile_bindings(
+        response_profile_bindings: merge_profile_bindings(
             &existing.response_profile_bindings,
             &snapshot.response_profile_bindings,
             &profiles,
+            RESPONSE_PROFILE_BINDING_LIMIT,
+        ),
+        session_profile_bindings: merge_profile_bindings(
+            &existing.session_profile_bindings,
+            &snapshot.session_profile_bindings,
+            &profiles,
+            SESSION_ID_PROFILE_BINDING_LIMIT,
         ),
     }
 }
@@ -451,10 +460,17 @@ fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState 
             &desired.last_run_selected_at,
             &desired.profiles,
         ),
-        response_profile_bindings: merge_response_profile_bindings(
+        response_profile_bindings: merge_profile_bindings(
             &existing.response_profile_bindings,
             &desired.response_profile_bindings,
             &desired.profiles,
+            RESPONSE_PROFILE_BINDING_LIMIT,
+        ),
+        session_profile_bindings: merge_profile_bindings(
+            &existing.session_profile_bindings,
+            &desired.session_profile_bindings,
+            &desired.profiles,
+            SESSION_ID_PROFILE_BINDING_LIMIT,
         ),
     }
 }
@@ -625,6 +641,8 @@ struct AppState {
     last_run_selected_at: BTreeMap<String, i64>,
     #[serde(default)]
     response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
+    #[serde(default)]
+    session_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -870,6 +888,7 @@ struct RuntimeRotationState {
     include_code_review: bool,
     current_profile: String,
     turn_state_bindings: BTreeMap<String, ResponseProfileBinding>,
+    session_id_bindings: BTreeMap<String, ResponseProfileBinding>,
     profile_probe_cache: BTreeMap<String, RuntimeProfileProbeCacheEntry>,
     profile_retry_backoff_until: BTreeMap<String, i64>,
     profile_transport_backoff_until: BTreeMap<String, i64>,
@@ -1504,6 +1523,9 @@ fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     state.last_run_selected_at.remove(&args.name);
     state
         .response_profile_bindings
+        .retain(|_, binding| binding.profile_name != args.name);
+    state
+        .session_profile_bindings
         .retain(|_, binding| binding.profile_name != args.name);
 
     if state.active_profile.as_deref() == Some(args.name.as_str()) {
@@ -3254,6 +3276,7 @@ fn start_runtime_rotation_proxy(
             include_code_review,
             current_profile: current_profile.to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: state.session_profile_bindings.clone(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -3716,6 +3739,14 @@ fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
     })
 }
 
+fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
+    request.headers.iter().find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("session_id")
+            .then(|| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
 fn runtime_response_bound_profile(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: &str,
@@ -3743,6 +3774,21 @@ fn runtime_turn_state_bound_profile(
     Ok(runtime
         .turn_state_bindings
         .get(turn_state)
+        .map(|binding| binding.profile_name.clone())
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
+}
+
+fn runtime_session_bound_profile(
+    shared: &RuntimeRotationProxyShared,
+    session_id: &str,
+) -> Result<Option<String>> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime
+        .session_id_bindings
+        .get(session_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
 }
@@ -3781,6 +3827,63 @@ fn remember_runtime_turn_state(
             shared,
             format!("binding turn_state profile={profile_name} value={turn_state}"),
         );
+    }
+    Ok(())
+}
+
+fn remember_runtime_session_id(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    session_id: Option<&str>,
+) -> Result<()> {
+    let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let bound_at = Local::now().timestamp();
+    let should_update = runtime
+        .session_id_bindings
+        .get(session_id)
+        .is_none_or(|binding| binding.profile_name != profile_name);
+    if should_update {
+        let binding = ResponseProfileBinding {
+            profile_name: profile_name.to_string(),
+            bound_at,
+        };
+        runtime
+            .session_id_bindings
+            .insert(session_id.to_string(), binding.clone());
+        runtime
+            .state
+            .session_profile_bindings
+            .insert(session_id.to_string(), binding);
+        prune_profile_bindings(
+            &mut runtime.session_id_bindings,
+            SESSION_ID_PROFILE_BINDING_LIMIT,
+        );
+        prune_profile_bindings(
+            &mut runtime.state.session_profile_bindings,
+            SESSION_ID_PROFILE_BINDING_LIMIT,
+        );
+        let state_snapshot = runtime.state.clone();
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            paths_snapshot,
+            &format!("session_id:{profile_name}"),
+        );
+        runtime_proxy_log(
+            shared,
+            format!("binding session_id profile={profile_name} value={session_id}"),
+        );
+    } else {
+        drop(runtime);
     }
     Ok(())
 }
@@ -3897,6 +4000,7 @@ fn runtime_proxy_allows_direct_current_profile_fallback(
     pinned_profile: Option<&str>,
     request_turn_state: Option<&str>,
     turn_state_profile: Option<&str>,
+    session_profile: Option<&str>,
     saw_inflight_saturation: bool,
     saw_upstream_failure: bool,
 ) -> bool {
@@ -3904,6 +4008,7 @@ fn runtime_proxy_allows_direct_current_profile_fallback(
         && pinned_profile.is_none()
         && request_turn_state.is_none()
         && turn_state_profile.is_none()
+        && session_profile.is_none()
         && !saw_inflight_saturation
         && !saw_upstream_failure
 }
@@ -3945,6 +4050,7 @@ fn select_runtime_response_candidate(
     excluded_profiles: &BTreeSet<String>,
     pinned_profile: Option<&str>,
     turn_state_profile: Option<&str>,
+    session_profile: Option<&str>,
     discover_previous_response_owner: bool,
 ) -> Result<Option<String>> {
     select_runtime_response_candidate_for_route(
@@ -3952,6 +4058,7 @@ fn select_runtime_response_candidate(
         excluded_profiles,
         pinned_profile,
         turn_state_profile,
+        session_profile,
         discover_previous_response_owner,
         RuntimeRouteKind::Responses,
     )
@@ -3962,6 +4069,7 @@ fn select_runtime_response_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     pinned_profile: Option<&str>,
     turn_state_profile: Option<&str>,
+    session_profile: Option<&str>,
     discover_previous_response_owner: bool,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
@@ -3976,6 +4084,10 @@ fn select_runtime_response_candidate_for_route(
 
     if discover_previous_response_owner {
         return next_runtime_previous_response_candidate(shared, excluded_profiles);
+    }
+
+    if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
+        return Ok(Some(profile_name.to_string()));
     }
 
     if let Some(profile_name) =
@@ -4320,6 +4432,7 @@ fn proxy_runtime_websocket_text_message(
 ) -> Result<()> {
     let previous_response_id = runtime_request_previous_response_id_from_text(request_text);
     let request_turn_state = runtime_request_turn_state(handshake_request);
+    let request_session_id = runtime_request_session_id(handshake_request);
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
@@ -4331,15 +4444,22 @@ fn proxy_runtime_websocket_text_message(
         .transpose()?
         .flatten();
     let session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
-        websocket_session.profile_name.clone()
+        websocket_session.profile_name.clone().or(request_session_id
+            .as_deref()
+            .map(|session_id| runtime_session_bound_profile(shared, session_id))
+            .transpose()?
+            .flatten())
     } else {
         None
     };
-    let mut pinned_profile = bound_profile.clone().or(session_profile).or_else(|| {
-        previous_response_id
-            .as_ref()
-            .and_then(|_| runtime_proxy_current_profile(shared).ok())
-    });
+    let mut pinned_profile = bound_profile
+        .clone()
+        .or(session_profile.clone())
+        .or_else(|| {
+            previous_response_id
+                .as_ref()
+                .and_then(|_| runtime_proxy_current_profile(shared).ok())
+        });
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -4368,6 +4488,7 @@ fn proxy_runtime_websocket_text_message(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
+                session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
@@ -4435,6 +4556,7 @@ fn proxy_runtime_websocket_text_message(
             &excluded_profiles,
             pinned_profile.as_deref(),
             turn_state_profile.as_deref(),
+            session_profile.as_deref(),
             previous_response_id.is_some(),
             RuntimeRouteKind::Websocket,
         )?
@@ -4455,6 +4577,7 @@ fn proxy_runtime_websocket_text_message(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
+                session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
@@ -4647,6 +4770,7 @@ fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
+    let request_session_id = runtime_request_session_id(handshake_request);
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
     let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
         if reuse_existing_session {
@@ -4751,6 +4875,11 @@ fn attempt_runtime_websocket_request(
                 }
 
                 if !committed {
+                    remember_runtime_session_id(
+                        shared,
+                        profile_name,
+                        request_session_id.as_deref(),
+                    )?;
                     remember_runtime_turn_state(
                         shared,
                         profile_name,
@@ -4794,6 +4923,11 @@ fn attempt_runtime_websocket_request(
             }
             Ok(WsMessage::Binary(payload)) => {
                 if !committed {
+                    remember_runtime_session_id(
+                        shared,
+                        profile_name,
+                        request_session_id.as_deref(),
+                    )?;
                     remember_runtime_turn_state(
                         shared,
                         profile_name,
@@ -5153,8 +5287,14 @@ fn proxy_runtime_standard_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
+    let request_session_id = runtime_request_session_id(request);
+    let session_profile = request_session_id
+        .as_deref()
+        .map(|session_id| runtime_session_bound_profile(shared, session_id))
+        .transpose()?
+        .flatten();
     if !is_runtime_compact_path(&request.path_and_query) {
-        let profile_name = runtime_proxy_current_profile(shared)?;
+        let profile_name = session_profile.unwrap_or(runtime_proxy_current_profile(shared)?);
         return proxy_runtime_standard_request_for_profile(
             request_id,
             request,
@@ -5164,7 +5304,6 @@ fn proxy_runtime_standard_request(
     }
 
     let current_profile = runtime_proxy_current_profile(shared)?;
-    let mut try_current_profile = true;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut saw_inflight_saturation = false;
@@ -5188,52 +5327,60 @@ fn proxy_runtime_standard_request(
                     "service_unavailable",
                     "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                 )),
-                None => proxy_runtime_standard_request_for_profile(
-                    request_id,
-                    request,
-                    shared,
-                    &current_profile,
-                ),
-            };
-        }
-
-        let candidate_name = if try_current_profile {
-            try_current_profile = false;
-            current_profile.clone()
-        } else {
-            let Some(candidate_name) = next_runtime_response_candidate_for_route(
-                shared,
-                &excluded_profiles,
-                RuntimeRouteKind::Compact,
-            )?
-            else {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http compact_candidate_exhausted last_failure={}",
-                        if last_failure.is_some() {
-                            "http"
-                        } else {
-                            "none"
-                        }
-                    ),
-                );
-                return match last_failure {
-                    Some(response) => Ok(response),
-                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )),
-                    None => proxy_runtime_standard_request_for_profile(
+                None => {
+                    let fallback_profile = session_profile
+                        .clone()
+                        .unwrap_or_else(|| current_profile.clone());
+                    proxy_runtime_standard_request_for_profile(
                         request_id,
                         request,
                         shared,
-                        &current_profile,
-                    ),
-                };
+                        &fallback_profile,
+                    )
+                }
             };
-            candidate_name
+        }
+
+        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+            shared,
+            &excluded_profiles,
+            None,
+            None,
+            session_profile.as_deref(),
+            false,
+            RuntimeRouteKind::Compact,
+        )?
+        else {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http compact_candidate_exhausted last_failure={}",
+                    if last_failure.is_some() {
+                        "http"
+                    } else {
+                        "none"
+                    }
+                ),
+            );
+            return match last_failure {
+                Some(response) => Ok(response),
+                None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+                    503,
+                    "service_unavailable",
+                    "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                )),
+                None => {
+                    let fallback_profile = session_profile
+                        .clone()
+                        .unwrap_or_else(|| current_profile.clone());
+                    proxy_runtime_standard_request_for_profile(
+                        request_id,
+                        request,
+                        shared,
+                        &fallback_profile,
+                    )
+                }
+            };
         };
         selection_attempts = selection_attempts.saturating_add(1);
 
@@ -5323,6 +5470,11 @@ fn proxy_runtime_standard_request_for_profile(
                 );
                 err
             })?;
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        runtime_request_session_id(request).as_deref(),
+    )?;
     forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
         note_runtime_profile_transport_failure(
             shared,
@@ -5341,6 +5493,7 @@ fn attempt_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeStandardAttempt> {
+    let request_session_id = runtime_request_session_id(request);
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
     let response =
@@ -5356,6 +5509,7 @@ fn attempt_runtime_standard_request(
                 err
             })?;
     if !is_runtime_compact_path(&request.path_and_query) || response.status().is_success() {
+        remember_runtime_session_id(shared, profile_name, request_session_id.as_deref())?;
         return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
             response: forward_runtime_proxy_response(shared, response, Vec::new()).map_err(
@@ -5411,6 +5565,7 @@ fn proxy_runtime_responses_request(
 ) -> Result<RuntimeResponsesReply> {
     let previous_response_id = runtime_request_previous_response_id(request);
     let request_turn_state = runtime_request_turn_state(request);
+    let request_session_id = runtime_request_session_id(request);
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
@@ -5421,6 +5576,15 @@ fn proxy_runtime_responses_request(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
+    let session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+        request_session_id
+            .as_deref()
+            .map(|session_id| runtime_session_bound_profile(shared, session_id))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let mut pinned_profile = bound_profile.clone().or_else(|| {
         previous_response_id
             .as_ref()
@@ -5454,6 +5618,7 @@ fn proxy_runtime_responses_request(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
+                session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
@@ -5524,6 +5689,7 @@ fn proxy_runtime_responses_request(
             &excluded_profiles,
             pinned_profile.as_deref(),
             turn_state_profile.as_deref(),
+            session_profile.as_deref(),
             previous_response_id.is_some(),
             RuntimeRouteKind::Responses,
         )?
@@ -5544,6 +5710,7 @@ fn proxy_runtime_responses_request(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
+                session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
@@ -5742,6 +5909,7 @@ fn attempt_runtime_responses_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
+    let request_session_id = runtime_request_session_id(request);
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
     let response = send_runtime_proxy_upstream_responses_request(
@@ -5803,6 +5971,7 @@ fn attempt_runtime_responses_request(
     }
     prepare_runtime_proxy_responses_success(
         request_id,
+        request_session_id.as_deref(),
         response,
         shared,
         profile_name,
@@ -6637,12 +6806,14 @@ fn forward_runtime_proxy_response(
 
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
+    request_session_id: Option<&str>,
     response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     inflight_guard: RuntimeProfileInFlightGuard,
 ) -> Result<RuntimeResponsesAttempt> {
     let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
+    remember_runtime_session_id(shared, profile_name, request_session_id)?;
     remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
     let is_sse = response
         .headers()
@@ -10008,6 +10179,7 @@ mod tests {
                 ("rested".to_string(), now - 3_600),
             ]),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let candidates = vec![
             ReadyProfileCandidate {
@@ -10035,6 +10207,7 @@ mod tests {
             profiles: BTreeMap::new(),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let candidates = vec![
             ReadyProfileCandidate {
@@ -10063,6 +10236,7 @@ mod tests {
             profiles: BTreeMap::new(),
             last_run_selected_at: BTreeMap::from([("active".to_string(), now)]),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let candidates = vec![
             ReadyProfileCandidate {
@@ -10164,6 +10338,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         assert_eq!(
@@ -10210,6 +10385,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let paths = AppPaths {
             root: PathBuf::from("/tmp/prodex-test"),
@@ -10286,6 +10462,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths,
@@ -10294,6 +10471,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::from([(
                 "second".to_string(),
@@ -10355,6 +10533,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths,
@@ -10363,6 +10542,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -10449,6 +10629,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths,
@@ -10457,6 +10638,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -10520,6 +10702,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths,
@@ -10528,6 +10711,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -10588,6 +10772,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -10597,6 +10782,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
             profile_transport_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
@@ -10654,6 +10840,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -10717,6 +10904,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths,
@@ -10725,6 +10913,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -10794,6 +10983,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -10866,6 +11056,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -10875,6 +11066,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::from([
                 (
                     "main".to_string(),
@@ -10970,6 +11162,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -10979,6 +11172,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::from([
                 (
                     "main".to_string(),
@@ -11074,6 +11268,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -11083,6 +11278,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::from([
                 (
                     "main".to_string(),
@@ -11181,6 +11377,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -11190,6 +11387,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::from([
                 (
                     "main".to_string(),
@@ -11297,6 +11495,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -11306,6 +11505,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::from([
                 (
                     "main".to_string(),
@@ -11386,6 +11586,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -11395,6 +11596,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -11466,6 +11668,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -11475,6 +11678,7 @@ mod tests {
             include_code_review: false,
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -11562,6 +11766,13 @@ mod tests {
                     bound_at: 10,
                 },
             )]),
+            session_profile_bindings: BTreeMap::from([(
+                "sess-existing".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: 10,
+                },
+            )]),
         };
         existing
             .save(&paths)
@@ -11572,6 +11783,7 @@ mod tests {
             profiles: existing.profiles.clone(),
             last_run_selected_at: BTreeMap::from([("second".to_string(), 20)]),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         desired
             .save(&paths)
@@ -11583,6 +11795,13 @@ mod tests {
             loaded
                 .response_profile_bindings
                 .get("resp-existing")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            loaded
+                .session_profile_bindings
+                .get("sess-existing")
                 .map(|binding| binding.profile_name.as_str()),
             Some("main")
         );
@@ -11622,6 +11841,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::from([("second".to_string(), 30)]),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         existing
             .save(&paths)
@@ -11645,6 +11865,13 @@ mod tests {
                     bound_at: 40,
                 },
             )]),
+            session_profile_bindings: BTreeMap::from([(
+                "sess-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: 40,
+                },
+            )]),
         };
         let revision = AtomicU64::new(1);
         assert!(
@@ -11659,6 +11886,13 @@ mod tests {
             loaded
                 .response_profile_bindings
                 .get("resp-main")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            loaded
+                .session_profile_bindings
+                .get("sess-main")
                 .map(|binding| binding.profile_name.as_str()),
             Some("main")
         );
@@ -11717,6 +11951,7 @@ mod tests {
                 include_code_review: false,
                 current_profile: "main".to_string(),
                 turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
                 profile_probe_cache: BTreeMap::new(),
                 profile_retry_backoff_until: BTreeMap::new(),
                 profile_transport_backoff_until: BTreeMap::new(),
@@ -11732,6 +11967,7 @@ mod tests {
                 profiles: profiles.clone(),
                 last_run_selected_at: BTreeMap::from([("main".to_string(), 10)]),
                 response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
             },
             paths.clone(),
             "first",
@@ -11749,6 +11985,13 @@ mod tests {
                         bound_at: 20,
                     },
                 )]),
+                session_profile_bindings: BTreeMap::from([(
+                    "sess-second".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "second".to_string(),
+                        bound_at: 20,
+                    },
+                )]),
             },
             paths.clone(),
             "second",
@@ -11760,11 +12003,22 @@ mod tests {
                     .response_profile_bindings
                     .get("resp-second")
                     .is_some_and(|binding| binding.profile_name == "second")
+                && state
+                    .session_profile_bindings
+                    .get("sess-second")
+                    .is_some_and(|binding| binding.profile_name == "second")
         });
         assert_eq!(persisted.active_profile.as_deref(), Some("second"));
         assert_eq!(
             persisted.last_run_selected_at.get("second").copied(),
             Some(20)
+        );
+        assert_eq!(
+            persisted
+                .session_profile_bindings
+                .get("sess-second")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("second")
         );
     }
 
@@ -11805,6 +12059,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths,
@@ -11819,6 +12074,7 @@ mod tests {
                     bound_at: Local::now().timestamp(),
                 },
             )]),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -11852,6 +12108,7 @@ mod tests {
                 &BTreeSet::new(),
                 None,
                 turn_state_profile.as_deref(),
+                None,
                 false,
             )
             .expect("candidate selection should succeed"),
@@ -11896,6 +12153,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let now = Local::now().timestamp();
         let runtime = RuntimeRotationState {
@@ -11911,6 +12169,7 @@ mod tests {
                     bound_at: now,
                 },
             )]),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -11953,10 +12212,109 @@ mod tests {
                 &BTreeSet::new(),
                 None,
                 turn_state_profile.as_deref(),
+                None,
                 false,
             )
             .expect("candidate selection should succeed"),
             Some("second".to_string())
+        );
+    }
+
+    #[test]
+    fn session_affinity_prefers_bound_profile_for_compact_requests() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::from([(
+                "sess-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )]),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses/compact".to_string(),
+            headers: vec![
+                ("Content-Type".to_string(), "application/json".to_string()),
+                ("session_id".to_string(), "sess-second".to_string()),
+                ("x-openai-subagent".to_string(), "compact".to_string()),
+            ],
+            body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+        };
+
+        let _response = proxy_runtime_standard_request(1, &request, &shared)
+            .expect("session-bound compact request should succeed");
+
+        assert_eq!(
+            backend.responses_accounts(),
+            vec!["second-account".to_string()]
         );
     }
 
@@ -11985,6 +12343,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let runtime = RuntimeRotationState {
             paths: paths.clone(),
@@ -11993,6 +12352,7 @@ mod tests {
             include_code_review: false,
             current_profile: "second".to_string(),
             turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
@@ -12173,6 +12533,7 @@ mod tests {
                 include_code_review: false,
                 current_profile: "main".to_string(),
                 turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
                 profile_probe_cache: BTreeMap::new(),
                 profile_retry_backoff_until: BTreeMap::new(),
                 profile_transport_backoff_until: BTreeMap::new(),
@@ -12240,6 +12601,7 @@ mod tests {
                 include_code_review: false,
                 current_profile: "main".to_string(),
                 turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
                 profile_probe_cache: BTreeMap::new(),
                 profile_retry_backoff_until: BTreeMap::new(),
                 profile_transport_backoff_until: BTreeMap::new(),
@@ -12326,6 +12688,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12411,6 +12774,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12494,6 +12858,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12573,6 +12938,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12643,6 +13009,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12703,6 +13070,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12795,6 +13163,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12868,6 +13237,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
             .expect("runtime proxy should start");
@@ -12937,6 +13307,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -12959,7 +13330,10 @@ mod tests {
 
         assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(body, "Too Many Requests");
-        assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+        assert_eq!(
+            backend.responses_accounts(),
+            vec!["main-account".to_string()]
+        );
     }
 
     #[test]
@@ -12987,6 +13361,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         state.save(&paths).expect("failed to save initial state");
 
@@ -13039,6 +13414,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
             .expect("runtime proxy should start");
@@ -13117,6 +13493,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
         let proxy =
             start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
@@ -13184,6 +13561,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths_one = AppPaths {
@@ -13242,6 +13620,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13332,6 +13711,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13408,6 +13788,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13499,6 +13880,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13577,6 +13959,144 @@ mod tests {
     }
 
     #[test]
+    fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
+        let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        let third_home = temp_dir.path.join("homes/third");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+        write_auth_json(&third_home.join("auth.json"), "third-account");
+
+        let initial_state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+                (
+                    "third".to_string(),
+                    ProfileEntry {
+                        codex_home: third_home,
+                        managed: true,
+                        email: Some("third@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        initial_state
+            .save(&paths)
+            .expect("failed to save initial state");
+
+        let client = Client::builder().build().expect("client");
+        {
+            let proxy = start_runtime_rotation_proxy(
+                &paths,
+                &initial_state,
+                "main",
+                backend.base_url(),
+                false,
+            )
+            .expect("runtime proxy should start");
+
+            let first = client
+                .post(format!(
+                    "http://{}/backend-api/codex/responses",
+                    proxy.listen_addr
+                ))
+                .header("Content-Type", "application/json")
+                .header("session_id", "sess-second")
+                .body("{\"input\":[]}")
+                .send()
+                .expect("first runtime proxy request should succeed");
+            let first_body = first
+                .text()
+                .expect("first response body should be readable");
+            assert!(first_body.contains("\"resp-second\""));
+        }
+
+        let persisted = wait_for_state(&paths, |state| {
+            state
+                .session_profile_bindings
+                .get("sess-second")
+                .is_some_and(|binding| binding.profile_name == "second")
+        });
+        assert_eq!(
+            persisted
+                .session_profile_bindings
+                .get("sess-second")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("second")
+        );
+
+        let mut resumed_state = AppState::load(&paths).expect("state should reload");
+        resumed_state.active_profile = Some("third".to_string());
+        resumed_state
+            .save(&paths)
+            .expect("failed to save resumed state");
+
+        let resumed_proxy = start_runtime_rotation_proxy(
+            &paths,
+            &resumed_state,
+            "third",
+            backend.base_url(),
+            false,
+        )
+        .expect("resumed runtime proxy should start");
+
+        let compact = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses/compact",
+                resumed_proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .header("session_id", "sess-second")
+            .body("{\"input\":[],\"instructions\":\"compact\"}")
+            .send()
+            .expect("compact request should succeed");
+        assert!(compact.status().is_success());
+        assert_eq!(
+            compact
+                .text()
+                .expect("compact response body should be readable"),
+            "{\"output\":[]}"
+        );
+        assert_eq!(
+            backend.responses_accounts(),
+            vec![
+                "main-account".to_string(),
+                "second-account".to_string(),
+                "second-account".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_http() {
         let backend = RuntimeProxyBackend::start();
         let temp_dir = TestDir::new();
@@ -13617,6 +14137,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13701,6 +14222,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13789,6 +14311,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13843,6 +14366,7 @@ mod tests {
             )]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {
@@ -13946,6 +14470,7 @@ mod tests {
             ]),
             last_run_selected_at: BTreeMap::new(),
             response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
         };
 
         let paths = AppPaths {

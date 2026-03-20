@@ -48,6 +48,7 @@ These bindings must remain reliable:
 
 - `previous_response_id -> profile`
 - `x-codex-turn-state -> profile`
+- `session_id -> profile` for session-scoped unary routes such as remote compact
 
 If a request continues an existing chain, it should stay on the owning profile whenever possible.
 
@@ -66,6 +67,7 @@ That fallback must not override:
 
 - `previous_response_id` ownership
 - `x-codex-turn-state` ownership
+- `session_id` ownership for an existing session-scoped route
 - mid-stream no-rotate rules
 
 ### Transport transparency
@@ -104,6 +106,7 @@ The runtime proxy should remain conservative and durable under poor networks and
   - `active_profile`
   - `last_run_selected_at`
   - `response_profile_bindings`
+  - `session_profile_bindings`
 
 ### Unary compact path
 
@@ -112,6 +115,7 @@ Remote compaction uses the unary endpoint:
 - `/responses/compact`
 
 This path should remain eligible for safe retry/rotate on temporary overload or quota exhaustion, while other unary errors should pass through unchanged.
+When `session_id` is present and already bound to a profile, compact should prefer that owning profile before fresh unary selection.
 
 For `429` on unary paths:
 
