@@ -139,6 +139,7 @@ If a user reports a stall, inspect the latest runtime log before changing behavi
 Look for:
 
 - `runtime_proxy_queue_overloaded`
+- `runtime_proxy_active_limit_reached`
 - `runtime_proxy_overload_backoff`
 - `profile_inflight_saturated`
 - `upstream_connect_*`
@@ -152,7 +153,7 @@ Look for:
 - `precommit_budget_exhausted`
 - `state_save_*`
 
-If `profile_inflight_saturated` appears repeatedly without matching transport or quota markers, suspect local concurrency pressure before changing upstream-facing behavior.
+If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching transport or quota markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
 ## Key Commands
 

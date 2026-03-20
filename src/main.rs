@@ -15,7 +15,7 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
@@ -146,6 +146,19 @@ fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
     usize_override(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
         worker_count.saturating_mul(4).clamp(8, 64),
+    )
+    .max(1)
+}
+
+fn runtime_proxy_active_request_limit(
+    worker_count: usize,
+    long_lived_worker_count: usize,
+) -> usize {
+    usize_override(
+        "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
+        worker_count
+            .saturating_add(long_lived_worker_count)
+            .clamp(8, 64),
     )
     .max(1)
 }
@@ -727,6 +740,8 @@ struct RuntimeRotationProxyShared {
     request_sequence: Arc<AtomicU64>,
     state_save_revision: Arc<AtomicU64>,
     local_overload_backoff_until: Arc<AtomicU64>,
+    active_request_count: Arc<AtomicUsize>,
+    active_request_limit: usize,
 }
 
 #[derive(Debug)]
@@ -869,6 +884,16 @@ struct RuntimeProfileInFlightGuard {
     shared: RuntimeRotationProxyShared,
     profile_name: String,
     context: &'static str,
+}
+
+struct RuntimeProxyActiveRequestGuard {
+    active_request_count: Arc<AtomicUsize>,
+}
+
+impl Drop for RuntimeProxyActiveRequestGuard {
+    fn drop(&mut self) {
+        self.active_request_count.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Drop for RuntimeProfileInFlightGuard {
@@ -1650,6 +1675,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded").to_string(),
         ),
         (
+            "Active limit".to_string(),
+            runtime_doctor_marker_count(&summary, "runtime_proxy_active_limit_reached").to_string(),
+        ),
+        (
             "Overload backoff".to_string(),
             runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff").to_string(),
         ),
@@ -1733,6 +1762,8 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Latest runtime log is empty.".to_string()
         } else if runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff") > 0 {
             "Recent local proxy overload backoff was triggered.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_active_limit_reached") > 0 {
+            "Recent global active-request admission limit was triggered.".to_string()
         } else if runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded") > 0 {
             "Recent proxy saturation detected before commit.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_inflight_saturated") > 0 {
@@ -1797,6 +1828,7 @@ fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
 fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
     [
         "runtime_proxy_queue_overloaded",
+        "runtime_proxy_active_limit_reached",
         "runtime_proxy_overload_backoff",
         "profile_inflight_saturated",
         "upstream_connect_timeout",
@@ -3079,6 +3111,12 @@ fn start_runtime_rotation_proxy(
             .build()
             .context("failed to build runtime auto-rotate async runtime")?,
     );
+    let worker_count = runtime_proxy_worker_count();
+    let long_lived_worker_count = runtime_proxy_long_lived_worker_count();
+    let long_lived_queue_capacity =
+        runtime_proxy_long_lived_queue_capacity(long_lived_worker_count);
+    let active_request_limit =
+        runtime_proxy_active_request_limit(worker_count, long_lived_worker_count);
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(
@@ -3092,6 +3130,8 @@ fn start_runtime_rotation_proxy(
         request_sequence: Arc::new(AtomicU64::new(1)),
         state_save_revision: Arc::new(AtomicU64::new(0)),
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit,
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths: paths.clone(),
             state: state.clone(),
@@ -3114,17 +3154,13 @@ fn start_runtime_rotation_proxy(
     );
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
-    let worker_count = runtime_proxy_worker_count();
-    let long_lived_worker_count = runtime_proxy_long_lived_worker_count();
-    let long_lived_queue_capacity =
-        runtime_proxy_long_lived_queue_capacity(long_lived_worker_count);
     let (long_lived_sender, long_lived_receiver) =
         mpsc::sync_channel::<tiny_http::Request>(long_lived_queue_capacity);
     let long_lived_receiver = Arc::new(Mutex::new(long_lived_receiver));
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime proxy worker_count={worker_count} long_lived_worker_count={long_lived_worker_count} long_lived_queue_capacity={long_lived_queue_capacity}"
+            "runtime proxy worker_count={worker_count} long_lived_worker_count={long_lived_worker_count} long_lived_queue_capacity={long_lived_queue_capacity} active_request_limit={active_request_limit}"
         ),
     );
 
@@ -3283,10 +3319,57 @@ fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason
     );
 }
 
+fn try_acquire_runtime_proxy_active_request_slot(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+) -> Option<RuntimeProxyActiveRequestGuard> {
+    loop {
+        let active = shared.active_request_count.load(Ordering::SeqCst);
+        if active >= shared.active_request_limit {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "runtime_proxy_active_limit_reached transport={transport} path={path} active={active} limit={}",
+                    shared.active_request_limit
+                ),
+            );
+            return None;
+        }
+        if shared
+            .active_request_count
+            .compare_exchange(
+                active,
+                active.saturating_add(1),
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            return Some(RuntimeProxyActiveRequestGuard {
+                active_request_count: Arc::clone(&shared.active_request_count),
+            });
+        }
+    }
+}
+
 fn handle_runtime_rotation_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) {
+    let request_path = request.url().to_string();
+    let request_transport = if is_tiny_http_websocket_upgrade(&request) {
+        "websocket"
+    } else {
+        "http"
+    };
+    let Some(_active_request_guard) =
+        try_acquire_runtime_proxy_active_request_slot(shared, request_transport, &request_path)
+    else {
+        mark_runtime_proxy_local_overload(shared, "active_request_limit");
+        reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
+        return;
+    };
     let request_id = runtime_proxy_next_request_id(shared);
     if is_tiny_http_websocket_upgrade(&request) {
         runtime_proxy_log(
@@ -9619,6 +9702,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let excluded = BTreeSet::from(["main".to_string()]);
@@ -9682,6 +9767,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9779,6 +9866,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9844,6 +9933,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9892,6 +9983,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9957,6 +10050,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10023,6 +10118,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10127,6 +10224,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10228,6 +10327,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10332,6 +10433,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10430,6 +10533,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10499,6 +10604,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -10700,6 +10807,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(RuntimeRotationState {
                 paths: paths.clone(),
                 state: AppState::default(),
@@ -10828,6 +10937,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
@@ -10926,6 +11037,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
@@ -10996,6 +11109,8 @@ mod tests {
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -11084,14 +11199,19 @@ mod tests {
 [2026-03-20 12:00:00.010 +07:00] request=1 transport=http first_local_chunk profile=main bytes=128 elapsed_ms=10
 [2026-03-20 12:00:00.020 +07:00] profile_transport_backoff profile=main until=123 reason=stream_read_error
 [2026-03-20 12:00:00.030 +07:00] profile_health profile=main score=4 delta=4 reason=stream_read_error
-[2026-03-20 12:00:00.040 +07:00] profile_inflight_saturated profile=main hard_limit=8
-[2026-03-20 12:00:00.050 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
+[2026-03-20 12:00:00.040 +07:00] runtime_proxy_active_limit_reached transport=http path=/backend-api/codex/responses active=12 limit=12
+[2026-03-20 12:00:00.050 +07:00] profile_inflight_saturated profile=main hard_limit=8
+[2026-03-20 12:00:00.060 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
 "#,
         );
 
-        assert_eq!(summary.line_count, 6);
+        assert_eq!(summary.line_count, 7);
         assert_eq!(
             runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
+            1
+        );
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "runtime_proxy_active_limit_reached"),
             1
         );
         assert_eq!(
@@ -11116,6 +11236,72 @@ mod tests {
                 .last_marker_line
                 .as_deref()
                 .is_some_and(|line| line.contains("runtime_proxy_queue_overloaded"))
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_active_request_limit_is_enforced_and_released() {
+        let temp_dir = TestDir::new();
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths: AppPaths {
+                    root: temp_dir.path.join("prodex"),
+                    state_file: temp_dir.path.join("prodex/state.json"),
+                    managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                    shared_codex_root: temp_dir.path.join("shared"),
+                    legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+                },
+                state: AppState::default(),
+                upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+                include_code_review: false,
+                current_profile: "main".to_string(),
+                turn_state_bindings: BTreeMap::new(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: 1,
+        };
+
+        let first = try_acquire_runtime_proxy_active_request_slot(
+            &shared,
+            "http",
+            "/backend-api/codex/responses",
+        )
+        .expect("first slot should be available");
+        assert!(
+            try_acquire_runtime_proxy_active_request_slot(
+                &shared,
+                "http",
+                "/backend-api/codex/responses",
+            )
+            .is_none(),
+            "second slot should be rejected once limit is reached"
+        );
+        drop(first);
+        assert!(
+            try_acquire_runtime_proxy_active_request_slot(
+                &shared,
+                "http",
+                "/backend-api/codex/responses",
+            )
+            .is_some(),
+            "slot should be available again after the first guard drops"
         );
     }
 

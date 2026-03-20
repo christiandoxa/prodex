@@ -109,6 +109,7 @@ tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 Good markers to look for:
 
 - `runtime_proxy_queue_overloaded`
+- `runtime_proxy_active_limit_reached`
 - `runtime_proxy_overload_backoff`
 - `profile_inflight_saturated`
 - `profile_retry_backoff`
@@ -120,7 +121,7 @@ Good markers to look for:
 - `first_local_chunk`
 - `stream_read_error`
 
-If `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure first.
+If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure first.
 
 ## Notes
 
