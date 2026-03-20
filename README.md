@@ -287,6 +287,7 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 - fresh pre-commit selection also respects a short per-profile in-flight cap, so new work fails fast instead of piling more pressure onto an already busy account
 - that per-profile cap only applies to fresh pre-commit selection; it does not override hard affinity for an existing continuation
 - quota backoff, transport backoff, and short-lived profile health penalties are tracked separately so the proxy can stop hammering a flaky account without weakening hard affinity
+- short-lived profile health penalties are endpoint-specific, so a hot `/responses/compact` path or flaky WebSocket route does not automatically poison fresh `responses` selection
 - pre-commit candidate selection is bounded, so when all candidates are currently bad the proxy fails fast instead of spinning in the background for too long
 - the unary compact path (`/responses/compact`) is also eligible for safe retry and rotation on temporary overload or quota exhaustion
 
@@ -335,6 +336,7 @@ Useful log markers:
 - `first_local_chunk`
 - `stream_read_error`
 
+If `profile_health` appears, also check its `route=` value before changing selection behavior globally.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
 ## Important Notes

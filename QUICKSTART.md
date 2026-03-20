@@ -84,6 +84,7 @@ In practice, that means:
 
 - existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
 - temporary quota, overload, and transport failures are tracked separately
+- short-lived profile health penalties are endpoint-specific, so compact or websocket flakiness does not automatically poison fresh responses selection
 - new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active
 - fresh pre-commit selection also respects a short per-profile in-flight cap, so new work fails fast instead of piling onto a busy account
 - that cap only applies to fresh pre-commit selection and does not override hard affinity for an existing continuation
@@ -121,6 +122,7 @@ Good markers to look for:
 - `first_local_chunk`
 - `stream_read_error`
 
+If `profile_health` appears, also check its `route=` value before changing selection behavior globally.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure first.
 
 ## Notes

@@ -76,10 +76,12 @@ The runtime proxy should remain conservative and durable under poor networks and
 - Keep long-lived request handling bounded; avoid unbounded `thread::spawn` patterns in acceptor paths.
 - Treat transport failures separately from quota failures.
 - Treat short-lived profile health as a separate signal from quota backoff and transport backoff.
+- Treat short-lived profile health as endpoint-specific where possible, so `responses`, `/responses/compact`, and websocket transport can degrade independently for fresh selection.
 - Fresh pre-commit selection may use a short-lived per-profile in-flight load signal to avoid creating hotspots.
 - Fresh pre-commit selection may also enforce a short per-profile in-flight cap so new work fails fast instead of piling more pressure onto a busy account.
 - Temporary connect/read/stream transport failures may place a profile into short transport backoff.
 - Temporary overload or repeated transport flakiness may add a short-lived profile health penalty that affects only new candidate selection.
+- Endpoint-specific health penalties must not globally poison unrelated fresh routes unless there is a deliberate reason to do so.
 - Do not let transport backoff override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary profile health penalties override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary in-flight load heuristics override hard affinity for an in-flight continuation that already owns a profile.
@@ -153,6 +155,7 @@ Look for:
 - `precommit_budget_exhausted`
 - `state_save_*`
 
+If `profile_health` appears, inspect its `route=` value before changing selection behavior globally.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching transport or quota markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
 ## Key Commands
