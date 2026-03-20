@@ -84,6 +84,9 @@ In practice, that means:
 
 - existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
 - temporary quota, overload, and transport failures are tracked separately
+- new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active
+- fresh pre-commit selection also respects a short per-profile in-flight cap, so new work fails fast instead of piling onto a busy account
+- that cap only applies to fresh pre-commit selection and does not override hard affinity for an existing continuation
 - flaky profiles can be deprioritized briefly without rotating mid-stream
 - pre-commit retry/selection is bounded so the proxy does not keep spinning too long when every candidate is currently bad
 - `/responses/compact` also gets the same safe retry/rotate treatment for temporary overload or quota exhaustion
@@ -93,23 +96,31 @@ In practice, that means:
 ```bash
 prodex doctor
 prodex doctor --quota
+prodex doctor --runtime
 ```
 
 If a runtime session looks stalled, inspect the latest proxy log:
 
 ```bash
+prodex doctor --runtime
 tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 ```
 
 Good markers to look for:
 
+- `runtime_proxy_queue_overloaded`
+- `runtime_proxy_overload_backoff`
+- `profile_inflight_saturated`
 - `profile_retry_backoff`
 - `profile_transport_backoff`
+- `profile_inflight`
 - `profile_health`
 - `precommit_budget_exhausted`
 - `first_upstream_chunk`
 - `first_local_chunk`
 - `stream_read_error`
+
+If `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure first.
 
 ## Notes
 

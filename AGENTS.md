@@ -76,10 +76,14 @@ The runtime proxy should remain conservative and durable under poor networks and
 - Keep long-lived request handling bounded; avoid unbounded `thread::spawn` patterns in acceptor paths.
 - Treat transport failures separately from quota failures.
 - Treat short-lived profile health as a separate signal from quota backoff and transport backoff.
+- Fresh pre-commit selection may use a short-lived per-profile in-flight load signal to avoid creating hotspots.
+- Fresh pre-commit selection may also enforce a short per-profile in-flight cap so new work fails fast instead of piling more pressure onto a busy account.
 - Temporary connect/read/stream transport failures may place a profile into short transport backoff.
 - Temporary overload or repeated transport flakiness may add a short-lived profile health penalty that affects only new candidate selection.
 - Do not let transport backoff override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary profile health penalties override hard affinity for an in-flight continuation that already owns a profile.
+- Do not let temporary in-flight load heuristics override hard affinity for an in-flight continuation that already owns a profile.
+- Do not let the per-profile in-flight hard cap override hard affinity for an in-flight continuation that already owns a profile.
 - Keep pre-commit candidate selection bounded in both time and attempts so the proxy fails fast when the whole pool is unhealthy.
 - Runtime state saves must not block request/stream commit paths.
 - Cross-process state persistence should remain merge-safe for:
@@ -134,15 +138,21 @@ Useful files:
 If a user reports a stall, inspect the latest runtime log before changing behavior blindly.
 Look for:
 
+- `runtime_proxy_queue_overloaded`
+- `runtime_proxy_overload_backoff`
+- `profile_inflight_saturated`
 - `upstream_connect_*`
 - `first_upstream_chunk`
 - `first_local_chunk`
 - `stream_read_error`
 - `profile_retry_backoff`
 - `profile_transport_backoff`
+- `profile_inflight`
 - `profile_health`
 - `precommit_budget_exhausted`
 - `state_save_*`
+
+If `profile_inflight_saturated` appears repeatedly without matching transport or quota markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
 ## Key Commands
 
@@ -162,6 +172,12 @@ Run the full test suite:
 
 ```bash
 cargo test -q -- --test-threads=1
+```
+
+Summarize the latest runtime log:
+
+```bash
+prodex doctor --runtime
 ```
 
 Reinstall the local binary after runtime changes:

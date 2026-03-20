@@ -127,6 +127,7 @@ If you want to audit the `prodex` environment:
 ```bash
 prodex doctor
 prodex doctor --quota
+prodex doctor --runtime
 ```
 
 ## How It Works
@@ -282,6 +283,9 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 - existing chains stay pinned through `previous_response_id` and `x-codex-turn-state`
 - temporary quota, overload, or transport failures can move later requests to another ready profile without rotating mid-stream
 - the current profile is still tried optimistically first when it looks healthy
+- new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active at once
+- fresh pre-commit selection also respects a short per-profile in-flight cap, so new work fails fast instead of piling more pressure onto an already busy account
+- that per-profile cap only applies to fresh pre-commit selection; it does not override hard affinity for an existing continuation
 - quota backoff, transport backoff, and short-lived profile health penalties are tracked separately so the proxy can stop hammering a flaky account without weakening hard affinity
 - pre-commit candidate selection is bounded, so when all candidates are currently bad the proxy fails fast instead of spinning in the background for too long
 - the unary compact path (`/responses/compact`) is also eligible for safe retry and rotation on temporary overload or quota exhaustion
@@ -306,6 +310,7 @@ If auto-rotate succeeds, the active profile is updated to the profile that was u
 If a session appears stalled or reconnect-heavy, inspect the latest runtime proxy log:
 
 ```bash
+prodex doctor --runtime
 cat /tmp/prodex-runtime-latest.path
 tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 ```
@@ -317,13 +322,19 @@ Useful files:
 
 Useful log markers:
 
+- `runtime_proxy_queue_overloaded`
+- `runtime_proxy_overload_backoff`
+- `profile_inflight_saturated`
 - `profile_retry_backoff`
 - `profile_transport_backoff`
+- `profile_inflight`
 - `profile_health`
 - `precommit_budget_exhausted`
 - `first_upstream_chunk`
 - `first_local_chunk`
 - `stream_read_error`
+
+If `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
 ## Important Notes
 

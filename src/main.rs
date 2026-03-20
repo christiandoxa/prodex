@@ -11,13 +11,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{
@@ -57,6 +57,9 @@ const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else 
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS: i64 = if cfg!(test) { 8 } else { 120 };
+const RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS: i64 = if cfg!(test) { 1 } else { 3 };
+const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
+const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
 const RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY: u32 = 2;
@@ -71,6 +74,7 @@ const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
+const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
 const CLI_WIDTH: usize = 110;
 const CLI_LABEL_WIDTH: usize = 16;
 const CLI_TABLE_GAP: &str = "  ";
@@ -79,6 +83,7 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl"];
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock::new();
 
 fn create_runtime_proxy_log_path() -> PathBuf {
     let millis = SystemTime::now()
@@ -119,18 +124,30 @@ fn runtime_proxy_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    (parallelism.saturating_mul(4)).clamp(8, 32)
+    usize_override(
+        "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
+        (parallelism.saturating_mul(4)).clamp(8, 32),
+    )
+    .clamp(1, 64)
 }
 
 fn runtime_proxy_long_lived_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    parallelism.clamp(2, 8)
+    usize_override(
+        "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
+        parallelism.clamp(2, 8),
+    )
+    .clamp(1, 32)
 }
 
 fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
-    worker_count.saturating_mul(4).clamp(8, 64)
+    usize_override(
+        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
+        worker_count.saturating_mul(4).clamp(8, 64),
+    )
+    .max(1)
 }
 
 fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
@@ -154,29 +171,85 @@ fn schedule_runtime_state_save(
     reason: &str,
 ) {
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
-    let latest_revision = Arc::clone(&shared.state_save_revision);
-    let log_path = shared.log_path.clone();
-    let reason = reason.to_string();
-    let runtime = Arc::clone(&shared.async_runtime);
+    let queue = runtime_state_save_queue();
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pending.insert(
+        paths.state_file.clone(),
+        RuntimeStateSaveJob {
+            paths,
+            state,
+            revision,
+            latest_revision: Arc::clone(&shared.state_save_revision),
+            log_path: shared.log_path.clone(),
+            reason: reason.to_string(),
+        },
+    );
+    drop(pending);
+    queue.wake.notify_one();
+}
 
-    drop(runtime.spawn_blocking(move || {
-        match save_runtime_state_snapshot_if_latest(&paths, &state, revision, &latest_revision) {
-            Ok(true) => runtime_proxy_log_to_path(
-                &log_path,
-                &format!("state_save_ok revision={revision} reason={reason}"),
-            ),
-            Ok(false) => runtime_proxy_log_to_path(
-                &log_path,
-                &format!("state_save_skipped revision={revision} reason={reason}"),
-            ),
-            Err(err) => runtime_proxy_log_to_path(
-                &log_path,
-                &format!(
-                    "state_save_error revision={revision} reason={reason} stage=write error={err:#}"
+fn runtime_state_save_queue() -> Arc<RuntimeStateSaveQueue> {
+    Arc::clone(RUNTIME_STATE_SAVE_QUEUE.get_or_init(|| {
+        let queue = Arc::new(RuntimeStateSaveQueue {
+            pending: Mutex::new(BTreeMap::new()),
+            wake: Condvar::new(),
+        });
+        let worker_queue = Arc::clone(&queue);
+        thread::spawn(move || runtime_state_save_worker_loop(worker_queue));
+        queue
+    }))
+}
+
+fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
+    loop {
+        let jobs = {
+            let mut pending = queue
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            while pending.is_empty() {
+                pending = queue
+                    .wake
+                    .wait(pending)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+            std::mem::take(&mut *pending)
+        };
+
+        for (_, job) in jobs {
+            match save_runtime_state_snapshot_if_latest(
+                &job.paths,
+                &job.state,
+                job.revision,
+                &job.latest_revision,
+            ) {
+                Ok(true) => runtime_proxy_log_to_path(
+                    &job.log_path,
+                    &format!(
+                        "state_save_ok revision={} reason={}",
+                        job.revision, job.reason
+                    ),
                 ),
-            ),
+                Ok(false) => runtime_proxy_log_to_path(
+                    &job.log_path,
+                    &format!(
+                        "state_save_skipped revision={} reason={}",
+                        job.revision, job.reason
+                    ),
+                ),
+                Err(err) => runtime_proxy_log_to_path(
+                    &job.log_path,
+                    &format!(
+                        "state_save_error revision={} reason={} stage=write error={err:#}",
+                        job.revision, job.reason
+                    ),
+                ),
+            }
         }
-    }));
+    }
 }
 
 fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
@@ -419,6 +492,8 @@ struct QuotaArgs {
 struct DoctorArgs {
     #[arg(long)]
     quota: bool,
+    #[arg(long)]
+    runtime: bool,
 }
 
 #[derive(Args, Debug)]
@@ -651,6 +726,23 @@ struct RuntimeRotationProxyShared {
     log_path: PathBuf,
     request_sequence: Arc<AtomicU64>,
     state_save_revision: Arc<AtomicU64>,
+    local_overload_backoff_until: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+struct RuntimeStateSaveQueue {
+    pending: Mutex<BTreeMap<PathBuf, RuntimeStateSaveJob>>,
+    wake: Condvar,
+}
+
+#[derive(Debug)]
+struct RuntimeStateSaveJob {
+    paths: AppPaths,
+    state: AppState,
+    revision: u64,
+    latest_revision: Arc<AtomicU64>,
+    log_path: PathBuf,
+    reason: String,
 }
 
 struct StateFileLock {
@@ -674,6 +766,7 @@ struct RuntimeRotationState {
     profile_probe_cache: BTreeMap<String, RuntimeProfileProbeCacheEntry>,
     profile_retry_backoff_until: BTreeMap<String, i64>,
     profile_transport_backoff_until: BTreeMap<String, i64>,
+    profile_inflight: BTreeMap<String, usize>,
     profile_health: BTreeMap<String, RuntimeProfileHealth>,
 }
 
@@ -688,6 +781,17 @@ struct RuntimeProfileProbeCacheEntry {
 struct RuntimeProfileHealth {
     score: u32,
     updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeDoctorSummary {
+    log_path: Option<PathBuf>,
+    pointer_exists: bool,
+    log_exists: bool,
+    line_count: usize,
+    marker_counts: BTreeMap<&'static str, usize>,
+    last_marker_line: Option<String>,
+    diagnosis: String,
 }
 
 struct RuntimeRotationProxy {
@@ -758,6 +862,39 @@ struct RuntimeStreamingResponse {
     request_id: u64,
     profile_name: String,
     log_path: PathBuf,
+    _inflight_guard: Option<RuntimeProfileInFlightGuard>,
+}
+
+struct RuntimeProfileInFlightGuard {
+    shared: RuntimeRotationProxyShared,
+    profile_name: String,
+    context: &'static str,
+}
+
+impl Drop for RuntimeProfileInFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut runtime) = self.shared.runtime.lock() {
+            let remaining =
+                if let Some(count) = runtime.profile_inflight.get_mut(&self.profile_name) {
+                    *count = count.saturating_sub(1);
+                    let remaining = *count;
+                    if remaining == 0 {
+                        runtime.profile_inflight.remove(&self.profile_name);
+                    }
+                    remaining
+                } else {
+                    0
+                };
+            drop(runtime);
+            runtime_proxy_log(
+                &self.shared,
+                format!(
+                    "profile_inflight profile={} count={} context={} event=release",
+                    self.profile_name, remaining, self.context
+                ),
+            );
+        }
+    }
 }
 
 enum RuntimePrefetchChunk {
@@ -977,6 +1114,14 @@ fn timeout_override_ms(env_key: &str, default_ms: u64) -> u64 {
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(default_ms)
+}
+
+fn usize_override(env_key: &str, default_value: usize) -> usize {
+    env::var(env_key)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default_value)
 }
 
 fn runtime_proxy_http_connect_timeout_ms() -> u64 {
@@ -1389,6 +1534,11 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
     ];
     print_panel("Doctor", &summary_fields);
 
+    if args.runtime {
+        println!();
+        print_panel("Runtime Proxy", &runtime_doctor_fields());
+    }
+
     if state.profiles.is_empty() {
         return Ok(());
     }
@@ -1456,6 +1606,225 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn runtime_doctor_fields() -> Vec<(String, String)> {
+    let pointer_path = runtime_proxy_latest_log_pointer_path();
+    let summary = collect_runtime_doctor_summary();
+    let latest_log = summary
+        .log_path
+        .as_ref()
+        .map(|path| {
+            format!(
+                "{} ({})",
+                path.display(),
+                if summary.log_exists {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            )
+        })
+        .unwrap_or_else(|| "-".to_string());
+
+    vec![
+        (
+            "Log pointer".to_string(),
+            format!(
+                "{} ({})",
+                pointer_path.display(),
+                if summary.pointer_exists {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            ),
+        ),
+        ("Latest log".to_string(), latest_log),
+        (
+            "Log sample".to_string(),
+            format!("{} lines", summary.line_count),
+        ),
+        (
+            "Queue overload".to_string(),
+            runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded").to_string(),
+        ),
+        (
+            "Overload backoff".to_string(),
+            runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff").to_string(),
+        ),
+        (
+            "Connect failures".to_string(),
+            (runtime_doctor_marker_count(&summary, "upstream_connect_timeout")
+                + runtime_doctor_marker_count(&summary, "upstream_connect_error"))
+            .to_string(),
+        ),
+        (
+            "Pre-commit budget".to_string(),
+            runtime_doctor_marker_count(&summary, "precommit_budget_exhausted").to_string(),
+        ),
+        (
+            "Retry backoff".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_retry_backoff").to_string(),
+        ),
+        (
+            "Transport backoff".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_transport_backoff").to_string(),
+        ),
+        (
+            "Health penalties".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_health").to_string(),
+        ),
+        (
+            "Stream read errors".to_string(),
+            runtime_doctor_marker_count(&summary, "stream_read_error").to_string(),
+        ),
+        (
+            "State save errors".to_string(),
+            runtime_doctor_marker_count(&summary, "state_save_error").to_string(),
+        ),
+        (
+            "Last marker".to_string(),
+            summary
+                .last_marker_line
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+        ),
+        ("Diagnosis".to_string(), summary.diagnosis),
+    ]
+}
+
+fn runtime_doctor_marker_count(summary: &RuntimeDoctorSummary, marker: &'static str) -> usize {
+    summary.marker_counts.get(marker).copied().unwrap_or(0)
+}
+
+fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
+    let pointer_path = runtime_proxy_latest_log_pointer_path();
+    let pointer_content = fs::read_to_string(&pointer_path).ok();
+    let log_path = pointer_content
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let pointer_exists = pointer_path.exists();
+    let log_exists = log_path.as_ref().is_some_and(|path| path.exists());
+
+    let mut summary = if let Some(log_path) = log_path.as_ref().filter(|path| path.exists()) {
+        match read_runtime_log_tail(log_path, RUNTIME_PROXY_DOCTOR_TAIL_BYTES) {
+            Ok(tail) => summarize_runtime_log_tail(&tail),
+            Err(err) => RuntimeDoctorSummary {
+                diagnosis: format!("Failed to read the latest runtime log tail: {err}"),
+                ..RuntimeDoctorSummary::default()
+            },
+        }
+    } else {
+        RuntimeDoctorSummary::default()
+    };
+
+    summary.pointer_exists = pointer_exists;
+    summary.log_exists = log_exists;
+    summary.log_path = log_path;
+    if summary.diagnosis.is_empty() {
+        summary.diagnosis = if !summary.pointer_exists {
+            "No runtime log pointer has been created yet.".to_string()
+        } else if !summary.log_exists {
+            "Latest runtime log path does not exist.".to_string()
+        } else if summary.line_count == 0 {
+            "Latest runtime log is empty.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff") > 0 {
+            "Recent local proxy overload backoff was triggered.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded") > 0 {
+            "Recent proxy saturation detected before commit.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "profile_inflight_saturated") > 0 {
+            "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "precommit_budget_exhausted") > 0 {
+            "Recent candidate selection exhausted before commit.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "stream_read_error") > 0 {
+            "Recent upstream stream read failure detected after commit.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
+            || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
+        {
+            "Recent upstream connect failures detected.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "state_save_error") > 0 {
+            "Recent runtime state save failures detected.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "first_upstream_chunk") > 0
+            && runtime_doctor_marker_count(&summary, "first_local_chunk") == 0
+        {
+            "Upstream produced data but the local writer did not emit a first chunk in the sampled tail."
+                .to_string()
+        } else {
+            "No recent overload or stream-failure markers were detected in the sampled runtime tail."
+                .to_string()
+        };
+    }
+    summary
+}
+
+fn read_runtime_log_tail(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
+    let mut file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let len = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .len();
+    let start = len.saturating_sub(max_bytes as u64);
+    file.seek(SeekFrom::Start(start))
+        .with_context(|| format!("failed to seek {}", path.display()))?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if start > 0
+        && let Some(position) = buffer.iter().position(|byte| *byte == b'\n')
+    {
+        buffer.drain(..=position);
+    }
+    Ok(buffer)
+}
+
+fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
+    let text = String::from_utf8_lossy(tail);
+    let mut summary = RuntimeDoctorSummary::default();
+    for line in text.lines() {
+        summary.line_count += 1;
+        if let Some(marker) = runtime_doctor_marker_name(line) {
+            *summary.marker_counts.entry(marker).or_insert(0) += 1;
+            summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
+        }
+    }
+    summary
+}
+
+fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
+    [
+        "runtime_proxy_queue_overloaded",
+        "runtime_proxy_overload_backoff",
+        "profile_inflight_saturated",
+        "upstream_connect_timeout",
+        "upstream_connect_error",
+        "precommit_budget_exhausted",
+        "profile_retry_backoff",
+        "profile_transport_backoff",
+        "profile_health",
+        "stream_read_error",
+        "first_upstream_chunk",
+        "first_local_chunk",
+        "state_save_error",
+    ]
+    .into_iter()
+    .find(|marker| line.contains(marker))
+}
+
+fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
+    let trimmed = line.trim();
+    let count = trimmed.chars().count();
+    if count <= limit {
+        return trimmed.to_string();
+    }
+    trimmed
+        .chars()
+        .take(limit.saturating_sub(1))
+        .collect::<String>()
+        + "…"
 }
 
 fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
@@ -2722,6 +3091,7 @@ fn start_runtime_rotation_proxy(
         log_path: log_path.clone(),
         request_sequence: Arc::new(AtomicU64::new(1)),
         state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths: paths.clone(),
             state: state.clone(),
@@ -2732,6 +3102,7 @@ fn start_runtime_rotation_proxy(
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -2791,11 +3162,37 @@ fn start_runtime_rotation_proxy(
                         let long_lived = is_tiny_http_websocket_upgrade(&request)
                             || is_runtime_responses_path(request.url());
                         if long_lived {
+                            if runtime_proxy_in_local_overload_backoff(&shared) {
+                                reject_runtime_proxy_overloaded_request(
+                                    request,
+                                    &shared,
+                                    "proxy_overload_backoff",
+                                );
+                                continue;
+                            }
                             match long_lived_sender.try_send(request) {
                                 Ok(()) => {}
-                                Err(TrySendError::Full(request))
-                                | Err(TrySendError::Disconnected(request)) => {
-                                    handle_runtime_rotation_proxy_request(request, &shared);
+                                Err(TrySendError::Full(request)) => {
+                                    mark_runtime_proxy_local_overload(
+                                        &shared,
+                                        "long_lived_queue_full",
+                                    );
+                                    reject_runtime_proxy_overloaded_request(
+                                        request,
+                                        &shared,
+                                        "long_lived_queue_full",
+                                    );
+                                }
+                                Err(TrySendError::Disconnected(request)) => {
+                                    mark_runtime_proxy_local_overload(
+                                        &shared,
+                                        "long_lived_queue_disconnected",
+                                    );
+                                    reject_runtime_proxy_overloaded_request(
+                                        request,
+                                        &shared,
+                                        "long_lived_queue_disconnected",
+                                    );
                                 }
                             }
                         } else {
@@ -2829,6 +3226,61 @@ impl Drop for RuntimeRotationProxy {
             let _ = worker.join();
         }
     }
+}
+
+fn reject_runtime_proxy_overloaded_request(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    reason: &str,
+) {
+    let path = request.url().to_string();
+    let websocket = is_tiny_http_websocket_upgrade(&request);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "runtime_proxy_queue_overloaded transport={} path={} reason={reason}",
+            if websocket { "websocket" } else { "http" },
+            path
+        ),
+    );
+    let response = if websocket {
+        build_runtime_proxy_text_response(
+            503,
+            "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
+        )
+    } else if is_runtime_responses_path(&path) || is_runtime_compact_path(&path) {
+        build_runtime_proxy_json_error_response(
+            503,
+            "service_unavailable",
+            "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
+        )
+    } else {
+        build_runtime_proxy_text_response(
+            503,
+            "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
+        )
+    };
+    let _ = request.respond(response);
+}
+
+fn runtime_proxy_in_local_overload_backoff(shared: &RuntimeRotationProxyShared) -> bool {
+    let now = Local::now().timestamp().max(0) as u64;
+    shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
+}
+
+fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason: &str) {
+    let now = Local::now().timestamp().max(0) as u64;
+    let until = now.saturating_add(RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS.max(1) as u64);
+    let current = shared.local_overload_backoff_until.load(Ordering::SeqCst);
+    if until > current {
+        shared
+            .local_overload_backoff_until
+            .store(until, Ordering::SeqCst);
+    }
+    runtime_proxy_log(
+        shared,
+        format!("runtime_proxy_overload_backoff until={until} reason={reason}"),
+    );
 }
 
 fn handle_runtime_rotation_proxy_request(
@@ -3239,7 +3691,7 @@ fn runtime_proxy_optimistic_current_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
 ) -> Result<Option<String>> {
-    let (current_profile, codex_home, in_selection_backoff, health_score) = {
+    let (current_profile, codex_home, in_selection_backoff, inflight_count, health_score) = {
         let mut runtime = shared
             .runtime
             .lock()
@@ -3258,11 +3710,15 @@ fn runtime_proxy_optimistic_current_candidate(
             runtime.current_profile.clone(),
             profile.codex_home.clone(),
             runtime_profile_in_selection_backoff(&runtime, &runtime.current_profile, now),
+            runtime_profile_inflight_count(&runtime, &runtime.current_profile),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now),
         )
     };
 
-    if in_selection_backoff || health_score > 0 {
+    if in_selection_backoff
+        || health_score > 0
+        || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
+    {
         return Ok(None);
     }
     if !read_auth_summary(&codex_home).quota_compatible {
@@ -3360,6 +3816,7 @@ struct RuntimeWebsocketSessionState {
     upstream_socket: Option<RuntimeUpstreamWebSocket>,
     profile_name: Option<String>,
     turn_state: Option<String>,
+    inflight_guard: Option<RuntimeProfileInFlightGuard>,
 }
 
 impl RuntimeWebsocketSessionState {
@@ -3378,16 +3835,21 @@ impl RuntimeWebsocketSessionState {
         socket: RuntimeUpstreamWebSocket,
         profile_name: &str,
         turn_state: Option<String>,
+        inflight_guard: Option<RuntimeProfileInFlightGuard>,
     ) {
         self.upstream_socket = Some(socket);
         self.profile_name = Some(profile_name.to_string());
         self.turn_state = turn_state;
+        if let Some(inflight_guard) = inflight_guard {
+            self.inflight_guard = Some(inflight_guard);
+        }
     }
 
     fn reset(&mut self) {
         self.upstream_socket = None;
         self.profile_name = None;
         self.turn_state = None;
+        self.inflight_guard = None;
     }
 
     fn close(&mut self) {
@@ -3396,7 +3858,38 @@ impl RuntimeWebsocketSessionState {
         }
         self.profile_name = None;
         self.turn_state = None;
+        self.inflight_guard = None;
     }
+}
+
+fn acquire_runtime_profile_inflight_guard(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    context: &'static str,
+) -> Result<RuntimeProfileInFlightGuard> {
+    let count = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let count = runtime
+            .profile_inflight
+            .entry(profile_name.to_string())
+            .or_insert(0);
+        *count = count.saturating_add(1);
+        *count
+    };
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_inflight profile={profile_name} count={count} context={context} event=acquire"
+        ),
+    );
+    Ok(RuntimeProfileInFlightGuard {
+        shared: shared.clone(),
+        profile_name: profile_name.to_string(),
+        context,
+    })
 }
 
 fn run_runtime_proxy_websocket_session(
@@ -3517,6 +4010,7 @@ fn proxy_runtime_websocket_text_message(
     let mut previous_response_retry_index = 0usize;
     let mut candidate_turn_state_retry_profile: Option<String> = None;
     let mut candidate_turn_state_retry_value: Option<String> = None;
+    let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
 
@@ -3536,6 +4030,14 @@ fn proxy_runtime_websocket_text_message(
             match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                }
+                _ if saw_inflight_saturation => {
+                    send_runtime_proxy_websocket_error(
+                        local_socket,
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    )?;
                 }
                 _ => {
                     send_runtime_proxy_websocket_error(
@@ -3572,6 +4074,14 @@ fn proxy_runtime_websocket_text_message(
                 Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                 }
+                _ if saw_inflight_saturation => {
+                    send_runtime_proxy_websocket_error(
+                        local_socket,
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    )?;
+                }
                 _ => {
                     send_runtime_proxy_websocket_error(
                         local_socket,
@@ -3601,6 +4111,21 @@ fn proxy_runtime_websocket_text_message(
                 excluded_profiles.len()
             ),
         );
+        if previous_response_id.is_none()
+            && pinned_profile.is_none()
+            && turn_state_profile.is_none()
+            && runtime_profile_inflight_hard_limited(shared, &candidate_name)?
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} websocket_session={session_id} profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}"
+                ),
+            );
+            excluded_profiles.insert(candidate_name);
+            saw_inflight_saturation = true;
+            continue;
+        }
 
         match attempt_runtime_websocket_request(
             request_id,
@@ -3699,47 +4224,56 @@ fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
-    let (mut upstream_socket, mut upstream_turn_state) = if websocket_session
-        .can_reuse(profile_name, turn_state_override)
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=websocket upstream_session=reuse profile={profile_name} turn_state_override={:?}",
-                turn_state_override
-            ),
-        );
-        (
-            websocket_session
-                .take_socket()
-                .expect("runtime websocket session should keep its upstream socket"),
-            websocket_session.turn_state.clone(),
-        )
-    } else {
-        websocket_session.close();
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=websocket upstream_session=connect profile={profile_name} turn_state_override={:?}",
-                turn_state_override
-            ),
-        );
-        match connect_runtime_proxy_upstream_websocket(
-            request_id,
-            handshake_request,
-            shared,
-            profile_name,
-            turn_state_override,
-        )? {
-            RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (socket, turn_state),
-            RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
-                return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
-                    profile_name: profile_name.to_string(),
-                    payload,
-                });
+    let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
+    let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
+        if reuse_existing_session {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=websocket upstream_session=reuse profile={profile_name} turn_state_override={:?}",
+                    turn_state_override
+                ),
+            );
+            (
+                websocket_session
+                    .take_socket()
+                    .expect("runtime websocket session should keep its upstream socket"),
+                websocket_session.turn_state.clone(),
+                None,
+            )
+        } else {
+            websocket_session.close();
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=websocket upstream_session=connect profile={profile_name} turn_state_override={:?}",
+                    turn_state_override
+                ),
+            );
+            match connect_runtime_proxy_upstream_websocket(
+                request_id,
+                handshake_request,
+                shared,
+                profile_name,
+                turn_state_override,
+            )? {
+                RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (
+                    socket,
+                    turn_state,
+                    Some(acquire_runtime_profile_inflight_guard(
+                        shared,
+                        profile_name,
+                        "websocket_session",
+                    )?),
+                ),
+                RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
+                    return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
+                        profile_name: profile_name.to_string(),
+                        payload,
+                    });
+                }
             }
-        }
-    };
+        };
 
     if let Err(err) = upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
         let _ = upstream_socket.close(None);
@@ -3825,7 +4359,12 @@ fn attempt_runtime_websocket_request(
                             "request={request_id} transport=websocket terminal_event profile={profile_name}"
                         ),
                     );
-                    websocket_session.store(upstream_socket, profile_name, upstream_turn_state);
+                    websocket_session.store(
+                        upstream_socket,
+                        profile_name,
+                        upstream_turn_state,
+                        inflight_guard.take(),
+                    );
                     return Ok(RuntimeWebsocketAttempt::Delivered);
                 }
             }
@@ -4200,6 +4739,7 @@ fn proxy_runtime_standard_request(
     let mut try_current_profile = true;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
+    let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
 
@@ -4215,6 +4755,11 @@ fn proxy_runtime_standard_request(
             );
             return match last_failure {
                 Some(response) => Ok(response),
+                None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+                    503,
+                    "service_unavailable",
+                    "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                )),
                 None => proxy_runtime_standard_request_for_profile(
                     request_id,
                     request,
@@ -4243,6 +4788,11 @@ fn proxy_runtime_standard_request(
                 );
                 return match last_failure {
                     Some(response) => Ok(response),
+                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    )),
                     None => proxy_runtime_standard_request_for_profile(
                         request_id,
                         request,
@@ -4267,6 +4817,17 @@ fn proxy_runtime_standard_request(
                 excluded_profiles.len()
             ),
         );
+        if runtime_profile_inflight_hard_limited(shared, &candidate_name)? {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}"
+                ),
+            );
+            excluded_profiles.insert(candidate_name);
+            saw_inflight_saturation = true;
+            continue;
+        }
 
         match attempt_runtime_standard_request(request_id, request, shared, &candidate_name)? {
             RuntimeStandardAttempt::Success {
@@ -4315,6 +4876,8 @@ fn proxy_runtime_standard_request_for_profile(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<tiny_http::ResponseBox> {
+    let _inflight_guard =
+        acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
     let response =
         send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
             .map_err(|err| {
@@ -4343,6 +4906,8 @@ fn attempt_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeStandardAttempt> {
+    let _inflight_guard =
+        acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
     let response =
         send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
             .map_err(|err| {
@@ -4429,6 +4994,7 @@ fn proxy_runtime_responses_request(
     let mut previous_response_retry_index = 0usize;
     let mut candidate_turn_state_retry_profile: Option<String> = None;
     let mut candidate_turn_state_retry_value: Option<String> = None;
+    let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
 
@@ -4447,6 +5013,13 @@ fn proxy_runtime_responses_request(
             );
             return Ok(match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
+                _ if saw_inflight_saturation => {
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    ))
+                }
                 _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
                     429,
                     "insufficient_quota",
@@ -4476,6 +5049,13 @@ fn proxy_runtime_responses_request(
             );
             return Ok(match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
+                _ if saw_inflight_saturation => {
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    ))
+                }
                 _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
                     429,
                     "insufficient_quota",
@@ -4501,6 +5081,21 @@ fn proxy_runtime_responses_request(
                 excluded_profiles.len()
             ),
         );
+        if previous_response_id.is_none()
+            && pinned_profile.is_none()
+            && turn_state_profile.is_none()
+            && runtime_profile_inflight_hard_limited(shared, &candidate_name)?
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}"
+                ),
+            );
+            excluded_profiles.insert(candidate_name);
+            saw_inflight_saturation = true;
+            continue;
+        }
 
         match attempt_runtime_responses_request(
             request_id,
@@ -4602,6 +5197,8 @@ fn attempt_runtime_responses_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
+    let inflight_guard =
+        acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
     let response = send_runtime_proxy_upstream_responses_request(
         request_id,
         request,
@@ -4657,17 +5254,22 @@ fn attempt_runtime_responses_request(
             response,
         });
     }
-    prepare_runtime_proxy_responses_success(request_id, response, shared, profile_name).map_err(
-        |err| {
-            note_runtime_profile_transport_failure(
-                shared,
-                profile_name,
-                "responses_prepare_success",
-                &err,
-            );
-            err
-        },
+    prepare_runtime_proxy_responses_success(
+        request_id,
+        response,
+        shared,
+        profile_name,
+        inflight_guard,
     )
+    .map_err(|err| {
+        note_runtime_profile_transport_failure(
+            shared,
+            profile_name,
+            "responses_prepare_success",
+            &err,
+        );
+        err
+    })
 }
 
 fn next_runtime_response_candidate(
@@ -4683,6 +5285,7 @@ fn next_runtime_response_candidate(
         cached_reports,
         retry_backoff_until,
         transport_backoff_until,
+        profile_inflight,
         profile_health,
     ) = {
         let mut runtime = shared
@@ -4698,6 +5301,7 @@ fn next_runtime_response_candidate(
             runtime.profile_probe_cache.clone(),
             runtime.profile_retry_backoff_until.clone(),
             runtime.profile_transport_backoff_until.clone(),
+            runtime.profile_inflight.clone(),
             runtime.profile_health.clone(),
         )
     };
@@ -4794,7 +5398,11 @@ fn next_runtime_response_candidate(
             )
         })
         .min_by_key(|(index, candidate)| {
-            runtime_profile_health_sort_key(&candidate.name, &profile_health, now, *index)
+            (
+                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                runtime_profile_health_sort_key(&candidate.name, &profile_health, now),
+                *index,
+            )
         })
     {
         return Ok(Some(candidate.name.clone()));
@@ -4809,9 +5417,10 @@ fn next_runtime_response_candidate(
                     &retry_backoff_until,
                     &transport_backoff_until,
                     now,
-                    *index,
                 ),
-                runtime_profile_health_sort_key(&candidate.name, &profile_health, now, *index),
+                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                runtime_profile_health_sort_key(&candidate.name, &profile_health, now),
+                *index,
             )
         })
         .map(|(_, candidate)| candidate.name))
@@ -4852,6 +5461,26 @@ fn runtime_profile_in_transport_backoff(
         .get(profile_name)
         .copied()
         .is_some_and(|until| until > now)
+}
+
+fn runtime_profile_inflight_count(runtime: &RuntimeRotationState, profile_name: &str) -> usize {
+    runtime
+        .profile_inflight
+        .get(profile_name)
+        .copied()
+        .unwrap_or(0)
+}
+
+fn runtime_profile_inflight_hard_limited(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<bool> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime_profile_inflight_count(&runtime, profile_name)
+        >= RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT)
 }
 
 fn runtime_profile_in_selection_backoff(
@@ -4913,8 +5542,7 @@ fn runtime_profile_backoff_sort_key(
     retry_backoff_until: &BTreeMap<String, i64>,
     transport_backoff_until: &BTreeMap<String, i64>,
     now: i64,
-    order_index: usize,
-) -> (usize, i64, i64, usize) {
+) -> (usize, i64, i64) {
     let retry_until = retry_backoff_until
         .get(profile_name)
         .copied()
@@ -4925,14 +5553,13 @@ fn runtime_profile_backoff_sort_key(
         .filter(|until| *until > now);
 
     match (transport_until, retry_until) {
-        (None, None) => (0, 0, 0, order_index),
-        (Some(transport_until), None) => (1, transport_until, 0, order_index),
-        (None, Some(retry_until)) => (2, retry_until, 0, order_index),
+        (None, None) => (0, 0, 0),
+        (Some(transport_until), None) => (1, transport_until, 0),
+        (None, Some(retry_until)) => (2, retry_until, 0),
         (Some(transport_until), Some(retry_until)) => (
             3,
             transport_until.min(retry_until),
             transport_until.max(retry_until),
-            order_index,
         ),
     }
 }
@@ -4941,15 +5568,18 @@ fn runtime_profile_health_sort_key(
     profile_name: &str,
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
     now: i64,
-    order_index: usize,
-) -> (u32, usize) {
-    (
-        profile_health
-            .get(profile_name)
-            .map(|entry| runtime_profile_effective_health_score(entry, now))
-            .unwrap_or(0),
-        order_index,
-    )
+) -> u32 {
+    profile_health
+        .get(profile_name)
+        .map(|entry| runtime_profile_effective_health_score(entry, now))
+        .unwrap_or(0)
+}
+
+fn runtime_profile_inflight_sort_key(
+    profile_name: &str,
+    profile_inflight: &BTreeMap<String, usize>,
+) -> usize {
+    profile_inflight.get(profile_name).copied().unwrap_or(0)
 }
 
 fn runtime_profile_effective_health_score(entry: &RuntimeProfileHealth, now: i64) -> u32 {
@@ -5380,6 +6010,7 @@ fn prepare_runtime_proxy_responses_success(
     response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    inflight_guard: RuntimeProfileInFlightGuard,
 ) -> Result<RuntimeResponsesAttempt> {
     let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
@@ -5456,6 +6087,7 @@ fn prepare_runtime_proxy_responses_success(
                     request_id,
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
+                    _inflight_guard: Some(inflight_guard),
                 }),
             });
         }
@@ -5476,6 +6108,7 @@ fn prepare_runtime_proxy_responses_success(
                     request_id,
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
+                    _inflight_guard: Some(inflight_guard),
                 }),
                 turn_state,
             });
@@ -5498,6 +6131,7 @@ fn prepare_runtime_proxy_responses_success(
             request_id,
             profile_name: profile_name.to_string(),
             log_path: shared.log_path.clone(),
+            _inflight_guard: Some(inflight_guard),
         }),
     })
 }
@@ -7584,6 +8218,32 @@ mod tests {
         }
     }
 
+    struct TestEnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl TestEnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var_os(key);
+            // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+            unsafe { env::set_var(key, value) };
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for TestEnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_ref() {
+                // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+                unsafe { env::set_var(self.key, value) };
+            } else {
+                // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+                unsafe { env::remove_var(self.key) };
+            }
+        }
+    }
+
     fn wait_for_state<F>(paths: &AppPaths, predicate: F) -> AppState
     where
         F: Fn(&AppState) -> bool,
@@ -8943,6 +9603,7 @@ mod tests {
                 Local::now().timestamp().saturating_add(60),
             )]),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -8957,6 +9618,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let excluded = BTreeSet::from(["main".to_string()]);
@@ -9004,6 +9666,7 @@ mod tests {
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -9018,6 +9681,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9093,6 +9757,7 @@ mod tests {
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::from([(
                 "main".to_string(),
                 RuntimeProfileHealth {
@@ -9113,6 +9778,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9120,6 +9786,122 @@ mod tests {
             runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
                 .expect("candidate lookup should succeed"),
             None
+        );
+    }
+
+    #[test]
+    fn optimistic_current_candidate_skips_busy_profile() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::from([(
+                "main".to_string(),
+                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+            )]),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert_eq!(
+            runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
+                .expect("candidate lookup should succeed"),
+            None
+        );
+    }
+
+    #[test]
+    fn runtime_profile_inflight_hard_limit_detects_saturation() {
+        let temp_dir = TestDir::new();
+        let runtime = RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::from([(
+                "main".to_string(),
+                RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
+            )]),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert!(
+            runtime_profile_inflight_hard_limited(&shared, "main")
+                .expect("hard inflight lookup should succeed")
+        );
+        assert!(
+            !runtime_profile_inflight_hard_limited(&shared, "other")
+                .expect("hard inflight lookup should succeed")
         );
     }
 
@@ -9159,6 +9941,7 @@ mod tests {
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -9173,6 +9956,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9202,6 +9986,54 @@ mod tests {
             second_until > first_until,
             "transport backoff should escalate"
         );
+    }
+
+    #[test]
+    fn local_proxy_overload_backoff_activates_and_expires() {
+        let temp_dir = TestDir::new();
+        let runtime = RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert!(!runtime_proxy_in_local_overload_backoff(&shared));
+        mark_runtime_proxy_local_overload(&shared, "test");
+        assert!(runtime_proxy_in_local_overload_backoff(&shared));
+
+        shared
+            .local_overload_backoff_until
+            .store(0, Ordering::SeqCst);
+        assert!(!runtime_proxy_in_local_overload_backoff(&shared));
     }
 
     #[test]
@@ -9279,6 +10111,7 @@ mod tests {
                 "main".to_string(),
                 now.saturating_add(60),
             )]),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -9293,6 +10126,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9378,6 +10212,7 @@ mod tests {
                 ("main".to_string(), now.saturating_add(90)),
                 ("second".to_string(), now.saturating_add(30)),
             ]),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -9392,6 +10227,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9474,6 +10310,7 @@ mod tests {
             ]),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::from([(
                 "main".to_string(),
                 RuntimeProfileHealth {
@@ -9494,6 +10331,105 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert_eq!(
+            next_runtime_response_candidate(&shared, &BTreeSet::new())
+                .expect("candidate selection should succeed"),
+            Some("second".to_string())
+        );
+    }
+
+    #[test]
+    fn next_runtime_response_candidate_prefers_less_loaded_profile() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let now = Local::now().timestamp();
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage_with_main_windows(100, 18_000, 100, 604_800)),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage_with_main_windows(100, 18_000, 100, 604_800)),
+                    },
+                ),
+            ]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::from([("main".to_string(), 2), ("second".to_string(), 0)]),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9541,6 +10477,7 @@ mod tests {
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::from([(
                 "main".to_string(),
                 RuntimeProfileHealth {
@@ -9561,6 +10498,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9722,6 +10660,105 @@ mod tests {
     }
 
     #[test]
+    fn runtime_state_save_scheduler_persists_latest_snapshot() {
+        let temp_dir = TestDir::new();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let profiles = BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: temp_dir.path.join("homes/main"),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: temp_dir.path.join("homes/second"),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]);
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths: paths.clone(),
+                state: AppState::default(),
+                upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+                include_code_review: false,
+                current_profile: "main".to_string(),
+                turn_state_bindings: BTreeMap::new(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+        };
+
+        schedule_runtime_state_save(
+            &shared,
+            AppState {
+                active_profile: Some("main".to_string()),
+                profiles: profiles.clone(),
+                last_run_selected_at: BTreeMap::from([("main".to_string(), 10)]),
+                response_profile_bindings: BTreeMap::new(),
+            },
+            paths.clone(),
+            "first",
+        );
+        schedule_runtime_state_save(
+            &shared,
+            AppState {
+                active_profile: Some("second".to_string()),
+                profiles: profiles.clone(),
+                last_run_selected_at: BTreeMap::from([("second".to_string(), 20)]),
+                response_profile_bindings: BTreeMap::from([(
+                    "resp-second".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "second".to_string(),
+                        bound_at: 20,
+                    },
+                )]),
+            },
+            paths.clone(),
+            "second",
+        );
+
+        let persisted = wait_for_state(&paths, |state| {
+            state.active_profile.as_deref() == Some("second")
+                && state
+                    .response_profile_bindings
+                    .get("resp-second")
+                    .is_some_and(|binding| binding.profile_name == "second")
+        });
+        assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+        assert_eq!(
+            persisted.last_run_selected_at.get("second").copied(),
+            Some(20)
+        );
+    }
+
+    #[test]
     fn turn_state_affinity_prefers_bound_profile() {
         let temp_dir = TestDir::new();
         let main_home = temp_dir.path.join("homes/main");
@@ -9775,6 +10812,7 @@ mod tests {
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -9789,6 +10827,105 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+        let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
+            .expect("turn-state lookup should succeed");
+
+        assert_eq!(
+            select_runtime_response_candidate(
+                &shared,
+                &BTreeSet::new(),
+                None,
+                turn_state_profile.as_deref(),
+                false,
+            )
+            .expect("candidate selection should succeed"),
+            Some("second".to_string())
+        );
+    }
+
+    #[test]
+    fn turn_state_affinity_ignores_inflight_and_health_penalties() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        let now = Local::now().timestamp();
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::from([(
+                "turn-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::from([(
+                "second".to_string(),
+                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT + 1,
+            )]),
+            profile_health: BTreeMap::from([(
+                "second".to_string(),
+                RuntimeProfileHealth {
+                    score: RUNTIME_PROFILE_HEALTH_MAX_SCORE,
+                    updated_at: now,
+                },
+            )]),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
         let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
@@ -9843,6 +10980,7 @@ mod tests {
             profile_probe_cache: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
@@ -9857,6 +10995,7 @@ mod tests {
             log_path: temp_dir.path.join("runtime-proxy.log"),
             request_sequence: Arc::new(AtomicU64::new(1)),
             state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             runtime: Arc::new(Mutex::new(runtime)),
         };
 
@@ -9935,6 +11074,48 @@ mod tests {
                 "/backend-api/codex/responses"
             ),
             "https://chatgpt.com/backend-api/codex/responses"
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_summary_counts_recent_runtime_markers() {
+        let summary = summarize_runtime_log_tail(
+            br#"[2026-03-20 12:00:00.000 +07:00] request=1 transport=http first_upstream_chunk bytes=128
+[2026-03-20 12:00:00.010 +07:00] request=1 transport=http first_local_chunk profile=main bytes=128 elapsed_ms=10
+[2026-03-20 12:00:00.020 +07:00] profile_transport_backoff profile=main until=123 reason=stream_read_error
+[2026-03-20 12:00:00.030 +07:00] profile_health profile=main score=4 delta=4 reason=stream_read_error
+[2026-03-20 12:00:00.040 +07:00] profile_inflight_saturated profile=main hard_limit=8
+[2026-03-20 12:00:00.050 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
+"#,
+        );
+
+        assert_eq!(summary.line_count, 6);
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
+            1
+        );
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "profile_inflight_saturated"),
+            1
+        );
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "profile_transport_backoff"),
+            1
+        );
+        assert_eq!(runtime_doctor_marker_count(&summary, "profile_health"), 1);
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "first_upstream_chunk"),
+            1
+        );
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "first_local_chunk"),
+            1
+        );
+        assert!(
+            summary
+                .last_marker_line
+                .as_deref()
+                .is_some_and(|line| line.contains("runtime_proxy_queue_overloaded"))
         );
     }
 
@@ -10151,6 +11332,92 @@ mod tests {
             vec!["second-account".to_string()]
         );
         assert!(backend.usage_accounts().is_empty());
+    }
+
+    #[test]
+    fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
+        let _worker_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "1");
+        let _long_lived_worker_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT", "1");
+        let _queue_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY", "1");
+
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start_http_initial_body_stall();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([(
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+        };
+        state.save(&paths).expect("failed to save initial state");
+
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+                .expect("runtime proxy should start");
+        let request_url = format!("http://{}/backend-api/codex/responses", proxy.listen_addr);
+        let saturate = |addr: SocketAddr| {
+            let mut stream =
+                TcpStream::connect(addr).expect("runtime proxy TCP request should connect");
+            let request = concat!(
+                "POST /backend-api/codex/responses HTTP/1.1\r\n",
+                "Host: 127.0.0.1\r\n",
+                "Content-Type: application/json\r\n",
+                "Connection: close\r\n",
+                "Content-Length: 12\r\n",
+                "\r\n",
+                "{\"input\":[]}"
+            );
+            stream
+                .write_all(request.as_bytes())
+                .expect("runtime proxy TCP request should be written");
+            stream
+        };
+
+        let first = saturate(proxy.listen_addr);
+        thread::sleep(Duration::from_millis(100));
+        let second = saturate(proxy.listen_addr);
+        thread::sleep(Duration::from_millis(100));
+
+        let started_at = Instant::now();
+        let third = Client::builder()
+            .build()
+            .expect("client")
+            .post(request_url)
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let third_status = third.status().as_u16();
+        let third_body = third.text().expect("response body should be readable");
+
+        drop(first);
+        drop(second);
+
+        assert_eq!(third_status, 503);
+        assert!(third_body.contains("service_unavailable"));
+        assert!(
+            started_at.elapsed() < Duration::from_millis(500),
+            "queue overload response took too long: {:?}",
+            started_at.elapsed()
+        );
     }
 
     #[test]
