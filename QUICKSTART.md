@@ -88,6 +88,8 @@ In practice, that means:
 - new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active
 - fresh pre-commit selection also respects a short per-profile in-flight cap, so new work fails fast instead of piling onto a busy account
 - that cap only applies to fresh pre-commit selection and does not override hard affinity for an existing continuation
+- local proxy admission is also lane-aware, so `responses`, `compact`, `websocket`, and other unary traffic are less likely to starve each other
+- lane-aware admission is also only for fresh local admission; it does not override hard affinity for an existing continuation
 - flaky profiles can be deprioritized briefly without rotating mid-stream
 - pre-commit retry/selection is bounded so the proxy does not keep spinning too long when every candidate is currently bad
 - `/responses/compact` also gets the same safe retry/rotate treatment for temporary overload or quota exhaustion
@@ -111,6 +113,7 @@ Good markers to look for:
 
 - `runtime_proxy_queue_overloaded`
 - `runtime_proxy_active_limit_reached`
+- `runtime_proxy_lane_limit_reached`
 - `runtime_proxy_overload_backoff`
 - `profile_inflight_saturated`
 - `profile_retry_backoff`
@@ -123,6 +126,8 @@ Good markers to look for:
 - `stream_read_error`
 
 If `profile_health` appears, also check its `route=` value before changing selection behavior globally.
+If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value first.
+Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers usually mean a side lane is consuming proxy capacity.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure first.
 
 ## Notes

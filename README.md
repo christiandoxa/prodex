@@ -286,6 +286,8 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 - new candidate selection is also load-aware, so one profile is less likely to become a hotspot when several terminals are active at once
 - fresh pre-commit selection also respects a short per-profile in-flight cap, so new work fails fast instead of piling more pressure onto an already busy account
 - that per-profile cap only applies to fresh pre-commit selection; it does not override hard affinity for an existing continuation
+- local proxy admission is also lane-aware, so bursty `compact`, `responses`, `websocket`, and other unary traffic are less likely to starve each other
+- lane-aware admission is also only for fresh local admission; it does not override hard affinity for an existing continuation
 - quota backoff, transport backoff, and short-lived profile health penalties are tracked separately so the proxy can stop hammering a flaky account without weakening hard affinity
 - short-lived profile health penalties are endpoint-specific, so a hot `/responses/compact` path or flaky WebSocket route does not automatically poison fresh `responses` selection
 - pre-commit candidate selection is bounded, so when all candidates are currently bad the proxy fails fast instead of spinning in the background for too long
@@ -325,6 +327,7 @@ Useful log markers:
 
 - `runtime_proxy_queue_overloaded`
 - `runtime_proxy_active_limit_reached`
+- `runtime_proxy_lane_limit_reached`
 - `runtime_proxy_overload_backoff`
 - `profile_inflight_saturated`
 - `profile_retry_backoff`
@@ -337,6 +340,8 @@ Useful log markers:
 - `stream_read_error`
 
 If `profile_health` appears, also check its `route=` value before changing selection behavior globally.
+If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value before changing upstream-facing behavior.
+Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers usually mean a side lane is consuming proxy capacity.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure before changing upstream-facing behavior.
 
 ## Important Notes
