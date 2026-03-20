@@ -61,6 +61,13 @@ Safe auto-rotate is allowed only before a request/stream is committed:
 
 Do not rotate mid-stream after model output has started.
 
+For fresh requests without hard affinity, a single last-chance attempt on the current profile is acceptable when only local selection heuristics were exhausted.
+That fallback must not override:
+
+- `previous_response_id` ownership
+- `x-codex-turn-state` ownership
+- mid-stream no-rotate rules
+
 ### Transport transparency
 
 Keep proxy behavior close to upstream Codex:
@@ -85,6 +92,8 @@ The runtime proxy should remain conservative and durable under poor networks and
 - Temporary connect/read/stream transport failures may place a profile into short transport backoff.
 - Temporary overload or repeated transport flakiness may add a short-lived profile health penalty that affects only new candidate selection.
 - Endpoint-specific health penalties must not globally poison unrelated fresh routes unless there is a deliberate reason to do so.
+- Do not treat a generic upstream `429 Too Many Requests` body as account-specific quota unless the upstream payload explicitly identifies a quota/rate-limit error code such as `insufficient_quota` or `rate_limit_exceeded`.
+- If pre-commit selection fails before any upstream response exists, prefer a local `503 service_unavailable` over a synthetic `429 insufficient_quota`.
 - Do not let transport backoff override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary profile health penalties override hard affinity for an in-flight continuation that already owns a profile.
 - Do not let temporary in-flight load heuristics override hard affinity for an in-flight continuation that already owns a profile.
@@ -103,6 +112,11 @@ Remote compaction uses the unary endpoint:
 - `/responses/compact`
 
 This path should remain eligible for safe retry/rotate on temporary overload or quota exhaustion, while other unary errors should pass through unchanged.
+
+For `429` on unary paths:
+
+- only rotate when the upstream payload clearly signals quota exhaustion
+- plain-text or generic `429` responses should pass through unchanged
 
 ## Headers and Metadata
 

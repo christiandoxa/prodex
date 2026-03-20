@@ -92,6 +92,9 @@ In practice, that means:
 - lane-aware admission is also only for fresh local admission; it does not override hard affinity for an existing continuation
 - flaky profiles can be deprioritized briefly without rotating mid-stream
 - pre-commit retry/selection is bounded so the proxy does not keep spinning too long when every candidate is currently bad
+- if a fresh request only exhausts local selection heuristics, the proxy may make one last direct attempt on the current profile
+- generic upstream `429 Too Many Requests` responses are passed through; they only trigger safe rotation when the upstream payload explicitly reports `insufficient_quota` or `rate_limit_exceeded`
+- if no healthy upstream profile can be secured before any upstream response exists, the proxy returns local `503 service_unavailable` instead of synthesizing a quota `429`
 - `/responses/compact` also gets the same safe retry/rotate treatment for temporary overload or quota exhaustion
 
 ## Debug the Environment
@@ -129,6 +132,7 @@ If `profile_health` appears, also check its `route=` value before changing selec
 If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value first.
 Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers usually mean a side lane is consuming proxy capacity.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure first.
+If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whether the runtime log actually shows upstream quota markers before assuming the account pool is exhausted.
 
 ## Notes
 

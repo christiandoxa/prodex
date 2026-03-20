@@ -291,6 +291,9 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 - quota backoff, transport backoff, and short-lived profile health penalties are tracked separately so the proxy can stop hammering a flaky account without weakening hard affinity
 - short-lived profile health penalties are endpoint-specific, so a hot `/responses/compact` path or flaky WebSocket route does not automatically poison fresh `responses` selection
 - pre-commit candidate selection is bounded, so when all candidates are currently bad the proxy fails fast instead of spinning in the background for too long
+- when a fresh request only exhausts local selection heuristics, the proxy may make one last direct attempt on the current profile before giving up
+- generic upstream `429 Too Many Requests` responses are passed through; they are not treated as account-specific quota unless the upstream payload explicitly reports `insufficient_quota` or `rate_limit_exceeded`
+- if the proxy cannot secure a healthy upstream profile before any upstream response exists, it now fails with local `503 service_unavailable` instead of synthesizing a local quota `429`
 - the unary compact path (`/responses/compact`) is also eligible for safe retry and rotation on temporary overload or quota exhaustion
 
 ## Quota Behavior
@@ -343,6 +346,7 @@ If `profile_health` appears, also check its `route=` value before changing selec
 If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value before changing upstream-facing behavior.
 Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers usually mean a side lane is consuming proxy capacity.
 If `runtime_proxy_active_limit_reached` or `profile_inflight_saturated` appears repeatedly without matching quota or transport markers, suspect local concurrency pressure before changing upstream-facing behavior.
+If users report `exceeded retry limit, last status: 429 Too Many Requests`, confirm whether the latest runtime log shows real upstream quota markers or only local pre-commit exhaustion before changing rotation behavior.
 
 ## Important Notes
 
