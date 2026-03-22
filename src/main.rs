@@ -13711,88 +13711,73 @@ mod tests {
 
     #[test]
     fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
-        let _worker_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "1");
-        let _long_lived_worker_guard =
-            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT", "1");
-        let _queue_guard =
-            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY", "1");
         let _wait_budget_guard =
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS", "20");
         let _wait_poll_guard =
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS", "5");
 
         let temp_dir = TestDir::new();
-        let backend = RuntimeProxyBackend::start_http_initial_body_stall();
-        let paths = AppPaths {
-            root: temp_dir.path.join("prodex"),
-            state_file: temp_dir.path.join("prodex/state.json"),
-            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-            shared_codex_root: temp_dir.path.join("shared"),
-            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-        };
-        let second_home = temp_dir.path.join("homes/second");
-        write_auth_json(&second_home.join("auth.json"), "second-account");
-
-        let state = AppState {
-            active_profile: Some("second".to_string()),
-            profiles: BTreeMap::from([(
-                "second".to_string(),
-                ProfileEntry {
-                    codex_home: second_home,
-                    managed: true,
-                    email: Some("second@example.com".to_string()),
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths: AppPaths {
+                    root: temp_dir.path.join("prodex"),
+                    state_file: temp_dir.path.join("prodex/state.json"),
+                    managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                    shared_codex_root: temp_dir.path.join("shared"),
+                    legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
                 },
-            )]),
-            last_run_selected_at: BTreeMap::new(),
-            response_profile_bindings: BTreeMap::new(),
-            session_profile_bindings: BTreeMap::new(),
-        };
-        state.save(&paths).expect("failed to save initial state");
-
-        let proxy =
-            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
-                .expect("runtime proxy should start");
-        let request_url = format!("http://{}/backend-api/codex/responses", proxy.listen_addr);
-        let saturate = |addr: SocketAddr| {
-            let mut stream =
-                TcpStream::connect(addr).expect("runtime proxy TCP request should connect");
-            let request = concat!(
-                "POST /backend-api/codex/responses HTTP/1.1\r\n",
-                "Host: 127.0.0.1\r\n",
-                "Content-Type: application/json\r\n",
-                "Connection: close\r\n",
-                "Content-Length: 12\r\n",
-                "\r\n",
-                "{\"input\":[]}"
-            );
-            stream
-                .write_all(request.as_bytes())
-                .expect("runtime proxy TCP request should be written");
-            stream
+                state: AppState::default(),
+                upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+                include_code_review: false,
+                current_profile: "main".to_string(),
+                turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         };
 
-        let first = saturate(proxy.listen_addr);
-        thread::sleep(Duration::from_millis(100));
-        let second = saturate(proxy.listen_addr);
-        thread::sleep(Duration::from_millis(100));
-
+        let (sender, _receiver) = mpsc::sync_channel::<u8>(1);
+        sender.send(1).expect("queue should accept first item");
         let started_at = Instant::now();
-        let third = Client::builder()
-            .build()
-            .expect("client")
-            .post(request_url)
-            .header("Content-Type", "application/json")
-            .body("{\"input\":[]}")
-            .send()
-            .expect("runtime proxy request should succeed");
-        let third_status = third.status().as_u16();
-        assert_eq!(third_status, 503);
-        let third_body = third.text().expect("response body should be readable");
+        let result = wait_for_runtime_proxy_queue_capacity(
+            2u8,
+            &shared,
+            "http",
+            "/backend-api/codex/responses",
+            |value| match sender.try_send(value) {
+                Ok(()) => Ok(()),
+                Err(TrySendError::Full(returned_value)) => {
+                    Err((RuntimeProxyQueueRejection::Full, returned_value))
+                }
+                Err(TrySendError::Disconnected(returned_value)) => {
+                    Err((RuntimeProxyQueueRejection::Disconnected, returned_value))
+                }
+            },
+        );
 
-        drop(first);
-        drop(second);
-
-        assert!(third_body.contains("service_unavailable"));
+        assert!(
+            matches!(result, Err((RuntimeProxyQueueRejection::Full, 2))),
+            "queue overload should fail fast once the bounded wait budget is exhausted"
+        );
         assert!(
             started_at.elapsed() < Duration::from_millis(500),
             "queue overload response took too long: {:?}",
