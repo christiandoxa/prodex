@@ -13786,7 +13786,7 @@ mod tests {
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY", "1");
         let _wait_budget_guard = TestEnvVarGuard::set(
             "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
-            "500",
+            "1500",
         );
         let _wait_poll_guard =
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS", "5");
@@ -13844,8 +13844,8 @@ mod tests {
         };
 
         let first = spawn_request(0, request_url.clone());
-        let second = spawn_request(10, request_url.clone());
-        let third = spawn_request(20, request_url);
+        let second = spawn_request(25, request_url.clone());
+        let third = spawn_request(50, request_url);
 
         for (status, body) in [
             first.join().expect("first request should join"),

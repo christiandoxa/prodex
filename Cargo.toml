@@ -1,6 +1,6 @@
 [package]
 name = "prodex"
-version = "0.2.39"
+version = "0.2.40"
 edition = "2024"
 description = "Safe multi-account auto-rotate for Codex CLI with isolated CODEX_HOME profiles"
 license = "MIT"
