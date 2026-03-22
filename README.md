@@ -19,7 +19,7 @@ In short:
 - `prodex` manages profiles, the active profile, built-in quota checks, and launching `codex`
 - the headline feature is built-in auto-rotate across multiple logged-in ChatGPT accounts, so `prodex run` can keep working when the current profile is quota-blocked or temporarily unhealthy
 - `prodex run` uses a local runtime proxy that keeps Codex transport behavior as intact as possible while rotating accounts safely
-- Prodex-owned screens use a fixed 110-character layout with section headers, wrapped fields, and readable tables
+- Prodex-owned screens adapt to the current terminal width, and live views can also adapt to terminal height when that improves readability without silently breaking sort order
 
 The mental model is similar to browser profiles, but for `codex`.
 
@@ -84,7 +84,7 @@ Use `prodex login --profile <name>` when you want a fixed profile name, or when 
 prodex quota --all
 ```
 
-`prodex quota --all` now refreshes continuously by default every 5 seconds. It renders a `Quota Overview` table with a fixed-width layout. The main quota summary appears in the `REMAINING` column, and each profile gets a wrapped `status:` detail line underneath the row.
+`prodex quota --all` now refreshes continuously by default every 5 seconds. It renders a `Quota Overview` table that adapts to the current terminal width. The main quota summary appears in the `REMAINING` column, and each profile gets a wrapped `status:` detail line underneath the row.
 
 Press `Ctrl+C` to stop the live refresh loop.
 
@@ -397,7 +397,7 @@ If users report `exceeded retry limit, last status: 429 Too Many Requests`, conf
 - `prodex login` without `--profile` depends on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - if a profile uses API key auth, `quota --all` will show `error` for that profile
 - managed Prodex profiles share the default `~/.codex` session history store, so `/resume` shows the same saved threads across accounts
-- `profile list`, `current`, `doctor`, `login`, `quota`, and other Prodex-owned screens use the same 110-character layout
+- `profile list`, `current`, `doctor`, `login`, `quota`, and other Prodex-owned screens adapt to the current terminal width instead of assuming a fixed 110-character layout
 - runtime proxy diagnostics are written to `/tmp`, not to the Codex TUI
 - `prodex` does not replace `codex`; it only acts as a launcher and profile manager
 

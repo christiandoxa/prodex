@@ -77,7 +77,10 @@ const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
 const CLI_WIDTH: usize = 110;
+const CLI_MIN_WIDTH: usize = 60;
 const CLI_LABEL_WIDTH: usize = 16;
+const CLI_MIN_LABEL_WIDTH: usize = 10;
+const CLI_MAX_LABEL_WIDTH: usize = 24;
 const CLI_TABLE_GAP: &str = "  ";
 const SHARED_CODEX_DIR_NAMES: &[&str] = &["sessions", "archived_sessions", "shell_snapshots"];
 const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl"];
@@ -1119,13 +1122,17 @@ struct SharedCodexEntry {
 }
 
 fn section_header(title: &str) -> String {
+    section_header_with_width(title, current_cli_width())
+}
+
+fn section_header_with_width(title: &str, total_width: usize) -> String {
     let prefix = format!("[ {title} ] ");
     let width = text_width(&prefix);
-    if width >= CLI_WIDTH {
+    if width >= total_width {
         return prefix;
     }
 
-    format!("{prefix}{}", "=".repeat(CLI_WIDTH - width))
+    format!("{prefix}{}", "=".repeat(total_width - width))
 }
 
 fn text_width(value: &str) -> usize {
@@ -1216,9 +1223,65 @@ fn wrap_text(input: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn format_field_lines(label: &str, value: &str) -> Vec<String> {
+fn current_cli_width() -> usize {
+    terminal_width_chars()
+        .unwrap_or(CLI_WIDTH)
+        .max(CLI_MIN_WIDTH)
+}
+
+fn terminal_size_override_usize(env_key: &str) -> Option<usize> {
+    env::var(env_key)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
+    let tty = fs::File::open("/dev/tty").ok()?;
+    let output = Command::new("stty").arg("size").stdin(tty).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8(output.stdout).ok()?;
+    let mut parts = text.split_whitespace();
+    let rows = parts.next()?.parse::<usize>().ok()?;
+    let cols = parts.next()?.parse::<usize>().ok()?;
+    Some((rows, cols))
+}
+
+fn terminal_width_chars() -> Option<usize> {
+    terminal_size_override_usize("PRODEX_TERM_COLUMNS")
+        .or_else(|| terminal_dimensions_from_tty().map(|(_, cols)| cols))
+}
+
+fn terminal_height_lines() -> Option<usize> {
+    terminal_size_override_usize("PRODEX_TERM_LINES")
+        .or_else(|| terminal_size_override_usize("LINES"))
+        .or_else(|| terminal_dimensions_from_tty().map(|(rows, _)| rows))
+}
+
+fn panel_label_width(fields: &[(String, String)], total_width: usize) -> usize {
+    let longest = fields
+        .iter()
+        .map(|(label, _)| text_width(label) + 1)
+        .max()
+        .unwrap_or(CLI_LABEL_WIDTH);
+    let max_by_width = total_width
+        .saturating_sub(20)
+        .clamp(CLI_MIN_LABEL_WIDTH, CLI_MAX_LABEL_WIDTH);
+    let preferred_cap = (total_width / 4).clamp(CLI_MIN_LABEL_WIDTH, CLI_MAX_LABEL_WIDTH);
+    longest.clamp(CLI_MIN_LABEL_WIDTH, max_by_width.min(preferred_cap))
+}
+
+fn format_field_lines_with_layout(
+    label: &str,
+    value: &str,
+    total_width: usize,
+    label_width: usize,
+) -> Vec<String> {
     let label = format!("{label}:");
-    let value_width = CLI_WIDTH.saturating_sub(CLI_LABEL_WIDTH + 1).max(1);
+    let value_width = total_width.saturating_sub(label_width + 1).max(1);
     let wrapped = wrap_text(value, value_width);
     let mut lines = Vec::new();
 
@@ -1226,7 +1289,7 @@ fn format_field_lines(label: &str, value: &str) -> Vec<String> {
         let field_label = if index == 0 { label.as_str() } else { "" };
         lines.push(format!(
             "{field_label:<label_w$} {line}",
-            label_w = CLI_LABEL_WIDTH
+            label_w = label_width
         ));
     }
 
@@ -1234,24 +1297,33 @@ fn format_field_lines(label: &str, value: &str) -> Vec<String> {
 }
 
 fn print_panel(title: &str, fields: &[(String, String)]) {
-    println!("{}", section_header(title));
+    let total_width = current_cli_width();
+    let label_width = panel_label_width(fields, total_width);
+    println!("{}", section_header_with_width(title, total_width));
     for (label, value) in fields {
-        for line in format_field_lines(label, value) {
+        for line in format_field_lines_with_layout(label, value, total_width, label_width) {
             println!("{line}");
         }
     }
 }
 
 fn render_panel(title: &str, fields: &[(String, String)]) -> String {
-    let mut lines = vec![section_header(title)];
+    let total_width = current_cli_width();
+    let label_width = panel_label_width(fields, total_width);
+    let mut lines = vec![section_header_with_width(title, total_width)];
     for (label, value) in fields {
-        lines.extend(format_field_lines(label, value));
+        lines.extend(format_field_lines_with_layout(
+            label,
+            value,
+            total_width,
+            label_width,
+        ));
     }
     lines.join("\n")
 }
 
 fn print_wrapped_stderr(message: &str) {
-    for line in wrap_text(message, CLI_WIDTH) {
+    for line in wrap_text(message, current_cli_width()) {
         eprintln!("{line}");
     }
 }
@@ -8128,7 +8200,51 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
 }
 
 fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
-    render_quota_reports_with_line_limit(reports, detail, None)
+    render_quota_reports_with_layout(reports, detail, None, current_cli_width())
+}
+
+#[derive(Clone, Copy)]
+struct QuotaReportColumnWidths {
+    profile: usize,
+    current: usize,
+    auth: usize,
+    account: usize,
+    plan: usize,
+    remaining: usize,
+}
+
+fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
+    const MIN_WIDTHS: [usize; 6] = [12, 3, 4, 14, 4, 13];
+    const EXTRA_WEIGHTS: [usize; 6] = [12, 1, 3, 13, 4, 18];
+    const DISTRIBUTION_ORDER: [usize; 6] = [5, 3, 0, 4, 2, 1];
+
+    let gap_width = text_width(CLI_TABLE_GAP) * 5;
+    let min_total = MIN_WIDTHS.iter().sum::<usize>();
+    let available = total_width.saturating_sub(gap_width).max(min_total);
+
+    let mut widths = MIN_WIDTHS;
+    let mut remaining_extra = available.saturating_sub(min_total);
+    let total_weight = EXTRA_WEIGHTS.iter().sum::<usize>().max(1);
+
+    for (width, weight) in widths.iter_mut().zip(EXTRA_WEIGHTS) {
+        let extra = remaining_extra * weight / total_weight;
+        *width += extra;
+    }
+
+    let assigned = widths.iter().sum::<usize>().saturating_sub(min_total);
+    remaining_extra = remaining_extra.saturating_sub(assigned);
+    for index in DISTRIBUTION_ORDER.into_iter().cycle().take(remaining_extra) {
+        widths[index] += 1;
+    }
+
+    QuotaReportColumnWidths {
+        profile: widths[0],
+        current: widths[1],
+        auth: widths[2],
+        account: widths[3],
+        plan: widths[4],
+        remaining: widths[5],
+    }
 }
 
 fn render_quota_reports_with_line_limit(
@@ -8136,12 +8252,16 @@ fn render_quota_reports_with_line_limit(
     detail: bool,
     max_lines: Option<usize>,
 ) -> String {
-    const PROFILE_COL_WIDTH: usize = 24;
-    const CUR_COL_WIDTH: usize = 3;
-    const AUTH_COL_WIDTH: usize = 7;
-    const ACCOUNT_COL_WIDTH: usize = 27;
-    const PLAN_COL_WIDTH: usize = 8;
-    const REMAINING_COL_WIDTH: usize = 31;
+    render_quota_reports_with_layout(reports, detail, max_lines, current_cli_width())
+}
+
+fn render_quota_reports_with_layout(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+    total_width: usize,
+) -> String {
+    let column_widths = quota_report_column_widths(total_width);
 
     let mut sections = Vec::new();
 
@@ -8177,33 +8297,36 @@ fn render_quota_reports_with_line_limit(
         let mut section = Vec::new();
         section.push(format!(
             "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
-            fit_cell(&report.name, PROFILE_COL_WIDTH),
+            fit_cell(&report.name, column_widths.profile),
             CLI_TABLE_GAP,
-            fit_cell(&active, CUR_COL_WIDTH),
+            fit_cell(&active, column_widths.current),
             CLI_TABLE_GAP,
-            fit_cell(&auth, AUTH_COL_WIDTH),
+            fit_cell(&auth, column_widths.auth),
             CLI_TABLE_GAP,
-            fit_cell(&email, ACCOUNT_COL_WIDTH),
+            fit_cell(&email, column_widths.account),
             CLI_TABLE_GAP,
-            fit_cell(&plan, PLAN_COL_WIDTH),
+            fit_cell(&plan, column_widths.plan),
             CLI_TABLE_GAP,
-            fit_cell(&main, REMAINING_COL_WIDTH),
-            name_w = PROFILE_COL_WIDTH,
-            act_w = CUR_COL_WIDTH,
-            auth_w = AUTH_COL_WIDTH,
-            email_w = ACCOUNT_COL_WIDTH,
-            plan_w = PLAN_COL_WIDTH,
-            main_w = REMAINING_COL_WIDTH,
+            fit_cell(&main, column_widths.remaining),
+            name_w = column_widths.profile,
+            act_w = column_widths.current,
+            auth_w = column_widths.auth,
+            email_w = column_widths.account,
+            plan_w = column_widths.plan,
+            main_w = column_widths.remaining,
         ));
         section.extend(
-            wrap_text(&format!("status: {status}"), CLI_WIDTH - 2)
-                .into_iter()
-                .map(|line| format!("  {line}")),
+            wrap_text(
+                &format!("status: {status}"),
+                total_width.saturating_sub(2).max(1),
+            )
+            .into_iter()
+            .map(|line| format!("  {line}")),
         );
         if detail {
             if let Some(resets) = resets.as_deref() {
                 section.extend(
-                    wrap_text(resets, CLI_WIDTH - 2)
+                    wrap_text(resets, total_width.saturating_sub(2).max(1))
                         .into_iter()
                         .map(|line| format!("  {line}")),
                 );
@@ -8221,15 +8344,15 @@ fn render_quota_reports_with_line_limit(
         "ACCOUNT",
         "PLAN",
         "REMAINING",
-        name_w = PROFILE_COL_WIDTH,
-        act_w = CUR_COL_WIDTH,
-        auth_w = AUTH_COL_WIDTH,
-        email_w = ACCOUNT_COL_WIDTH,
-        plan_w = PLAN_COL_WIDTH,
-        main_w = REMAINING_COL_WIDTH,
+        name_w = column_widths.profile,
+        act_w = column_widths.current,
+        auth_w = column_widths.auth,
+        email_w = column_widths.account,
+        plan_w = column_widths.plan,
+        main_w = column_widths.remaining,
     );
     let mut output = vec![
-        section_header("Quota Overview"),
+        section_header_with_width("Quota Overview", total_width),
         header.clone(),
         "-".repeat(text_width(&header)),
     ];
@@ -8741,25 +8864,6 @@ fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
     let terminal_height = terminal_height_lines()?;
     let reserved = header.lines().count().saturating_add(1);
     Some(terminal_height.saturating_sub(reserved))
-}
-
-fn terminal_height_lines() -> Option<usize> {
-    if let Ok(lines) = env::var("LINES") {
-        if let Ok(parsed) = lines.trim().parse::<usize>() {
-            if parsed > 0 {
-                return Some(parsed);
-            }
-        }
-    }
-
-    let tty = fs::File::open("/dev/tty").ok()?;
-    let output = Command::new("stty").arg("size").stdin(tty).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let text = String::from_utf8(output.stdout).ok()?;
-    text.split_whitespace().next()?.parse::<usize>().ok()
 }
 
 fn watch_quota(profile_name: &str, codex_home: &Path, base_url: Option<&str>) -> Result<()> {
@@ -10580,6 +10684,34 @@ mod tests {
         assert!(!output.contains("blocked"));
         assert!(!output.contains("error"));
         assert!(output.contains("showing top 2 of 4 profiles"));
+    }
+
+    #[test]
+    fn quota_reports_fit_requested_width_in_narrow_layout() {
+        let reports = vec![
+            QuotaReport {
+                name: "ready-early".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            },
+            QuotaReport {
+                name: "blocked".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            },
+        ];
+
+        let output = render_quota_reports_with_layout(&reports, false, None, 72);
+
+        assert!(output.lines().all(|line| text_width(line) <= 72));
     }
 
     #[test]
@@ -12687,17 +12819,53 @@ mod tests {
 
     #[test]
     fn section_headers_use_cli_width() {
-        assert_eq!(text_width(&section_header("Quota Overview")), CLI_WIDTH);
+        assert_eq!(
+            text_width(&section_header_with_width("Quota Overview", CLI_WIDTH)),
+            CLI_WIDTH
+        );
     }
 
     #[test]
     fn field_lines_do_not_exceed_cli_width() {
-        let fields = format_field_lines(
+        let label_width = panel_label_width(
+            &[(
+                "Path".to_string(),
+                "/tmp/some/really/long/path/that/should/still/stay/inside/the/configured/cli/width/when/rendered"
+                    .to_string(),
+            )],
+            CLI_WIDTH,
+        );
+        let fields = format_field_lines_with_layout(
             "Path",
             "/tmp/some/really/long/path/that/should/still/stay/inside/the/configured/cli/width/when/rendered",
+            CLI_WIDTH,
+            label_width,
         );
 
         assert!(fields.iter().all(|line| text_width(line) <= CLI_WIDTH));
+    }
+
+    #[test]
+    fn section_headers_expand_to_requested_width() {
+        assert_eq!(text_width(&section_header_with_width("Doctor", 72)), 72);
+    }
+
+    #[test]
+    fn field_lines_respect_requested_width() {
+        let width = 72;
+        let fields = vec![(
+            "Profiles root".to_string(),
+            "/tmp/some/really/long/path/that/needs/to/wrap/narrower".to_string(),
+        )];
+        let label_width = panel_label_width(&fields, width);
+        let lines = format_field_lines_with_layout(
+            "Profiles root",
+            "/tmp/some/really/long/path/that/needs/to/wrap/narrower",
+            width,
+            label_width,
+        );
+
+        assert!(lines.iter().all(|line| text_width(line) <= width));
     }
 
     #[test]

@@ -38,6 +38,11 @@ When changing `prodex`, keep these invariants intact:
    - Do not reintroduce disk I/O, broad file reads, or unbounded thread spawning into the request/stream hot path.
    - Prefer async transport and bounded background work over ad hoc blocking behavior.
 
+7. Prodex-owned screens should be terminal-responsive.
+   - Prefer adapting to the current terminal width instead of assuming a fixed 110-character layout.
+   - Live views may also adapt to terminal height when that improves readability without hiding critical state silently.
+   - If a live view refreshes in place, keep the previous snapshot visible until the next snapshot is ready to render.
+
 ## Runtime Proxy Rules
 
 The runtime proxy is the most sensitive part of the project.

@@ -12,7 +12,7 @@ cargo install prodex
 prodex
 ```
 
-Prodex-owned commands use a fixed 110-character layout with section headers, wrapped key-value fields, and readable tables.
+Prodex-owned commands adapt to the current terminal width, and live quota views can also adapt to terminal height when needed.
 
 ## Import your current `codex` login
 
@@ -69,7 +69,7 @@ prodex use main
 prodex current
 ```
 
-`prodex current` renders the same fixed-width panel format, which is also used by `prodex doctor`, `prodex login`, and detailed single-profile quota views.
+`prodex current` renders the same responsive panel format, which is also used by `prodex doctor`, `prodex login`, and detailed single-profile quota views.
 
 ## Run `codex` through `prodex`
 
