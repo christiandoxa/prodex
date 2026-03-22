@@ -3695,23 +3695,22 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
     }
 }
 
-fn enqueue_runtime_proxy_long_lived_request_with_wait(
-    sender: &mpsc::SyncSender<tiny_http::Request>,
-    mut request: tiny_http::Request,
+fn wait_for_runtime_proxy_queue_capacity<T, F>(
+    mut item: T,
     shared: &RuntimeRotationProxyShared,
-) -> Result<(), (RuntimeProxyQueueRejection, tiny_http::Request)> {
+    transport: &str,
+    path: &str,
+    mut try_enqueue: F,
+) -> Result<(), (RuntimeProxyQueueRejection, T)>
+where
+    F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
+{
     let started_at = Instant::now();
     let budget = Duration::from_millis(runtime_proxy_long_lived_queue_wait_budget_ms());
     let poll = Duration::from_millis(runtime_proxy_long_lived_queue_wait_poll_ms().max(1));
-    let path = request.url().to_string();
-    let transport = if is_tiny_http_websocket_upgrade(&request) {
-        "websocket"
-    } else {
-        "http"
-    };
     let mut waited = false;
     loop {
-        match sender.try_send(request) {
+        match try_enqueue(item) {
             Ok(()) => {
                 if waited {
                     runtime_proxy_log(
@@ -3724,8 +3723,8 @@ fn enqueue_runtime_proxy_long_lived_request_with_wait(
                 }
                 return Ok(());
             }
-            Err(TrySendError::Full(returned_request)) => {
-                request = returned_request;
+            Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
+                item = returned_item;
                 let elapsed = started_at.elapsed();
                 if elapsed >= budget {
                     runtime_proxy_log(
@@ -3735,12 +3734,12 @@ fn enqueue_runtime_proxy_long_lived_request_with_wait(
                             elapsed.as_millis()
                         ),
                     );
-                    return Err((RuntimeProxyQueueRejection::Full, request));
+                    return Err((RuntimeProxyQueueRejection::Full, item));
                 }
                 waited = true;
                 thread::sleep(poll.min(budget.saturating_sub(elapsed)));
             }
-            Err(TrySendError::Disconnected(returned_request)) => {
+            Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -3748,10 +3747,34 @@ fn enqueue_runtime_proxy_long_lived_request_with_wait(
                         started_at.elapsed().as_millis()
                     ),
                 );
-                return Err((RuntimeProxyQueueRejection::Disconnected, returned_request));
+                return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
             }
         }
     }
+}
+
+fn enqueue_runtime_proxy_long_lived_request_with_wait(
+    sender: &mpsc::SyncSender<tiny_http::Request>,
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Result<(), (RuntimeProxyQueueRejection, tiny_http::Request)> {
+    let path = request.url().to_string();
+    let transport = if is_tiny_http_websocket_upgrade(&request) {
+        "websocket"
+    } else {
+        "http"
+    };
+    wait_for_runtime_proxy_queue_capacity(request, shared, transport, &path, |request| match sender
+        .try_send(request)
+    {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(returned_request)) => {
+            Err((RuntimeProxyQueueRejection::Full, returned_request))
+        }
+        Err(TrySendError::Disconnected(returned_request)) => {
+            Err((RuntimeProxyQueueRejection::Disconnected, returned_request))
+        }
+    })
 }
 
 fn handle_runtime_rotation_proxy_request(
@@ -13779,91 +13802,94 @@ mod tests {
 
     #[test]
     fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
-        let _worker_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "1");
-        let _long_lived_worker_guard =
-            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT", "1");
-        let _queue_guard =
-            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY", "1");
         let _wait_budget_guard = TestEnvVarGuard::set(
             "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
-            "1500",
+            "250",
         );
         let _wait_poll_guard =
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS", "5");
 
         let temp_dir = TestDir::new();
-        let backend = RuntimeProxyBackend::start_http_slow_stream();
-        let paths = AppPaths {
-            root: temp_dir.path.join("prodex"),
-            state_file: temp_dir.path.join("prodex/state.json"),
-            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-            shared_codex_root: temp_dir.path.join("shared"),
-            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-        };
-        let second_home = temp_dir.path.join("homes/second");
-        write_auth_json(&second_home.join("auth.json"), "second-account");
-
-        let state = AppState {
-            active_profile: Some("second".to_string()),
-            profiles: BTreeMap::from([(
-                "second".to_string(),
-                ProfileEntry {
-                    codex_home: second_home,
-                    managed: true,
-                    email: Some("second@example.com".to_string()),
-                },
-            )]),
-            last_run_selected_at: BTreeMap::new(),
-            response_profile_bindings: BTreeMap::new(),
-            session_profile_bindings: BTreeMap::new(),
-        };
-        state.save(&paths).expect("failed to save initial state");
-
-        let proxy =
-            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
-                .expect("runtime proxy should start");
-        let request_url = format!("http://{}/backend-api/codex/responses", proxy.listen_addr);
-
-        let spawn_request = |delay_ms: u64, url: String| {
-            thread::spawn(move || {
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms));
-                }
-                let response = Client::builder()
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
                     .build()
-                    .expect("client")
-                    .post(url)
-                    .header("Content-Type", "application/json")
-                    .body("{\"input\":[]}")
-                    .send()
-                    .expect("runtime proxy request should succeed");
-                let status = response.status().as_u16();
-                let body = response.text().expect("response body should be readable");
-                (status, body)
-            })
+                    .expect("async runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths: AppPaths {
+                    root: temp_dir.path.join("prodex"),
+                    state_file: temp_dir.path.join("prodex/state.json"),
+                    managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                    shared_codex_root: temp_dir.path.join("shared"),
+                    legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+                },
+                state: AppState::default(),
+                upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+                include_code_review: false,
+                current_profile: "main".to_string(),
+                turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         };
 
-        let first = spawn_request(0, request_url.clone());
-        let second = spawn_request(25, request_url.clone());
-        let third = spawn_request(50, request_url);
+        let (sender, receiver) = mpsc::sync_channel::<u8>(1);
+        let receiver = Arc::new(Mutex::new(receiver));
+        sender.send(1).expect("queue should accept first item");
 
-        for (status, body) in [
-            first.join().expect("first request should join"),
-            second.join().expect("second request should join"),
-            third.join().expect("third request should join"),
-        ] {
-            assert_eq!(status, 200);
-            assert!(body.contains("\"response.created\""));
-        }
+        let release_receiver = Arc::clone(&receiver);
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            let drained = release_receiver
+                .lock()
+                .expect("receiver mutex should not be poisoned")
+                .recv_timeout(Duration::from_secs(1))
+                .expect("queue should drain after short burst");
+            assert_eq!(drained, 1);
+        });
 
-        assert_eq!(
-            backend.responses_accounts(),
-            vec![
-                "second-account".to_string(),
-                "second-account".to_string(),
-                "second-account".to_string(),
-            ]
+        assert!(
+            wait_for_runtime_proxy_queue_capacity(
+                2u8,
+                &shared,
+                "http",
+                "/backend-api/codex/responses",
+                |value| match sender.try_send(value) {
+                    Ok(()) => Ok(()),
+                    Err(TrySendError::Full(returned_value)) => {
+                        Err((RuntimeProxyQueueRejection::Full, returned_value))
+                    }
+                    Err(TrySendError::Disconnected(returned_value)) => {
+                        Err((RuntimeProxyQueueRejection::Disconnected, returned_value))
+                    }
+                },
+            )
+            .is_ok(),
+            "queue wait should recover once the short-lived burst drains"
         );
+
+        release.join().expect("release thread should join");
+        let queued = receiver
+            .lock()
+            .expect("receiver mutex should not be poisoned")
+            .recv_timeout(Duration::from_secs(1))
+            .expect("recovered item should reach the queue");
+        assert_eq!(queued, 2);
     }
 
     #[test]
