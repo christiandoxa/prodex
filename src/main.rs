@@ -59,6 +59,10 @@ const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS: i64 = if cfg!(test) { 8 } else { 120 };
 const RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS: i64 = if cfg!(test) { 1 } else { 3 };
+const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
+const RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
+const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
+const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
 const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
@@ -149,7 +153,7 @@ fn runtime_proxy_long_lived_worker_count() -> usize {
 fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
     usize_override(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
-        worker_count.saturating_mul(4).clamp(8, 64),
+        worker_count.saturating_mul(8).clamp(16, 128),
     )
     .max(1)
 }
@@ -161,8 +165,8 @@ fn runtime_proxy_active_request_limit(
     usize_override(
         "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
         worker_count
-            .saturating_add(long_lived_worker_count)
-            .clamp(8, 64),
+            .saturating_add(long_lived_worker_count.saturating_mul(4))
+            .clamp(16, 128),
     )
     .max(1)
 }
@@ -1369,6 +1373,34 @@ fn runtime_proxy_websocket_connect_timeout_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
         RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS,
+    )
+}
+
+fn runtime_proxy_admission_wait_budget_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS,
+    )
+}
+
+fn runtime_proxy_admission_wait_poll_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS",
+        RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS,
+    )
+}
+
+fn runtime_proxy_long_lived_queue_wait_budget_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
+        RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
+    )
+}
+
+fn runtime_proxy_long_lived_queue_wait_poll_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS",
+        RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS,
     )
 }
 
@@ -3413,17 +3445,13 @@ fn start_runtime_rotation_proxy(
                         let long_lived = is_tiny_http_websocket_upgrade(&request)
                             || is_runtime_responses_path(request.url());
                         if long_lived {
-                            if runtime_proxy_in_local_overload_backoff(&shared) {
-                                reject_runtime_proxy_overloaded_request(
-                                    request,
-                                    &shared,
-                                    "proxy_overload_backoff",
-                                );
-                                continue;
-                            }
-                            match long_lived_sender.try_send(request) {
+                            match enqueue_runtime_proxy_long_lived_request_with_wait(
+                                &long_lived_sender,
+                                request,
+                                &shared,
+                            ) {
                                 Ok(()) => {}
-                                Err(TrySendError::Full(request)) => {
+                                Err((RuntimeProxyQueueRejection::Full, request)) => {
                                     mark_runtime_proxy_local_overload(
                                         &shared,
                                         "long_lived_queue_full",
@@ -3434,7 +3462,7 @@ fn start_runtime_rotation_proxy(
                                         "long_lived_queue_full",
                                     );
                                 }
-                                Err(TrySendError::Disconnected(request)) => {
+                                Err((RuntimeProxyQueueRejection::Disconnected, request)) => {
                                     mark_runtime_proxy_local_overload(
                                         &shared,
                                         "long_lived_queue_disconnected",
@@ -3514,6 +3542,7 @@ fn reject_runtime_proxy_overloaded_request(
     let _ = request.respond(response);
 }
 
+#[cfg(test)]
 fn runtime_proxy_in_local_overload_backoff(shared: &RuntimeRotationProxyShared) -> bool {
     let now = Local::now().timestamp().max(0) as u64;
     shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
@@ -3538,6 +3567,12 @@ fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason
 enum RuntimeProxyAdmissionRejection {
     GlobalLimit,
     LaneLimit(RuntimeRouteKind),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProxyQueueRejection {
+    Full,
+    Disconnected,
 }
 
 fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
@@ -3612,6 +3647,113 @@ fn try_acquire_runtime_proxy_active_request_slot(
     }
 }
 
+fn acquire_runtime_proxy_active_request_slot_with_wait(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
+    let started_at = Instant::now();
+    let budget = Duration::from_millis(runtime_proxy_admission_wait_budget_ms());
+    let poll = Duration::from_millis(runtime_proxy_admission_wait_poll_ms().max(1));
+    let mut waited = false;
+    loop {
+        match try_acquire_runtime_proxy_active_request_slot(shared, transport, path) {
+            Ok(guard) => {
+                if waited {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "runtime_proxy_admission_recovered transport={transport} path={path} waited_ms={}",
+                            started_at.elapsed().as_millis()
+                        ),
+                    );
+                }
+                return Ok(guard);
+            }
+            Err(rejection) => {
+                let elapsed = started_at.elapsed();
+                if elapsed >= budget {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "runtime_proxy_admission_wait_exhausted transport={transport} path={path} waited_ms={} reason={}",
+                            elapsed.as_millis(),
+                            match rejection {
+                                RuntimeProxyAdmissionRejection::GlobalLimit =>
+                                    "active_request_limit",
+                                RuntimeProxyAdmissionRejection::LaneLimit(lane) =>
+                                    runtime_route_kind_label(lane),
+                            }
+                        ),
+                    );
+                    return Err(rejection);
+                }
+                waited = true;
+                thread::sleep(poll.min(budget.saturating_sub(elapsed)));
+            }
+        }
+    }
+}
+
+fn enqueue_runtime_proxy_long_lived_request_with_wait(
+    sender: &mpsc::SyncSender<tiny_http::Request>,
+    mut request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Result<(), (RuntimeProxyQueueRejection, tiny_http::Request)> {
+    let started_at = Instant::now();
+    let budget = Duration::from_millis(runtime_proxy_long_lived_queue_wait_budget_ms());
+    let poll = Duration::from_millis(runtime_proxy_long_lived_queue_wait_poll_ms().max(1));
+    let path = request.url().to_string();
+    let transport = if is_tiny_http_websocket_upgrade(&request) {
+        "websocket"
+    } else {
+        "http"
+    };
+    let mut waited = false;
+    loop {
+        match sender.try_send(request) {
+            Ok(()) => {
+                if waited {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "runtime_proxy_queue_recovered transport={transport} path={path} waited_ms={}",
+                            started_at.elapsed().as_millis()
+                        ),
+                    );
+                }
+                return Ok(());
+            }
+            Err(TrySendError::Full(returned_request)) => {
+                request = returned_request;
+                let elapsed = started_at.elapsed();
+                if elapsed >= budget {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_full",
+                            elapsed.as_millis()
+                        ),
+                    );
+                    return Err((RuntimeProxyQueueRejection::Full, request));
+                }
+                waited = true;
+                thread::sleep(poll.min(budget.saturating_sub(elapsed)));
+            }
+            Err(TrySendError::Disconnected(returned_request)) => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_disconnected",
+                        started_at.elapsed().as_millis()
+                    ),
+                );
+                return Err((RuntimeProxyQueueRejection::Disconnected, returned_request));
+            }
+        }
+    }
+}
+
 fn handle_runtime_rotation_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
@@ -3622,7 +3764,7 @@ fn handle_runtime_rotation_proxy_request(
     } else {
         "http"
     };
-    let _active_request_guard = match try_acquire_runtime_proxy_active_request_slot(
+    let _active_request_guard = match acquire_runtime_proxy_active_request_slot_with_wait(
         shared,
         request_transport,
         &request_path,
@@ -13107,6 +13249,68 @@ mod tests {
     }
 
     #[test]
+    fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
+        let temp_dir = TestDir::new();
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths: AppPaths {
+                    root: temp_dir.path.join("prodex"),
+                    state_file: temp_dir.path.join("prodex/state.json"),
+                    managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                    shared_codex_root: temp_dir.path.join("shared"),
+                    legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+                },
+                state: AppState::default(),
+                upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+                include_code_review: false,
+                current_profile: "main".to_string(),
+                turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: 1,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(1),
+        };
+
+        let first = try_acquire_runtime_proxy_active_request_slot(
+            &shared,
+            "http",
+            "/backend-api/codex/responses",
+        )
+        .expect("first slot should be available");
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            drop(first);
+        });
+
+        let second = acquire_runtime_proxy_active_request_slot_with_wait(
+            &shared,
+            "http",
+            "/backend-api/codex/responses",
+        )
+        .expect("second slot should recover after a short wait");
+        drop(second);
+        release.join().expect("release thread should join");
+    }
+
+    #[test]
     fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
         let temp_dir = TestDir::new();
         let backend = RuntimeProxyBackend::start();
@@ -13489,6 +13693,10 @@ mod tests {
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT", "1");
         let _queue_guard =
             TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY", "1");
+        let _wait_budget_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS", "20");
+        let _wait_poll_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS", "5");
 
         let temp_dir = TestDir::new();
         let backend = RuntimeProxyBackend::start_http_initial_body_stall();
@@ -13566,6 +13774,95 @@ mod tests {
             started_at.elapsed() < Duration::from_millis(500),
             "queue overload response took too long: {:?}",
             started_at.elapsed()
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
+        let _worker_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "1");
+        let _long_lived_worker_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT", "1");
+        let _queue_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY", "1");
+        let _wait_budget_guard = TestEnvVarGuard::set(
+            "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
+            "500",
+        );
+        let _wait_poll_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS", "5");
+
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start_http_slow_stream();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([(
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        state.save(&paths).expect("failed to save initial state");
+
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+                .expect("runtime proxy should start");
+        let request_url = format!("http://{}/backend-api/codex/responses", proxy.listen_addr);
+
+        let spawn_request = |delay_ms: u64, url: String| {
+            thread::spawn(move || {
+                if delay_ms > 0 {
+                    thread::sleep(Duration::from_millis(delay_ms));
+                }
+                let response = Client::builder()
+                    .build()
+                    .expect("client")
+                    .post(url)
+                    .header("Content-Type", "application/json")
+                    .body("{\"input\":[]}")
+                    .send()
+                    .expect("runtime proxy request should succeed");
+                let status = response.status().as_u16();
+                let body = response.text().expect("response body should be readable");
+                (status, body)
+            })
+        };
+
+        let first = spawn_request(0, request_url.clone());
+        let second = spawn_request(10, request_url.clone());
+        let third = spawn_request(20, request_url);
+
+        for (status, body) in [
+            first.join().expect("first request should join"),
+            second.join().expect("second request should join"),
+            third.join().expect("third request should join"),
+        ] {
+            assert_eq!(status, 200);
+            assert!(body.contains("\"response.created\""));
+        }
+
+        assert_eq!(
+            backend.responses_accounts(),
+            vec![
+                "second-account".to_string(),
+                "second-account".to_string(),
+                "second-account".to_string(),
+            ]
         );
     }
 
