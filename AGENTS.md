@@ -149,6 +149,16 @@ Headers that may be skipped as transport-local:
 - `Upgrade`
 - `sec-websocket-*`
 
+## Quota UX
+
+`prodex quota` is a Prodex-owned screen, not a Codex TUI path.
+
+- By default, `prodex quota` should refresh continuously every 5 seconds.
+- This default applies to both single-profile quota views and `prodex quota --all`.
+- `prodex quota --raw` should remain one-shot.
+- `prodex quota --once` is the explicit one-shot escape hatch for human-facing quota views.
+- When changing quota behavior, keep integration tests and docs aligned so snapshot-style tests use `--once`.
+
 ## Observability
 
 Runtime proxy diagnostics are written to `/tmp`.
@@ -206,6 +216,12 @@ Summarize the latest runtime log:
 
 ```bash
 prodex doctor --runtime
+```
+
+Show quota as a one-shot snapshot:
+
+```bash
+prodex quota --all --once
 ```
 
 Reinstall the local binary after runtime changes:

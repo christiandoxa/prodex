@@ -48,11 +48,15 @@ prodex profile list
 prodex quota --all
 ```
 
-`prodex profile list` renders a `Profiles` panel. `prodex quota --all` renders a `Quota Overview` table with a `REMAINING` column and a wrapped `status:` line for each profile.
+`prodex profile list` renders a `Profiles` panel. `prodex quota --all` refreshes continuously by default every 5 seconds and renders a `Quota Overview` table with a `REMAINING` column and a wrapped `status:` line for each profile.
 
 The `REMAINING` column shows quota left, not quota used.
 
+Press `Ctrl+C` to stop the live refresh loop.
+
 Use `prodex quota --all --detail` when you want the exact local reset timestamp for the `5h` and `weekly` windows under each profile row.
+
+Use `prodex quota --all --once` when you want a single snapshot instead of continuous refresh.
 
 ## Select the active profile
 

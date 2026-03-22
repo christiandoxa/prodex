@@ -602,8 +602,10 @@ struct QuotaArgs {
     detail: bool,
     #[arg(long)]
     raw: bool,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     watch: bool,
+    #[arg(long, conflicts_with = "watch")]
+    once: bool,
     #[arg(long)]
     base_url: Option<String>,
 }
@@ -2393,16 +2395,15 @@ fn handle_codex_logout(selector: ProfileSelector) -> Result<()> {
 }
 
 fn handle_quota(args: QuotaArgs) -> Result<()> {
-    if args.all && args.watch {
-        bail!("--all cannot be combined with --watch");
-    }
-
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
 
     if args.all {
         if state.profiles.is_empty() {
             bail!("no profiles configured");
+        }
+        if quota_watch_enabled(&args) {
+            return watch_all_quotas(&paths, args.base_url.as_deref(), args.detail);
         }
         let reports = collect_quota_reports(&state, args.base_url.as_deref());
         print_quota_reports(&reports, args.detail);
@@ -2426,7 +2427,7 @@ fn handle_quota(args: QuotaArgs) -> Result<()> {
         return Ok(());
     }
 
-    if args.watch {
+    if quota_watch_enabled(&args) {
         return watch_quota(&profile_name, &codex_home, args.base_url.as_deref());
     }
 
@@ -8123,6 +8124,10 @@ fn fetch_usage_json(codex_home: &Path, base_url: Option<&str>) -> Result<serde_j
 }
 
 fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
+    print!("{}", render_quota_reports(reports, detail));
+}
+
+fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
     const PROFILE_COL_WIDTH: usize = 24;
     const CUR_COL_WIDTH: usize = 3;
     const AUTH_COL_WIDTH: usize = 7;
@@ -8130,7 +8135,7 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
     const PLAN_COL_WIDTH: usize = 8;
     const REMAINING_COL_WIDTH: usize = 31;
 
-    let mut rows = Vec::new();
+    let mut lines = Vec::new();
 
     for report in sort_quota_reports_for_display(reports) {
         let active = if report.active { "*" } else { "" }.to_string();
@@ -8161,41 +8166,9 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
             ),
         };
 
-        rows.push((
-            report.name.clone(),
-            active,
-            auth,
-            email,
-            plan,
-            main,
-            status,
-            resets,
-        ));
-    }
-
-    println!("{}", section_header("Quota Overview"));
-    let header = format!(
-        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}",
-        "PROFILE",
-        "CUR",
-        "AUTH",
-        "ACCOUNT",
-        "PLAN",
-        "REMAINING",
-        name_w = PROFILE_COL_WIDTH,
-        act_w = CUR_COL_WIDTH,
-        auth_w = AUTH_COL_WIDTH,
-        email_w = ACCOUNT_COL_WIDTH,
-        plan_w = PLAN_COL_WIDTH,
-        main_w = REMAINING_COL_WIDTH,
-    );
-    println!("{header}");
-    println!("{}", "-".repeat(text_width(&header)));
-
-    for (name, active, auth, email, plan, main, status, resets) in rows {
-        println!(
+        lines.push(format!(
             "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
-            fit_cell(&name, PROFILE_COL_WIDTH),
+            fit_cell(&report.name, PROFILE_COL_WIDTH),
             CLI_TABLE_GAP,
             fit_cell(&active, CUR_COL_WIDTH),
             CLI_TABLE_GAP,
@@ -8212,19 +8185,46 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
             email_w = ACCOUNT_COL_WIDTH,
             plan_w = PLAN_COL_WIDTH,
             main_w = REMAINING_COL_WIDTH,
+        ));
+        lines.extend(
+            wrap_text(&format!("status: {status}"), CLI_WIDTH - 2)
+                .into_iter()
+                .map(|line| format!("  {line}")),
         );
-        for line in wrap_text(&format!("status: {status}"), CLI_WIDTH - 2) {
-            println!("  {line}");
-        }
         if detail {
             if let Some(resets) = resets.as_deref() {
-                for line in wrap_text(resets, CLI_WIDTH - 2) {
-                    println!("  {line}");
-                }
+                lines.extend(
+                    wrap_text(resets, CLI_WIDTH - 2)
+                        .into_iter()
+                        .map(|line| format!("  {line}")),
+                );
             }
         }
-        println!();
+        lines.push(String::new());
     }
+
+    let header = format!(
+        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}",
+        "PROFILE",
+        "CUR",
+        "AUTH",
+        "ACCOUNT",
+        "PLAN",
+        "REMAINING",
+        name_w = PROFILE_COL_WIDTH,
+        act_w = CUR_COL_WIDTH,
+        auth_w = AUTH_COL_WIDTH,
+        email_w = ACCOUNT_COL_WIDTH,
+        plan_w = PLAN_COL_WIDTH,
+        main_w = REMAINING_COL_WIDTH,
+    );
+    let mut output = vec![
+        section_header("Quota Overview"),
+        header.clone(),
+        "-".repeat(text_width(&header)),
+    ];
+    output.extend(lines);
+    output.join("\n")
 }
 
 fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
@@ -8618,30 +8618,102 @@ fn first_line_of_error(input: &str) -> String {
         .to_string()
 }
 
+fn quota_watch_enabled(args: &QuotaArgs) -> bool {
+    !args.raw && !args.once
+}
+
+fn render_profile_quota_watch_output(
+    profile_name: &str,
+    updated: &str,
+    usage_result: std::result::Result<UsageResponse, String>,
+) -> String {
+    let header = render_panel(
+        "Quota Watch",
+        &[
+            ("Profile".to_string(), profile_name.to_string()),
+            ("Updated".to_string(), updated.to_string()),
+        ],
+    );
+    let body = match usage_result {
+        Ok(usage) => render_profile_quota(profile_name, &usage),
+        Err(err) => render_panel(
+            "Quota Watch",
+            &[("Error".to_string(), first_line_of_error(&err))],
+        ),
+    };
+    format!("{header}\n\n{body}\n")
+}
+
+fn render_all_quota_watch_output(
+    updated: &str,
+    state_result: std::result::Result<AppState, String>,
+    base_url: Option<&str>,
+    detail: bool,
+) -> String {
+    match state_result {
+        Ok(state) if !state.profiles.is_empty() => {
+            let header = render_panel(
+                "Quota Watch",
+                &[
+                    ("Profiles".to_string(), state.profiles.len().to_string()),
+                    ("Updated".to_string(), updated.to_string()),
+                ],
+            );
+            let reports = collect_quota_reports(&state, base_url);
+            format!("{header}\n\n{}\n", render_quota_reports(&reports, detail))
+        }
+        Ok(_) => {
+            render_panel(
+                "Quota Watch",
+                &[
+                    ("Updated".to_string(), updated.to_string()),
+                    ("Error".to_string(), "No profiles configured".to_string()),
+                ],
+            ) + "\n"
+        }
+        Err(err) => {
+            render_panel(
+                "Quota Watch",
+                &[
+                    ("Updated".to_string(), updated.to_string()),
+                    ("Error".to_string(), first_line_of_error(&err)),
+                ],
+            ) + "\n"
+        }
+    }
+}
+
+fn redraw_quota_watch(output: &str) -> Result<()> {
+    print!("\x1b[H\x1b[2J{output}");
+    io::stdout()
+        .flush()
+        .context("failed to flush quota watch output")?;
+    Ok(())
+}
+
 fn watch_quota(profile_name: &str, codex_home: &Path, base_url: Option<&str>) -> Result<()> {
     loop {
-        print!("\x1b[H\x1b[2J");
-        let header = vec![
-            ("Profile".to_string(), profile_name.to_string()),
-            (
-                "Updated".to_string(),
-                Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string(),
-            ),
-        ];
-        println!("{}", render_panel("Quota Watch", &header));
-        println!();
+        let updated = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+        let output = render_profile_quota_watch_output(
+            profile_name,
+            &updated,
+            fetch_usage(codex_home, base_url).map_err(|err| err.to_string()),
+        );
+        redraw_quota_watch(&output)?;
+        thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+    }
+}
 
-        match fetch_usage(codex_home, base_url) {
-            Ok(usage) => println!("{}", render_profile_quota(profile_name, &usage)),
-            Err(err) => {
-                let fields = vec![("Error".to_string(), first_line_of_error(&err.to_string()))];
-                println!("{}", render_panel("Quota Watch", &fields));
-            }
-        }
-
-        io::stdout()
-            .flush()
-            .context("failed to flush quota watch output")?;
+fn watch_all_quotas(paths: &AppPaths, base_url: Option<&str>, detail: bool) -> Result<()> {
+    loop {
+        let updated = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+        let output = render_all_quota_watch_output(
+            &updated,
+            AppState::load(paths).map_err(|err| err.to_string()),
+            base_url,
+            detail,
+        );
+        redraw_quota_watch(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
     }
 }
@@ -10304,6 +10376,89 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["ready-early", "ready-late", "blocked", "error"]);
+    }
+
+    #[test]
+    fn quota_watch_defaults_to_live_refresh_for_regular_views() {
+        let profile_args = QuotaArgs {
+            profile: Some("main".to_string()),
+            all: false,
+            detail: false,
+            raw: false,
+            watch: false,
+            once: false,
+            base_url: None,
+        };
+        assert!(quota_watch_enabled(&profile_args));
+
+        let overview_args = QuotaArgs {
+            all: true,
+            ..profile_args
+        };
+        assert!(quota_watch_enabled(&overview_args));
+    }
+
+    #[test]
+    fn quota_watch_respects_once_and_raw_modes() {
+        let once_args = QuotaArgs {
+            profile: Some("main".to_string()),
+            all: false,
+            detail: false,
+            raw: false,
+            watch: false,
+            once: true,
+            base_url: None,
+        };
+        assert!(!quota_watch_enabled(&once_args));
+
+        let raw_args = QuotaArgs {
+            raw: true,
+            watch: true,
+            once: false,
+            ..once_args
+        };
+        assert!(!quota_watch_enabled(&raw_args));
+    }
+
+    #[test]
+    fn quota_command_accepts_once_flag() {
+        let cli = Cli::try_parse_from(["prodex", "quota", "--once"]).expect("quota command");
+        let Commands::Quota(args) = cli.command else {
+            panic!("expected quota command");
+        };
+        assert!(args.once);
+        assert!(!quota_watch_enabled(&args));
+    }
+
+    #[test]
+    fn profile_quota_watch_output_contains_header_and_snapshot_body() {
+        let output = render_profile_quota_watch_output(
+            "main",
+            "2026-03-22 10:00:00 WIB",
+            Ok(usage_with_main_windows(63, 18_000, 12, 604_800)),
+        );
+
+        assert!(output.contains("Quota Watch"));
+        assert!(output.contains("Profile"));
+        assert!(output.contains("main"));
+        assert!(output.contains("Updated"));
+        assert!(output.contains("2026-03-22 10:00:00 WIB"));
+        assert!(output.contains("Quota main"));
+    }
+
+    #[test]
+    fn all_quota_watch_output_preserves_updated_on_load_error() {
+        let output = render_all_quota_watch_output(
+            "2026-03-22 10:00:00 WIB",
+            Err("load failed".to_string()),
+            None,
+            false,
+        );
+
+        assert!(output.contains("Quota Watch"));
+        assert!(output.contains("Updated"));
+        assert!(output.contains("2026-03-22 10:00:00 WIB"));
+        assert!(output.contains("load failed"));
     }
 
     #[test]

@@ -1,5 +1,7 @@
 # prodex
 
+Safe multi-account auto-rotate for `codex`.
+
 `prodex` is a CLI wrapper for `codex` that separates multiple profiles by giving each one its own `CODEX_HOME`.
 
 Install from [crates.io](https://crates.io/crates/prodex):
@@ -15,6 +17,7 @@ In short:
 - one `prodex` profile = one `CODEX_HOME` directory
 - login is still handled by `codex`
 - `prodex` manages profiles, the active profile, built-in quota checks, and launching `codex`
+- the headline feature is built-in auto-rotate across multiple logged-in ChatGPT accounts, so `prodex run` can keep working when the current profile is quota-blocked or temporarily unhealthy
 - `prodex run` uses a local runtime proxy that keeps Codex transport behavior as intact as possible while rotating accounts safely
 - Prodex-owned screens use a fixed 110-character layout with section headers, wrapped fields, and readable tables
 
@@ -81,7 +84,9 @@ Use `prodex login --profile <name>` when you want a fixed profile name, or when 
 prodex quota --all
 ```
 
-`prodex quota --all` prints a `Quota Overview` table with a fixed-width layout. The main quota summary now appears in the `REMAINING` column, and each profile gets a wrapped `status:` detail line underneath the row.
+`prodex quota --all` now refreshes continuously by default every 5 seconds. It renders a `Quota Overview` table with a fixed-width layout. The main quota summary appears in the `REMAINING` column, and each profile gets a wrapped `status:` detail line underneath the row.
+
+Press `Ctrl+C` to stop the live refresh loop.
 
 If you also want the exact reset timestamps for the required main windows:
 
@@ -90,6 +95,12 @@ prodex quota --all --detail
 ```
 
 This adds a `resets:` line under each profile row, including the full local timestamp for both `5h` and `weekly`.
+
+Use `--once` when you want a single snapshot instead of continuous refresh:
+
+```bash
+prodex quota --all --once
+```
 
 Example `REMAINING` value:
 
@@ -109,6 +120,19 @@ Or run directly with a specific profile:
 ```bash
 prodex run --profile second
 ```
+
+By default, `prodex run` will auto-rotate to another ready profile when the current one is blocked by quota or temporary runtime health signals. Use `--no-auto-rotate` only when you explicitly want to stay pinned to one profile and fail there.
+
+## Why Prodex
+
+`prodex` is primarily useful when you keep more than one ChatGPT-backed `codex` login and want account rotation built in.
+
+The main value is:
+
+- automatic preflight rotation when the selected profile does not have clear remaining required quota
+- safe runtime rotation before a request or stream is committed
+- hard affinity preservation for ongoing chains, so rotation does not break continuations
+- transport behavior kept close to direct `codex`, so reconnect and fallback still feel native
 
 ## Requirements
 
@@ -223,11 +247,19 @@ Show quota for one profile:
 prodex quota --profile work
 ```
 
+`prodex quota --profile work` also refreshes continuously by default every 5 seconds. Add `--once` when you want a single snapshot:
+
+```bash
+prodex quota --profile work --once
+```
+
 Show raw quota JSON:
 
 ```bash
 prodex quota --profile work --raw
 ```
+
+`--raw` remains a one-shot command.
 
 View all profiles at once:
 
@@ -235,7 +267,7 @@ View all profiles at once:
 prodex quota --all
 ```
 
-This renders a `Quota Overview` table with `PROFILE`, `CUR`, `AUTH`, `ACCOUNT`, `PLAN`, and `REMAINING`, plus a `status:` line for each profile.
+This continuously refreshes a `Quota Overview` table with `PROFILE`, `CUR`, `AUTH`, `ACCOUNT`, `PLAN`, and `REMAINING`, plus a `status:` line for each profile. Add `--once` if you want a single render.
 
 Add `--detail` to include exact local reset timestamps for `5h` and `weekly` under each row:
 
@@ -276,6 +308,8 @@ Skip quota preflight:
 prodex run --profile work --skip-quota-check
 ```
 
+`prodex run` is the core command of the project. Its main job is to auto-rotate between profiles safely while keeping the transport side as close as possible to direct `codex`.
+
 At runtime, `prodex` keeps the transport side as close as possible to direct `codex`:
 
 - WebSocket and HTTP/SSE traffic still follow Codex reconnect and fallback behavior
@@ -301,6 +335,8 @@ At runtime, `prodex` keeps the transport side as close as possible to direct `co
 ## Quota Behavior
 
 Before `prodex run` launches `codex`, `prodex` tries to check quota for the selected profile.
+
+This preflight is the first layer of auto-rotate.
 
 Before a profile is considered safe to use, `prodex` requires both the `5h` and `weekly` quota windows to be present and still have remaining capacity.
 
