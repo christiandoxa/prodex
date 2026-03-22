@@ -8128,6 +8128,14 @@ fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
 }
 
 fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
+    render_quota_reports_with_line_limit(reports, detail, None)
+}
+
+fn render_quota_reports_with_line_limit(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+) -> String {
     const PROFILE_COL_WIDTH: usize = 24;
     const CUR_COL_WIDTH: usize = 3;
     const AUTH_COL_WIDTH: usize = 7;
@@ -8135,7 +8143,7 @@ fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
     const PLAN_COL_WIDTH: usize = 8;
     const REMAINING_COL_WIDTH: usize = 31;
 
-    let mut lines = Vec::new();
+    let mut sections = Vec::new();
 
     for report in sort_quota_reports_for_display(reports) {
         let active = if report.active { "*" } else { "" }.to_string();
@@ -8166,7 +8174,8 @@ fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
             ),
         };
 
-        lines.push(format!(
+        let mut section = Vec::new();
+        section.push(format!(
             "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
             fit_cell(&report.name, PROFILE_COL_WIDTH),
             CLI_TABLE_GAP,
@@ -8186,21 +8195,22 @@ fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
             plan_w = PLAN_COL_WIDTH,
             main_w = REMAINING_COL_WIDTH,
         ));
-        lines.extend(
+        section.extend(
             wrap_text(&format!("status: {status}"), CLI_WIDTH - 2)
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
         if detail {
             if let Some(resets) = resets.as_deref() {
-                lines.extend(
+                section.extend(
                     wrap_text(resets, CLI_WIDTH - 2)
                         .into_iter()
                         .map(|line| format!("  {line}")),
                 );
             }
         }
-        lines.push(String::new());
+        section.push(String::new());
+        sections.push(section);
     }
 
     let header = format!(
@@ -8223,7 +8233,39 @@ fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
         header.clone(),
         "-".repeat(text_width(&header)),
     ];
-    output.extend(lines);
+    if let Some(max_lines) = max_lines {
+        let mut remaining = max_lines.saturating_sub(output.len());
+        let total_profiles = sections.len();
+        let mut shown_profiles = 0_usize;
+
+        for (index, section) in sections.into_iter().enumerate() {
+            let more_profiles_remain = index + 1 < total_profiles;
+            let reserve_for_notice = usize::from(more_profiles_remain);
+            if section.len() + reserve_for_notice > remaining {
+                break;
+            }
+            remaining = remaining.saturating_sub(section.len());
+            output.extend(section);
+            shown_profiles += 1;
+        }
+
+        let hidden_profiles = total_profiles.saturating_sub(shown_profiles);
+        if hidden_profiles > 0 {
+            let notice = format!(
+                "  showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
+            );
+            if remaining == 0 {
+                if !output.is_empty() {
+                    output.pop();
+                }
+            }
+            output.push(notice);
+        }
+    } else {
+        for section in sections {
+            output.extend(section);
+        }
+    }
     output.join("\n")
 }
 
@@ -8660,7 +8702,11 @@ fn render_all_quota_watch_output(
                 ],
             );
             let reports = collect_quota_reports(&state, base_url);
-            format!("{header}\n\n{}\n", render_quota_reports(&reports, detail))
+            let available_report_lines = quota_watch_available_report_lines(&header);
+            format!(
+                "{header}\n\n{}\n",
+                render_quota_reports_with_line_limit(&reports, detail, available_report_lines)
+            )
         }
         Ok(_) => {
             render_panel(
@@ -8689,6 +8735,31 @@ fn redraw_quota_watch(output: &str) -> Result<()> {
         .flush()
         .context("failed to flush quota watch output")?;
     Ok(())
+}
+
+fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
+    let terminal_height = terminal_height_lines()?;
+    let reserved = header.lines().count().saturating_add(1);
+    Some(terminal_height.saturating_sub(reserved))
+}
+
+fn terminal_height_lines() -> Option<usize> {
+    if let Ok(lines) = env::var("LINES") {
+        if let Ok(parsed) = lines.trim().parse::<usize>() {
+            if parsed > 0 {
+                return Some(parsed);
+            }
+        }
+    }
+
+    let tty = fs::File::open("/dev/tty").ok()?;
+    let output = Command::new("stty").arg("size").stdin(tty).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8(output.stdout).ok()?;
+    text.split_whitespace().next()?.parse::<usize>().ok()
 }
 
 fn watch_quota(profile_name: &str, codex_home: &Path, base_url: Option<&str>) -> Result<()> {
@@ -10459,6 +10530,56 @@ mod tests {
         assert!(output.contains("Updated"));
         assert!(output.contains("2026-03-22 10:00:00 WIB"));
         assert!(output.contains("load failed"));
+    }
+
+    #[test]
+    fn quota_reports_respect_line_budget_while_preserving_sort_order() {
+        let reports = vec![
+            QuotaReport {
+                name: "blocked".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            },
+            QuotaReport {
+                name: "ready-late".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            },
+            QuotaReport {
+                name: "error".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Err("boom".to_string()),
+            },
+            QuotaReport {
+                name: "ready-early".to_string(),
+                active: false,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            },
+        ];
+
+        let output = render_quota_reports_with_line_limit(&reports, false, Some(10));
+
+        assert!(output.contains("ready-early"));
+        assert!(output.contains("ready-late"));
+        assert!(!output.contains("blocked"));
+        assert!(!output.contains("error"));
+        assert!(output.contains("showing top 2 of 4 profiles"));
     }
 
     #[test]

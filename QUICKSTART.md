@@ -54,6 +54,10 @@ The `REMAINING` column shows quota left, not quota used.
 
 Press `Ctrl+C` to stop the live refresh loop.
 
+The previous snapshot stays visible while the next refresh is loading.
+
+If the terminal is too short to show every profile, the live `--all` view keeps the current sort order, shows only the top rows that fit, and summarizes how many profiles are hidden.
+
 Use `prodex quota --all --detail` when you want the exact local reset timestamp for the `5h` and `weekly` windows under each profile row.
 
 Use `prodex quota --all --once` when you want a single snapshot instead of continuous refresh.

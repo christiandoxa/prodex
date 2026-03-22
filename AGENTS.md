@@ -157,6 +157,8 @@ Headers that may be skipped as transport-local:
 - This default applies to both single-profile quota views and `prodex quota --all`.
 - `prodex quota --raw` should remain one-shot.
 - `prodex quota --once` is the explicit one-shot escape hatch for human-facing quota views.
+- During a live quota refresh, the previous snapshot should stay visible until the next snapshot is fully ready to render.
+- The live `prodex quota --all` view may truncate to the current terminal height, but it must preserve the existing sort order, show the top rows that fit, and surface how many profiles are hidden.
 - When changing quota behavior, keep integration tests and docs aligned so snapshot-style tests use `--once`.
 
 ## Observability

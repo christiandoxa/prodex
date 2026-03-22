@@ -88,6 +88,10 @@ prodex quota --all
 
 Press `Ctrl+C` to stop the live refresh loop.
 
+The previous snapshot stays on screen while the next refresh is loading, so the view does not go blank between updates.
+
+When the terminal is not tall enough to show every profile, the live `--all` view keeps the existing sort order and shows only the top rows that fit, plus a summary of how many profiles are hidden.
+
 If you also want the exact reset timestamps for the required main windows:
 
 ```bash
