@@ -13763,12 +13763,12 @@ mod tests {
             .send()
             .expect("runtime proxy request should succeed");
         let third_status = third.status().as_u16();
+        assert_eq!(third_status, 503);
         let third_body = third.text().expect("response body should be readable");
 
         drop(first);
         drop(second);
 
-        assert_eq!(third_status, 503);
         assert!(third_body.contains("service_unavailable"));
         assert!(
             started_at.elapsed() < Duration::from_millis(500),
