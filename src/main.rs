@@ -65,6 +65,7 @@ const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 
 const RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
 const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
 const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
+const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
@@ -5724,6 +5725,7 @@ fn proxy_runtime_standard_request(
 
     let current_profile = runtime_proxy_current_profile(shared)?;
     let mut excluded_profiles = BTreeSet::new();
+    let mut conservative_overload_retried_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
@@ -5854,6 +5856,24 @@ fn proxy_runtime_standard_request(
                 response,
                 overload,
             } => {
+                let should_retry_same_profile = overload
+                    && !conservative_overload_retried_profiles.contains(&profile_name)
+                    && (session_profile.as_deref() == Some(profile_name.as_str())
+                        || current_profile == profile_name);
+                if should_retry_same_profile {
+                    conservative_overload_retried_profiles.insert(profile_name.clone());
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS}"
+                        ),
+                    );
+                    thread::sleep(Duration::from_millis(
+                        RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS,
+                    ));
+                    last_failure = Some(response);
+                    continue;
+                }
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -6692,13 +6712,6 @@ fn runtime_profile_inflight_count(runtime: &RuntimeRotationState, profile_name: 
 
 fn runtime_profile_inflight_hard_limit_context(context: &str) -> usize {
     runtime_profile_inflight_weight(context)
-}
-
-fn runtime_profile_inflight_hard_limited(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-) -> Result<bool> {
-    runtime_profile_inflight_hard_limited_for_context(shared, profile_name, "standard_http")
 }
 
 fn runtime_profile_inflight_hard_limited_for_context(
@@ -8423,19 +8436,29 @@ fn extract_runtime_proxy_quota_message_from_value(value: &serde_json::Value) -> 
         .get("response")
         .and_then(|response| response.get("error"));
     for error in [direct_error, response_error].into_iter().flatten() {
-        let code = error.get("code").and_then(serde_json::Value::as_str)?;
-        if !matches!(code, "insufficient_quota" | "rate_limit_exceeded") {
+        let message = error
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Upstream Codex account quota was exhausted.");
+        let code = error.get("code").and_then(serde_json::Value::as_str);
+        let code_matches = matches!(code, Some("insufficient_quota" | "rate_limit_exceeded"));
+        let message_matches = runtime_proxy_usage_limit_message(message);
+        if !(code_matches || message_matches) {
             continue;
         }
-        return Some(
-            error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Upstream Codex account quota was exhausted.")
-                .to_string(),
-        );
+        return Some(message.to_string());
     }
     None
+}
+
+fn runtime_proxy_usage_limit_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("you've hit your usage limit")
+        || lower.contains("you have hit your usage limit")
+        || lower.contains("usage limit")
+            && (lower.contains("try again at")
+                || lower.contains("request to your admin")
+                || lower.contains("more access now"))
 }
 
 fn extract_runtime_proxy_previous_response_message_from_value(
@@ -10050,6 +10073,7 @@ mod tests {
         HttpOnlySlowStream,
         HttpOnlyPreviousResponseNeedsTurnState,
         HttpOnlyCompactOverloaded,
+        HttpOnlyUsageLimitMessage,
         HttpOnlyPlain429,
         Websocket,
         WebsocketPreviousResponseNeedsTurnState,
@@ -10074,6 +10098,10 @@ mod tests {
 
         fn start_http_compact_overloaded() -> Self {
             Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactOverloaded)
+        }
+
+        fn start_http_usage_limit_message() -> Self {
+            Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
         }
 
         fn start_http_plain_429() -> Self {
@@ -10254,21 +10282,34 @@ mod tests {
                     None,
                     None,
                 ),
-                "main-account" => (
-                    "HTTP/1.1 200 OK",
-                    "text/event-stream",
-                    concat!(
-                        "event: response.failed\r\n",
-                        "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"main quota exhausted\"}}}\r\n",
-                        "\r\n"
+                "main-account" => {
+                    let body = if matches!(_mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
+                    {
+                        concat!(
+                            "event: response.failed\r\n",
+                            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
+                            "\r\n"
+                        )
+                        .to_string()
+                    } else {
+                        concat!(
+                            "event: response.failed\r\n",
+                            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"main quota exhausted\"}}}\r\n",
+                            "\r\n"
+                        )
+                        .to_string()
+                    };
+                    (
+                        "HTTP/1.1 200 OK",
+                        "text/event-stream",
+                        body,
+                        None,
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                            .then_some(Duration::from_millis(750)),
+                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                            .then_some(Duration::from_millis(100)),
                     )
-                    .to_string(),
-                    None,
-                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
-                        .then_some(Duration::from_millis(750)),
-                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
-                        .then_some(Duration::from_millis(100)),
-                ),
+                }
                 "second-account"
                     if matches!(
                         _mode,
@@ -12005,11 +12046,11 @@ mod tests {
         };
 
         assert!(
-            runtime_profile_inflight_hard_limited(&shared, "main")
+            runtime_profile_inflight_hard_limited_for_context(&shared, "main", "standard_http")
                 .expect("hard inflight lookup should succeed")
         );
         assert!(
-            !runtime_profile_inflight_hard_limited(&shared, "other")
+            !runtime_profile_inflight_hard_limited_for_context(&shared, "other", "standard_http")
                 .expect("hard inflight lookup should succeed")
         );
     }
@@ -14824,6 +14865,76 @@ mod tests {
     }
 
     #[test]
+    fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home.clone(),
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        state.save(&paths).expect("failed to save initial state");
+
+        let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("runtime proxy should start");
+        let response = Client::builder()
+            .build()
+            .expect("client")
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let body = response.text().expect("response body should be readable");
+
+        assert!(body.contains("\"response.created\""));
+        assert!(!body.contains("You've hit your usage limit"));
+        assert_eq!(
+            backend.responses_accounts(),
+            vec!["main-account".to_string(), "second-account".to_string()]
+        );
+
+        let persisted = wait_for_state(&paths, |state| {
+            state.active_profile.as_deref() == Some("second")
+        });
+        assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    }
+
+    #[test]
     fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
         let temp_dir = TestDir::new();
         let backend = RuntimeProxyBackend::start_http_compact_overloaded();
@@ -14895,7 +15006,11 @@ mod tests {
         assert_eq!(body, "{\"output\":[]}");
         assert_eq!(
             backend.responses_accounts(),
-            vec!["main-account".to_string(), "second-account".to_string()]
+            vec![
+                "main-account".to_string(),
+                "main-account".to_string(),
+                "second-account".to_string()
+            ]
         );
 
         let persisted = wait_for_state(&paths, |state| {
