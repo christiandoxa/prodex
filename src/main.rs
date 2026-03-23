@@ -69,6 +69,7 @@ const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else
 const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
+const RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS: i64 = if cfg!(test) { 30 } else { 300 };
 const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
@@ -4508,7 +4509,14 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (current_profile, codex_home, in_selection_backoff, inflight_count, health_score) = {
+    let (
+        current_profile,
+        codex_home,
+        in_selection_backoff,
+        inflight_count,
+        health_score,
+        cached_usage_exhausted,
+    ) = {
         let mut runtime = shared
             .runtime
             .lock()
@@ -4529,17 +4537,26 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             runtime_profile_in_selection_backoff(&runtime, &runtime.current_profile, now),
             runtime_profile_inflight_count(&runtime, &runtime.current_profile),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now, route_kind),
+            runtime
+                .profile_probe_cache
+                .get(&runtime.current_profile)
+                .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
+                .and_then(|entry| entry.result.as_ref().ok())
+                .is_some_and(usage_exhausts_fresh_runtime_selection),
         )
     };
 
     if in_selection_backoff
         || health_score > 0
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
+        || cached_usage_exhausted
     {
         let reason = if in_selection_backoff {
             "selection_backoff"
         } else if health_score > 0 {
             "profile_health"
+        } else if cached_usage_exhausted {
+            "usage_exhausted"
         } else {
             "profile_inflight_soft_limit"
         };
@@ -5929,6 +5946,24 @@ fn proxy_runtime_standard_request_for_profile(
         profile_name,
         runtime_request_session_id(request).as_deref(),
     )?;
+    if request.path_and_query.ends_with("/backend-api/wham/usage") {
+        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new()).map_err(
+            |err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    "standard_buffer_usage_response",
+                    &err,
+                );
+                err
+            },
+        )?;
+        if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
+            update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
+        }
+        return Ok(build_runtime_proxy_response_from_parts(parts));
+    }
     forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
         note_runtime_profile_transport_failure(
             shared,
@@ -6667,6 +6702,51 @@ fn next_runtime_response_candidate_for_route(
 
 fn runtime_profile_probe_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
     now.saturating_sub(entry.checked_at) < RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS
+}
+
+fn runtime_profile_usage_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
+    now.saturating_sub(entry.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS
+}
+
+fn usage_exhausts_fresh_runtime_selection(usage: &UsageResponse) -> bool {
+    let Some(main) = usage.rate_limit.as_ref() else {
+        return false;
+    };
+    ["5h", "weekly"].into_iter().any(|label| {
+        let Some(window) = find_main_window(main, label) else {
+            return false;
+        };
+        remaining_percent(window.used_percent) == 0
+    })
+}
+
+fn update_runtime_profile_probe_cache_with_usage(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    usage: UsageResponse,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let auth = runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .map(|profile| read_auth_summary(&profile.codex_home))
+        .unwrap_or(AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        });
+    runtime.profile_probe_cache.insert(
+        profile_name.to_string(),
+        RuntimeProfileProbeCacheEntry {
+            checked_at: Local::now().timestamp(),
+            auth,
+            result: Ok(usage),
+        },
+    );
+    Ok(())
 }
 
 fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {
@@ -11895,6 +11975,83 @@ mod tests {
                 "main".to_string(),
                 RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
             )]),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert_eq!(
+            runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
+                .expect("candidate lookup should succeed"),
+            None
+        );
+    }
+
+    #[test]
+    fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: Local::now().timestamp(),
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(0, 18_000, 50, 604_800)),
+                },
+            )]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = RuntimeRotationProxyShared {
