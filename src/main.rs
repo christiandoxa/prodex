@@ -5947,8 +5947,8 @@ fn proxy_runtime_standard_request_for_profile(
         runtime_request_session_id(request).as_deref(),
     )?;
     if request.path_and_query.ends_with("/backend-api/wham/usage") {
-        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new()).map_err(
-            |err| {
+        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+            .map_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
@@ -5957,8 +5957,7 @@ fn proxy_runtime_standard_request_for_profile(
                     &err,
                 );
                 err
-            },
-        )?;
+            })?;
         if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
             update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
         }
