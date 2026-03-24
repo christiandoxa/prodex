@@ -420,7 +420,7 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
 }
 
 fn runtime_state_save_debounce(reason: &str) -> Duration {
-    if reason.starts_with("response_ids:") || reason.starts_with("session_id:") {
+    if reason.starts_with("session_id:") {
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS)
     } else {
         Duration::ZERO
@@ -1061,6 +1061,29 @@ struct ReadyProfileScore {
     five_hour_remaining: i64,
     weekly_reset_at: i64,
     five_hour_reset_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeQuotaWindowStatus {
+    Ready,
+    Thin,
+    Critical,
+    Exhausted,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeQuotaWindowSummary {
+    status: RuntimeQuotaWindowStatus,
+    remaining_percent: i64,
+    reset_at: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeQuotaSummary {
+    five_hour: RuntimeQuotaWindowSummary,
+    weekly: RuntimeQuotaWindowSummary,
+    route_band: RuntimeQuotaPressureBand,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2239,6 +2262,14 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "state_save_error").to_string(),
         ),
         (
+            "Probe refresh".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_probe_refresh_start").to_string(),
+        ),
+        (
+            "Probe refresh errors".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_probe_refresh_error").to_string(),
+        ),
+        (
             "Last marker".to_string(),
             summary
                 .last_marker_line
@@ -2312,6 +2343,10 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent upstream connect failures detected.".to_string()
         } else if runtime_doctor_marker_count(&summary, "state_save_error") > 0 {
             "Recent runtime state save failures detected.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0 {
+            "Recent background quota refresh failures detected; fresh selection may rely on stale quota snapshots.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0 {
+            "Background quota refresh activity was detected; inspect the last marker for the most recent profile refresh.".to_string()
         } else if runtime_doctor_marker_count(&summary, "first_upstream_chunk") > 0
             && runtime_doctor_marker_count(&summary, "first_local_chunk") == 0
         {
@@ -2379,6 +2414,8 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "first_upstream_chunk",
         "first_local_chunk",
         "state_save_error",
+        "profile_probe_refresh_start",
+        "profile_probe_refresh_error",
     ]
     .into_iter()
     .find(|marker| line.contains(marker))
@@ -4695,7 +4732,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         in_selection_backoff,
         inflight_count,
         health_score,
-        cached_quota_band,
+        cached_quota_summary,
     ) = {
         let mut runtime = shared
             .runtime
@@ -4722,35 +4759,48 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 .get(&runtime.current_profile)
                 .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
                 .and_then(|entry| entry.result.as_ref().ok())
-                .map(|usage| runtime_quota_pressure_band_for_route(usage, route_kind))
-                .unwrap_or(RuntimeQuotaPressureBand::Healthy),
+                .map(|usage| runtime_quota_summary_for_route(usage, route_kind))
+                .unwrap_or(RuntimeQuotaSummary {
+                    five_hour: RuntimeQuotaWindowSummary {
+                        status: RuntimeQuotaWindowStatus::Unknown,
+                        remaining_percent: 0,
+                        reset_at: i64::MAX,
+                    },
+                    weekly: RuntimeQuotaWindowSummary {
+                        status: RuntimeQuotaWindowStatus::Unknown,
+                        remaining_percent: 0,
+                        reset_at: i64::MAX,
+                    },
+                    route_band: RuntimeQuotaPressureBand::Healthy,
+                }),
         )
     };
 
     if in_selection_backoff
         || health_score > 0
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
-        || cached_quota_band > RuntimeQuotaPressureBand::Healthy
+        || cached_quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
     {
         let reason = if in_selection_backoff {
             "selection_backoff"
         } else if health_score > 0 {
             "profile_health"
-        } else if cached_quota_band > RuntimeQuotaPressureBand::Healthy {
-            runtime_quota_pressure_band_reason(cached_quota_band)
+        } else if cached_quota_summary.route_band > RuntimeQuotaPressureBand::Healthy {
+            runtime_quota_pressure_band_reason(cached_quota_summary.route_band)
         } else {
             "profile_inflight_soft_limit"
         };
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={}",
+                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={} {}",
                 runtime_route_kind_label(route_kind),
                 current_profile,
                 reason,
                 inflight_count,
                 health_score,
-                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
+                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+                runtime_quota_summary_log_fields(cached_quota_summary),
             ),
         );
         return Ok(None);
@@ -4770,11 +4820,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     runtime_proxy_log(
         shared,
         format!(
-            "selection_keep_current route={} profile={} inflight={} health={}",
+            "selection_keep_current route={} profile={} inflight={} health={} {}",
             runtime_route_kind_label(route_kind),
             current_profile,
             inflight_count,
-            health_score
+            health_score,
+            runtime_quota_summary_log_fields(cached_quota_summary),
         ),
     );
     Ok(Some(current_profile))
@@ -6751,7 +6802,8 @@ fn next_runtime_response_candidate_for_route(
                 auth: entry.auth.clone(),
                 result: entry.result.clone(),
             });
-            if runtime_profile_probe_cache_freshness(entry, now) != RuntimeProbeCacheFreshness::Fresh
+            if runtime_profile_probe_cache_freshness(entry, now)
+                != RuntimeProbeCacheFreshness::Fresh
             {
                 schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
             }
@@ -6878,19 +6930,17 @@ fn next_runtime_response_candidate_for_route(
             )
         })
     {
+        let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
         runtime_proxy_log(
             shared,
             format!(
-                "selection_pick route={} profile={} mode=ready inflight={} health={} quota_band={} order={}",
+                "selection_pick route={} profile={} mode=ready inflight={} health={} order={} {}",
                 runtime_route_kind_label(route_kind),
                 candidate.name,
                 runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
-                runtime_quota_pressure_band_reason(runtime_quota_pressure_band_for_route(
-                    &candidate.usage,
-                    route_kind,
-                )),
-                index
+                index,
+                runtime_quota_summary_log_fields(quota_summary),
             ),
         );
         return Ok(Some(candidate.name.clone()));
@@ -6914,25 +6964,23 @@ fn next_runtime_response_candidate_for_route(
             )
         })
         .map(|(index, candidate)| {
+            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
             runtime_proxy_log(
                 shared,
                 format!(
-                    "selection_pick route={} profile={} mode=backoff inflight={} health={} quota_band={} backoff={:?} order={}",
+                    "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} {}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
                     runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                     runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
-                    runtime_quota_pressure_band_reason(runtime_quota_pressure_band_for_route(
-                        &candidate.usage,
-                        route_kind,
-                    )),
                     runtime_profile_backoff_sort_key(
                         &candidate.name,
                         &retry_backoff_until,
                         &transport_backoff_until,
                         now,
                     ),
-                    index
+                    index,
+                    runtime_quota_summary_log_fields(quota_summary),
                 ),
             );
             candidate.name
@@ -7271,6 +7319,64 @@ fn runtime_quota_pressure_band_reason(band: RuntimeQuotaPressureBand) -> &'stati
         RuntimeQuotaPressureBand::Exhausted => "quota_exhausted",
         RuntimeQuotaPressureBand::Unknown => "quota_unknown",
     }
+}
+
+fn runtime_quota_window_status_reason(status: RuntimeQuotaWindowStatus) -> &'static str {
+    match status {
+        RuntimeQuotaWindowStatus::Ready => "ready",
+        RuntimeQuotaWindowStatus::Thin => "thin",
+        RuntimeQuotaWindowStatus::Critical => "critical",
+        RuntimeQuotaWindowStatus::Exhausted => "exhausted",
+        RuntimeQuotaWindowStatus::Unknown => "unknown",
+    }
+}
+
+fn runtime_quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {
+    let Some(window) = required_main_window_snapshot(usage, label) else {
+        return RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Unknown,
+            remaining_percent: 0,
+            reset_at: i64::MAX,
+        };
+    };
+    let status = if window.remaining_percent == 0 {
+        RuntimeQuotaWindowStatus::Exhausted
+    } else if window.remaining_percent <= 5 {
+        RuntimeQuotaWindowStatus::Critical
+    } else if window.remaining_percent <= 15 {
+        RuntimeQuotaWindowStatus::Thin
+    } else {
+        RuntimeQuotaWindowStatus::Ready
+    };
+    RuntimeQuotaWindowSummary {
+        status,
+        remaining_percent: window.remaining_percent,
+        reset_at: window.reset_at,
+    }
+}
+
+fn runtime_quota_summary_for_route(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+) -> RuntimeQuotaSummary {
+    RuntimeQuotaSummary {
+        five_hour: runtime_quota_window_summary(usage, "5h"),
+        weekly: runtime_quota_window_summary(usage, "weekly"),
+        route_band: runtime_quota_pressure_band_for_route(usage, route_kind),
+    }
+}
+
+fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
+    format!(
+        "quota_band={} five_hour_status={} five_hour_remaining={} five_hour_reset_at={} weekly_status={} weekly_remaining={} weekly_reset_at={}",
+        runtime_quota_pressure_band_reason(summary.route_band),
+        runtime_quota_window_status_reason(summary.five_hour.status),
+        summary.five_hour.remaining_percent,
+        summary.five_hour.reset_at,
+        runtime_quota_window_status_reason(summary.weekly.status),
+        summary.weekly.remaining_percent,
+        summary.weekly.reset_at,
+    )
 }
 
 fn runtime_quota_pressure_sort_key_for_route(
@@ -11657,13 +11763,27 @@ mod tests {
             Duration::ZERO
         );
         assert!(
-            runtime_state_save_debounce("response_ids:main") > Duration::ZERO,
-            "response id saves should be debounced"
-        );
-        assert!(
             runtime_state_save_debounce("session_id:main") > Duration::ZERO,
             "session id saves should be debounced"
         );
+        assert_eq!(
+            runtime_state_save_debounce("response_ids:main"),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn runtime_quota_summary_distinguishes_window_health() {
+        let summary = runtime_quota_summary_for_route(
+            &usage_with_main_windows(4, 18_000, 12, 604_800),
+            RuntimeRouteKind::Responses,
+        );
+
+        assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Critical);
+        assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Critical);
+        assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Thin);
+        assert_eq!(summary.five_hour.remaining_percent, 4);
+        assert_eq!(summary.weekly.remaining_percent, 12);
     }
 
     #[test]
@@ -15299,10 +15419,12 @@ mod tests {
 [2026-03-20 12:00:00.050 +07:00] runtime_proxy_lane_limit_reached transport=http path=/backend-api/codex/responses lane=responses active=9 limit=9
 [2026-03-20 12:00:00.060 +07:00] profile_inflight_saturated profile=main hard_limit=8
 [2026-03-20 12:00:00.070 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
+[2026-03-20 12:00:00.080 +07:00] profile_probe_refresh_start profile=second
+[2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_error profile=third error=timeout
 "#,
         );
 
-        assert_eq!(summary.line_count, 8);
+        assert_eq!(summary.line_count, 10);
         assert_eq!(
             runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
             1
@@ -15332,11 +15454,19 @@ mod tests {
             runtime_doctor_marker_count(&summary, "first_local_chunk"),
             1
         );
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "profile_probe_refresh_start"),
+            1
+        );
+        assert_eq!(
+            runtime_doctor_marker_count(&summary, "profile_probe_refresh_error"),
+            1
+        );
         assert!(
             summary
                 .last_marker_line
                 .as_deref()
-                .is_some_and(|line| line.contains("runtime_proxy_queue_overloaded"))
+                .is_some_and(|line| line.contains("profile_probe_refresh_error"))
         );
     }
 
