@@ -82,7 +82,7 @@ impl UsageServer {
                         });
                     }
                     Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
+                        thread::sleep(Duration::from_millis(1));
                     }
                     Err(_) => break,
                 }
@@ -188,7 +188,7 @@ fn handle_usage_request(
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Option<String> {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
     let mut buffer = [0_u8; 1024];
     let mut request = Vec::new();
 
@@ -325,7 +325,6 @@ struct Fixture {
     usage_base_url: String,
     prodex_home: PathBuf,
     shared_codex_home: PathBuf,
-    cargo_target_dir: PathBuf,
     main_home: PathBuf,
     second_home: PathBuf,
     codex_log: PathBuf,
@@ -338,7 +337,6 @@ fn setup_fixture() -> Fixture {
     let usage_base_url = usage_server.base_url();
     let prodex_home = temp_dir.path.join("prodex-home");
     let shared_codex_home = temp_dir.path.join("shared-codex-home");
-    let cargo_target_dir = temp_dir.path.join("cargo-target");
     let homes_root = temp_dir.path.join("homes");
     let bin_root = temp_dir.path.join("bin");
     let main_home = homes_root.join("main");
@@ -419,7 +417,6 @@ exit 0
         usage_base_url,
         prodex_home,
         shared_codex_home,
-        cargo_target_dir,
         main_home,
         second_home,
         codex_log,
@@ -462,9 +459,8 @@ fn run_prodex_with_env(
     args: &[&str],
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
-    Command::new("cargo")
+    Command::new(env!("CARGO_BIN_EXE_prodex"))
         .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .env("CARGO_TARGET_DIR", &fixture.cargo_target_dir)
         .env("PRODEX_HOME", &fixture.prodex_home)
         .env("PRODEX_SHARED_CODEX_HOME", &fixture.shared_codex_home)
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
@@ -474,7 +470,6 @@ fn run_prodex_with_env(
         .env("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "250")
         .env("PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS", "250")
         .envs(extra_env.iter().copied())
-        .args(["run", "--quiet", "--bin", "prodex", "--"])
         .args(args)
         .output()
         .expect("failed to execute prodex")
@@ -601,7 +596,7 @@ fn explicit_profile_can_disable_auto_rotate() {
 fn run_preflight_checks_fallback_profiles_in_parallel() {
     let fixture = setup_fixture();
     add_managed_profile(&fixture, "third", "third-account");
-    fixture.usage_server.set_delay_ms(250);
+    fixture.usage_server.set_delay_ms(80);
 
     let output = run_prodex(&fixture, &["run", "--profile", "main", "--no-auto-rotate"]);
 
@@ -647,7 +642,7 @@ fn run_without_profile_selects_the_best_ready_account() {
 #[test]
 fn doctor_quota_checks_profiles_in_parallel() {
     let fixture = setup_fixture();
-    fixture.usage_server.set_delay_ms(250);
+    fixture.usage_server.set_delay_ms(80);
 
     let output = run_prodex(&fixture, &["doctor", "--quota"]);
 
@@ -963,7 +958,7 @@ fn login_without_profile_reuses_existing_profile_for_same_email() {
 fn login_without_profile_looks_up_existing_profiles_in_parallel() {
     let fixture = setup_fixture();
     add_managed_profile(&fixture, "third", "third-account");
-    fixture.usage_server.set_delay_ms(250);
+    fixture.usage_server.set_delay_ms(80);
 
     let output = run_prodex_with_env(
         &fixture,
