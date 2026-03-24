@@ -919,6 +919,15 @@ struct ReadyProfileScore {
     five_hour_reset_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RuntimeQuotaPressureBand {
+    Healthy,
+    Thin,
+    Critical,
+    Exhausted,
+    Unknown,
+}
+
 #[derive(Debug, Clone)]
 struct RuntimeProxyRequest {
     method: String,
@@ -4386,6 +4395,7 @@ fn runtime_proxy_allows_direct_current_profile_fallback(
 fn runtime_proxy_direct_current_fallback_profile(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     let (profile_name, codex_home) = {
         let runtime = shared
@@ -4404,7 +4414,11 @@ fn runtime_proxy_direct_current_fallback_profile(
     if !read_auth_summary(&codex_home).quota_compatible {
         return Ok(None);
     }
-    if runtime_profile_inflight_hard_limited_for_context(shared, &profile_name, "standard_http")? {
+    if runtime_profile_inflight_hard_limited_for_context(
+        shared,
+        &profile_name,
+        runtime_route_kind_inflight_context(route_kind),
+    )? {
         return Ok(None);
     }
     Ok(Some(profile_name))
@@ -4515,7 +4529,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         in_selection_backoff,
         inflight_count,
         health_score,
-        cached_usage_exhausted,
+        cached_quota_band,
     ) = {
         let mut runtime = shared
             .runtime
@@ -4542,21 +4556,22 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 .get(&runtime.current_profile)
                 .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
                 .and_then(|entry| entry.result.as_ref().ok())
-                .is_some_and(usage_exhausts_fresh_runtime_selection),
+                .map(|usage| runtime_quota_pressure_band_for_route(usage, route_kind))
+                .unwrap_or(RuntimeQuotaPressureBand::Healthy),
         )
     };
 
     if in_selection_backoff
         || health_score > 0
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
-        || cached_usage_exhausted
+        || cached_quota_band > RuntimeQuotaPressureBand::Healthy
     {
         let reason = if in_selection_backoff {
             "selection_backoff"
         } else if health_score > 0 {
             "profile_health"
-        } else if cached_usage_exhausted {
-            "usage_exhausted"
+        } else if cached_quota_band > RuntimeQuotaPressureBand::Healthy {
+            runtime_quota_pressure_band_reason(cached_quota_band)
         } else {
             "profile_inflight_soft_limit"
         };
@@ -4917,9 +4932,11 @@ fn proxy_runtime_websocket_text_message(
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
-                if let Some(current_profile) =
-                    runtime_proxy_direct_current_fallback_profile(shared, &excluded_profiles)?
-                {
+                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Websocket,
+                )? {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -5006,9 +5023,11 @@ fn proxy_runtime_websocket_text_message(
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
-                if let Some(current_profile) =
-                    runtime_proxy_direct_current_fallback_profile(shared, &excluded_profiles)?
-                {
+                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Websocket,
+                )? {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -5167,7 +5186,13 @@ fn proxy_runtime_websocket_text_message(
                 {
                     previous_response_retry_index += 1;
                     last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                    thread::sleep(delay);
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry",
+                            delay.as_millis()
+                        ),
+                    );
                     continue;
                 }
                 previous_response_retry_candidate = None;
@@ -5882,12 +5907,9 @@ fn proxy_runtime_standard_request(
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS}"
+                            "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS} reason=non_blocking_retry"
                         ),
                     );
-                    thread::sleep(Duration::from_millis(
-                        RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS,
-                    ));
                     last_failure = Some(response);
                     continue;
                 }
@@ -6110,9 +6132,11 @@ fn proxy_runtime_responses_request(
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
-                if let Some(current_profile) =
-                    runtime_proxy_direct_current_fallback_profile(shared, &excluded_profiles)?
-                {
+                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Responses,
+                )? {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -6203,9 +6227,11 @@ fn proxy_runtime_responses_request(
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) {
-                if let Some(current_profile) =
-                    runtime_proxy_direct_current_fallback_profile(shared, &excluded_profiles)?
-                {
+                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Responses,
+                )? {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -6378,7 +6404,13 @@ fn proxy_runtime_responses_request(
                 {
                     previous_response_retry_index += 1;
                     last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
-                    thread::sleep(delay);
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry",
+                            delay.as_millis()
+                        ),
+                    );
                     continue;
                 }
                 previous_response_retry_candidate = None;
@@ -6627,6 +6659,7 @@ fn next_runtime_response_candidate_for_route(
         })
         .min_by_key(|(index, candidate)| {
             (
+                runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
                 runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
                 *index,
@@ -6637,11 +6670,15 @@ fn next_runtime_response_candidate_for_route(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_pick route={} profile={} mode=ready inflight={} health={} order={}",
+                "selection_pick route={} profile={} mode=ready inflight={} health={} quota_band={} order={}",
                 runtime_route_kind_label(route_kind),
                 candidate.name,
                 runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+                runtime_quota_pressure_band_reason(runtime_quota_pressure_band_for_route(
+                    &candidate.usage,
+                    route_kind,
+                )),
                 index
             ),
         );
@@ -6658,6 +6695,7 @@ fn next_runtime_response_candidate_for_route(
                     &transport_backoff_until,
                     now,
                 ),
+                runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
                 runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
                 *index,
@@ -6668,11 +6706,15 @@ fn next_runtime_response_candidate_for_route(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={}",
+                    "selection_pick route={} profile={} mode=backoff inflight={} health={} quota_band={} backoff={:?} order={}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
                     runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                     runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+                    runtime_quota_pressure_band_reason(runtime_quota_pressure_band_for_route(
+                        &candidate.usage,
+                        route_kind,
+                    )),
                     runtime_profile_backoff_sort_key(
                         &candidate.name,
                         &retry_backoff_until,
@@ -6705,18 +6747,6 @@ fn runtime_profile_probe_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, n
 
 fn runtime_profile_usage_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
     now.saturating_sub(entry.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS
-}
-
-fn usage_exhausts_fresh_runtime_selection(usage: &UsageResponse) -> bool {
-    let Some(main) = usage.rate_limit.as_ref() else {
-        return false;
-    };
-    ["5h", "weekly"].into_iter().any(|label| {
-        let Some(window) = find_main_window(main, label) else {
-            return false;
-        };
-        remaining_percent(window.used_percent) == 0
-    })
 }
 
 fn update_runtime_profile_probe_cache_with_usage(
@@ -7000,6 +7030,84 @@ fn runtime_profile_inflight_weight(context: &str) -> usize {
     match context {
         "websocket_session" | "responses_http" => 2,
         _ => 1,
+    }
+}
+
+fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {
+    match route_kind {
+        RuntimeRouteKind::Responses => "responses_http",
+        RuntimeRouteKind::Compact => "compact_http",
+        RuntimeRouteKind::Websocket => "websocket_session",
+        RuntimeRouteKind::Standard => "standard_http",
+    }
+}
+
+fn runtime_quota_pressure_band_reason(band: RuntimeQuotaPressureBand) -> &'static str {
+    match band {
+        RuntimeQuotaPressureBand::Healthy => "quota_healthy",
+        RuntimeQuotaPressureBand::Thin => "quota_thin",
+        RuntimeQuotaPressureBand::Critical => "quota_critical",
+        RuntimeQuotaPressureBand::Exhausted => "quota_exhausted",
+        RuntimeQuotaPressureBand::Unknown => "quota_unknown",
+    }
+}
+
+fn runtime_quota_pressure_sort_key_for_route(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+) -> (
+    RuntimeQuotaPressureBand,
+    i64,
+    i64,
+    i64,
+    Reverse<i64>,
+    Reverse<i64>,
+    Reverse<i64>,
+    i64,
+    i64,
+) {
+    let score = ready_profile_score_for_route(usage, route_kind);
+    (
+        runtime_quota_pressure_band_for_route(usage, route_kind),
+        score.total_pressure,
+        score.weekly_pressure,
+        score.five_hour_pressure,
+        Reverse(score.reserve_floor),
+        Reverse(score.weekly_remaining),
+        Reverse(score.five_hour_remaining),
+        score.weekly_reset_at,
+        score.five_hour_reset_at,
+    )
+}
+
+fn runtime_quota_pressure_band_for_route(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+) -> RuntimeQuotaPressureBand {
+    let Some(weekly) = required_main_window_snapshot(usage, "weekly") else {
+        return RuntimeQuotaPressureBand::Unknown;
+    };
+    let Some(five_hour) = required_main_window_snapshot(usage, "5h") else {
+        return RuntimeQuotaPressureBand::Unknown;
+    };
+
+    let weekly_remaining = weekly.remaining_percent;
+    let five_hour_remaining = five_hour.remaining_percent;
+    if weekly_remaining == 0 || five_hour_remaining == 0 {
+        return RuntimeQuotaPressureBand::Exhausted;
+    }
+
+    let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) = match route_kind {
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => (20, 10, 10, 5),
+        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
+    };
+
+    if weekly_remaining <= critical_weekly || five_hour_remaining <= critical_five_hour {
+        RuntimeQuotaPressureBand::Critical
+    } else if weekly_remaining <= thin_weekly || five_hour_remaining <= thin_five_hour {
+        RuntimeQuotaPressureBand::Thin
+    } else {
+        RuntimeQuotaPressureBand::Healthy
     }
 }
 
@@ -7386,28 +7494,43 @@ fn commit_runtime_proxy_profile_selection(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let switched = runtime.current_profile != profile_name;
     let now = Local::now().timestamp();
-    runtime.profile_retry_backoff_until.remove(profile_name);
-    runtime.profile_transport_backoff_until.remove(profile_name);
-    clear_runtime_profile_health_for_route(&mut runtime, profile_name, route_kind, now);
+    let cleared_retry_backoff = runtime
+        .profile_retry_backoff_until
+        .remove(profile_name)
+        .is_some();
+    let cleared_transport_backoff = runtime
+        .profile_transport_backoff_until
+        .remove(profile_name)
+        .is_some();
+    let cleared_health =
+        clear_runtime_profile_health_for_route(&mut runtime, profile_name, route_kind, now);
     runtime.current_profile = profile_name.to_string();
+    let state_changed = runtime.state.active_profile.as_deref() != Some(profile_name);
     runtime.state.active_profile = Some(profile_name.to_string());
     record_run_selection(&mut runtime.state, profile_name);
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
-    schedule_runtime_state_save(
-        shared,
-        state_snapshot,
-        profile_scores_snapshot,
-        paths_snapshot,
-        &format!("profile_commit:{profile_name}"),
-    );
+    let should_persist = switched
+        || state_changed
+        || cleared_retry_backoff
+        || cleared_transport_backoff
+        || cleared_health;
+    if should_persist {
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            profile_scores_snapshot,
+            paths_snapshot,
+            &format!("profile_commit:{profile_name}"),
+        );
+    }
     runtime_proxy_log(
         shared,
         format!(
-            "profile_commit profile={profile_name} route={} switched={switched}",
-            runtime_route_kind_label(route_kind)
+            "profile_commit profile={profile_name} route={} switched={switched} persisted={should_persist}",
+            runtime_route_kind_label(route_kind),
         ),
     );
     Ok(switched)
@@ -7418,15 +7541,28 @@ fn clear_runtime_profile_health_for_route(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
     now: i64,
-) {
-    runtime.profile_health.remove(profile_name);
+) -> bool {
+    let mut changed = runtime.profile_health.remove(profile_name).is_some();
+    let previous_route_score =
+        runtime_profile_route_health_score(runtime, profile_name, now, route_kind);
+    let previous_bad_pairing = runtime_profile_effective_score_from_map(
+        &runtime.profile_health,
+        &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+        now,
+        RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+    );
     recover_runtime_profile_health_for_route(runtime, profile_name, route_kind, now);
-    runtime
+    changed = changed || previous_route_score > 0;
+    changed = changed || previous_bad_pairing > 0;
+    changed = runtime
         .profile_health
         .remove(&runtime_profile_route_bad_pairing_key(
             profile_name,
             route_kind,
-        ));
+        ))
+        .is_some()
+        || changed;
+    changed
 }
 
 fn commit_runtime_proxy_profile_selection_with_notice(
@@ -8873,17 +9009,34 @@ fn ready_profile_sort_key(
 }
 
 fn ready_profile_score(candidate: &ReadyProfileCandidate) -> ReadyProfileScore {
-    let weekly = required_main_window_snapshot(&candidate.usage, "weekly");
-    let five_hour = required_main_window_snapshot(&candidate.usage, "5h");
+    ready_profile_score_for_route(&candidate.usage, RuntimeRouteKind::Responses)
+}
+
+fn ready_profile_score_for_route(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+) -> ReadyProfileScore {
+    let weekly = required_main_window_snapshot(usage, "weekly");
+    let five_hour = required_main_window_snapshot(usage, "5h");
 
     let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
     let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
     let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
     let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
+    let weekly_weight = match route_kind {
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
+        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
+    };
+    let reserve_bias = match runtime_quota_pressure_band_for_route(usage, route_kind) {
+        RuntimeQuotaPressureBand::Healthy => 0,
+        RuntimeQuotaPressureBand::Thin => 250_000,
+        RuntimeQuotaPressureBand::Critical => 1_000_000,
+        RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => i64::MAX / 4,
+    };
 
     ReadyProfileScore {
-        total_pressure: weekly_pressure
-            .saturating_mul(8)
+        total_pressure: reserve_bias
+            .saturating_add(weekly_pressure.saturating_mul(weekly_weight))
             .saturating_add(five_hour_pressure),
         weekly_pressure,
         five_hour_pressure,
@@ -12003,6 +12156,84 @@ mod tests {
     }
 
     #[test]
+    fn optimistic_current_candidate_skips_thin_long_lived_quota() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let now = Local::now().timestamp();
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(9, 18_000, 18, 604_800)),
+                },
+            )]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert_eq!(
+            runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
+                .expect("candidate lookup should succeed"),
+            None
+        );
+    }
+
+    #[test]
     fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         let temp_dir = TestDir::new();
         let main_home = temp_dir.path.join("homes/main");
@@ -12150,9 +12381,96 @@ mod tests {
         };
 
         assert_eq!(
-            runtime_proxy_direct_current_fallback_profile(&shared, &BTreeSet::new())
-                .expect("direct fallback lookup should succeed"),
+            runtime_proxy_direct_current_fallback_profile(
+                &shared,
+                &BTreeSet::new(),
+                RuntimeRouteKind::Standard,
+            )
+            .expect("direct fallback lookup should succeed"),
             Some("main".to_string())
+        );
+    }
+
+    #[test]
+    fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::from([(
+                "main".to_string(),
+                RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT.saturating_sub(1),
+            )]),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert_eq!(
+            runtime_proxy_direct_current_fallback_profile(
+                &shared,
+                &BTreeSet::new(),
+                RuntimeRouteKind::Standard,
+            )
+            .expect("standard direct fallback lookup should succeed"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            runtime_proxy_direct_current_fallback_profile(
+                &shared,
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+            .expect("responses direct fallback lookup should succeed"),
+            None
         );
     }
 
@@ -13258,6 +13576,109 @@ mod tests {
     }
 
     #[test]
+    fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        let second_home = temp_dir.path.join("homes/second");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+        write_auth_json(&second_home.join("auth.json"), "second-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let now = Local::now().timestamp();
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage_with_main_windows(4, 18_000, 30, 604_800)),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage_with_main_windows(25, 18_000, 12, 604_800)),
+                    },
+                ),
+            ]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        assert_eq!(
+            next_runtime_response_candidate(&shared, &BTreeSet::new())
+                .expect("candidate selection should succeed"),
+            Some("second".to_string())
+        );
+    }
+
+    #[test]
     fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         let temp_dir = TestDir::new();
         let main_home = temp_dir.path.join("homes/main");
@@ -13336,6 +13757,76 @@ mod tests {
                 .get("main")
                 .is_none(),
             "successful commit should clear temporary health penalty"
+        );
+    }
+
+    #[test]
+    fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
+        let temp_dir = TestDir::new();
+        let main_home = temp_dir.path.join("homes/main");
+        write_auth_json(&main_home.join("auth.json"), "main-account");
+
+        let paths = AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        };
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let runtime = RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder().build().expect("async client"),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("async runtime"),
+            ),
+            log_path: temp_dir.path.join("runtime-proxy.log"),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: usize::MAX,
+            lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+            runtime: Arc::new(Mutex::new(runtime)),
+        };
+
+        commit_runtime_proxy_profile_selection(&shared, "main", RuntimeRouteKind::Responses)
+            .expect("profile commit should succeed");
+
+        assert_eq!(
+            shared.state_save_revision.load(Ordering::SeqCst),
+            0,
+            "unchanged commit should not enqueue a state save"
         );
     }
 
