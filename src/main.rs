@@ -56,7 +56,6 @@ const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_00
 const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
     RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT * 2;
 const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS: u64 = RUNTIME_PROXY_PRECOMMIT_BUDGET_MS * 4;
-const RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 60 } else { 30 };
 const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS: i64 = if cfg!(test) { 8 } else { 120 };
@@ -70,6 +69,9 @@ const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 const RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS: i64 = if cfg!(test) { 30 } else { 300 };
+const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
+const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
+const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
@@ -103,6 +105,7 @@ const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock::new();
+static RUNTIME_PROBE_REFRESH_QUEUE: OnceLock<Arc<RuntimeProbeRefreshQueue>> = OnceLock::new();
 
 fn create_runtime_proxy_log_path() -> PathBuf {
     let millis = SystemTime::now()
@@ -310,6 +313,7 @@ fn schedule_runtime_state_save(
             latest_revision: Arc::clone(&shared.state_save_revision),
             log_path: shared.log_path.clone(),
             reason: reason.to_string(),
+            ready_at: Instant::now() + runtime_state_save_debounce(reason),
         },
     );
     drop(pending);
@@ -328,6 +332,18 @@ fn runtime_state_save_queue() -> Arc<RuntimeStateSaveQueue> {
     }))
 }
 
+fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
+    Arc::clone(RUNTIME_PROBE_REFRESH_QUEUE.get_or_init(|| {
+        let queue = Arc::new(RuntimeProbeRefreshQueue {
+            pending: Mutex::new(BTreeMap::new()),
+            wake: Condvar::new(),
+        });
+        let worker_queue = Arc::clone(&queue);
+        thread::spawn(move || runtime_probe_refresh_worker_loop(worker_queue));
+        queue
+    }))
+}
+
 fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
     loop {
         let jobs = {
@@ -341,7 +357,32 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
                     .wait(pending)
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
-            std::mem::take(&mut *pending)
+            loop {
+                let now = Instant::now();
+                let next_ready_at = pending.values().map(|job| job.ready_at).min();
+                let Some(next_ready_at) = next_ready_at else {
+                    break BTreeMap::new();
+                };
+                if next_ready_at <= now {
+                    let due_keys = pending
+                        .iter()
+                        .filter_map(|(key, job)| (job.ready_at <= now).then_some(key.clone()))
+                        .collect::<Vec<_>>();
+                    let mut due = BTreeMap::new();
+                    for key in due_keys {
+                        if let Some(job) = pending.remove(&key) {
+                            due.insert(key, job);
+                        }
+                    }
+                    break due;
+                }
+                let wait_for = next_ready_at.saturating_duration_since(now);
+                let (next_pending, _) = queue
+                    .wake
+                    .wait_timeout(pending, wait_for)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                pending = next_pending;
+            }
         };
 
         for (_, job) in jobs {
@@ -371,6 +412,109 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
                     &format!(
                         "state_save_error revision={} reason={} stage=write error={err:#}",
                         job.revision, job.reason
+                    ),
+                ),
+            }
+        }
+    }
+}
+
+fn runtime_state_save_debounce(reason: &str) -> Duration {
+    if reason.starts_with("response_ids:") || reason.starts_with("session_id:") {
+        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS)
+    } else {
+        Duration::ZERO
+    }
+}
+
+fn schedule_runtime_probe_refresh(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    codex_home: &Path,
+) {
+    let (state_file, upstream_base_url) = match shared.runtime.lock() {
+        Ok(runtime) => (
+            runtime.paths.state_file.clone(),
+            runtime.upstream_base_url.clone(),
+        ),
+        Err(_) => return,
+    };
+    let queue = runtime_probe_refresh_queue();
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let reason = if pending.contains_key(&(state_file.clone(), profile_name.to_string())) {
+        "deduped"
+    } else {
+        "queued"
+    };
+    pending.insert(
+        (state_file.clone(), profile_name.to_string()),
+        RuntimeProbeRefreshJob {
+            shared: shared.clone(),
+            profile_name: profile_name.to_string(),
+            codex_home: codex_home.to_path_buf(),
+            upstream_base_url,
+        },
+    );
+    drop(pending);
+    queue.wake.notify_one();
+    runtime_proxy_log(
+        shared,
+        format!("profile_probe_refresh_queued profile={profile_name} reason={reason}"),
+    );
+}
+
+fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
+    loop {
+        let jobs = {
+            let mut pending = queue
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            while pending.is_empty() {
+                pending = queue
+                    .wake
+                    .wait(pending)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+            std::mem::take(&mut *pending)
+        };
+
+        for (_, job) in jobs {
+            runtime_proxy_log(
+                &job.shared,
+                format!("profile_probe_refresh_start profile={}", job.profile_name),
+            );
+            let auth = read_auth_summary(&job.codex_home);
+            let result = if auth.quota_compatible {
+                fetch_usage(&job.codex_home, Some(job.upstream_base_url.as_str()))
+                    .map_err(|err| err.to_string())
+            } else {
+                Err("auth mode is not quota-compatible".to_string())
+            };
+            let now = Local::now().timestamp();
+            if let Ok(mut runtime) = job.shared.runtime.lock() {
+                runtime.profile_probe_cache.insert(
+                    job.profile_name.clone(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: auth.clone(),
+                        result: result.clone(),
+                    },
+                );
+            }
+            match result {
+                Ok(_) => runtime_proxy_log(
+                    &job.shared,
+                    format!("profile_probe_refresh_ok profile={}", job.profile_name),
+                ),
+                Err(err) => runtime_proxy_log(
+                    &job.shared,
+                    format!(
+                        "profile_probe_refresh_error profile={} error={err}",
+                        job.profile_name
                     ),
                 ),
             }
@@ -965,6 +1109,21 @@ struct RuntimeStateSaveJob {
     latest_revision: Arc<AtomicU64>,
     log_path: PathBuf,
     reason: String,
+    ready_at: Instant,
+}
+
+#[derive(Debug)]
+struct RuntimeProbeRefreshQueue {
+    pending: Mutex<BTreeMap<(PathBuf, String), RuntimeProbeRefreshJob>>,
+    wake: Condvar,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeProbeRefreshJob {
+    shared: RuntimeRotationProxyShared,
+    profile_name: String,
+    codex_home: PathBuf,
+    upstream_base_url: String,
 }
 
 struct StateFileLock {
@@ -998,6 +1157,13 @@ struct RuntimeProfileProbeCacheEntry {
     checked_at: i64,
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProbeCacheFreshness {
+    Fresh,
+    StaleUsable,
+    Expired,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6567,7 +6733,7 @@ fn next_runtime_response_candidate_for_route(
     };
 
     let mut reports = Vec::new();
-    let mut probe_jobs = Vec::new();
+    let mut cold_start_probe_jobs = Vec::new();
     for (order_index, name) in active_profile_selection_order(&state, &current_profile)
         .into_iter()
         .enumerate()
@@ -6575,31 +6741,60 @@ fn next_runtime_response_candidate_for_route(
         if excluded_profiles.contains(&name) {
             continue;
         }
-        if let Some(entry) = cached_reports.get(&name)
-            && runtime_profile_probe_cache_is_fresh(entry, now)
-        {
+        let Some(profile) = state.profiles.get(&name) else {
+            continue;
+        };
+        if let Some(entry) = cached_reports.get(&name) {
             reports.push(RunProfileProbeReport {
-                name,
+                name: name.clone(),
                 order_index,
                 auth: entry.auth.clone(),
                 result: entry.result.clone(),
             });
-            continue;
+            if runtime_profile_probe_cache_freshness(entry, now) != RuntimeProbeCacheFreshness::Fresh
+            {
+                schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
+            }
+        } else {
+            let auth = read_auth_summary(&profile.codex_home);
+            reports.push(RunProfileProbeReport {
+                name: name.clone(),
+                order_index,
+                auth,
+                result: Err("runtime quota snapshot unavailable".to_string()),
+            });
+            cold_start_probe_jobs.push(RunProfileProbeJob {
+                name,
+                order_index,
+                codex_home: profile.codex_home.clone(),
+            });
         }
-
-        let Some(profile) = state.profiles.get(&name) else {
-            continue;
-        };
-        probe_jobs.push(RunProfileProbeJob {
-            name,
-            order_index,
-            codex_home: profile.codex_home.clone(),
-        });
     }
 
-    if !probe_jobs.is_empty() {
+    reports.sort_by_key(|report| report.order_index);
+    let mut candidates = ready_profile_candidates(
+        &reports,
+        include_code_review,
+        Some(current_profile.as_str()),
+        &state,
+    );
+
+    if candidates.is_empty() && !cold_start_probe_jobs.is_empty() {
         let base_url = Some(upstream_base_url.clone());
-        let fresh_reports = map_parallel(probe_jobs, |job| {
+        let sync_jobs = cold_start_probe_jobs
+            .iter()
+            .take(RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT)
+            .map(|job| RunProfileProbeJob {
+                name: job.name.clone(),
+                order_index: job.order_index,
+                codex_home: job.codex_home.clone(),
+            })
+            .collect::<Vec<_>>();
+        let probed_names = sync_jobs
+            .iter()
+            .map(|job| job.name.clone())
+            .collect::<BTreeSet<_>>();
+        let fresh_reports = map_parallel(sync_jobs, |job| {
             let auth = read_auth_summary(&job.codex_home);
             let result = if auth.quota_compatible {
                 fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
@@ -6631,16 +6826,32 @@ fn next_runtime_response_candidate_for_route(
         }
         drop(runtime);
 
-        reports.extend(fresh_reports);
+        for fresh_report in fresh_reports {
+            if let Some(existing) = reports
+                .iter_mut()
+                .find(|report| report.name == fresh_report.name)
+            {
+                *existing = fresh_report;
+            }
+        }
+        reports.sort_by_key(|report| report.order_index);
+        candidates = ready_profile_candidates(
+            &reports,
+            include_code_review,
+            Some(current_profile.as_str()),
+            &state,
+        );
+        for job in cold_start_probe_jobs
+            .into_iter()
+            .filter(|job| !probed_names.contains(&job.name))
+        {
+            schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
+        }
+    } else {
+        for job in cold_start_probe_jobs {
+            schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
+        }
     }
-
-    reports.sort_by_key(|report| report.order_index);
-    let candidates = ready_profile_candidates(
-        &reports,
-        include_code_review,
-        Some(current_profile.as_str()),
-        &state,
-    );
     let available_candidates = candidates
         .into_iter()
         .enumerate()
@@ -6741,12 +6952,22 @@ fn next_runtime_response_candidate_for_route(
     Ok(fallback)
 }
 
-fn runtime_profile_probe_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
-    now.saturating_sub(entry.checked_at) < RUNTIME_PROFILE_REPORT_CACHE_TTL_SECONDS
-}
-
 fn runtime_profile_usage_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
     now.saturating_sub(entry.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS
+}
+
+fn runtime_profile_probe_cache_freshness(
+    entry: &RuntimeProfileProbeCacheEntry,
+    now: i64,
+) -> RuntimeProbeCacheFreshness {
+    let age = now.saturating_sub(entry.checked_at);
+    if age <= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS {
+        RuntimeProbeCacheFreshness::Fresh
+    } else if age <= RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS {
+        RuntimeProbeCacheFreshness::StaleUsable
+    } else {
+        RuntimeProbeCacheFreshness::Expired
+    }
 }
 
 fn update_runtime_profile_probe_cache_with_usage(
@@ -11391,6 +11612,58 @@ mod tests {
         let mut ranked = candidates.clone();
         ranked.sort_by_key(ready_profile_sort_key);
         assert_eq!(ranked[0].name, "fast");
+    }
+
+    #[test]
+    fn runtime_probe_cache_freshness_distinguishes_fresh_stale_and_expired() {
+        let now = Local::now().timestamp();
+        let fresh = RuntimeProfileProbeCacheEntry {
+            checked_at: now,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(100, 18_000, 100, 604_800)),
+        };
+        let stale = RuntimeProfileProbeCacheEntry {
+            checked_at: now - (RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS + 1),
+            auth: fresh.auth.clone(),
+            result: fresh.result.clone(),
+        };
+        let expired = RuntimeProfileProbeCacheEntry {
+            checked_at: now - (RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS + 1),
+            auth: fresh.auth.clone(),
+            result: fresh.result.clone(),
+        };
+
+        assert_eq!(
+            runtime_profile_probe_cache_freshness(&fresh, now),
+            RuntimeProbeCacheFreshness::Fresh
+        );
+        assert_eq!(
+            runtime_profile_probe_cache_freshness(&stale, now),
+            RuntimeProbeCacheFreshness::StaleUsable
+        );
+        assert_eq!(
+            runtime_profile_probe_cache_freshness(&expired, now),
+            RuntimeProbeCacheFreshness::Expired
+        );
+    }
+
+    #[test]
+    fn runtime_state_save_debounce_only_applies_to_binding_updates() {
+        assert_eq!(
+            runtime_state_save_debounce("profile_commit:main"),
+            Duration::ZERO
+        );
+        assert!(
+            runtime_state_save_debounce("response_ids:main") > Duration::ZERO,
+            "response id saves should be debounced"
+        );
+        assert!(
+            runtime_state_save_debounce("session_id:main") > Duration::ZERO,
+            "session id saves should be debounced"
+        );
     }
 
     #[test]
