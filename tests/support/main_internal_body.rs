@@ -120,6 +120,7 @@ enum RuntimeProxyBackendMode {
     HttpOnly,
     HttpOnlyInitialBodyStall,
     HttpOnlySlowStream,
+    HttpOnlyResetBeforeFirstByte,
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyCompactOverloaded,
     HttpOnlyUsageLimitMessage,
@@ -139,6 +140,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_slow_stream() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySlowStream)
+    }
+
+    fn start_http_reset_before_first_byte() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
     }
 
     fn start_http_previous_response_needs_turn_state() -> Self {
@@ -290,6 +295,21 @@ fn handle_runtime_proxy_backend_request(
     let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
     let turn_state = request_header(&request, "x-codex-turn-state");
     let captured_headers = request_headers_map(&request);
+
+    if path.ends_with("/backend-api/codex/responses")
+        && account_id == "main-account"
+        && matches!(_mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
+    {
+        responses_accounts
+            .lock()
+            .expect("responses_accounts poisoned")
+            .push(account_id.clone());
+        responses_headers
+            .lock()
+            .expect("responses_headers poisoned")
+            .push(captured_headers);
+        return;
+    }
 
     let (status_line, content_type, body, response_turn_state, initial_body_stall, chunk_delay) =
         if path.ends_with("/backend-api/wham/usage") {
@@ -1762,6 +1782,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::from([(
             "second".to_string(),
             Local::now().timestamp().saturating_add(60),
@@ -1833,6 +1854,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -1929,6 +1951,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -2002,6 +2025,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
@@ -2083,6 +2107,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
                 result: Ok(usage_with_main_windows(9, 18_000, 18, 604_800)),
             },
         )]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -2160,6 +2185,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
                 result: Ok(usage_with_main_windows(0, 18_000, 50, 604_800)),
             },
         )]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -2228,6 +2254,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
         profile_transport_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
         profile_inflight: BTreeMap::from([(
@@ -2308,6 +2335,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
@@ -2373,6 +2401,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
@@ -2428,6 +2457,7 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
@@ -2491,6 +2521,7 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -2583,6 +2614,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -2653,6 +2685,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -2759,6 +2792,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::from([(
             "main".to_string(),
@@ -2865,6 +2899,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::from([
             ("main".to_string(), now.saturating_add(90)),
@@ -2971,6 +3006,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3080,6 +3116,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3198,6 +3235,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3316,6 +3354,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3425,6 +3464,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([("main".to_string(), 2), ("second".to_string(), 0)]),
@@ -3528,6 +3568,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
                 },
             ),
         ]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3596,6 +3637,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3677,6 +3719,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3748,6 +3791,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3859,6 +3903,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -3967,6 +4012,7 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -4029,15 +4075,182 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.line_count = 3;
     summary.marker_counts.insert("selection_pick", 2);
     summary.marker_counts.insert("selection_skip_current", 1);
+    summary.first_timestamp = Some("2026-03-25 00:00:00.000 +07:00".to_string());
+    summary.last_timestamp = Some("2026-03-25 00:00:05.000 +07:00".to_string());
+    summary.facet_counts.insert(
+        "route".to_string(),
+        BTreeMap::from([("responses".to_string(), 2)]),
+    );
+    summary.marker_last_fields.insert(
+        "selection_pick",
+        BTreeMap::from([
+            ("profile".to_string(), "second".to_string()),
+            ("route".to_string(), "responses".to_string()),
+        ]),
+    );
     summary.diagnosis = "Recent selection decisions were logged.".to_string();
 
     let value = runtime_doctor_json_value(&summary);
     assert_eq!(value["line_count"], 3);
+    assert_eq!(value["first_timestamp"], "2026-03-25 00:00:00.000 +07:00");
+    assert_eq!(value["last_timestamp"], "2026-03-25 00:00:05.000 +07:00");
     assert_eq!(value["marker_counts"]["selection_pick"], 2);
     assert_eq!(value["marker_counts"]["selection_skip_current"], 1);
+    assert_eq!(value["facet_counts"]["route"]["responses"], 2);
+    assert_eq!(
+        value["marker_last_fields"]["selection_pick"]["profile"],
+        "second"
+    );
     assert_eq!(
         value["diagnosis"],
         "Recent selection decisions were logged."
+    );
+}
+
+#[test]
+fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_remaining_percent: 0,
+                five_hour_reset_at: Local::now().timestamp() + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 80,
+                weekly_reset_at: Local::now().timestamp() + 86_400,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("candidate lookup should succeed"),
+        None
+    );
+}
+
+#[test]
+fn merge_runtime_usage_snapshots_keeps_newer_entries() {
+    let existing = BTreeMap::from([(
+        "main".to_string(),
+        RuntimeProfileUsageSnapshot {
+            checked_at: 10,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 70,
+            five_hour_reset_at: 100,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: 200,
+        },
+    )]);
+    let incoming = BTreeMap::from([
+        (
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: 20,
+                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_remaining_percent: 0,
+                five_hour_reset_at: 300,
+                weekly_status: RuntimeQuotaWindowStatus::Critical,
+                weekly_remaining_percent: 5,
+                weekly_reset_at: 400,
+            },
+        ),
+        (
+            "stale".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: 20,
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 100,
+                five_hour_reset_at: 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 100,
+                weekly_reset_at: 400,
+            },
+        ),
+    ]);
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: PathBuf::from("/tmp/main"),
+            managed: true,
+            email: None,
+        },
+    )]);
+
+    let merged = merge_runtime_usage_snapshots(&existing, &incoming, &profiles);
+    assert_eq!(merged.len(), 1);
+    assert_eq!(
+        merged.get("main").expect("main snapshot should exist").checked_at,
+        20
+    );
+    assert_eq!(
+        merged
+            .get("main")
+            .expect("main snapshot should exist")
+            .five_hour_status,
+        RuntimeQuotaWindowStatus::Exhausted
     );
 }
 
@@ -4075,6 +4288,7 @@ fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -4250,8 +4464,15 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
     };
     let revision = AtomicU64::new(1);
     assert!(
-        save_runtime_state_snapshot_if_latest(&paths, &snapshot, &BTreeMap::new(), 1, &revision)
-            .expect("runtime snapshot save should succeed")
+        save_runtime_state_snapshot_if_latest(
+            &paths,
+            &snapshot,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            1,
+            &revision,
+        )
+        .expect("runtime snapshot save should succeed")
     );
 
     let loaded = AppState::load(&paths).expect("state should reload");
@@ -4328,6 +4549,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -4351,6 +4573,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 updated_at: 10,
             },
         )]),
+        BTreeMap::new(),
         paths.clone(),
         "first",
     );
@@ -4382,6 +4605,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 updated_at: 20,
             },
         )]),
+        BTreeMap::new(),
         paths.clone(),
         "second",
     );
@@ -4474,6 +4698,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         )]),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -4569,6 +4794,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         )]),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
@@ -4673,6 +4899,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
             },
         )]),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -4752,6 +4979,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
@@ -4979,6 +5207,7 @@ fn runtime_proxy_active_request_limit_is_enforced_and_released() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -5047,6 +5276,7 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -5133,6 +5363,7 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -5467,6 +5698,30 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
 }
 
 #[test]
+fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
+    let tail = concat!(
+        "[2026-03-25 00:00:00.000 +07:00] request=1 route=responses transport=http first_upstream_chunk profile=main\n",
+        "[2026-03-25 00:00:01.000 +07:00] request=1 route=responses transport=http stream_read_error profile=main reason=connection_reset\n",
+    );
+
+    let summary = summarize_runtime_log_tail(tail.as_bytes());
+    assert_eq!(runtime_doctor_marker_count(&summary, "first_upstream_chunk"), 1);
+    assert_eq!(runtime_doctor_marker_count(&summary, "first_local_chunk"), 0);
+    assert_eq!(
+        runtime_doctor_top_facet(&summary, "route").as_deref(),
+        Some("responses (2)")
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("stream_read_error")
+            .and_then(|fields| fields.get("reason"))
+            .map(String::as_str),
+        Some("connection_reset")
+    );
+}
+
+#[test]
 fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
@@ -5649,6 +5904,7 @@ fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -5727,6 +5983,7 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),

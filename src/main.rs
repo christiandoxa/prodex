@@ -285,6 +285,7 @@ fn schedule_runtime_state_save(
     shared: &RuntimeRotationProxyShared,
     state: AppState,
     profile_scores: BTreeMap<String, RuntimeProfileHealth>,
+    usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     paths: AppPaths,
     reason: &str,
 ) {
@@ -300,6 +301,7 @@ fn schedule_runtime_state_save(
             paths,
             state,
             profile_scores,
+            usage_snapshots,
             revision,
             latest_revision: Arc::clone(&shared.state_save_revision),
             log_path: shared.log_path.clone(),
@@ -381,6 +383,7 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
                 &job.paths,
                 &job.state,
                 &job.profile_scores,
+                &job.usage_snapshots,
                 job.revision,
                 &job.latest_revision,
             ) {
@@ -648,6 +651,10 @@ fn runtime_scores_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-scores.json")
 }
 
+fn runtime_usage_snapshots_file_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join("runtime-usage-snapshots.json")
+}
+
 fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("update-check.json")
 }
@@ -705,10 +712,65 @@ fn save_runtime_profile_scores(
     Ok(())
 }
 
+fn merge_runtime_usage_snapshots(
+    existing: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    incoming: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
+    let mut merged = existing.clone();
+    for (profile_name, snapshot) in incoming {
+        let should_replace = merged
+            .get(profile_name)
+            .is_none_or(|current| current.checked_at <= snapshot.checked_at);
+        if should_replace {
+            merged.insert(profile_name.clone(), snapshot.clone());
+        }
+    }
+    merged.retain(|profile_name, _| profiles.contains_key(profile_name));
+    merged
+}
+
+fn load_runtime_usage_snapshots(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<BTreeMap<String, RuntimeProfileUsageSnapshot>> {
+    let path = runtime_usage_snapshots_file_path(paths);
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot> =
+        serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+    snapshots.retain(|profile_name, _| profiles.contains_key(profile_name));
+    Ok(snapshots)
+}
+
+fn save_runtime_usage_snapshots(
+    paths: &AppPaths,
+    snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+) -> Result<()> {
+    let path = runtime_usage_snapshots_file_path(paths);
+    let temp_file = unique_state_temp_file_path(&path);
+    let json = serde_json::to_string_pretty(snapshots)
+        .context("failed to serialize runtime usage snapshots")?;
+    fs::write(&temp_file, json)
+        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    fs::rename(&temp_file, &path).with_context(|| {
+        format!(
+            "failed to replace runtime usage snapshots file {}",
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
 fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
     snapshot: &AppState,
     profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     revision: u64,
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
@@ -728,6 +790,9 @@ fn save_runtime_state_snapshot_if_latest(
     let existing_scores = load_runtime_profile_scores(paths, &merged.profiles)?;
     let merged_scores =
         merge_runtime_profile_scores(&existing_scores, profile_scores, &merged.profiles);
+    let existing_usage_snapshots = load_runtime_usage_snapshots(paths, &merged.profiles)?;
+    let merged_usage_snapshots =
+        merge_runtime_usage_snapshots(&existing_usage_snapshots, usage_snapshots, &merged.profiles);
 
     if latest_revision.load(Ordering::SeqCst) != revision {
         return Ok(false);
@@ -735,6 +800,7 @@ fn save_runtime_state_snapshot_if_latest(
 
     write_state_json_atomic(paths, &json)?;
     save_runtime_profile_scores(paths, &merged_scores)?;
+    save_runtime_usage_snapshots(paths, &merged_usage_snapshots)?;
     Ok(true)
 }
 
@@ -1075,7 +1141,7 @@ struct ReadyProfileScore {
     five_hour_reset_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum RuntimeQuotaWindowStatus {
     Ready,
     Thin,
@@ -1140,6 +1206,7 @@ struct RuntimeStateSaveJob {
     paths: AppPaths,
     state: AppState,
     profile_scores: BTreeMap<String, RuntimeProfileHealth>,
+    usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     revision: u64,
     latest_revision: Arc<AtomicU64>,
     log_path: PathBuf,
@@ -1181,6 +1248,7 @@ struct RuntimeRotationState {
     turn_state_bindings: BTreeMap<String, ResponseProfileBinding>,
     session_id_bindings: BTreeMap<String, ResponseProfileBinding>,
     profile_probe_cache: BTreeMap<String, RuntimeProfileProbeCacheEntry>,
+    profile_usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     profile_retry_backoff_until: BTreeMap<String, i64>,
     profile_transport_backoff_until: BTreeMap<String, i64>,
     profile_inflight: BTreeMap<String, usize>,
@@ -1192,6 +1260,17 @@ struct RuntimeProfileProbeCacheEntry {
     checked_at: i64,
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RuntimeProfileUsageSnapshot {
+    checked_at: i64,
+    five_hour_status: RuntimeQuotaWindowStatus,
+    five_hour_remaining_percent: i64,
+    five_hour_reset_at: i64,
+    weekly_status: RuntimeQuotaWindowStatus,
+    weekly_remaining_percent: i64,
+    weekly_reset_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1223,6 +1302,10 @@ struct RuntimeDoctorSummary {
     line_count: usize,
     marker_counts: BTreeMap<&'static str, usize>,
     last_marker_line: Option<String>,
+    marker_last_fields: BTreeMap<&'static str, BTreeMap<String, String>>,
+    facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
     diagnosis: String,
 }
 
@@ -2282,12 +2365,38 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         .iter()
         .map(|(marker, count)| ((*marker).to_string(), serde_json::Value::from(*count)))
         .collect::<serde_json::Map<String, serde_json::Value>>();
+    let marker_last_fields = summary
+        .marker_last_fields
+        .iter()
+        .map(|(marker, fields)| {
+            let fields = fields
+                .iter()
+                .map(|(key, value)| (key.clone(), serde_json::Value::from(value.clone())))
+                .collect::<serde_json::Map<String, serde_json::Value>>();
+            ((*marker).to_string(), serde_json::Value::Object(fields))
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+    let facet_counts = summary
+        .facet_counts
+        .iter()
+        .map(|(facet, counts)| {
+            let counts = counts
+                .iter()
+                .map(|(value, count)| (value.clone(), serde_json::Value::from(*count)))
+                .collect::<serde_json::Map<String, serde_json::Value>>();
+            (facet.clone(), serde_json::Value::Object(counts))
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>();
     serde_json::json!({
         "log_path": summary.log_path.as_ref().map(|path| path.display().to_string()),
         "pointer_exists": summary.pointer_exists,
         "log_exists": summary.log_exists,
         "line_count": summary.line_count,
+        "first_timestamp": summary.first_timestamp,
+        "last_timestamp": summary.last_timestamp,
         "marker_counts": marker_counts,
+        "marker_last_fields": marker_last_fields,
+        "facet_counts": facet_counts,
         "last_marker_line": summary.last_marker_line,
         "diagnosis": summary.diagnosis,
     })
@@ -2397,6 +2506,18 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "profile_probe_refresh_error").to_string(),
         ),
         (
+            "Hot lane".to_string(),
+            runtime_doctor_top_facet(&summary, "lane").unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Hot route".to_string(),
+            runtime_doctor_top_facet(&summary, "route").unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Hot profile".to_string(),
+            runtime_doctor_top_facet(&summary, "profile").unwrap_or_else(|| "-".to_string()),
+        ),
+        (
             "Last marker".to_string(),
             summary
                 .last_marker_line
@@ -2409,6 +2530,15 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
 
 fn runtime_doctor_marker_count(summary: &RuntimeDoctorSummary, marker: &'static str) -> usize {
     summary.marker_counts.get(marker).copied().unwrap_or(0)
+}
+
+fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Option<String> {
+    summary.facet_counts.get(facet).and_then(|counts| {
+        counts
+            .iter()
+            .max_by_key(|(value, count)| (**count, value.as_str()))
+            .map(|(value, count)| format!("{value} ({count})"))
+    })
 }
 
 fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
@@ -2513,12 +2643,58 @@ fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     let mut summary = RuntimeDoctorSummary::default();
     for line in text.lines() {
         summary.line_count += 1;
+        if let Some(timestamp) = runtime_doctor_line_timestamp(line) {
+            if summary.first_timestamp.is_none() {
+                summary.first_timestamp = Some(timestamp.clone());
+            }
+            summary.last_timestamp = Some(timestamp);
+        }
         if let Some(marker) = runtime_doctor_marker_name(line) {
             *summary.marker_counts.entry(marker).or_insert(0) += 1;
             summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
+            let fields = runtime_doctor_parse_fields(line);
+            for facet in ["lane", "route", "profile", "reason", "transport"] {
+                if let Some(value) = fields.get(facet).cloned() {
+                    *summary
+                        .facet_counts
+                        .entry(facet.to_string())
+                        .or_default()
+                        .entry(value)
+                        .or_insert(0) += 1;
+                }
+            }
+            if !fields.is_empty() {
+                summary.marker_last_fields.insert(marker, fields);
+            }
         }
     }
     summary
+}
+
+fn runtime_doctor_line_timestamp(line: &str) -> Option<String> {
+    let end = line.find("] ")?;
+    line.strip_prefix('[')
+        .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
+        .map(ToString::to_string)
+}
+
+fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
+    let message = line
+        .split_once("] ")
+        .map(|(_, message)| message)
+        .unwrap_or(line)
+        .trim();
+    let mut fields = BTreeMap::new();
+    for token in message.split_whitespace() {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        fields.insert(key.to_string(), value.trim_matches('"').to_string());
+    }
+    fields
 }
 
 fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
@@ -3825,6 +4001,8 @@ fn start_runtime_rotation_proxy(
     ));
     let persisted_profile_scores =
         load_runtime_profile_scores(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
+    let persisted_usage_snapshots =
+        load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(
@@ -3850,6 +4028,7 @@ fn start_runtime_rotation_proxy(
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: state.session_profile_bindings.clone(),
             profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: persisted_usage_snapshots,
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
@@ -4570,12 +4749,14 @@ fn remember_runtime_session_id(
         );
         let state_snapshot = runtime.state.clone();
         let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let paths_snapshot = runtime.paths.clone();
         drop(runtime);
         schedule_runtime_state_save(
             shared,
             state_snapshot,
             profile_scores_snapshot,
+            usage_snapshots,
             paths_snapshot,
             &format!("session_id:{profile_name}"),
         );
@@ -4628,12 +4809,14 @@ fn remember_runtime_response_ids(
         );
         let state_snapshot = runtime.state.clone();
         let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let paths_snapshot = runtime.paths.clone();
         drop(runtime);
         schedule_runtime_state_save(
             shared,
             state_snapshot,
             profile_scores_snapshot,
+            usage_snapshots,
             paths_snapshot,
             &format!("response_ids:{profile_name}"),
         );
@@ -4821,7 +5004,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         in_selection_backoff,
         inflight_count,
         health_score,
-        cached_quota_summary,
+        quota_summary,
     ) = {
         let mut runtime = shared
             .runtime
@@ -4849,6 +5032,15 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
                 .and_then(|entry| entry.result.as_ref().ok())
                 .map(|usage| runtime_quota_summary_for_route(usage, route_kind))
+                .or_else(|| {
+                    runtime
+                        .profile_usage_snapshots
+                        .get(&runtime.current_profile)
+                        .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
+                        .map(|snapshot| {
+                            runtime_quota_summary_from_usage_snapshot(snapshot, route_kind)
+                        })
+                })
                 .unwrap_or(RuntimeQuotaSummary {
                     five_hour: RuntimeQuotaWindowSummary {
                         status: RuntimeQuotaWindowStatus::Unknown,
@@ -4868,14 +5060,14 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     if in_selection_backoff
         || health_score > 0
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
-        || cached_quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
+        || quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
     {
         let reason = if in_selection_backoff {
             "selection_backoff"
         } else if health_score > 0 {
             "profile_health"
-        } else if cached_quota_summary.route_band > RuntimeQuotaPressureBand::Healthy {
-            runtime_quota_pressure_band_reason(cached_quota_summary.route_band)
+        } else if quota_summary.route_band > RuntimeQuotaPressureBand::Healthy {
+            runtime_quota_pressure_band_reason(quota_summary.route_band)
         } else {
             "profile_inflight_soft_limit"
         };
@@ -4889,7 +5081,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 inflight_count,
                 health_score,
                 RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
-                runtime_quota_summary_log_fields(cached_quota_summary),
+                runtime_quota_summary_log_fields(quota_summary),
             ),
         );
         return Ok(None);
@@ -4914,7 +5106,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             current_profile,
             inflight_count,
             health_score,
-            runtime_quota_summary_log_fields(cached_quota_summary),
+            runtime_quota_summary_log_fields(quota_summary),
         ),
     );
     Ok(Some(current_profile))
@@ -6837,6 +7029,7 @@ fn next_runtime_response_candidate_for_route(
         include_code_review,
         upstream_base_url,
         cached_reports,
+        cached_usage_snapshots,
         retry_backoff_until,
         transport_backoff_until,
         profile_inflight,
@@ -6853,6 +7046,7 @@ fn next_runtime_response_candidate_for_route(
             runtime.include_code_review,
             runtime.upstream_base_url.clone(),
             runtime.profile_probe_cache.clone(),
+            runtime.profile_usage_snapshots.clone(),
             runtime.profile_retry_backoff_until.clone(),
             runtime.profile_transport_backoff_until.clone(),
             runtime.profile_inflight.clone(),
@@ -6900,6 +7094,30 @@ fn next_runtime_response_candidate_for_route(
         }
     }
 
+    cold_start_probe_jobs.sort_by_key(|job| {
+        let quota_summary = cached_usage_snapshots
+            .get(&job.name)
+            .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
+            .map(|snapshot| runtime_quota_summary_from_usage_snapshot(snapshot, route_kind))
+            .unwrap_or(RuntimeQuotaSummary {
+                five_hour: RuntimeQuotaWindowSummary {
+                    status: RuntimeQuotaWindowStatus::Unknown,
+                    remaining_percent: 0,
+                    reset_at: i64::MAX,
+                },
+                weekly: RuntimeQuotaWindowSummary {
+                    status: RuntimeQuotaWindowStatus::Unknown,
+                    remaining_percent: 0,
+                    reset_at: i64::MAX,
+                },
+                route_band: RuntimeQuotaPressureBand::Unknown,
+            });
+        (
+            runtime_quota_pressure_sort_key_for_route_from_summary(quota_summary),
+            job.order_index,
+        )
+    });
+
     reports.sort_by_key(|report| report.order_index);
     let mut candidates = ready_profile_candidates(
         &reports,
@@ -6943,6 +7161,7 @@ fn next_runtime_response_candidate_for_route(
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let mut usage_snapshot_changed = false;
         for report in &fresh_reports {
             runtime.profile_probe_cache.insert(
                 report.name.clone(),
@@ -6952,8 +7171,29 @@ fn next_runtime_response_candidate_for_route(
                     result: report.result.clone(),
                 },
             );
+            if let Ok(usage) = report.result.as_ref() {
+                runtime.profile_usage_snapshots.insert(
+                    report.name.clone(),
+                    runtime_profile_usage_snapshot_from_usage(usage),
+                );
+                usage_snapshot_changed = true;
+            }
         }
+        let state_snapshot = runtime.state.clone();
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let paths_snapshot = runtime.paths.clone();
         drop(runtime);
+        if usage_snapshot_changed {
+            schedule_runtime_state_save(
+                shared,
+                state_snapshot,
+                profile_scores_snapshot,
+                usage_snapshots,
+                paths_snapshot,
+                "usage_snapshot:sync_probe",
+            );
+        }
 
         for fresh_report in fresh_reports {
             if let Some(existing) = reports
@@ -7118,8 +7358,25 @@ fn update_runtime_profile_probe_cache_with_usage(
         RuntimeProfileProbeCacheEntry {
             checked_at: Local::now().timestamp(),
             auth,
-            result: Ok(usage),
+            result: Ok(usage.clone()),
         },
+    );
+    runtime.profile_usage_snapshots.insert(
+        profile_name.to_string(),
+        runtime_profile_usage_snapshot_from_usage(&usage),
+    );
+    let state_snapshot = runtime.state.clone();
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        paths_snapshot,
+        &format!("usage_snapshot:{profile_name}"),
     );
     Ok(())
 }
@@ -7443,6 +7700,63 @@ fn runtime_quota_summary_for_route(
     }
 }
 
+fn runtime_profile_usage_snapshot_from_usage(usage: &UsageResponse) -> RuntimeProfileUsageSnapshot {
+    let five_hour = runtime_quota_window_summary(usage, "5h");
+    let weekly = runtime_quota_window_summary(usage, "weekly");
+    RuntimeProfileUsageSnapshot {
+        checked_at: Local::now().timestamp(),
+        five_hour_status: five_hour.status,
+        five_hour_remaining_percent: five_hour.remaining_percent,
+        five_hour_reset_at: five_hour.reset_at,
+        weekly_status: weekly.status,
+        weekly_remaining_percent: weekly.remaining_percent,
+        weekly_reset_at: weekly.reset_at,
+    }
+}
+
+fn runtime_quota_summary_from_usage_snapshot(
+    snapshot: &RuntimeProfileUsageSnapshot,
+    route_kind: RuntimeRouteKind,
+) -> RuntimeQuotaSummary {
+    let five_hour = RuntimeQuotaWindowSummary {
+        status: snapshot.five_hour_status,
+        remaining_percent: snapshot.five_hour_remaining_percent,
+        reset_at: snapshot.five_hour_reset_at,
+    };
+    let weekly = RuntimeQuotaWindowSummary {
+        status: snapshot.weekly_status,
+        remaining_percent: snapshot.weekly_remaining_percent,
+        reset_at: snapshot.weekly_reset_at,
+    };
+    let route_band = [
+        five_hour.status,
+        weekly.status,
+        match route_kind {
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => weekly.status,
+            RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => five_hour.status,
+        },
+    ]
+    .into_iter()
+    .fold(RuntimeQuotaPressureBand::Healthy, |band, status| {
+        band.max(match status {
+            RuntimeQuotaWindowStatus::Ready => RuntimeQuotaPressureBand::Healthy,
+            RuntimeQuotaWindowStatus::Thin => RuntimeQuotaPressureBand::Thin,
+            RuntimeQuotaWindowStatus::Critical => RuntimeQuotaPressureBand::Critical,
+            RuntimeQuotaWindowStatus::Exhausted => RuntimeQuotaPressureBand::Exhausted,
+            RuntimeQuotaWindowStatus::Unknown => RuntimeQuotaPressureBand::Unknown,
+        })
+    });
+    RuntimeQuotaSummary {
+        five_hour,
+        weekly,
+        route_band,
+    }
+}
+
+fn runtime_usage_snapshot_is_usable(snapshot: &RuntimeProfileUsageSnapshot, now: i64) -> bool {
+    now.saturating_sub(snapshot.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS
+}
+
 fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
     format!(
         "quota_band={} five_hour_status={} five_hour_remaining={} five_hour_reset_at={} weekly_status={} weekly_remaining={} weekly_reset_at={}",
@@ -7481,6 +7795,55 @@ fn runtime_quota_pressure_sort_key_for_route(
         Reverse(score.five_hour_remaining),
         score.weekly_reset_at,
         score.five_hour_reset_at,
+    )
+}
+
+fn runtime_quota_pressure_sort_key_for_route_from_summary(
+    summary: RuntimeQuotaSummary,
+) -> (
+    RuntimeQuotaPressureBand,
+    i64,
+    i64,
+    i64,
+    Reverse<i64>,
+    Reverse<i64>,
+    Reverse<i64>,
+    i64,
+    i64,
+) {
+    (
+        summary.route_band,
+        match summary.route_band {
+            RuntimeQuotaPressureBand::Healthy => 0,
+            RuntimeQuotaPressureBand::Thin => 1,
+            RuntimeQuotaPressureBand::Critical => 2,
+            RuntimeQuotaPressureBand::Exhausted => 3,
+            RuntimeQuotaPressureBand::Unknown => 4,
+        },
+        match summary.weekly.status {
+            RuntimeQuotaWindowStatus::Ready => 0,
+            RuntimeQuotaWindowStatus::Thin => 1,
+            RuntimeQuotaWindowStatus::Critical => 2,
+            RuntimeQuotaWindowStatus::Exhausted => 3,
+            RuntimeQuotaWindowStatus::Unknown => 4,
+        },
+        match summary.five_hour.status {
+            RuntimeQuotaWindowStatus::Ready => 0,
+            RuntimeQuotaWindowStatus::Thin => 1,
+            RuntimeQuotaWindowStatus::Critical => 2,
+            RuntimeQuotaWindowStatus::Exhausted => 3,
+            RuntimeQuotaWindowStatus::Unknown => 4,
+        },
+        Reverse(
+            summary
+                .weekly
+                .remaining_percent
+                .min(summary.five_hour.remaining_percent),
+        ),
+        Reverse(summary.weekly.remaining_percent),
+        Reverse(summary.five_hour.remaining_percent),
+        summary.weekly.reset_at,
+        summary.five_hour.reset_at,
     )
 }
 
@@ -7671,6 +8034,7 @@ fn bump_runtime_profile_bad_pairing_score(
     );
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     runtime_proxy_log(
@@ -7684,6 +8048,7 @@ fn bump_runtime_profile_bad_pairing_score(
         shared,
         state_snapshot,
         profile_scores_snapshot,
+        usage_snapshots,
         paths_snapshot,
         &format!(
             "profile_bad_pairing:{profile_name}:{}",
@@ -7723,6 +8088,7 @@ fn bump_runtime_profile_health_score(
     );
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     runtime_proxy_log(
@@ -7736,6 +8102,7 @@ fn bump_runtime_profile_health_score(
         shared,
         state_snapshot,
         profile_scores_snapshot,
+        usage_snapshots,
         paths_snapshot,
         &format!(
             "profile_health:{profile_name}:{}",
@@ -7914,6 +8281,7 @@ fn commit_runtime_proxy_profile_selection(
     record_run_selection(&mut runtime.state, profile_name);
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     let should_persist = switched
@@ -7926,6 +8294,7 @@ fn commit_runtime_proxy_profile_selection(
             shared,
             state_snapshot,
             profile_scores_snapshot,
+            usage_snapshots,
             paths_snapshot,
             &format!("profile_commit:{profile_name}"),
         );
