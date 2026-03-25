@@ -67,7 +67,8 @@ const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 const RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS: i64 = if cfg!(test) { 30 } else { 300 };
-const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 21_600 };
+const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 5 } else { 21_600 };
+const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 300 };
 const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
 const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
@@ -1737,7 +1738,7 @@ fn should_emit_update_notice(command: &Commands) -> bool {
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
     if let Some(cached) = load_update_check_cache(paths)?
         && Local::now().timestamp().saturating_sub(cached.checked_at)
-            < UPDATE_CHECK_CACHE_TTL_SECONDS
+            < update_check_cache_ttl_seconds(&cached.latest_version, env!("CARGO_PKG_VERSION"))
     {
         return Ok(Some(cached.latest_version));
     }
@@ -1754,6 +1755,14 @@ fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
         },
     )?;
     Ok(Some(latest_version))
+}
+
+fn update_check_cache_ttl_seconds(cached_latest_version: &str, current_version: &str) -> i64 {
+    if version_is_newer(cached_latest_version, current_version) {
+        UPDATE_CHECK_CACHE_TTL_SECONDS
+    } else {
+        UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS
+    }
 }
 
 fn load_update_check_cache(paths: &AppPaths) -> Result<Option<UpdateCheckCache>> {
@@ -10981,5 +10990,21 @@ mod update_notice_tests {
             base_url: None,
         })));
         assert!(should_emit_update_notice(&Commands::Current));
+    }
+
+    #[test]
+    fn update_check_cache_ttl_is_short_when_cached_version_matches_current() {
+        assert_eq!(
+            update_check_cache_ttl_seconds("0.2.47", "0.2.47"),
+            UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS
+        );
+        assert_eq!(
+            update_check_cache_ttl_seconds("0.2.46", "0.2.47"),
+            UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS
+        );
+        assert_eq!(
+            update_check_cache_ttl_seconds("0.2.48", "0.2.47"),
+            UPDATE_CHECK_CACHE_TTL_SECONDS
+        );
     }
 }
