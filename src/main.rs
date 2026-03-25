@@ -4879,6 +4879,82 @@ fn remember_runtime_response_ids(
     Ok(())
 }
 
+fn release_runtime_quota_blocked_affinity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<bool> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let mut changed = false;
+
+    if let Some(previous_response_id) = previous_response_id
+        && runtime
+            .state
+            .response_profile_bindings
+            .get(previous_response_id)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        runtime
+            .state
+            .response_profile_bindings
+            .remove(previous_response_id);
+        changed = true;
+    }
+
+    if let Some(turn_state) = turn_state
+        && runtime
+            .turn_state_bindings
+            .get(turn_state)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        runtime.turn_state_bindings.remove(turn_state);
+        changed = true;
+    }
+
+    if let Some(session_id) = session_id
+        && runtime
+            .session_id_bindings
+            .get(session_id)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        runtime.session_id_bindings.remove(session_id);
+        runtime.state.session_profile_bindings.remove(session_id);
+        changed = true;
+    }
+
+    if changed {
+        let state_snapshot = runtime.state.clone();
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            paths_snapshot,
+            &format!("quota_release:{profile_name}"),
+        );
+        runtime_proxy_log(
+            shared,
+            format!(
+                "quota_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
+                previous_response_id, turn_state, session_id
+            ),
+        );
+    } else {
+        drop(runtime);
+    }
+
+    Ok(changed)
+}
+
 fn prune_profile_bindings(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     max_entries: usize,
@@ -5433,7 +5509,7 @@ fn proxy_runtime_websocket_text_message(
     let previous_response_id = runtime_request_previous_response_id_from_text(request_text);
     let request_turn_state = runtime_request_turn_state(handshake_request);
     let request_session_id = runtime_request_session_id(handshake_request);
-    let bound_profile = previous_response_id
+    let mut bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
         .transpose()?
@@ -5443,7 +5519,7 @@ fn proxy_runtime_websocket_text_message(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+    let mut session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
         websocket_session.profile_name.clone().or(request_session_id
             .as_deref()
             .map(|session_id| runtime_session_bound_profile(shared, session_id))
@@ -5703,9 +5779,18 @@ fn proxy_runtime_websocket_text_message(
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                let released_affinity = release_runtime_quota_blocked_affinity(
+                    shared,
+                    &profile_name,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    request_session_id.as_deref(),
+                )?;
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                    return Ok(());
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
                 }
                 if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
                     candidate_turn_state_retry_profile = None;
@@ -5717,6 +5802,14 @@ fn proxy_runtime_websocket_text_message(
                 }
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
+                }
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name}"
+                        ),
+                    );
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
@@ -6636,7 +6729,7 @@ fn proxy_runtime_responses_request(
     let previous_response_id = runtime_request_previous_response_id(request);
     let request_turn_state = runtime_request_turn_state(request);
     let request_session_id = runtime_request_session_id(request);
-    let bound_profile = previous_response_id
+    let mut bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
         .transpose()?
@@ -6646,7 +6739,7 @@ fn proxy_runtime_responses_request(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+    let mut session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
         request_session_id
             .as_deref()
             .map(|session_id| runtime_session_bound_profile(shared, session_id))
@@ -6922,8 +7015,18 @@ fn proxy_runtime_responses_request(
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                let released_affinity = release_runtime_quota_blocked_affinity(
+                    shared,
+                    &profile_name,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    request_session_id.as_deref(),
+                )?;
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    return Ok(response);
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
                 }
                 if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
                     candidate_turn_state_retry_profile = None;
@@ -6935,6 +7038,14 @@ fn proxy_runtime_responses_request(
                 }
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
+                }
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name}"
+                        ),
+                    );
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));

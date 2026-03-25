@@ -5788,6 +5788,94 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
 }
 
 #[test]
+fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-123".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-123")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+
+    assert!(body.contains("\"response.created\""));
+    assert!(!body.contains("You've hit your usage limit"));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+            && state
+                .session_profile_bindings
+                .get("sess-123")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-123")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+}
+
+#[test]
 fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
     let tail = concat!(
         "[2026-03-25 00:00:00.000 +07:00] request=1 route=responses transport=http first_upstream_chunk profile=main\n",
