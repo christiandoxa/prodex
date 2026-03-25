@@ -287,6 +287,7 @@ fn schedule_runtime_state_save(
     state: AppState,
     profile_scores: BTreeMap<String, RuntimeProfileHealth>,
     usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    backoffs: RuntimeProfileBackoffs,
     paths: AppPaths,
     reason: &str,
 ) {
@@ -303,6 +304,7 @@ fn schedule_runtime_state_save(
             state,
             profile_scores,
             usage_snapshots,
+            backoffs,
             revision,
             latest_revision: Arc::clone(&shared.state_save_revision),
             log_path: shared.log_path.clone(),
@@ -385,6 +387,7 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
                 &job.state,
                 &job.profile_scores,
                 &job.usage_snapshots,
+                &job.backoffs,
                 job.revision,
                 &job.latest_revision,
             ) {
@@ -656,6 +659,10 @@ fn runtime_usage_snapshots_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-usage-snapshots.json")
 }
 
+fn runtime_backoffs_file_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join("runtime-backoffs.json")
+}
+
 fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("update-check.json")
 }
@@ -767,11 +774,79 @@ fn save_runtime_usage_snapshots(
     Ok(())
 }
 
+fn merge_runtime_profile_backoffs(
+    existing: &RuntimeProfileBackoffs,
+    incoming: &RuntimeProfileBackoffs,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+) -> RuntimeProfileBackoffs {
+    let mut merged = existing.clone();
+    for (profile_name, until) in &incoming.retry_backoff_until {
+        merged
+            .retry_backoff_until
+            .entry(profile_name.clone())
+            .and_modify(|current| *current = (*current).max(*until))
+            .or_insert(*until);
+    }
+    for (profile_name, until) in &incoming.transport_backoff_until {
+        merged
+            .transport_backoff_until
+            .entry(profile_name.clone())
+            .and_modify(|current| *current = (*current).max(*until))
+            .or_insert(*until);
+    }
+    merged
+        .retry_backoff_until
+        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    merged
+        .transport_backoff_until
+        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    merged
+}
+
+fn load_runtime_profile_backoffs(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<RuntimeProfileBackoffs> {
+    let path = runtime_backoffs_file_path(paths);
+    if !path.exists() {
+        return Ok(RuntimeProfileBackoffs::default());
+    }
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut backoffs: RuntimeProfileBackoffs = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let now = Local::now().timestamp();
+    backoffs
+        .retry_backoff_until
+        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    backoffs
+        .transport_backoff_until
+        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    Ok(backoffs)
+}
+
+fn save_runtime_profile_backoffs(
+    paths: &AppPaths,
+    backoffs: &RuntimeProfileBackoffs,
+) -> Result<()> {
+    let path = runtime_backoffs_file_path(paths);
+    let temp_file = unique_state_temp_file_path(&path);
+    let json =
+        serde_json::to_string_pretty(backoffs).context("failed to serialize runtime backoffs")?;
+    fs::write(&temp_file, json)
+        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    fs::rename(&temp_file, &path)
+        .with_context(|| format!("failed to replace runtime backoffs file {}", path.display()))?;
+    Ok(())
+}
+
 fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
     snapshot: &AppState,
     profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
     usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    backoffs: &RuntimeProfileBackoffs,
     revision: u64,
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
@@ -794,6 +869,13 @@ fn save_runtime_state_snapshot_if_latest(
     let existing_usage_snapshots = load_runtime_usage_snapshots(paths, &merged.profiles)?;
     let merged_usage_snapshots =
         merge_runtime_usage_snapshots(&existing_usage_snapshots, usage_snapshots, &merged.profiles);
+    let existing_backoffs = load_runtime_profile_backoffs(paths, &merged.profiles)?;
+    let merged_backoffs = merge_runtime_profile_backoffs(
+        &existing_backoffs,
+        backoffs,
+        &merged.profiles,
+        Local::now().timestamp(),
+    );
 
     if latest_revision.load(Ordering::SeqCst) != revision {
         return Ok(false);
@@ -802,6 +884,7 @@ fn save_runtime_state_snapshot_if_latest(
     write_state_json_atomic(paths, &json)?;
     save_runtime_profile_scores(paths, &merged_scores)?;
     save_runtime_usage_snapshots(paths, &merged_usage_snapshots)?;
+    save_runtime_profile_backoffs(paths, &merged_backoffs)?;
     Ok(true)
 }
 
@@ -1215,6 +1298,7 @@ struct RuntimeStateSaveJob {
     state: AppState,
     profile_scores: BTreeMap<String, RuntimeProfileHealth>,
     usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    backoffs: RuntimeProfileBackoffs,
     revision: u64,
     latest_revision: Arc<AtomicU64>,
     log_path: PathBuf,
@@ -1281,6 +1365,12 @@ struct RuntimeProfileUsageSnapshot {
     weekly_reset_at: i64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RuntimeProfileBackoffs {
+    retry_backoff_until: BTreeMap<String, i64>,
+    transport_backoff_until: BTreeMap<String, i64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeProbeCacheFreshness {
     Fresh,
@@ -1314,6 +1404,10 @@ struct RuntimeDoctorSummary {
     facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
     first_timestamp: Option<String>,
     last_timestamp: Option<String>,
+    selection_pressure: String,
+    transport_pressure: String,
+    persistence_pressure: String,
+    quota_freshness_pressure: String,
     diagnosis: String,
 }
 
@@ -2423,6 +2517,10 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         "marker_last_fields": marker_last_fields,
         "facet_counts": facet_counts,
         "last_marker_line": summary.last_marker_line,
+        "selection_pressure": summary.selection_pressure,
+        "transport_pressure": summary.transport_pressure,
+        "persistence_pressure": summary.persistence_pressure,
+        "quota_freshness_pressure": summary.quota_freshness_pressure,
         "diagnosis": summary.diagnosis,
     })
 }
@@ -2559,6 +2657,22 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_top_facet(&summary, "quota_source").unwrap_or_else(|| "-".to_string()),
         ),
         (
+            "Selection pressure".to_string(),
+            summary.selection_pressure.clone(),
+        ),
+        (
+            "Transport pressure".to_string(),
+            summary.transport_pressure.clone(),
+        ),
+        (
+            "Persistence pressure".to_string(),
+            summary.persistence_pressure.clone(),
+        ),
+        (
+            "Quota freshness".to_string(),
+            summary.quota_freshness_pressure.clone(),
+        ),
+        (
             "Last marker".to_string(),
             summary
                 .last_marker_line
@@ -2608,6 +2722,45 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
     summary.pointer_exists = pointer_exists;
     summary.log_exists = log_exists;
     summary.log_path = log_path;
+    summary.selection_pressure = if runtime_doctor_marker_count(&summary, "selection_pick") > 0
+        || runtime_doctor_marker_count(&summary, "selection_skip_current") > 0
+        || runtime_doctor_marker_count(&summary, "selection_skip_affinity") > 0
+        || runtime_doctor_marker_count(&summary, "precommit_budget_exhausted") > 0
+    {
+        "elevated".to_string()
+    } else {
+        "low".to_string()
+    };
+    summary.transport_pressure = if runtime_doctor_marker_count(&summary, "stream_read_error") > 0
+        || runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
+        || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
+        || runtime_doctor_marker_count(&summary, "profile_transport_backoff") > 0
+    {
+        "elevated".to_string()
+    } else {
+        "low".to_string()
+    };
+    summary.persistence_pressure = if runtime_doctor_marker_count(&summary, "state_save_error") > 0
+    {
+        "elevated".to_string()
+    } else if runtime_doctor_marker_count(&summary, "state_save_skipped") > 0 {
+        "active".to_string()
+    } else {
+        "low".to_string()
+    };
+    summary.quota_freshness_pressure =
+        if runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0
+            || runtime_doctor_top_facet(&summary, "quota_source")
+                .is_some_and(|value| value.starts_with("persisted_snapshot "))
+        {
+            "stale_risk".to_string()
+        } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0
+            || runtime_doctor_marker_count(&summary, "profile_probe_refresh_ok") > 0
+        {
+            "active".to_string()
+        } else {
+            "low".to_string()
+        };
     if summary.diagnosis.is_empty() {
         summary.diagnosis = if !summary.pointer_exists {
             "No runtime log pointer has been created yet.".to_string()
@@ -2775,8 +2928,11 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "state_save_skipped",
         "state_save_error",
         "runtime_proxy_restore_counts",
+        "profile_probe_refresh_queued",
         "profile_probe_refresh_start",
+        "profile_probe_refresh_ok",
         "profile_probe_refresh_error",
+        "quota_blocked_affinity_released",
     ]
     .into_iter()
     .find(|marker| line.contains(marker))
@@ -4090,11 +4246,31 @@ fn start_runtime_rotation_proxy(
         load_runtime_profile_scores(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
     let persisted_usage_snapshots =
         load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
+    let persisted_backoffs =
+        load_runtime_profile_backoffs(paths, &state.profiles).unwrap_or_default();
     let persisted_profile_scores_count = persisted_profile_scores.len();
     let persisted_usage_snapshots_count = persisted_usage_snapshots.len();
+    let persisted_retry_backoffs_count = persisted_backoffs.retry_backoff_until.len();
+    let persisted_transport_backoffs_count = persisted_backoffs.transport_backoff_until.len();
     let expired_usage_snapshot_count = persisted_usage_snapshots
         .values()
         .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, Local::now().timestamp()))
+        .count();
+    let restored_global_scores_count = persisted_profile_scores
+        .keys()
+        .filter(|key| !key.starts_with("__route_"))
+        .count();
+    let restored_route_scores_count = persisted_profile_scores
+        .keys()
+        .filter(|key| key.starts_with("__route_health__"))
+        .count();
+    let restored_bad_pairing_count = persisted_profile_scores
+        .keys()
+        .filter(|key| key.starts_with("__route_bad_pairing__"))
+        .count();
+    let restored_success_streak_count = persisted_profile_scores
+        .keys()
+        .filter(|key| key.starts_with("__route_success__"))
         .count();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder()
@@ -4122,8 +4298,8 @@ fn start_runtime_rotation_proxy(
             session_id_bindings: state.session_profile_bindings.clone(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: persisted_usage_snapshots,
-            profile_retry_backoff_until: BTreeMap::new(),
-            profile_transport_backoff_until: BTreeMap::new(),
+            profile_retry_backoff_until: persisted_backoffs.retry_backoff_until,
+            profile_transport_backoff_until: persisted_backoffs.transport_backoff_until,
             profile_inflight: BTreeMap::new(),
             profile_health: persisted_profile_scores,
         })),
@@ -4137,10 +4313,16 @@ fn start_runtime_rotation_proxy(
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={}",
+            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} retry_backoffs={} transport_backoffs={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={}",
             persisted_profile_scores_count,
             persisted_usage_snapshots_count,
             expired_usage_snapshot_count,
+            persisted_retry_backoffs_count,
+            persisted_transport_backoffs_count,
+            restored_global_scores_count,
+            restored_route_scores_count,
+            restored_bad_pairing_count,
+            restored_success_streak_count,
         ),
     );
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -4852,6 +5034,7 @@ fn remember_runtime_session_id(
         let state_snapshot = runtime.state.clone();
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
         let paths_snapshot = runtime.paths.clone();
         drop(runtime);
         schedule_runtime_state_save(
@@ -4859,6 +5042,7 @@ fn remember_runtime_session_id(
             state_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
+            backoffs_snapshot,
             paths_snapshot,
             &format!("session_id:{profile_name}"),
         );
@@ -4912,6 +5096,7 @@ fn remember_runtime_response_ids(
         let state_snapshot = runtime.state.clone();
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
         let paths_snapshot = runtime.paths.clone();
         drop(runtime);
         schedule_runtime_state_save(
@@ -4919,6 +5104,7 @@ fn remember_runtime_response_ids(
             state_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
+            backoffs_snapshot,
             paths_snapshot,
             &format!("response_ids:{profile_name}"),
         );
@@ -4988,6 +5174,7 @@ fn release_runtime_quota_blocked_affinity(
         let state_snapshot = runtime.state.clone();
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
         let paths_snapshot = runtime.paths.clone();
         drop(runtime);
         schedule_runtime_state_save(
@@ -4995,6 +5182,7 @@ fn release_runtime_quota_blocked_affinity(
             state_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
+            backoffs_snapshot,
             paths_snapshot,
             &format!("quota_release:{profile_name}"),
         );
@@ -6592,13 +6780,67 @@ fn proxy_runtime_standard_request(
         .transpose()?
         .flatten();
     if !is_runtime_compact_path(&request.path_and_query) {
-        let profile_name = session_profile.unwrap_or(runtime_proxy_current_profile(shared)?);
-        return proxy_runtime_standard_request_for_profile(
-            request_id,
-            request,
+        let current_profile = runtime_proxy_current_profile(shared)?;
+        let preferred_profile = session_profile
+            .clone()
+            .unwrap_or_else(|| current_profile.clone());
+        let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route(
             shared,
-            &profile_name,
+            &preferred_profile,
+            RuntimeRouteKind::Standard,
+        )?;
+        if quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
+            return proxy_runtime_standard_request_for_profile(
+                request_id,
+                request,
+                shared,
+                &preferred_profile,
+            );
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http {} profile={} reason=quota_exhausted quota_source={} {}",
+                if session_profile.as_deref() == Some(preferred_profile.as_str()) {
+                    format!(
+                        "selection_skip_affinity route={} affinity=session",
+                        runtime_route_kind_label(RuntimeRouteKind::Standard)
+                    )
+                } else {
+                    format!(
+                        "selection_skip_current route={}",
+                        runtime_route_kind_label(RuntimeRouteKind::Standard)
+                    )
+                },
+                preferred_profile,
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
         );
+        let mut excluded_profiles = BTreeSet::from([preferred_profile]);
+        if let Some(candidate_name) = select_runtime_response_candidate_for_route(
+            shared,
+            &excluded_profiles,
+            None,
+            None,
+            None,
+            false,
+            RuntimeRouteKind::Standard,
+        )? {
+            return proxy_runtime_standard_request_for_profile(
+                request_id,
+                request,
+                shared,
+                &candidate_name,
+            );
+        }
+        excluded_profiles.clear();
+        return Ok(build_runtime_proxy_text_response(
+            503,
+            runtime_proxy_local_selection_failure_message(),
+        ));
     }
 
     let current_profile = runtime_proxy_current_profile(shared)?;
@@ -7612,6 +7854,7 @@ fn next_runtime_response_candidate_for_route(
         let state_snapshot = runtime.state.clone();
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
         let paths_snapshot = runtime.paths.clone();
         drop(runtime);
         if usage_snapshot_changed {
@@ -7620,6 +7863,7 @@ fn next_runtime_response_candidate_for_route(
                 state_snapshot,
                 profile_scores_snapshot,
                 usage_snapshots,
+                backoffs_snapshot,
                 paths_snapshot,
                 "usage_snapshot:sync_probe",
             );
@@ -7829,6 +8073,7 @@ fn update_runtime_profile_probe_cache_with_usage(
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     schedule_runtime_state_save(
@@ -7836,6 +8081,7 @@ fn update_runtime_profile_probe_cache_with_usage(
         state_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
+        backoffs_snapshot,
         paths_snapshot,
         &format!("usage_snapshot:{profile_name}"),
     );
@@ -8237,6 +8483,13 @@ fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> 
     }
 }
 
+fn runtime_profile_backoffs_snapshot(runtime: &RuntimeRotationState) -> RuntimeProfileBackoffs {
+    RuntimeProfileBackoffs {
+        retry_backoff_until: runtime.profile_retry_backoff_until.clone(),
+        transport_backoff_until: runtime.profile_transport_backoff_until.clone(),
+    }
+}
+
 fn runtime_quota_source_label(source: RuntimeQuotaSource) -> &'static str {
     match source {
         RuntimeQuotaSource::LiveProbe => "probe_cache",
@@ -8526,6 +8779,7 @@ fn bump_runtime_profile_bad_pairing_score(
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     runtime_proxy_log(
@@ -8540,6 +8794,7 @@ fn bump_runtime_profile_bad_pairing_score(
         state_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
+        backoffs_snapshot,
         paths_snapshot,
         &format!(
             "profile_bad_pairing:{profile_name}:{}",
@@ -8580,6 +8835,7 @@ fn bump_runtime_profile_health_score(
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     runtime_proxy_log(
@@ -8594,6 +8850,7 @@ fn bump_runtime_profile_health_score(
         state_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
+        backoffs_snapshot,
         paths_snapshot,
         &format!(
             "profile_health:{profile_name}:{}",
@@ -8663,16 +8920,28 @@ fn mark_runtime_profile_retry_backoff(
     let now = Local::now().timestamp();
     prune_runtime_profile_selection_backoff(&mut runtime, now);
     runtime.profile_probe_cache.remove(profile_name);
-    runtime.profile_retry_backoff_until.insert(
-        profile_name.to_string(),
-        now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS),
-    );
+    let until = now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS);
+    runtime
+        .profile_retry_backoff_until
+        .insert(profile_name.to_string(), until);
+    let state_snapshot = runtime.state.clone();
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_retry_backoff profile={profile_name} until={}",
-            now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS)
-        ),
+        format!("profile_retry_backoff profile={profile_name} until={until}"),
+    );
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!("profile_retry_backoff:{profile_name}"),
     );
     Ok(())
 }
@@ -8709,11 +8978,26 @@ fn mark_runtime_profile_transport_backoff(
         .entry(profile_name.to_string())
         .and_modify(|current| *current = (*current).max(until))
         .or_insert(until);
+    let state_snapshot = runtime.state.clone();
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
     runtime_proxy_log(
         shared,
         format!(
             "profile_transport_backoff profile={profile_name} until={until} seconds={next_backoff_seconds} context={context}"
         ),
+    );
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!("profile_transport_backoff:{profile_name}"),
     );
     Ok(())
 }
@@ -8773,6 +9057,7 @@ fn commit_runtime_proxy_profile_selection(
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
     let should_persist = switched
@@ -8786,6 +9071,7 @@ fn commit_runtime_proxy_profile_selection(
             state_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
+            backoffs_snapshot,
             paths_snapshot,
             &format!("profile_commit:{profile_name}"),
         );

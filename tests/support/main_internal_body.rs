@@ -4812,6 +4812,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
             &snapshot,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &RuntimeProfileBackoffs::default(),
             1,
             &revision,
         )
@@ -4917,6 +4918,10 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             },
         )]),
         BTreeMap::new(),
+        RuntimeProfileBackoffs {
+            retry_backoff_until: BTreeMap::from([("main".to_string(), Local::now().timestamp() + 60)]),
+            transport_backoff_until: BTreeMap::new(),
+        },
         paths.clone(),
         "first",
     );
@@ -4949,6 +4954,10 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             },
         )]),
         BTreeMap::new(),
+        RuntimeProfileBackoffs {
+            retry_backoff_until: BTreeMap::new(),
+            transport_backoff_until: BTreeMap::from([("second".to_string(), Local::now().timestamp() + 120)]),
+        },
         paths.clone(),
         "second",
     );
@@ -4978,6 +4987,8 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
     );
     let persisted_scores =
         load_runtime_profile_scores(&paths, &profiles).expect("runtime scores should reload");
+    let persisted_backoffs =
+        load_runtime_profile_backoffs(&paths, &profiles).expect("runtime backoffs should reload");
     assert!(
         persisted_scores.contains_key(&runtime_profile_route_health_key(
             "second",
@@ -4985,6 +4996,10 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         )),
         "latest queued runtime scores should persist alongside state"
     );
+    assert!(persisted_backoffs
+        .transport_backoff_until
+        .get("second")
+        .is_some_and(|until| *until > Local::now().timestamp()));
 }
 
 #[test]
