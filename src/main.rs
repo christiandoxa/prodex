@@ -1342,6 +1342,9 @@ enum RuntimeResponsesAttempt {
         response: RuntimeResponsesReply,
         turn_state: Option<String>,
     },
+    LocalSelectionBlocked {
+        profile_name: String,
+    },
 }
 
 enum RuntimeStandardAttempt {
@@ -1353,6 +1356,9 @@ enum RuntimeStandardAttempt {
         profile_name: String,
         response: tiny_http::ResponseBox,
         overload: bool,
+    },
+    LocalSelectionBlocked {
+        profile_name: String,
     },
 }
 
@@ -2517,6 +2523,14 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "state_save_error").to_string(),
         ),
         (
+            "State save ok".to_string(),
+            runtime_doctor_marker_count(&summary, "state_save_ok").to_string(),
+        ),
+        (
+            "State save skipped".to_string(),
+            runtime_doctor_marker_count(&summary, "state_save_skipped").to_string(),
+        ),
+        (
             "Probe refresh".to_string(),
             runtime_doctor_marker_count(&summary, "profile_probe_refresh_start").to_string(),
         ),
@@ -2535,6 +2549,14 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
         (
             "Hot profile".to_string(),
             runtime_doctor_top_facet(&summary, "profile").unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Hot reason".to_string(),
+            runtime_doctor_top_facet(&summary, "reason").unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Quota source".to_string(),
+            runtime_doctor_top_facet(&summary, "quota_source").unwrap_or_else(|| "-".to_string()),
         ),
         (
             "Last marker".to_string(),
@@ -2672,7 +2694,18 @@ fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             *summary.marker_counts.entry(marker).or_insert(0) += 1;
             summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
             let fields = runtime_doctor_parse_fields(line);
-            for facet in ["lane", "route", "profile", "reason", "transport"] {
+            for facet in [
+                "lane",
+                "route",
+                "profile",
+                "reason",
+                "transport",
+                "quota_source",
+                "affinity",
+                "context",
+                "event",
+                "stage",
+            ] {
                 if let Some(value) = fields.get(facet).cloned() {
                     *summary
                         .facet_counts
@@ -2732,10 +2765,16 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "profile_bad_pairing",
         "selection_pick",
         "selection_skip_current",
+        "selection_skip_affinity",
+        "quota_release_profile_affinity",
+        "websocket_reuse_skip_quota_exhausted",
         "stream_read_error",
         "first_upstream_chunk",
         "first_local_chunk",
+        "state_save_ok",
+        "state_save_skipped",
         "state_save_error",
+        "runtime_proxy_restore_counts",
         "profile_probe_refresh_start",
         "profile_probe_refresh_error",
     ]
@@ -4051,6 +4090,12 @@ fn start_runtime_rotation_proxy(
         load_runtime_profile_scores(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
     let persisted_usage_snapshots =
         load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
+    let persisted_profile_scores_count = persisted_profile_scores.len();
+    let persisted_usage_snapshots_count = persisted_usage_snapshots.len();
+    let expired_usage_snapshot_count = persisted_usage_snapshots
+        .values()
+        .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, Local::now().timestamp()))
+        .count();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(
@@ -4087,6 +4132,15 @@ fn start_runtime_rotation_proxy(
         &log_path,
         &format!(
             "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} upstream_base_url={upstream_base_url}"
+        ),
+    );
+    runtime_proxy_log_to_path(
+        &log_path,
+        &format!(
+            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={}",
+            persisted_profile_scores_count,
+            persisted_usage_snapshots_count,
+            expired_usage_snapshot_count,
         ),
     );
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -6721,6 +6775,15 @@ fn proxy_runtime_standard_request(
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(response);
             }
+            RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http local_selection_blocked profile={profile_name} route=compact reason=quota_exhausted_before_send"
+                    ),
+                );
+                excluded_profiles.insert(profile_name);
+            }
         }
     }
 }
@@ -6786,6 +6849,23 @@ fn attempt_runtime_standard_request(
     profile_name: &str,
 ) -> Result<RuntimeStandardAttempt> {
     let request_session_id = runtime_request_session_id(request);
+    let (quota_summary, quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Compact)?;
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http standard_pre_send_skip profile={profile_name} route=compact quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+        });
+    }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
     let response =
@@ -6955,6 +7035,10 @@ fn proxy_runtime_responses_request(
                         RuntimeResponsesAttempt::PreviousResponseNotFound { response, .. } => {
                             return Ok(response);
                         }
+                        RuntimeResponsesAttempt::LocalSelectionBlocked { profile_name } => {
+                            excluded_profiles.insert(profile_name);
+                            continue;
+                        }
                     }
                 }
             }
@@ -7049,6 +7133,10 @@ fn proxy_runtime_responses_request(
                         }
                         RuntimeResponsesAttempt::PreviousResponseNotFound { response, .. } => {
                             return Ok(response);
+                        }
+                        RuntimeResponsesAttempt::LocalSelectionBlocked { profile_name } => {
+                            excluded_profiles.insert(profile_name);
+                            continue;
                         }
                     }
                 }
@@ -7175,6 +7263,32 @@ fn proxy_runtime_responses_request(
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
             }
+            RuntimeResponsesAttempt::LocalSelectionBlocked { profile_name } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http local_selection_blocked profile={profile_name} route=responses reason=quota_exhausted_before_send"
+                    ),
+                );
+                if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                }
+                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                    pinned_profile = None;
+                    previous_response_retry_index = 0;
+                }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
+                }
+                excluded_profiles.insert(profile_name);
+            }
             RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name,
                 response,
@@ -7236,6 +7350,23 @@ fn attempt_runtime_responses_request(
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
     let request_session_id = runtime_request_session_id(request);
+    let (quota_summary, quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Responses)?;
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+        });
+    }
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
     let response = send_runtime_proxy_upstream_responses_request(

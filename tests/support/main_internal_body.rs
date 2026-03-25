@@ -4171,11 +4171,16 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         "route".to_string(),
         BTreeMap::from([("responses".to_string(), 2)]),
     );
+    summary.facet_counts.insert(
+        "quota_source".to_string(),
+        BTreeMap::from([("persisted_snapshot".to_string(), 1)]),
+    );
     summary.marker_last_fields.insert(
         "selection_pick",
         BTreeMap::from([
             ("profile".to_string(), "second".to_string()),
             ("route".to_string(), "responses".to_string()),
+            ("quota_source".to_string(), "persisted_snapshot".to_string()),
         ]),
     );
     summary.diagnosis = "Recent selection decisions were logged.".to_string();
@@ -4188,8 +4193,16 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["marker_counts"]["selection_skip_current"], 1);
     assert_eq!(value["facet_counts"]["route"]["responses"], 2);
     assert_eq!(
+        value["facet_counts"]["quota_source"]["persisted_snapshot"],
+        1
+    );
+    assert_eq!(
         value["marker_last_fields"]["selection_pick"]["profile"],
         "second"
+    );
+    assert_eq!(
+        value["marker_last_fields"]["selection_pick"]["quota_source"],
+        "persisted_snapshot"
     );
     assert_eq!(
         value["diagnosis"],
@@ -5455,16 +5468,18 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.010 +07:00] request=1 transport=http first_local_chunk profile=main bytes=128 elapsed_ms=10
 [2026-03-20 12:00:00.020 +07:00] profile_transport_backoff profile=main until=123 reason=stream_read_error
 [2026-03-20 12:00:00.030 +07:00] profile_health profile=main score=4 delta=4 reason=stream_read_error
+[2026-03-20 12:00:00.035 +07:00] selection_skip_affinity route=responses affinity=session profile=main reason=quota_exhausted quota_source=persisted_snapshot
 [2026-03-20 12:00:00.040 +07:00] runtime_proxy_active_limit_reached transport=http path=/backend-api/codex/responses active=12 limit=12
 [2026-03-20 12:00:00.050 +07:00] runtime_proxy_lane_limit_reached transport=http path=/backend-api/codex/responses lane=responses active=9 limit=9
 [2026-03-20 12:00:00.060 +07:00] profile_inflight_saturated profile=main hard_limit=8
 [2026-03-20 12:00:00.070 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
+[2026-03-20 12:00:00.075 +07:00] state_save_skipped revision=2 reason=session_id:main
 [2026-03-20 12:00:00.080 +07:00] profile_probe_refresh_start profile=second
 [2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_error profile=third error=timeout
 "#,
         );
 
-    assert_eq!(summary.line_count, 10);
+    assert_eq!(summary.line_count, 12);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -5487,6 +5502,10 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     );
     assert_eq!(runtime_doctor_marker_count(&summary, "profile_health"), 1);
     assert_eq!(
+        runtime_doctor_marker_count(&summary, "selection_skip_affinity"),
+        1
+    );
+    assert_eq!(
         runtime_doctor_marker_count(&summary, "first_upstream_chunk"),
         1
     );
@@ -5498,9 +5517,22 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_start"),
         1
     );
+    assert_eq!(runtime_doctor_marker_count(&summary, "state_save_skipped"), 1);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_error"),
         1
+    );
+    assert_eq!(
+        runtime_doctor_top_facet(&summary, "quota_source").as_deref(),
+        Some("persisted_snapshot (1)")
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("selection_skip_affinity")
+            .and_then(|fields| fields.get("affinity"))
+            .map(String::as_str),
+        Some("session")
     );
     assert!(
         summary
@@ -5508,6 +5540,182 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
             .as_deref()
             .is_some_and(|line| line.contains("profile_probe_refresh_error"))
     );
+}
+
+#[test]
+fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths: paths.clone(),
+        state,
+        upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 81,
+                five_hour_reset_at: Local::now().timestamp() + 3600,
+                weekly_status: RuntimeQuotaWindowStatus::Exhausted,
+                weekly_remaining_percent: 0,
+                weekly_reset_at: Local::now().timestamp() + 300,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{"input":[]}"#.to_vec(),
+    };
+
+    match attempt_runtime_responses_request(1, &request, &shared, "main", None)
+        .expect("responses attempt should succeed")
+    {
+        RuntimeResponsesAttempt::LocalSelectionBlocked { profile_name } => {
+            assert_eq!(profile_name, "main");
+        }
+        _ => panic!("expected exhausted pre-send responses skip"),
+    }
+}
+
+#[test]
+fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths: paths.clone(),
+        state,
+        upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_remaining_percent: 0,
+                five_hour_reset_at: Local::now().timestamp() + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 90,
+                weekly_reset_at: Local::now().timestamp() + 86_400,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![("session_id".to_string(), "sess-123".to_string())],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    match attempt_runtime_standard_request(1, &request, &shared, "main")
+        .expect("standard attempt should succeed")
+    {
+        RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
+            assert_eq!(profile_name, "main");
+        }
+        _ => panic!("expected exhausted pre-send compact skip"),
+    }
 }
 
 #[test]
