@@ -67,6 +67,9 @@ const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 const RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS: i64 = if cfg!(test) { 30 } else { 300 };
+const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 21_600 };
+const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
+const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
 const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
@@ -645,6 +648,10 @@ fn runtime_scores_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-scores.json")
 }
 
+fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join("update-check.json")
+}
+
 fn runtime_profile_score_profile_name(key: &str) -> &str {
     key.rsplit(':').next().unwrap_or(key)
 }
@@ -876,6 +883,23 @@ struct ProfileEntry {
 struct ResponseProfileBinding {
     profile_name: String,
     bound_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct UpdateCheckCache {
+    latest_version: String,
+    checked_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CratesIoVersionResponse {
+    #[serde(rename = "crate")]
+    crate_info: CratesIoCrateInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct CratesIoCrateInfo {
+    max_version: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1598,6 +1622,120 @@ fn print_wrapped_stderr(message: &str) {
     }
 }
 
+fn show_update_notice_if_available(command: &Commands) -> Result<()> {
+    if !should_emit_update_notice(command) {
+        return Ok(());
+    }
+
+    let paths = AppPaths::discover()?;
+    if let Some(latest_version) = latest_prodex_version(&paths)?
+        && version_is_newer(&latest_version, env!("CARGO_PKG_VERSION"))
+    {
+        print_wrapped_stderr(&section_header("Update Available"));
+        print_wrapped_stderr(&format!(
+            "A newer prodex release is available: {} -> {}",
+            env!("CARGO_PKG_VERSION"),
+            latest_version
+        ));
+        print_wrapped_stderr("Update with: cargo install prodex --force");
+    }
+
+    Ok(())
+}
+
+fn should_emit_update_notice(command: &Commands) -> bool {
+    match command {
+        Commands::Doctor(args) => !args.json,
+        Commands::Quota(args) => !args.raw,
+        _ => true,
+    }
+}
+
+fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
+    if let Some(cached) = load_update_check_cache(paths)?
+        && Local::now().timestamp().saturating_sub(cached.checked_at)
+            < UPDATE_CHECK_CACHE_TTL_SECONDS
+    {
+        return Ok(Some(cached.latest_version));
+    }
+
+    let latest_version = match fetch_latest_prodex_version() {
+        Ok(version) => version,
+        Err(_) => return Ok(None),
+    };
+    save_update_check_cache(
+        paths,
+        &UpdateCheckCache {
+            latest_version: latest_version.clone(),
+            checked_at: Local::now().timestamp(),
+        },
+    )?;
+    Ok(Some(latest_version))
+}
+
+fn load_update_check_cache(paths: &AppPaths) -> Result<Option<UpdateCheckCache>> {
+    let path = update_check_cache_file_path(paths);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let cache = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(Some(cache))
+}
+
+fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result<()> {
+    fs::create_dir_all(&paths.root)
+        .with_context(|| format!("failed to create {}", paths.root.display()))?;
+    let path = update_check_cache_file_path(paths);
+    let temp_file = unique_state_temp_file_path(&path);
+    let json =
+        serde_json::to_string_pretty(cache).context("failed to serialize update check cache")?;
+    fs::write(&temp_file, json)
+        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    fs::rename(&temp_file, &path)
+        .with_context(|| format!("failed to replace update cache file {}", path.display()))?;
+    Ok(())
+}
+
+fn fetch_latest_prodex_version() -> Result<String> {
+    let client = Client::builder()
+        .connect_timeout(Duration::from_millis(UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(UPDATE_CHECK_HTTP_READ_TIMEOUT_MS))
+        .build()
+        .context("failed to build update-check HTTP client")?;
+    let response = client
+        .get("https://crates.io/api/v1/crates/prodex")
+        .header(
+            "User-Agent",
+            format!("prodex/{}", env!("CARGO_PKG_VERSION")),
+        )
+        .send()
+        .context("failed to request crates.io prodex metadata")?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .context("failed to read crates.io prodex metadata")?;
+    if !status.is_success() {
+        bail!("crates.io returned HTTP {}", status.as_u16());
+    }
+    let payload: CratesIoVersionResponse =
+        serde_json::from_slice(&body).context("failed to parse crates.io prodex metadata")?;
+    Ok(payload.crate_info.max_version)
+}
+
+fn version_is_newer(candidate: &str, current: &str) -> bool {
+    parse_release_version(candidate) > parse_release_version(current)
+}
+
+fn parse_release_version(version: &str) -> Vec<u64> {
+    version
+        .split('.')
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
 fn timeout_override_ms(env_key: &str, default_ms: u64) -> u64 {
     env::var(env_key)
         .ok()
@@ -1683,6 +1821,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    let _ = show_update_notice_if_available(&cli.command);
     match cli.command {
         Commands::Profile(command) => handle_profile_command(command),
         Commands::UseProfile(selector) => handle_set_active_profile(selector),
@@ -10442,4 +10581,36 @@ fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
 
 fn codex_bin() -> OsString {
     env::var_os("PRODEX_CODEX_BIN").unwrap_or_else(|| OsString::from("codex"))
+}
+
+#[cfg(test)]
+mod update_notice_tests {
+    use super::*;
+
+    #[test]
+    fn version_is_newer_compares_semver_like_versions() {
+        assert!(version_is_newer("0.2.47", "0.2.46"));
+        assert!(version_is_newer("1.0.0", "0.9.9"));
+        assert!(!version_is_newer("0.2.46", "0.2.46"));
+        assert!(!version_is_newer("0.2.45", "0.2.46"));
+    }
+
+    #[test]
+    fn update_notice_is_suppressed_for_machine_output_modes() {
+        assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
+            quota: false,
+            runtime: true,
+            json: true,
+        })));
+        assert!(!should_emit_update_notice(&Commands::Quota(QuotaArgs {
+            profile: None,
+            all: false,
+            detail: false,
+            raw: true,
+            watch: false,
+            once: false,
+            base_url: None,
+        })));
+        assert!(should_emit_update_notice(&Commands::Current));
+    }
 }
