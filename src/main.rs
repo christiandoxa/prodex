@@ -1121,6 +1121,7 @@ struct ReadyProfileCandidate {
     usage: UsageResponse,
     order_index: usize,
     preferred: bool,
+    quota_source: RuntimeQuotaSource,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1172,6 +1173,12 @@ enum RuntimeQuotaPressureBand {
     Critical,
     Exhausted,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeQuotaSource {
+    LiveProbe,
+    PersistedSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -3191,13 +3198,14 @@ fn handle_quota(args: QuotaArgs) -> Result<()> {
 }
 
 fn handle_run(args: RunArgs) -> Result<()> {
+    let codex_args = normalize_run_codex_args(&args.codex_args);
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
     let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
     let mut selected_profile_name = profile_name.clone();
     let explicit_profile_requested = args.profile.is_some();
     let allow_auto_rotate = !args.no_auto_rotate;
-    let include_code_review = is_review_invocation(&args.codex_args);
+    let include_code_review = is_review_invocation(&codex_args);
     let mut codex_home = state
         .profiles
         .get(&profile_name)
@@ -3207,6 +3215,8 @@ fn handle_run(args: RunArgs) -> Result<()> {
 
     if !args.skip_quota_check {
         if allow_auto_rotate && !explicit_profile_requested && state.profiles.len() > 1 {
+            let persisted_usage_snapshots =
+                load_runtime_usage_snapshots(&paths, &state.profiles).unwrap_or_default();
             let reports = collect_run_profile_reports(
                 &state,
                 active_profile_selection_order(&state, &profile_name),
@@ -3217,6 +3227,7 @@ fn handle_run(args: RunArgs) -> Result<()> {
                 include_code_review,
                 Some(&profile_name),
                 &state,
+                Some(&persisted_usage_snapshots),
             );
             let selected_report = reports.iter().find(|report| report.name == profile_name);
 
@@ -3409,11 +3420,36 @@ fn handle_run(args: RunArgs) -> Result<()> {
     };
     let runtime_args = runtime_proxy
         .as_ref()
-        .map(|proxy| runtime_proxy_codex_args(proxy.listen_addr, &args.codex_args))
-        .unwrap_or_else(|| args.codex_args.clone());
+        .map(|proxy| runtime_proxy_codex_args(proxy.listen_addr, &codex_args))
+        .unwrap_or(codex_args);
 
     let status = run_child(&codex_bin(), &runtime_args, &codex_home)?;
     exit_with_status(status)
+}
+
+fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
+    let Some(first) = codex_args.first().and_then(|arg| arg.to_str()) else {
+        return codex_args.to_vec();
+    };
+    if !looks_like_codex_session_id(first) {
+        return codex_args.to_vec();
+    }
+
+    let mut normalized = Vec::with_capacity(codex_args.len() + 1);
+    normalized.push(OsString::from("resume"));
+    normalized.extend(codex_args.iter().cloned());
+    normalized
+}
+
+fn looks_like_codex_session_id(value: &str) -> bool {
+    let parts = value.split('-').collect::<Vec<_>>();
+    if parts.len() != 5 {
+        return false;
+    }
+    let expected_lengths = [8usize, 4, 4, 4, 12];
+    parts.iter().zip(expected_lengths).all(|(part, expected)| {
+        part.len() == expected && part.chars().all(|ch| ch.is_ascii_hexdigit())
+    })
 }
 
 fn record_run_selection(state: &mut AppState, profile_name: &str) {
@@ -5013,7 +5049,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         in_selection_backoff,
         inflight_count,
         health_score,
-        quota_summary,
+        (quota_summary, quota_source),
     ) = {
         let mut runtime = shared
             .runtime
@@ -5040,29 +5076,40 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 .get(&runtime.current_profile)
                 .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
                 .and_then(|entry| entry.result.as_ref().ok())
-                .map(|usage| runtime_quota_summary_for_route(usage, route_kind))
+                .map(|usage| {
+                    (
+                        runtime_quota_summary_for_route(usage, route_kind),
+                        Some(RuntimeQuotaSource::LiveProbe),
+                    )
+                })
                 .or_else(|| {
                     runtime
                         .profile_usage_snapshots
                         .get(&runtime.current_profile)
                         .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
                         .map(|snapshot| {
-                            runtime_quota_summary_from_usage_snapshot(snapshot, route_kind)
+                            (
+                                runtime_quota_summary_from_usage_snapshot(snapshot, route_kind),
+                                Some(RuntimeQuotaSource::PersistedSnapshot),
+                            )
                         })
                 })
-                .unwrap_or(RuntimeQuotaSummary {
-                    five_hour: RuntimeQuotaWindowSummary {
-                        status: RuntimeQuotaWindowStatus::Unknown,
-                        remaining_percent: 0,
-                        reset_at: i64::MAX,
+                .unwrap_or((
+                    RuntimeQuotaSummary {
+                        five_hour: RuntimeQuotaWindowSummary {
+                            status: RuntimeQuotaWindowStatus::Unknown,
+                            remaining_percent: 0,
+                            reset_at: i64::MAX,
+                        },
+                        weekly: RuntimeQuotaWindowSummary {
+                            status: RuntimeQuotaWindowStatus::Unknown,
+                            remaining_percent: 0,
+                            reset_at: i64::MAX,
+                        },
+                        route_band: RuntimeQuotaPressureBand::Healthy,
                     },
-                    weekly: RuntimeQuotaWindowSummary {
-                        status: RuntimeQuotaWindowStatus::Unknown,
-                        remaining_percent: 0,
-                        reset_at: i64::MAX,
-                    },
-                    route_band: RuntimeQuotaPressureBand::Healthy,
-                }),
+                    None,
+                )),
         )
     };
 
@@ -5083,13 +5130,16 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={} {}",
+                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 current_profile,
                 reason,
                 inflight_count,
                 health_score,
                 RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
                 runtime_quota_summary_log_fields(quota_summary),
             ),
         );
@@ -5110,11 +5160,14 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     runtime_proxy_log(
         shared,
         format!(
-            "selection_keep_current route={} profile={} inflight={} health={} {}",
+            "selection_keep_current route={} profile={} inflight={} health={} quota_source={} {}",
             runtime_route_kind_label(route_kind),
             current_profile,
             inflight_count,
             health_score,
+            quota_source
+                .map(runtime_quota_source_label)
+                .unwrap_or("unknown"),
             runtime_quota_summary_log_fields(quota_summary),
         ),
     );
@@ -7133,6 +7186,7 @@ fn next_runtime_response_candidate_for_route(
         include_code_review,
         Some(current_profile.as_str()),
         &state,
+        Some(&cached_usage_snapshots),
     );
 
     if candidates.is_empty() && !cold_start_probe_jobs.is_empty() {
@@ -7218,6 +7272,7 @@ fn next_runtime_response_candidate_for_route(
             include_code_review,
             Some(current_profile.as_str()),
             &state,
+            Some(&cached_usage_snapshots),
         );
         for job in cold_start_probe_jobs
             .into_iter()
@@ -7266,7 +7321,11 @@ fn next_runtime_response_candidate_for_route(
                 runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
                 index,
-                runtime_quota_summary_log_fields(quota_summary),
+                format!(
+                    "quota_source={} {}",
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(quota_summary)
+                ),
             ),
         );
         return Ok(Some(candidate.name.clone()));
@@ -7294,7 +7353,7 @@ fn next_runtime_response_candidate_for_route(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} {}",
+                    "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} quota_source={} {}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
                     runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
@@ -7306,6 +7365,7 @@ fn next_runtime_response_candidate_for_route(
                         now,
                     ),
                     index,
+                    runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary),
                 ),
             );
@@ -7759,6 +7819,36 @@ fn runtime_quota_summary_from_usage_snapshot(
         five_hour,
         weekly,
         route_band,
+    }
+}
+
+fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {
+    UsageResponse {
+        email: None,
+        plan_type: None,
+        rate_limit: Some(WindowPair {
+            primary_window: Some(UsageWindow {
+                used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
+                reset_at: (snapshot.five_hour_reset_at != i64::MAX)
+                    .then_some(snapshot.five_hour_reset_at),
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: Some((100 - snapshot.weekly_remaining_percent).clamp(0, 100)),
+                reset_at: (snapshot.weekly_reset_at != i64::MAX)
+                    .then_some(snapshot.weekly_reset_at),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        additional_rate_limits: Vec::new(),
+    }
+}
+
+fn runtime_quota_source_label(source: RuntimeQuotaSource) -> &'static str {
+    match source {
+        RuntimeQuotaSource::LiveProbe => "probe_cache",
+        RuntimeQuotaSource::PersistedSnapshot => "persisted_snapshot",
     }
 }
 
@@ -9643,6 +9733,7 @@ fn ready_profile_candidates(
     include_code_review: bool,
     preferred_profile: Option<&str>,
     state: &AppState,
+    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
 ) -> Vec<ReadyProfileCandidate> {
     let candidates = reports
         .iter()
@@ -9651,16 +9742,31 @@ fn ready_profile_candidates(
                 return None;
             }
 
-            let usage = report.result.as_ref().ok()?;
-            if !collect_blocked_limits(usage, include_code_review).is_empty() {
+            let (usage, quota_source) = match report.result.as_ref() {
+                Ok(usage) => (usage.clone(), RuntimeQuotaSource::LiveProbe),
+                Err(_) => {
+                    let snapshot = persisted_usage_snapshots
+                        .and_then(|snapshots| snapshots.get(&report.name))?;
+                    let now = Local::now().timestamp();
+                    if !runtime_usage_snapshot_is_usable(snapshot, now) {
+                        return None;
+                    }
+                    (
+                        usage_from_runtime_usage_snapshot(snapshot),
+                        RuntimeQuotaSource::PersistedSnapshot,
+                    )
+                }
+            };
+            if !collect_blocked_limits(&usage, include_code_review).is_empty() {
                 return None;
             }
 
             Some(ReadyProfileCandidate {
                 name: report.name.clone(),
-                usage: usage.clone(),
+                usage,
                 order_index: report.order_index,
                 preferred: preferred_profile == Some(report.name.as_str()),
+                quota_source,
             })
         })
         .collect::<Vec<_>>();
@@ -10810,6 +10916,7 @@ fn find_ready_profiles(
         include_code_review,
         None,
         state,
+        None,
     )
     .into_iter()
     .map(|candidate| candidate.name)
@@ -11006,5 +11113,27 @@ mod update_notice_tests {
             update_check_cache_ttl_seconds("0.2.48", "0.2.47"),
             UPDATE_CHECK_CACHE_TTL_SECONDS
         );
+    }
+
+    #[test]
+    fn normalize_run_codex_args_rewrites_session_id_to_resume() {
+        let args = vec![
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("continue from here"),
+        ];
+        assert_eq!(
+            normalize_run_codex_args(&args),
+            vec![
+                OsString::from("resume"),
+                OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+                OsString::from("continue from here"),
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_run_codex_args_keeps_regular_prompt_intact() {
+        let args = vec![OsString::from("fix this bug")];
+        assert_eq!(normalize_run_codex_args(&args), args);
     }
 }
