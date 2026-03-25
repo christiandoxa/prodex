@@ -1458,6 +1458,9 @@ enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
     },
+    LocalSelectionBlocked {
+        profile_name: String,
+    },
     PreviousResponseNotFound {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
@@ -5160,7 +5163,7 @@ fn select_runtime_response_candidate_for_route(
     }
 
     if discover_previous_response_owner {
-        return next_runtime_previous_response_candidate(shared, excluded_profiles);
+        return next_runtime_previous_response_candidate(shared, excluded_profiles, route_kind);
     }
 
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
@@ -5196,6 +5199,7 @@ fn select_runtime_response_candidate_for_route(
 fn next_runtime_previous_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     let (state, current_profile) = {
         let runtime = shared
@@ -5205,15 +5209,37 @@ fn next_runtime_previous_response_candidate(
         (runtime.state.clone(), runtime.current_profile.clone())
     };
 
-    Ok(active_profile_selection_order(&state, &current_profile)
-        .into_iter()
-        .find(|name| {
-            !excluded_profiles.contains(name)
-                && state
-                    .profiles
-                    .get(name)
-                    .is_some_and(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
-        }))
+    for name in active_profile_selection_order(&state, &current_profile) {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        let Some(profile) = state.profiles.get(&name) else {
+            continue;
+        };
+        if !read_auth_summary(&profile.codex_home).quota_compatible {
+            continue;
+        }
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, &name, route_kind)?;
+        if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    name,
+                    runtime_quota_pressure_band_reason(quota_summary.route_band),
+                    quota_source
+                        .map(runtime_quota_source_label)
+                        .unwrap_or("unknown"),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            continue;
+        }
+        return Ok(Some(name));
+    }
+    Ok(None)
 }
 
 fn runtime_proxy_optimistic_current_candidate_for_route(
@@ -5586,14 +5612,7 @@ fn proxy_runtime_websocket_text_message(
     } else {
         None
     };
-    let mut pinned_profile = bound_profile
-        .clone()
-        .or(session_profile.clone())
-        .or_else(|| {
-            previous_response_id
-                .as_ref()
-                .and_then(|_| runtime_proxy_current_profile(shared).ok())
-        });
+    let mut pinned_profile = bound_profile.clone().or(session_profile.clone());
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -5659,6 +5678,10 @@ fn proxy_runtime_websocket_text_message(
                         RuntimeWebsocketAttempt::PreviousResponseNotFound { payload, .. } => {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
+                        }
+                        RuntimeWebsocketAttempt::LocalSelectionBlocked { profile_name } => {
+                            excluded_profiles.insert(profile_name);
+                            continue;
                         }
                     }
                 }
@@ -5750,6 +5773,10 @@ fn proxy_runtime_websocket_text_message(
                         RuntimeWebsocketAttempt::PreviousResponseNotFound { payload, .. } => {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
+                        }
+                        RuntimeWebsocketAttempt::LocalSelectionBlocked { profile_name } => {
+                            excluded_profiles.insert(profile_name);
+                            continue;
                         }
                     }
                 }
@@ -5872,6 +5899,32 @@ fn proxy_runtime_websocket_text_message(
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
+            RuntimeWebsocketAttempt::LocalSelectionBlocked { profile_name } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} local_selection_blocked profile={profile_name} reason=quota_exhausted_before_send"
+                    ),
+                );
+                if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                }
+                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                    pinned_profile = None;
+                    previous_response_retry_index = 0;
+                }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
+                }
+                excluded_profiles.insert(profile_name);
+            }
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
                 profile_name,
                 payload,
@@ -5936,6 +5989,24 @@ fn attempt_runtime_websocket_request(
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
     let request_session_id = runtime_request_session_id(handshake_request);
+    let (quota_summary, quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        websocket_session.close();
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket websocket_reuse_skip_quota_exhausted profile={profile_name} quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+        });
+    }
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
     let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
         if reuse_existing_session {
@@ -6806,11 +6877,7 @@ fn proxy_runtime_responses_request(
     } else {
         None
     };
-    let mut pinned_profile = bound_profile.clone().or_else(|| {
-        previous_response_id
-            .as_ref()
-            .and_then(|_| runtime_proxy_current_profile(shared).ok())
-    });
+    let mut pinned_profile = bound_profile.clone();
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
