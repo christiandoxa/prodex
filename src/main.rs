@@ -5056,6 +5056,57 @@ fn runtime_proxy_local_selection_failure_message() -> &'static str {
     "Runtime proxy could not secure a healthy upstream profile before the pre-commit retry budget was exhausted. Retry the request."
 }
 
+fn runtime_profile_quota_summary_for_route(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    Ok(runtime
+        .profile_probe_cache
+        .get(profile_name)
+        .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
+        .and_then(|entry| entry.result.as_ref().ok())
+        .map(|usage| {
+            (
+                runtime_quota_summary_for_route(usage, route_kind),
+                Some(RuntimeQuotaSource::LiveProbe),
+            )
+        })
+        .or_else(|| {
+            runtime
+                .profile_usage_snapshots
+                .get(profile_name)
+                .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
+                .map(|snapshot| {
+                    (
+                        runtime_quota_summary_from_usage_snapshot(snapshot, route_kind),
+                        Some(RuntimeQuotaSource::PersistedSnapshot),
+                    )
+                })
+        })
+        .unwrap_or((
+            RuntimeQuotaSummary {
+                five_hour: RuntimeQuotaWindowSummary {
+                    status: RuntimeQuotaWindowStatus::Unknown,
+                    remaining_percent: 0,
+                    reset_at: i64::MAX,
+                },
+                weekly: RuntimeQuotaWindowSummary {
+                    status: RuntimeQuotaWindowStatus::Unknown,
+                    remaining_percent: 0,
+                    reset_at: i64::MAX,
+                },
+                route_band: RuntimeQuotaPressureBand::Healthy,
+            },
+            None,
+        )))
+}
+
 fn select_runtime_response_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
@@ -5066,12 +5117,46 @@ fn select_runtime_response_candidate_for_route(
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     if let Some(profile_name) = pinned_profile.filter(|name| !excluded_profiles.contains(*name)) {
-        return Ok(Some(profile_name.to_string()));
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+            return Ok(Some(profile_name.to_string()));
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=pinned profile={} reason={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+                runtime_quota_pressure_band_reason(quota_summary.route_band),
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
     }
 
     if let Some(profile_name) = turn_state_profile.filter(|name| !excluded_profiles.contains(*name))
     {
-        return Ok(Some(profile_name.to_string()));
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+            return Ok(Some(profile_name.to_string()));
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=turn_state profile={} reason={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+                runtime_quota_pressure_band_reason(quota_summary.route_band),
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
     }
 
     if discover_previous_response_owner {
@@ -5079,7 +5164,24 @@ fn select_runtime_response_candidate_for_route(
     }
 
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
-        return Ok(Some(profile_name.to_string()));
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+            return Ok(Some(profile_name.to_string()));
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=session profile={} reason={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+                runtime_quota_pressure_band_reason(quota_summary.route_band),
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
     }
 
     if let Some(profile_name) =
@@ -5119,14 +5221,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (
-        current_profile,
-        codex_home,
-        in_selection_backoff,
-        inflight_count,
-        health_score,
-        (quota_summary, quota_source),
-    ) = {
+    let (current_profile, codex_home, in_selection_backoff, inflight_count, health_score) = {
         let mut runtime = shared
             .runtime
             .lock()
@@ -5147,47 +5242,10 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             runtime_profile_in_selection_backoff(&runtime, &runtime.current_profile, now),
             runtime_profile_inflight_count(&runtime, &runtime.current_profile),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now, route_kind),
-            runtime
-                .profile_probe_cache
-                .get(&runtime.current_profile)
-                .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
-                .and_then(|entry| entry.result.as_ref().ok())
-                .map(|usage| {
-                    (
-                        runtime_quota_summary_for_route(usage, route_kind),
-                        Some(RuntimeQuotaSource::LiveProbe),
-                    )
-                })
-                .or_else(|| {
-                    runtime
-                        .profile_usage_snapshots
-                        .get(&runtime.current_profile)
-                        .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
-                        .map(|snapshot| {
-                            (
-                                runtime_quota_summary_from_usage_snapshot(snapshot, route_kind),
-                                Some(RuntimeQuotaSource::PersistedSnapshot),
-                            )
-                        })
-                })
-                .unwrap_or((
-                    RuntimeQuotaSummary {
-                        five_hour: RuntimeQuotaWindowSummary {
-                            status: RuntimeQuotaWindowStatus::Unknown,
-                            remaining_percent: 0,
-                            reset_at: i64::MAX,
-                        },
-                        weekly: RuntimeQuotaWindowSummary {
-                            status: RuntimeQuotaWindowStatus::Unknown,
-                            remaining_percent: 0,
-                            reset_at: i64::MAX,
-                        },
-                        route_band: RuntimeQuotaPressureBand::Healthy,
-                    },
-                    None,
-                )),
         )
     };
+    let (quota_summary, quota_source) =
+        runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
 
     if in_selection_backoff
         || health_score > 0
