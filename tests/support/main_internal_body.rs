@@ -5481,20 +5481,25 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     let summary = summarize_runtime_log_tail(
             br#"[2026-03-20 12:00:00.000 +07:00] request=1 transport=http first_upstream_chunk bytes=128
 [2026-03-20 12:00:00.010 +07:00] request=1 transport=http first_local_chunk profile=main bytes=128 elapsed_ms=10
+[2026-03-20 12:00:00.015 +07:00] runtime_proxy_admission_wait_started transport=http path=/backend-api/codex/responses budget_ms=120 poll_ms=10 reason=responses
 [2026-03-20 12:00:00.020 +07:00] profile_transport_backoff profile=main until=123 reason=stream_read_error
 [2026-03-20 12:00:00.030 +07:00] profile_health profile=main score=4 delta=4 reason=stream_read_error
 [2026-03-20 12:00:00.035 +07:00] selection_skip_affinity route=responses affinity=session profile=main reason=quota_exhausted quota_source=persisted_snapshot
 [2026-03-20 12:00:00.040 +07:00] runtime_proxy_active_limit_reached transport=http path=/backend-api/codex/responses active=12 limit=12
 [2026-03-20 12:00:00.050 +07:00] runtime_proxy_lane_limit_reached transport=http path=/backend-api/codex/responses lane=responses active=9 limit=9
+[2026-03-20 12:00:00.055 +07:00] runtime_proxy_admission_recovered transport=http path=/backend-api/codex/responses waited_ms=20
 [2026-03-20 12:00:00.060 +07:00] profile_inflight_saturated profile=main hard_limit=8
 [2026-03-20 12:00:00.070 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
+[2026-03-20 12:00:00.072 +07:00] runtime_proxy_queue_wait_started transport=http path=/backend-api/codex/responses budget_ms=120 poll_ms=10 reason=long_lived_queue_full
+[2026-03-20 12:00:00.074 +07:00] runtime_proxy_queue_recovered transport=http path=/backend-api/codex/responses waited_ms=18
 [2026-03-20 12:00:00.075 +07:00] state_save_skipped revision=2 reason=session_id:main
 [2026-03-20 12:00:00.080 +07:00] profile_probe_refresh_start profile=second
+[2026-03-20 12:00:00.085 +07:00] profile_probe_refresh_ok profile=second
 [2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_error profile=third error=timeout
 "#,
         );
 
-    assert_eq!(summary.line_count, 12);
+    assert_eq!(summary.line_count, 17);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -5505,6 +5510,14 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_lane_limit_reached"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "runtime_proxy_admission_wait_started"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "runtime_proxy_admission_recovered"),
         1
     );
     assert_eq!(
@@ -5521,6 +5534,14 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         1
     );
     assert_eq!(
+        runtime_doctor_marker_count(&summary, "runtime_proxy_queue_wait_started"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "runtime_proxy_queue_recovered"),
+        1
+    );
+    assert_eq!(
         runtime_doctor_marker_count(&summary, "first_upstream_chunk"),
         1
     );
@@ -5530,6 +5551,10 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_start"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_probe_refresh_ok"),
         1
     );
     assert_eq!(runtime_doctor_marker_count(&summary, "state_save_skipped"), 1);

@@ -2629,6 +2629,14 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "state_save_skipped").to_string(),
         ),
         (
+            "Admission recovered".to_string(),
+            runtime_doctor_marker_count(&summary, "runtime_proxy_admission_recovered").to_string(),
+        ),
+        (
+            "Queue recovered".to_string(),
+            runtime_doctor_marker_count(&summary, "runtime_proxy_queue_recovered").to_string(),
+        ),
+        (
             "Probe refresh".to_string(),
             runtime_doctor_marker_count(&summary, "profile_probe_refresh_start").to_string(),
         ),
@@ -2908,6 +2916,10 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "runtime_proxy_active_limit_reached",
         "runtime_proxy_lane_limit_reached",
         "runtime_proxy_overload_backoff",
+        "runtime_proxy_admission_wait_started",
+        "runtime_proxy_admission_recovered",
+        "runtime_proxy_queue_wait_started",
+        "runtime_proxy_queue_recovered",
         "profile_inflight_saturated",
         "upstream_connect_timeout",
         "upstream_connect_error",
@@ -4612,6 +4624,22 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
                     );
                     return Err(rejection);
                 }
+                if !waited {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "runtime_proxy_admission_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason={}",
+                            budget.as_millis(),
+                            poll.as_millis(),
+                            match rejection {
+                                RuntimeProxyAdmissionRejection::GlobalLimit =>
+                                    "active_request_limit",
+                                RuntimeProxyAdmissionRejection::LaneLimit(lane) =>
+                                    runtime_route_kind_label(lane),
+                            }
+                        ),
+                    );
+                }
                 waited = true;
                 thread::sleep(poll.min(budget.saturating_sub(elapsed)));
             }
@@ -4659,6 +4687,16 @@ where
                         ),
                     );
                     return Err((RuntimeProxyQueueRejection::Full, item));
+                }
+                if !waited {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason=long_lived_queue_full",
+                            budget.as_millis(),
+                            poll.as_millis()
+                        ),
+                    );
                 }
                 waited = true;
                 thread::sleep(poll.min(budget.saturating_sub(elapsed)));
@@ -6872,12 +6910,22 @@ fn proxy_runtime_standard_request(
                     let fallback_profile = session_profile
                         .clone()
                         .unwrap_or_else(|| current_profile.clone());
-                    proxy_runtime_standard_request_for_profile(
+                    match attempt_runtime_standard_request(
                         request_id,
                         request,
                         shared,
                         &fallback_profile,
-                    )
+                    )? {
+                        RuntimeStandardAttempt::Success { response, .. } => Ok(response),
+                        RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+                        RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
+                            Ok(build_runtime_proxy_json_error_response(
+                                503,
+                                "service_unavailable",
+                                runtime_proxy_local_selection_failure_message(),
+                            ))
+                        }
+                    }
                 }
             };
         }
@@ -6914,12 +6962,22 @@ fn proxy_runtime_standard_request(
                     let fallback_profile = session_profile
                         .clone()
                         .unwrap_or_else(|| current_profile.clone());
-                    proxy_runtime_standard_request_for_profile(
+                    match attempt_runtime_standard_request(
                         request_id,
                         request,
                         shared,
                         &fallback_profile,
-                    )
+                    )? {
+                        RuntimeStandardAttempt::Success { response, .. } => Ok(response),
+                        RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+                        RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
+                            Ok(build_runtime_proxy_json_error_response(
+                                503,
+                                "service_unavailable",
+                                runtime_proxy_local_selection_failure_message(),
+                            ))
+                        }
+                    }
                 }
             };
         };
@@ -7036,6 +7094,24 @@ fn proxy_runtime_standard_request_for_profile(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<tiny_http::ResponseBox> {
+    let (quota_summary, quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Standard)?;
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http standard_pre_send_skip profile={profile_name} route=standard quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(build_runtime_proxy_text_response(
+            503,
+            runtime_proxy_local_selection_failure_message(),
+        ));
+    }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
     let response =
