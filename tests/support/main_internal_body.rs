@@ -6002,6 +6002,95 @@ fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
 }
 
 #[test]
+fn exhausted_usage_snapshot_releases_persisted_affinity_bindings() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-1".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-123".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let runtime = RuntimeRotationState {
+        paths: paths.clone(),
+        state: state.clone(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: state.session_profile_bindings.clone(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+    let exhausted_usage = usage_with_main_windows(81, 3600, 0, 300);
+
+    update_runtime_profile_probe_cache_with_usage(&shared, "main", exhausted_usage)
+        .expect("usage snapshot update should succeed");
+
+    let runtime = shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed");
+    assert!(!runtime.state.response_profile_bindings.contains_key("resp-1"));
+    assert!(!runtime.state.session_profile_bindings.contains_key("sess-123"));
+    assert!(!runtime.turn_state_bindings.values().any(|binding| binding.profile_name == "main"));
+    assert!(!runtime.session_id_bindings.contains_key("sess-123"));
+}
+
+#[test]
 fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
     let tail = concat!(
         "[2026-03-25 00:00:00.000 +07:00] request=1 route=responses transport=http first_upstream_chunk profile=main\n",

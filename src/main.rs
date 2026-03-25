@@ -7599,10 +7599,35 @@ fn update_runtime_profile_probe_cache_with_usage(
             result: Ok(usage.clone()),
         },
     );
-    runtime.profile_usage_snapshots.insert(
-        profile_name.to_string(),
-        runtime_profile_usage_snapshot_from_usage(&usage),
-    );
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let quota_summary =
+        runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
+    runtime
+        .profile_usage_snapshots
+        .insert(profile_name.to_string(), snapshot);
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime
+            .state
+            .response_profile_bindings
+            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime
+            .state
+            .session_profile_bindings
+            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime
+            .turn_state_bindings
+            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime
+            .session_id_bindings
+            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime_proxy_log(
+            shared,
+            format!(
+                "quota_release_profile_affinity profile={profile_name} reason=usage_snapshot_exhausted {}",
+                runtime_quota_summary_log_fields(quota_summary)
+            ),
+        );
+    }
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
