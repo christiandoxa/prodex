@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.2.49"
+version = "0.2.50"
 dependencies = [
  "anyhow",
  "base64",
