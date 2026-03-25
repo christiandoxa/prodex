@@ -1214,12 +1214,14 @@ fn ready_profile_ranking_prefers_soon_recovering_weekly_capacity() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "fast".to_string(),
             usage: usage_with_main_windows(80, 18_000, 80, 86_400),
             order_index: 1,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -1302,12 +1304,14 @@ fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
             usage: usage_with_main_windows(65, 18_000, 70, 604_800),
             order_index: 0,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "deep".to_string(),
             usage: usage_with_main_windows(95, 18_000, 98, 604_800),
             order_index: 1,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -1335,12 +1339,14 @@ fn scheduler_prefers_rested_profile_within_near_optimal_band() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "rested".to_string(),
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -1363,12 +1369,14 @@ fn scheduler_keeps_preferred_profile_when_gain_is_small() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "active".to_string(),
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: true,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -1392,17 +1400,99 @@ fn scheduler_allows_switch_when_preferred_profile_is_in_cooldown() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "active".to_string(),
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: true,
+        quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
     let ranked = schedule_ready_profile_candidates(candidates, &state, Some("active"));
     assert_eq!(ranked[0].name, "better");
+}
+
+#[test]
+fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/main"),
+                    managed: true,
+                    email: None,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/second"),
+                    managed: true,
+                    email: None,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let reports = vec![
+        RunProfileProbeReport {
+            name: "main".to_string(),
+            order_index: 0,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Err("runtime quota snapshot unavailable".to_string()),
+        },
+        RunProfileProbeReport {
+            name: "second".to_string(),
+            order_index: 1,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Err("runtime quota snapshot unavailable".to_string()),
+        },
+    ];
+    let now = Local::now().timestamp();
+    let persisted = BTreeMap::from([
+        (
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_remaining_percent: 0,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 70,
+                weekly_reset_at: now + 86_400,
+            },
+        ),
+        (
+            "second".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 90,
+                five_hour_reset_at: now + 3_600,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 95,
+                weekly_reset_at: now + 604_800,
+            },
+        ),
+    ]);
+
+    let ranked = ready_profile_candidates(&reports, false, Some("main"), &state, Some(&persisted));
+    assert_eq!(ranked.len(), 1);
+    assert_eq!(ranked[0].name, "second");
+    assert_eq!(ranked[0].quota_source, RuntimeQuotaSource::PersistedSnapshot);
 }
 
 #[test]
