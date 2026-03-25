@@ -82,11 +82,14 @@ Examples:
 ```bash
 prodex run -- --version
 prodex run exec "review this repo"
+prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 prodex run --profile second
 prodex run --profile second --no-auto-rotate
 ```
 
 `prodex run` uses a local runtime proxy for the session. The proxy keeps WebSocket and HTTP/SSE behavior as close as possible to direct `codex`, while handling safe account rotation before a request or stream is committed.
+
+If the first positional argument looks like a Codex session id, `prodex run <session-id>` forwards to `codex resume <session-id>`.
 
 In practice, that means:
 
@@ -151,6 +154,7 @@ If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whe
 - that auto-create flow relies on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - built-in quota checks only work for profiles using ChatGPT auth
 - managed Prodex profiles share the default `~/.codex` session history store, so `/resume` shows the same saved threads across accounts
+- `prodex run <session-id>` is a shortcut for resuming a saved Codex session through the Prodex proxy
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity
 - `prodex run` auto-rotates to the next ready profile when the current one hits a limit, including when you pass `--profile`
