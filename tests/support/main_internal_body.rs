@@ -1428,6 +1428,37 @@ fn runtime_state_save_debounce_only_applies_to_binding_updates() {
 }
 
 #[test]
+fn runtime_fault_injection_consumes_budget() {
+    let _guard = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", "2");
+
+    assert!(runtime_take_fault_injection(
+        "PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE"
+    ));
+    assert!(runtime_take_fault_injection(
+        "PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE"
+    ));
+    assert!(!runtime_take_fault_injection(
+        "PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE"
+    ));
+}
+
+#[test]
+fn runtime_request_detects_function_call_output_payloads() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
+    };
+
+    assert!(runtime_request_contains_function_call_output(&request));
+    assert!(
+        runtime_request_without_previous_response_id(&request).is_some(),
+        "helper should still be able to strip previous_response_id when explicitly asked"
+    );
+}
+
+#[test]
 fn runtime_quota_summary_distinguishes_window_health() {
     let summary = runtime_quota_summary_for_route(
         &usage_with_main_windows(4, 18_000, 12, 604_800),
@@ -3924,6 +3955,117 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
 }
 
 #[test]
+fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::from([
+            (
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(100, 18_000, 100, 604_800)),
+                },
+            ),
+            (
+                "second".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(100, 18_000, 100, 604_800)),
+                },
+            ),
+        ]),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_route_performance_key("main", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: 9,
+                updated_at: now,
+            },
+        )]),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        next_runtime_response_candidate(&shared, &BTreeSet::new())
+            .expect("candidate selection should succeed"),
+        Some("second".to_string())
+    );
+}
+
+#[test]
 fn commit_runtime_proxy_profile_selection_clears_profile_health() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -4450,6 +4592,24 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.stale_persisted_usage_snapshots = 1;
     summary.degraded_routes = vec!["main/responses circuit=open until=123".to_string()];
     summary.orphan_managed_dirs = vec!["ghost_profile".to_string()];
+    summary.profiles = vec![RuntimeDoctorProfileSummary {
+        profile: "main".to_string(),
+        quota_freshness: "stale".to_string(),
+        quota_age_seconds: 420,
+        retry_backoff_until: Some(100),
+        transport_backoff_until: Some(200),
+        routes: vec![RuntimeDoctorRouteSummary {
+            route: "responses".to_string(),
+            circuit_state: "open".to_string(),
+            circuit_until: Some(200),
+            health_score: 4,
+            bad_pairing_score: 2,
+            performance_score: 3,
+            quota_band: "quota_critical".to_string(),
+            five_hour_status: "quota_ready".to_string(),
+            weekly_status: "quota_critical".to_string(),
+        }],
+    }];
 
     let value = runtime_doctor_json_value(&summary);
     assert_eq!(
@@ -4463,6 +4623,10 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["stale_persisted_usage_snapshots"], 1);
     assert_eq!(value["degraded_routes"][0], "main/responses circuit=open until=123");
     assert_eq!(value["orphan_managed_dirs"][0], "ghost_profile");
+    assert_eq!(value["profiles"][0]["profile"], "main");
+    assert_eq!(value["profiles"][0]["quota_freshness"], "stale");
+    assert_eq!(value["profiles"][0]["routes"][0]["route"], "responses");
+    assert_eq!(value["profiles"][0]["routes"][0]["performance_score"], 3);
 }
 
 #[test]
@@ -5795,6 +5959,47 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
 }
 
 #[test]
+fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
+    let temp_dir = TestDir::new();
+    let _guard = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", "1");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let snapshot = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let latest_revision = AtomicU64::new(1);
+
+    let err = save_runtime_state_snapshot_if_latest(
+        &paths,
+        &snapshot,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &RuntimeProfileBackoffs::default(),
+        1,
+        &latest_revision,
+    )
+    .expect_err("injected save failure should bubble up");
+    assert!(err.to_string().contains("injected runtime state save failure"));
+}
+
+#[test]
 fn turn_state_affinity_prefers_bound_profile() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -7093,6 +7298,65 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
         state.active_profile.as_deref() == Some("second")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_does_not_fresh_fallback_function_call_output_requests() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body(
+            r#"{"previous_response_id":"resp-missing","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
+        )
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status.as_u16(), 400, "unexpected status: {status}");
+    assert!(
+        body.contains("previous_response_not_found"),
+        "expected upstream continuation error, got: {body}"
+    );
+    assert!(
+        !body.contains("\"response.created\""),
+        "function call output request must not be retried as a fresh request"
+    );
 }
 
 #[test]
@@ -8877,6 +9141,45 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
     let _runtime_log_dir_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
     let log_path = temp_dir.path.join("runtime-proxy.log");
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "second".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        })),
+        log_path: log_path.clone(),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+    };
     let body = TwoChunkReader::new(vec![b"data: first\n\n".to_vec(), b"data: second\n\n".to_vec()]);
     let response = RuntimeStreamingResponse {
         status: 200,
@@ -8885,6 +9188,7 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
         request_id: 1,
         profile_name: "second".to_string(),
         log_path: log_path.clone(),
+        shared,
         _inflight_guard: None,
     };
     let writer: Box<dyn Write + Send + 'static> = Box::new(FailAfterFirstChunkWriter::new());

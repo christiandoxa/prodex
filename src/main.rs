@@ -87,10 +87,12 @@ const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
+const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
 const RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY: u32 = 5;
 const RUNTIME_PROFILE_FORWARD_FAILURE_HEALTH_PENALTY: u32 = 3;
 const RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY: u32 = 2;
+const RUNTIME_PROFILE_LATENCY_PENALTY_MAX: u32 = 12;
 const RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE: u32 = 2;
 const RUNTIME_PROFILE_BAD_PAIRING_PENALTY: u32 = 2;
 const RUNTIME_PROFILE_HEALTH_MAX_SCORE: u32 = 16;
@@ -717,6 +719,9 @@ fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState 
 
 fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()> {
     let temp_file = unique_state_temp_file_path(&paths.state_file);
+    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE") {
+        bail!("injected runtime state save failure");
+    }
     fs::write(&temp_file, json)
         .with_context(|| format!("failed to write {}", temp_file.display()))?;
     fs::rename(&temp_file, &paths.state_file).with_context(|| {
@@ -725,6 +730,10 @@ fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()> {
             paths.state_file.display()
         )
     })?;
+    let written = fs::read_to_string(&paths.state_file)
+        .with_context(|| format!("failed to re-read {}", paths.state_file.display()))?;
+    let _: AppState = serde_json::from_str(&written)
+        .with_context(|| format!("failed to validate {}", paths.state_file.display()))?;
     Ok(())
 }
 
@@ -1721,7 +1730,31 @@ struct RuntimeDoctorSummary {
     stale_persisted_usage_snapshots: usize,
     degraded_routes: Vec<String>,
     orphan_managed_dirs: Vec<String>,
+    profiles: Vec<RuntimeDoctorProfileSummary>,
     diagnosis: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeDoctorProfileSummary {
+    profile: String,
+    quota_freshness: String,
+    quota_age_seconds: i64,
+    retry_backoff_until: Option<i64>,
+    transport_backoff_until: Option<i64>,
+    routes: Vec<RuntimeDoctorRouteSummary>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeDoctorRouteSummary {
+    route: String,
+    circuit_state: String,
+    circuit_until: Option<i64>,
+    health_score: u32,
+    bad_pairing_score: u32,
+    performance_score: u32,
+    quota_band: String,
+    five_hour_status: String,
+    weekly_status: String,
 }
 
 struct RuntimeRotationProxy {
@@ -1798,6 +1831,7 @@ struct RuntimeStreamingResponse {
     request_id: u64,
     profile_name: String,
     log_path: PathBuf,
+    shared: RuntimeRotationProxyShared,
     _inflight_guard: Option<RuntimeProfileInFlightGuard>,
 }
 
@@ -2269,6 +2303,47 @@ fn usize_override(env_key: &str, default_value: usize) -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(default_value)
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeFaultBudget {
+    raw_value: String,
+    remaining: usize,
+}
+
+fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudget>> {
+    static COUNTERS: OnceLock<Mutex<BTreeMap<String, RuntimeFaultBudget>>> = OnceLock::new();
+    COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn runtime_take_fault_injection(env_key: &str) -> bool {
+    let raw_value = env::var(env_key).ok().unwrap_or_default();
+    let configured = raw_value.parse::<usize>().unwrap_or(0);
+    if configured == 0 {
+        if let Ok(mut counters) = runtime_fault_counters().lock() {
+            counters.remove(env_key);
+        }
+        return false;
+    }
+
+    let Ok(mut counters) = runtime_fault_counters().lock() else {
+        return false;
+    };
+    let counter = counters
+        .entry(env_key.to_string())
+        .or_insert_with(|| RuntimeFaultBudget {
+            raw_value: raw_value.clone(),
+            remaining: configured,
+        });
+    if counter.raw_value != raw_value {
+        counter.raw_value = raw_value;
+        counter.remaining = configured;
+    }
+    if counter.remaining == 0 {
+        return false;
+    }
+    counter.remaining -= 1;
+    true
 }
 
 fn runtime_proxy_http_connect_timeout_ms() -> u64 {
@@ -2824,6 +2899,32 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
             (facet.clone(), serde_json::Value::Object(counts))
         })
         .collect::<serde_json::Map<String, serde_json::Value>>();
+    let profiles = summary
+        .profiles
+        .iter()
+        .map(|profile| {
+            serde_json::json!({
+                "profile": profile.profile,
+                "quota_freshness": profile.quota_freshness,
+                "quota_age_seconds": profile.quota_age_seconds,
+                "retry_backoff_until": profile.retry_backoff_until,
+                "transport_backoff_until": profile.transport_backoff_until,
+                "routes": profile.routes.iter().map(|route| {
+                    serde_json::json!({
+                        "route": route.route,
+                        "circuit_state": route.circuit_state,
+                        "circuit_until": route.circuit_until,
+                        "health_score": route.health_score,
+                        "bad_pairing_score": route.bad_pairing_score,
+                        "performance_score": route.performance_score,
+                        "quota_band": route.quota_band,
+                        "five_hour_status": route.five_hour_status,
+                        "weekly_status": route.weekly_status,
+                    })
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
     serde_json::json!({
         "log_path": summary.log_path.as_ref().map(|path| path.display().to_string()),
         "pointer_exists": summary.pointer_exists,
@@ -2847,6 +2948,7 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         "stale_persisted_usage_snapshots": summary.stale_persisted_usage_snapshots,
         "degraded_routes": summary.degraded_routes,
         "orphan_managed_dirs": summary.orphan_managed_dirs,
+        "profiles": profiles,
         "diagnosis": summary.diagnosis,
     })
 }
@@ -2929,6 +3031,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
         (
             "Health penalties".to_string(),
             runtime_doctor_marker_count(&summary, "profile_health").to_string(),
+        ),
+        (
+            "Latency penalties".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_latency").to_string(),
         ),
         (
             "Bad pairing".to_string(),
@@ -3082,6 +3188,114 @@ fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Opti
     })
 }
 
+fn runtime_doctor_quota_freshness_label(
+    snapshot: Option<&RuntimeProfileUsageSnapshot>,
+    now: i64,
+) -> String {
+    match snapshot {
+        Some(snapshot) if runtime_usage_snapshot_is_usable(snapshot, now) => "fresh".to_string(),
+        Some(_) => "stale".to_string(),
+        None => "missing".to_string(),
+    }
+}
+
+fn runtime_doctor_route_circuit_state(until: Option<i64>, now: i64) -> String {
+    match until {
+        Some(until) if until > now => "open".to_string(),
+        Some(_) => "half_open".to_string(),
+        None => "closed".to_string(),
+    }
+}
+
+fn runtime_doctor_profile_summaries(
+    state: &AppState,
+    usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    scores: &BTreeMap<String, RuntimeProfileHealth>,
+    backoffs: &RuntimeProfileBackoffs,
+    now: i64,
+) -> Vec<RuntimeDoctorProfileSummary> {
+    let mut profiles = Vec::new();
+    for profile_name in state.profiles.keys() {
+        let snapshot = usage_snapshots.get(profile_name);
+        let quota_age_seconds = snapshot
+            .map(|snapshot| now.saturating_sub(snapshot.checked_at))
+            .unwrap_or(i64::MAX);
+        let routes = [
+            RuntimeRouteKind::Responses,
+            RuntimeRouteKind::Websocket,
+            RuntimeRouteKind::Compact,
+            RuntimeRouteKind::Standard,
+        ]
+        .into_iter()
+        .map(|route_kind| {
+            let quota_summary = snapshot
+                .map(|snapshot| runtime_quota_summary_from_usage_snapshot(snapshot, route_kind))
+                .unwrap_or(RuntimeQuotaSummary {
+                    five_hour: RuntimeQuotaWindowSummary {
+                        status: RuntimeQuotaWindowStatus::Unknown,
+                        remaining_percent: 0,
+                        reset_at: i64::MAX,
+                    },
+                    weekly: RuntimeQuotaWindowSummary {
+                        status: RuntimeQuotaWindowStatus::Unknown,
+                        remaining_percent: 0,
+                        reset_at: i64::MAX,
+                    },
+                    route_band: RuntimeQuotaPressureBand::Unknown,
+                });
+            RuntimeDoctorRouteSummary {
+                route: runtime_route_kind_label(route_kind).to_string(),
+                circuit_state: runtime_doctor_route_circuit_state(
+                    backoffs
+                        .route_circuit_open_until
+                        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+                        .copied(),
+                    now,
+                ),
+                circuit_until: backoffs
+                    .route_circuit_open_until
+                    .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+                    .copied(),
+                health_score: runtime_profile_effective_health_score_from_map(
+                    scores,
+                    &runtime_profile_route_health_key(profile_name, route_kind),
+                    now,
+                ),
+                bad_pairing_score: runtime_profile_effective_score_from_map(
+                    scores,
+                    &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+                    now,
+                    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+                ),
+                performance_score: runtime_profile_effective_score_from_map(
+                    scores,
+                    &runtime_profile_route_performance_key(profile_name, route_kind),
+                    now,
+                    RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+                ),
+                quota_band: runtime_quota_pressure_band_reason(quota_summary.route_band)
+                    .to_string(),
+                five_hour_status: runtime_quota_window_status_reason(
+                    quota_summary.five_hour.status,
+                )
+                .to_string(),
+                weekly_status: runtime_quota_window_status_reason(quota_summary.weekly.status)
+                    .to_string(),
+            }
+        })
+        .collect::<Vec<_>>();
+        profiles.push(RuntimeDoctorProfileSummary {
+            profile: profile_name.clone(),
+            quota_freshness: runtime_doctor_quota_freshness_label(snapshot, now),
+            quota_age_seconds,
+            retry_backoff_until: backoffs.retry_backoff_until.get(profile_name).copied(),
+            transport_backoff_until: backoffs.transport_backoff_until.get(profile_name).copied(),
+            routes,
+        });
+    }
+    profiles
+}
+
 fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
     let Ok(state) = AppState::load(paths) else {
         return;
@@ -3101,6 +3315,8 @@ fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSum
         .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, now))
         .count();
     summary.orphan_managed_dirs = orphan_managed_dirs;
+    summary.profiles =
+        runtime_doctor_profile_summaries(&state, &usage_snapshots, &scores, &backoffs, now);
 
     let mut degraded_routes = Vec::new();
     for (key, until) in &backoffs.route_circuit_open_until {
@@ -3349,10 +3565,14 @@ fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                 "reason",
                 "transport",
                 "quota_source",
+                "quota_band",
+                "five_hour_status",
+                "weekly_status",
                 "affinity",
                 "context",
                 "event",
                 "stage",
+                "state",
             ] {
                 if let Some(value) = fields.get(facet).cloned() {
                     *summary
@@ -3416,6 +3636,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "profile_circuit_open",
         "profile_circuit_half_open_probe",
         "profile_health",
+        "profile_latency",
         "profile_bad_pairing",
         "selection_pick",
         "selection_skip_current",
@@ -5579,6 +5800,44 @@ fn runtime_request_previous_response_id_from_value(value: &serde_json::Value) ->
         .map(str::to_string)
 }
 
+fn runtime_request_contains_function_call_output(request: &RuntimeProxyRequest) -> bool {
+    runtime_request_contains_function_call_output_from_bytes(&request.body)
+}
+
+fn runtime_request_contains_function_call_output_from_bytes(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .is_some_and(|value| runtime_request_contains_function_call_output_from_value(&value))
+}
+
+fn runtime_request_contains_function_call_output_from_text(request_text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(request_text)
+        .ok()
+        .is_some_and(|value| runtime_request_contains_function_call_output_from_value(&value))
+}
+
+fn runtime_request_contains_function_call_output_from_value(value: &serde_json::Value) -> bool {
+    value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                let Some(object) = item.as_object() else {
+                    return false;
+                };
+                object
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| value == "function_call_output")
+                    || (object.contains_key("call_id")
+                        && (object.contains_key("output") || object.contains_key("status")))
+            })
+        })
+}
+
 fn runtime_request_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
@@ -6712,6 +6971,8 @@ fn proxy_runtime_websocket_text_message(
 ) -> Result<()> {
     let mut request_text = request_text.to_string();
     let mut previous_response_id = runtime_request_previous_response_id_from_text(&request_text);
+    let request_contains_function_call_output =
+        runtime_request_contains_function_call_output_from_text(&request_text);
     let request_turn_state = runtime_request_turn_state(handshake_request);
     let request_session_id = runtime_request_session_id(handshake_request);
     let mut bound_profile = previous_response_id
@@ -6761,6 +7022,7 @@ fn proxy_runtime_websocket_text_message(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
+                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -6890,6 +7152,7 @@ fn proxy_runtime_websocket_text_message(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
+                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -7645,6 +7908,18 @@ fn connect_runtime_proxy_upstream_websocket(
             turn_state_override
         ),
     );
+    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
+        let transport_error = anyhow::anyhow!("injected runtime websocket connect failure");
+        note_runtime_profile_transport_failure(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Websocket,
+            "websocket_connect",
+            &transport_error,
+        );
+        return Err(transport_error);
+    }
+    let started_at = Instant::now();
     match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
         Ok((socket, response)) => Ok(RuntimeWebsocketConnectResult::Connected {
             socket,
@@ -7660,6 +7935,13 @@ fn connect_runtime_proxy_upstream_websocket(
                         response.status().as_u16(),
                         turn_state
                     ),
+                );
+                note_runtime_profile_latency_observation(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Websocket,
+                    "connect",
+                    started_at.elapsed().as_millis() as u64,
                 );
                 turn_state
             },
@@ -8282,6 +8564,8 @@ fn proxy_runtime_responses_request(
 ) -> Result<RuntimeResponsesReply> {
     let mut request = request.clone();
     let mut previous_response_id = runtime_request_previous_response_id(&request);
+    let request_contains_function_call_output =
+        runtime_request_contains_function_call_output(&request);
     let request_turn_state = runtime_request_turn_state(&request);
     let request_session_id = runtime_request_session_id(&request);
     let mut bound_profile = previous_response_id
@@ -8331,6 +8615,7 @@ fn proxy_runtime_responses_request(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
+                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -8459,6 +8744,7 @@ fn proxy_runtime_responses_request(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
+                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -9623,6 +9909,12 @@ fn runtime_profile_health_sort_key(
             now,
             route_kind,
         ))
+        .saturating_add(runtime_profile_route_performance_score(
+            profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
 }
 
 fn runtime_profile_inflight_sort_key(
@@ -10093,6 +10385,16 @@ fn runtime_profile_route_success_streak_key(
     )
 }
 
+fn runtime_profile_route_performance_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_performance__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
 fn runtime_profile_route_health_score(
     runtime: &RuntimeRotationState,
     profile_name: &str,
@@ -10104,6 +10406,159 @@ fn runtime_profile_route_health_score(
         &runtime_profile_route_health_key(profile_name, route_kind),
         now,
     )
+}
+
+fn runtime_profile_route_performance_score(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    let route_score = runtime_profile_effective_score_from_map(
+        profile_health,
+        &runtime_profile_route_performance_key(profile_name, route_kind),
+        now,
+        RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+    );
+    let coupled_score = runtime_route_coupled_kinds(route_kind)
+        .iter()
+        .copied()
+        .map(|coupled_kind| {
+            runtime_profile_effective_score_from_map(
+                profile_health,
+                &runtime_profile_route_performance_key(profile_name, coupled_kind),
+                now,
+                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+            )
+            .saturating_div(2)
+        })
+        .fold(0, u32::saturating_add);
+    route_score.saturating_add(coupled_score)
+}
+
+fn runtime_profile_latency_penalty(
+    elapsed_ms: u64,
+    route_kind: RuntimeRouteKind,
+    stage: &str,
+) -> u32 {
+    let (good_ms, warn_ms, poor_ms, severe_ms) = match (route_kind, stage) {
+        (RuntimeRouteKind::Responses, "ttfb") | (RuntimeRouteKind::Websocket, "connect") => {
+            (120, 300, 700, 1_500)
+        }
+        (RuntimeRouteKind::Compact, _) | (RuntimeRouteKind::Standard, _) => (80, 180, 400, 900),
+        _ => (100, 250, 600, 1_200),
+    };
+    match elapsed_ms {
+        elapsed if elapsed <= good_ms => 0,
+        elapsed if elapsed <= warn_ms => 2,
+        elapsed if elapsed <= poor_ms => 4,
+        elapsed if elapsed <= severe_ms => 7,
+        _ => RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
+    }
+}
+
+fn update_runtime_profile_route_performance(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    next_score: u32,
+    reason: &str,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    let key = runtime_profile_route_performance_key(profile_name, route_kind);
+    if next_score == 0 {
+        runtime.profile_health.remove(&key);
+    } else {
+        runtime.profile_health.insert(
+            key,
+            RuntimeProfileHealth {
+                score: next_score.min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX),
+                updated_at: now,
+            },
+        );
+    }
+    drop(runtime);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_latency profile={profile_name} route={} score={} reason={reason}",
+            runtime_route_kind_label(route_kind),
+            next_score.min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX),
+        ),
+    );
+    Ok(())
+}
+
+fn note_runtime_profile_latency_observation(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    stage: &str,
+    elapsed_ms: u64,
+) {
+    let current_score = shared
+        .runtime
+        .lock()
+        .ok()
+        .map(|runtime| {
+            let now = Local::now().timestamp();
+            runtime_profile_effective_score_from_map(
+                &runtime.profile_health,
+                &runtime_profile_route_performance_key(profile_name, route_kind),
+                now,
+                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+            )
+        })
+        .unwrap_or(0);
+    let observed = runtime_profile_latency_penalty(elapsed_ms, route_kind, stage);
+    let next_score = if observed == 0 {
+        current_score.saturating_sub(2)
+    } else {
+        (((current_score as u64) * 2) + (observed as u64)).div_ceil(3) as u32
+    };
+    let _ = update_runtime_profile_route_performance(
+        shared,
+        profile_name,
+        route_kind,
+        next_score,
+        &format!("{stage}_{elapsed_ms}ms"),
+    );
+}
+
+fn note_runtime_profile_latency_failure(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    stage: &str,
+) {
+    let current_score = shared
+        .runtime
+        .lock()
+        .ok()
+        .map(|runtime| {
+            let now = Local::now().timestamp();
+            runtime_profile_effective_score_from_map(
+                &runtime.profile_health,
+                &runtime_profile_route_performance_key(profile_name, route_kind),
+                now,
+                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+            )
+        })
+        .unwrap_or(0);
+    let next_score = current_score
+        .saturating_add(RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY)
+        .min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX);
+    let _ = update_runtime_profile_route_performance(
+        shared,
+        profile_name,
+        route_kind,
+        next_score,
+        stage,
+    );
 }
 
 fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
@@ -10443,6 +10898,7 @@ fn note_runtime_profile_transport_failure(
         RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
         context,
     );
+    note_runtime_profile_latency_failure(shared, profile_name, route_kind, context);
     let _ = mark_runtime_profile_transport_backoff(shared, profile_name, context);
 }
 
@@ -10551,6 +11007,7 @@ fn send_runtime_proxy_upstream_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<reqwest::Response> {
+    let started_at = Instant::now();
     let runtime = shared
         .runtime
         .lock()
@@ -10609,6 +11066,9 @@ fn send_runtime_proxy_upstream_request(
             runtime_request_previous_response_id(request)
         ),
     );
+    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
+        bail!("injected runtime upstream connect failure");
+    }
     let response = shared
         .async_runtime
         .block_on(async move { upstream_request.send().await })
@@ -10630,6 +11090,13 @@ fn send_runtime_proxy_upstream_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
+    note_runtime_profile_latency_observation(
+        shared,
+        profile_name,
+        runtime_proxy_request_lane(&request.path_and_query, false),
+        "connect",
+        started_at.elapsed().as_millis() as u64,
+    );
     Ok(response)
 }
 
@@ -10640,6 +11107,7 @@ fn send_runtime_proxy_upstream_responses_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<reqwest::Response> {
+    let started_at = Instant::now();
     let runtime = shared
         .runtime
         .lock()
@@ -10698,6 +11166,9 @@ fn send_runtime_proxy_upstream_responses_request(
             runtime_request_previous_response_id(request)
         ),
     );
+    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
+        bail!("injected runtime upstream connect failure");
+    }
     let response = shared
         .async_runtime
         .block_on(async move { upstream_request.send().await })
@@ -10718,6 +11189,13 @@ fn send_runtime_proxy_upstream_responses_request(
                 .and_then(|value| value.to_str().ok()),
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
+    );
+    note_runtime_profile_latency_observation(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Responses,
+        "connect",
+        started_at.elapsed().as_millis() as u64,
     );
     Ok(response)
 }
@@ -10888,6 +11366,7 @@ fn prepare_runtime_proxy_responses_success(
                     request_id,
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
+                    shared: shared.clone(),
                     _inflight_guard: Some(inflight_guard),
                 }),
             });
@@ -10909,6 +11388,7 @@ fn prepare_runtime_proxy_responses_success(
                     request_id,
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
+                    shared: shared.clone(),
                     _inflight_guard: Some(inflight_guard),
                 }),
                 turn_state,
@@ -10942,6 +11422,7 @@ fn prepare_runtime_proxy_responses_success(
             request_id,
             profile_name: profile_name.to_string(),
             log_path: shared.log_path.clone(),
+            shared: shared.clone(),
             _inflight_guard: Some(inflight_guard),
         }),
     })
@@ -11169,11 +11650,44 @@ fn write_runtime_streaming_response(
                         err
                     ),
                 );
+                note_runtime_profile_latency_failure(
+                    &response.shared,
+                    &response.profile_name,
+                    RuntimeRouteKind::Responses,
+                    "stream_read_error",
+                );
                 return Err(err);
             }
         };
         if read == 0 {
             break;
+        }
+        if chunk_count == 0
+            && runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_STREAM_READ_ERROR_ONCE")
+        {
+            let err = io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "injected runtime stream read failure",
+            );
+            runtime_proxy_log_to_path(
+                &response.log_path,
+                &format!(
+                    "request={} transport=http stream_read_error profile={} chunks={} bytes={} elapsed_ms={} error={}",
+                    response.request_id,
+                    response.profile_name,
+                    chunk_count,
+                    total_bytes,
+                    started_at.elapsed().as_millis(),
+                    err
+                ),
+            );
+            note_runtime_profile_latency_failure(
+                &response.shared,
+                &response.profile_name,
+                RuntimeRouteKind::Responses,
+                "stream_read_error",
+            );
+            return Err(err);
         }
         chunk_count += 1;
         total_bytes += read;
@@ -11187,6 +11701,13 @@ fn write_runtime_streaming_response(
                     read,
                     started_at.elapsed().as_millis()
                 ),
+            );
+            note_runtime_profile_latency_observation(
+                &response.shared,
+                &response.profile_name,
+                RuntimeRouteKind::Responses,
+                "ttfb",
+                started_at.elapsed().as_millis() as u64,
             );
         }
         write!(writer, "{:X}\r\n", read).map_err(|err| {
@@ -11224,6 +11745,13 @@ fn write_runtime_streaming_response(
             total_bytes,
             started_at.elapsed().as_millis()
         ),
+    );
+    note_runtime_profile_latency_observation(
+        &response.shared,
+        &response.profile_name,
+        RuntimeRouteKind::Responses,
+        "stream_complete",
+        started_at.elapsed().as_millis() as u64,
     );
     Ok(())
 }
