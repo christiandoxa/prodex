@@ -48,6 +48,11 @@ const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 const RESPONSE_PROFILE_BINDING_LIMIT: usize = 16_384;
 const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
 const SESSION_ID_PROFILE_BINDING_LIMIT: usize = 4_096;
+const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 = if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
+const APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS: i64 =
+    if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
+const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
+    if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
 const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_000 };
@@ -555,6 +560,17 @@ fn merge_last_run_selection(
     merged
 }
 
+fn prune_last_run_selection(
+    selections: &mut BTreeMap<String, i64>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+) {
+    let oldest_allowed = now.saturating_sub(APP_STATE_LAST_RUN_RETENTION_SECONDS);
+    selections.retain(|profile_name, timestamp| {
+        profiles.contains_key(profile_name) && *timestamp >= oldest_allowed
+    });
+}
+
 fn merge_profile_bindings(
     existing: &BTreeMap<String, ResponseProfileBinding>,
     incoming: &BTreeMap<String, ResponseProfileBinding>,
@@ -575,6 +591,42 @@ fn merge_profile_bindings(
     merged
 }
 
+fn prune_profile_bindings_for_housekeeping(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+    retention_seconds: i64,
+    max_entries: usize,
+) {
+    let oldest_allowed = now.saturating_sub(retention_seconds);
+    bindings.retain(|_, binding| {
+        profiles.contains_key(&binding.profile_name) && binding.bound_at >= oldest_allowed
+    });
+    prune_profile_bindings(bindings, max_entries);
+}
+
+fn compact_app_state(mut state: AppState, now: i64) -> AppState {
+    state.active_profile = state
+        .active_profile
+        .filter(|profile_name| state.profiles.contains_key(profile_name));
+    prune_last_run_selection(&mut state.last_run_selected_at, &state.profiles, now);
+    prune_profile_bindings_for_housekeeping(
+        &mut state.response_profile_bindings,
+        &state.profiles,
+        now,
+        APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS,
+        RESPONSE_PROFILE_BINDING_LIMIT,
+    );
+    prune_profile_bindings_for_housekeeping(
+        &mut state.session_profile_bindings,
+        &state.profiles,
+        now,
+        APP_STATE_SESSION_BINDING_RETENTION_SECONDS,
+        SESSION_ID_PROFILE_BINDING_LIMIT,
+    );
+    state
+}
+
 fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppState {
     let profiles = if existing.profiles.is_empty() {
         snapshot.profiles.clone()
@@ -587,7 +639,7 @@ fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppS
         .or(existing.active_profile.clone())
         .filter(|profile_name| profiles.contains_key(profile_name));
 
-    AppState {
+    let merged = AppState {
         active_profile,
         profiles: profiles.clone(),
         last_run_selected_at: merge_last_run_selection(
@@ -607,7 +659,8 @@ fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppS
             &profiles,
             SESSION_ID_PROFILE_BINDING_LIMIT,
         ),
-    }
+    };
+    compact_app_state(merged, Local::now().timestamp())
 }
 
 fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
@@ -615,7 +668,7 @@ fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState 
         .active_profile
         .clone()
         .filter(|profile_name| desired.profiles.contains_key(profile_name));
-    AppState {
+    let merged = AppState {
         active_profile,
         profiles: desired.profiles.clone(),
         last_run_selected_at: merge_last_run_selection(
@@ -635,7 +688,8 @@ fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState 
             &desired.profiles,
             SESSION_ID_PROFILE_BINDING_LIMIT,
         ),
-    }
+    };
+    compact_app_state(merged, Local::now().timestamp())
 }
 
 fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()> {
@@ -810,10 +864,10 @@ fn merge_runtime_profile_backoffs(
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
     merged
         .route_circuit_open_until
-        .retain(|route_profile_key, until| {
+        .retain(|route_profile_key, _| {
             profiles.contains_key(runtime_profile_route_circuit_profile_name(
                 route_profile_key,
-            )) && *until > now
+            ))
         });
     merged
 }
@@ -839,10 +893,10 @@ fn load_runtime_profile_backoffs(
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
     backoffs
         .route_circuit_open_until
-        .retain(|route_profile_key, until| {
+        .retain(|route_profile_key, _| {
             profiles.contains_key(runtime_profile_route_circuit_profile_name(
                 route_profile_key,
-            )) && *until > now
+            ))
         });
     Ok(backoffs)
 }
@@ -2788,6 +2842,7 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
         || runtime_doctor_marker_count(&summary, "profile_transport_backoff") > 0
         || runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0
+        || runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe") > 0
         || runtime_doctor_marker_count(&summary, "local_writer_error") > 0
     {
         "elevated".to_string()
@@ -2832,6 +2887,8 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent proxy saturation detected before commit.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0 {
             "Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe") > 0 {
+            "Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_inflight_saturated") > 0 {
             "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_bad_pairing") > 0 {
@@ -2979,6 +3036,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "profile_retry_backoff",
         "profile_transport_backoff",
         "profile_circuit_open",
+        "profile_circuit_half_open_probe",
         "profile_health",
         "profile_bad_pairing",
         "selection_pick",
@@ -4599,6 +4657,7 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
     let Ok(mut runtime) = shared.runtime.lock() else {
         return;
     };
+    let now = Local::now().timestamp();
     let missing_managed_dirs = runtime
         .state
         .profiles
@@ -4693,6 +4752,10 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
     runtime
         .profile_health
         .retain(|key, _| valid_profiles.contains(runtime_profile_score_profile_name(key)));
+    let route_circuit_count_after_profile_prune = runtime.profile_route_circuit_open_until.len();
+    prune_runtime_profile_route_circuits(&mut runtime, now);
+    let expired_route_circuits = route_circuit_count_after_profile_prune
+        .saturating_sub(runtime.profile_route_circuit_open_until.len());
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
@@ -4705,13 +4768,14 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
         || stale_retry_backoffs > 0
         || stale_transport_backoffs > 0
         || stale_route_circuits > 0
+        || expired_route_circuits > 0
         || stale_health_scores > 0;
     drop(runtime);
 
     runtime_proxy_log(
         shared,
         format!(
-            "runtime_proxy_startup_audit missing_managed_dirs={missing_managed_dirs} stale_response_bindings={stale_response_bindings} stale_session_bindings={stale_session_bindings} stale_probe_cache={stale_probe_cache} stale_usage_snapshots={stale_usage_snapshots} stale_retry_backoffs={stale_retry_backoffs} stale_transport_backoffs={stale_transport_backoffs} stale_route_circuits={stale_route_circuits} stale_health_scores={stale_health_scores} active_profile_missing_dir={active_profile_missing_dir}",
+            "runtime_proxy_startup_audit missing_managed_dirs={missing_managed_dirs} stale_response_bindings={stale_response_bindings} stale_session_bindings={stale_session_bindings} stale_probe_cache={stale_probe_cache} stale_usage_snapshots={stale_usage_snapshots} stale_retry_backoffs={stale_retry_backoffs} stale_transport_backoffs={stale_transport_backoffs} stale_route_circuits={stale_route_circuits} expired_route_circuits={expired_route_circuits} stale_health_scores={stale_health_scores} active_profile_missing_dir={active_profile_missing_dir}",
         ),
     );
     if changed {
@@ -5832,6 +5896,24 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             runtime_quota_summary_log_fields(quota_summary),
         ),
     );
+    if !reserve_runtime_profile_route_circuit_half_open_probe(shared, &current_profile, route_kind)?
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                current_profile,
+                inflight_count,
+                health_score,
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(None);
+    }
     Ok(Some(current_profile))
 }
 
@@ -8297,7 +8379,7 @@ fn next_runtime_response_candidate_for_route(
         .filter(|(_, candidate)| !excluded_profiles.contains(&candidate.name))
         .collect::<Vec<_>>();
 
-    if let Some((index, candidate)) = available_candidates
+    let mut ready_candidates = available_candidates
         .iter()
         .filter(|(_, candidate)| {
             !runtime_profile_name_in_selection_backoff(
@@ -8309,16 +8391,42 @@ fn next_runtime_response_candidate_for_route(
                 now,
             )
         })
-        .min_by_key(|(index, candidate)| {
-            (
-                runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
-                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
-                *index,
-                runtime_profile_selection_jitter(shared, &candidate.name, route_kind),
-            )
-        })
-    {
+        .collect::<Vec<_>>();
+    ready_candidates.sort_by_key(|(index, candidate)| {
+        (
+            runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
+            runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+            runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+            *index,
+            runtime_profile_selection_jitter(shared, &candidate.name, route_kind),
+        )
+    });
+    for (index, candidate) in ready_candidates {
+        if !reserve_runtime_profile_route_circuit_half_open_probe(
+            shared,
+            &candidate.name,
+            route_kind,
+        )? {
+            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            continue;
+        }
         let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
         runtime_proxy_log(
             shared,
@@ -8339,10 +8447,60 @@ fn next_runtime_response_candidate_for_route(
         return Ok(Some(candidate.name.clone()));
     }
 
-    let fallback = available_candidates
-        .into_iter()
-        .min_by_key(|(index, candidate)| {
-            (
+    let mut fallback_candidates = available_candidates.into_iter().collect::<Vec<_>>();
+    fallback_candidates.sort_by_key(|(index, candidate)| {
+        (
+            runtime_profile_backoff_sort_key(
+                &candidate.name,
+                &retry_backoff_until,
+                &transport_backoff_until,
+                &route_circuit_open_until,
+                route_kind,
+                now,
+            ),
+            runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
+            runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+            runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+            *index,
+            runtime_profile_selection_jitter(shared, &candidate.name, route_kind),
+        )
+    });
+    let mut fallback = None;
+    for (index, candidate) in fallback_candidates {
+        if !reserve_runtime_profile_route_circuit_half_open_probe(
+            shared,
+            &candidate.name,
+            route_kind,
+        )? {
+            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            continue;
+        }
+        let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                candidate.name,
+                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
                 runtime_profile_backoff_sort_key(
                     &candidate.name,
                     &retry_backoff_until,
@@ -8351,38 +8509,14 @@ fn next_runtime_response_candidate_for_route(
                     route_kind,
                     now,
                 ),
-                runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
-                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
-                *index,
-                runtime_profile_selection_jitter(shared, &candidate.name, route_kind),
-            )
-        })
-        .map(|(index, candidate)| {
-            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} quota_source={} {}",
-                    runtime_route_kind_label(route_kind),
-                    candidate.name,
-                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                    runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
-                    runtime_profile_backoff_sort_key(
-                        &candidate.name,
-                        &retry_backoff_until,
-                        &transport_backoff_until,
-                        &route_circuit_open_until,
-                        route_kind,
-                        now,
-                    ),
-                    index,
-                    runtime_quota_source_label(candidate.quota_source),
-                    runtime_quota_summary_log_fields(quota_summary),
-                ),
-            );
-            candidate.name
-        });
+                index,
+                runtime_quota_source_label(candidate.quota_source),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        fallback = Some(candidate.name);
+        break;
+    }
 
     if fallback.is_none() {
         runtime_proxy_log(
@@ -8659,7 +8793,17 @@ fn prune_runtime_profile_transport_backoff(runtime: &mut RuntimeRotationState, n
 fn prune_runtime_profile_route_circuits(runtime: &mut RuntimeRotationState, now: i64) {
     runtime
         .profile_route_circuit_open_until
-        .retain(|_, until| *until > now);
+        .retain(|key, until| {
+            if *until > now {
+                return true;
+            }
+            let health_key = runtime_profile_route_circuit_health_key(key);
+            runtime_profile_effective_health_score_from_map(
+                &runtime.profile_health,
+                &health_key,
+                now,
+            ) > 0
+        });
 }
 
 fn prune_runtime_profile_selection_backoff(runtime: &mut RuntimeRotationState, now: i64) {
@@ -8933,6 +9077,7 @@ fn runtime_profile_backoffs_snapshot(runtime: &RuntimeRotationState) -> RuntimeP
 
 const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
 const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
+const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
 
 fn runtime_profile_route_circuit_key(profile_name: &str, route_kind: RuntimeRouteKind) -> String {
     format!(
@@ -8943,6 +9088,10 @@ fn runtime_profile_route_circuit_key(profile_name: &str, route_kind: RuntimeRout
 
 fn runtime_profile_route_circuit_profile_name(key: &str) -> &str {
     key.rsplit(':').next().unwrap_or(key)
+}
+
+fn runtime_profile_route_circuit_health_key(key: &str) -> String {
+    key.replacen("__route_circuit__", "__route_health__", 1)
 }
 
 fn runtime_profile_route_circuit_open_until(
@@ -8956,6 +9105,63 @@ fn runtime_profile_route_circuit_open_until(
         .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
         .copied()
         .filter(|until| *until > now)
+}
+
+fn reserve_runtime_profile_route_circuit_half_open_probe(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    let key = runtime_profile_route_circuit_key(profile_name, route_kind);
+    let Some(until) = runtime.profile_route_circuit_open_until.get(&key).copied() else {
+        return Ok(true);
+    };
+    if until > now {
+        return Ok(false);
+    }
+    let health_key = runtime_profile_route_circuit_health_key(&key);
+    let health_score =
+        runtime_profile_effective_health_score_from_map(&runtime.profile_health, &health_key, now);
+    if health_score == 0 {
+        runtime.profile_route_circuit_open_until.remove(&key);
+        return Ok(true);
+    }
+
+    let reserve_until = now.saturating_add(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS);
+    runtime
+        .profile_route_circuit_open_until
+        .insert(key, reserve_until);
+    let state_snapshot = runtime.state.clone();
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_circuit_half_open_probe profile={profile_name} route={} until={reserve_until} health={health_score}",
+            runtime_route_kind_label(route_kind)
+        ),
+    );
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!(
+            "profile_circuit_half_open_probe:{profile_name}:{}",
+            runtime_route_kind_label(route_kind)
+        ),
+    );
+    Ok(true)
 }
 
 fn clear_runtime_profile_circuit_for_route(
@@ -12259,13 +12465,16 @@ impl AppState {
             .with_context(|| format!("failed to read {}", paths.state_file.display()))?;
         let state = serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {}", paths.state_file.display()))?;
-        Ok(state)
+        Ok(compact_app_state(state, Local::now().timestamp()))
     }
 
     fn save(&self, paths: &AppPaths) -> Result<()> {
         let _lock = acquire_state_file_lock(paths)?;
         let existing = Self::load(paths)?;
-        let merged = merge_app_state_for_save(existing, self);
+        let merged = compact_app_state(
+            merge_app_state_for_save(existing, self),
+            Local::now().timestamp(),
+        );
         let json =
             serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
         write_state_json_atomic(paths, &json)?;

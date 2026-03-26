@@ -4874,6 +4874,7 @@ fn runtime_profile_transport_health_penalty_weights_connect_failures_higher() {
 #[test]
 fn app_state_save_merges_existing_runtime_bindings() {
     let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -4901,19 +4902,19 @@ fn app_state_save_merges_existing_runtime_bindings() {
                 },
             ),
         ]),
-        last_run_selected_at: BTreeMap::from([("main".to_string(), 10)]),
+        last_run_selected_at: BTreeMap::from([("main".to_string(), now - 20)]),
         response_profile_bindings: BTreeMap::from([(
             "resp-existing".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
-                bound_at: 10,
+                bound_at: now - 20,
             },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-existing".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
-                bound_at: 10,
+                bound_at: now - 20,
             },
         )]),
     };
@@ -4924,7 +4925,7 @@ fn app_state_save_merges_existing_runtime_bindings() {
     let desired = AppState {
         active_profile: Some("second".to_string()),
         profiles: existing.profiles.clone(),
-        last_run_selected_at: BTreeMap::from([("second".to_string(), 20)]),
+        last_run_selected_at: BTreeMap::from([("second".to_string(), now - 10)]),
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -4948,13 +4949,148 @@ fn app_state_save_merges_existing_runtime_bindings() {
             .map(|binding| binding.profile_name.as_str()),
         Some("main")
     );
-    assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(10));
-    assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(20));
+    assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(now - 20));
+    assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(now - 10));
+}
+
+#[test]
+fn app_state_housekeeping_prunes_stale_entries_on_save() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let stale_last_run = now - APP_STATE_LAST_RUN_RETENTION_SECONDS - 5;
+    let stale_binding = now - APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS - 5;
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/main"),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::from([
+            ("main".to_string(), now),
+            ("ghost".to_string(), stale_last_run),
+        ]),
+        response_profile_bindings: BTreeMap::from([
+            (
+                "resp-fresh".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "resp-stale".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: stale_binding,
+                },
+            ),
+        ]),
+        session_profile_bindings: BTreeMap::from([
+            (
+                "sess-fresh".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "sess-stale".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: stale_binding,
+                },
+            ),
+        ]),
+    };
+    state.save(&paths).expect("state should save");
+
+    let loaded = AppState::load(&paths).expect("state should reload");
+    let raw = fs::read_to_string(&paths.state_file).expect("state file should be readable");
+    assert!(loaded.last_run_selected_at.contains_key("main"));
+    assert!(!loaded.last_run_selected_at.contains_key("ghost"));
+    assert!(loaded.response_profile_bindings.contains_key("resp-fresh"));
+    assert!(!loaded.response_profile_bindings.contains_key("resp-stale"));
+    assert!(loaded.session_profile_bindings.contains_key("sess-fresh"));
+    assert!(!loaded.session_profile_bindings.contains_key("sess-stale"));
+    assert!(raw.contains("resp-fresh"));
+    assert!(!raw.contains("resp-stale"));
+    assert!(!raw.contains("sess-stale"));
+}
+
+#[test]
+fn app_state_load_compacts_stale_entries_in_memory() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(
+        paths.state_file
+            .parent()
+            .expect("state file should have a parent"),
+    )
+    .expect("state dir should exist");
+    let now = Local::now().timestamp();
+    let stale_last_run = now - APP_STATE_LAST_RUN_RETENTION_SECONDS - 5;
+    let stale_binding = now - APP_STATE_SESSION_BINDING_RETENTION_SECONDS - 5;
+    let raw = serde_json::json!({
+        "active_profile": "main",
+        "profiles": {
+            "main": {
+                "codex_home": temp_dir.path.join("homes/main"),
+                "managed": true,
+                "email": "main@example.com"
+            }
+        },
+        "last_run_selected_at": {
+            "main": now,
+            "ghost": stale_last_run
+        },
+        "response_profile_bindings": {
+            "resp-stale": {
+                "profile_name": "main",
+                "bound_at": stale_binding
+            }
+        },
+        "session_profile_bindings": {
+            "sess-stale": {
+                "profile_name": "main",
+                "bound_at": stale_binding
+            }
+        }
+    });
+    fs::write(
+        &paths.state_file,
+        serde_json::to_string_pretty(&raw).expect("raw json should serialize"),
+    )
+    .expect("raw state should write");
+
+    let loaded = AppState::load(&paths).expect("state should load");
+    assert_eq!(loaded.active_profile.as_deref(), Some("main"));
+    assert!(loaded.last_run_selected_at.contains_key("main"));
+    assert!(!loaded.last_run_selected_at.contains_key("ghost"));
+    assert!(loaded.response_profile_bindings.is_empty());
+    assert!(loaded.session_profile_bindings.is_empty());
 }
 
 #[test]
 fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
     let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -4982,7 +5118,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
                 },
             ),
         ]),
-        last_run_selected_at: BTreeMap::from([("second".to_string(), 30)]),
+        last_run_selected_at: BTreeMap::from([("second".to_string(), now - 20)]),
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -5000,19 +5136,19 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
                 email: Some("main@example.com".to_string()),
             },
         )]),
-        last_run_selected_at: BTreeMap::from([("main".to_string(), 40)]),
+        last_run_selected_at: BTreeMap::from([("main".to_string(), now - 10)]),
         response_profile_bindings: BTreeMap::from([(
             "resp-main".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
-                bound_at: 40,
+                bound_at: now - 10,
             },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
-                bound_at: 40,
+                bound_at: now - 10,
             },
         )]),
     };
@@ -5047,13 +5183,14 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
             .map(|binding| binding.profile_name.as_str()),
         Some("main")
     );
-    assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(30));
-    assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(40));
+    assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(now - 20));
+    assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(now - 10));
 }
 
 #[test]
 fn runtime_state_save_scheduler_persists_latest_snapshot() {
     let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -5118,7 +5255,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         AppState {
             active_profile: Some("main".to_string()),
             profiles: profiles.clone(),
-            last_run_selected_at: BTreeMap::from([("main".to_string(), 10)]),
+            last_run_selected_at: BTreeMap::from([("main".to_string(), now - 20)]),
             response_profile_bindings: BTreeMap::new(),
             session_profile_bindings: BTreeMap::new(),
         },
@@ -5126,12 +5263,12 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
             RuntimeProfileHealth {
                 score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
-                updated_at: 10,
+                updated_at: now - 20,
             },
         )]),
         BTreeMap::new(),
         RuntimeProfileBackoffs {
-            retry_backoff_until: BTreeMap::from([("main".to_string(), Local::now().timestamp() + 60)]),
+            retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
             transport_backoff_until: BTreeMap::new(),
         route_circuit_open_until: BTreeMap::new(),
         },
@@ -5143,19 +5280,19 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         AppState {
             active_profile: Some("second".to_string()),
             profiles: profiles.clone(),
-            last_run_selected_at: BTreeMap::from([("second".to_string(), 20)]),
+            last_run_selected_at: BTreeMap::from([("second".to_string(), now - 10)]),
             response_profile_bindings: BTreeMap::from([(
                 "resp-second".to_string(),
                 ResponseProfileBinding {
                     profile_name: "second".to_string(),
-                    bound_at: 20,
+                    bound_at: now - 10,
                 },
             )]),
             session_profile_bindings: BTreeMap::from([(
                 "sess-second".to_string(),
                 ResponseProfileBinding {
                     profile_name: "second".to_string(),
-                    bound_at: 20,
+                    bound_at: now - 10,
                 },
             )]),
         },
@@ -5163,13 +5300,13 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             runtime_profile_route_health_key("second", RuntimeRouteKind::Compact),
             RuntimeProfileHealth {
                 score: RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
-                updated_at: 20,
+                updated_at: now - 10,
             },
         )]),
         BTreeMap::new(),
         RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::new(),
-            transport_backoff_until: BTreeMap::from([("second".to_string(), Local::now().timestamp() + 120)]),
+            transport_backoff_until: BTreeMap::from([("second".to_string(), now + 120)]),
         route_circuit_open_until: BTreeMap::new(),
         },
         paths.clone(),
@@ -5190,7 +5327,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
     assert_eq!(persisted.active_profile.as_deref(), Some("second"));
     assert_eq!(
         persisted.last_run_selected_at.get("second").copied(),
-        Some(20)
+        Some(now - 10)
     );
     assert_eq!(
         persisted
@@ -5715,13 +5852,14 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.085 +07:00] profile_probe_refresh_ok profile=second
 [2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_error profile=third error=timeout
 [2026-03-20 12:00:00.095 +07:00] profile_circuit_open profile=main route=responses until=123 reason=stream_read_error score=4
+[2026-03-20 12:00:00.096 +07:00] profile_circuit_half_open_probe profile=main route=responses until=128 health=3
 [2026-03-20 12:00:00.097 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
 [2026-03-20 12:00:00.099 +07:00] local_writer_error request=1 transport=http profile=main stage=chunk_flush chunks=1 bytes=128 elapsed_ms=20 error=broken_pipe
 [2026-03-20 12:00:00.100 +07:00] runtime_proxy_startup_audit missing_managed_dirs=1 stale_response_bindings=2 stale_session_bindings=1 active_profile_missing_dir=false
 "#,
         );
 
-    assert_eq!(summary.line_count, 21);
+    assert_eq!(summary.line_count, 22);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -5785,6 +5923,10 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         1
     );
     assert_eq!(runtime_doctor_marker_count(&summary, "profile_circuit_open"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe"),
+        1
+    );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog"),
         1
@@ -6894,6 +7036,105 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
                 "missing",
                 RuntimeRouteKind::Responses
             ))
+    );
+}
+
+#[test]
+fn reserve_runtime_profile_route_circuit_half_open_probe_is_single_flight() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            now - 1,
+        )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: 4,
+                updated_at: now,
+            },
+        )]),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert!(
+        reserve_runtime_profile_route_circuit_half_open_probe(
+            &shared,
+            "main",
+            RuntimeRouteKind::Responses,
+        )
+        .expect("first half-open reservation should succeed")
+    );
+    {
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        assert!(
+            runtime
+                .profile_route_circuit_open_until
+                .get(&runtime_profile_route_circuit_key(
+                    "main",
+                    RuntimeRouteKind::Responses,
+                ))
+                .is_some_and(|until| *until > now)
+        );
+    }
+    assert!(
+        !reserve_runtime_profile_route_circuit_half_open_probe(
+            &shared,
+            "main",
+            RuntimeRouteKind::Responses,
+        )
+        .expect("second half-open reservation should be blocked")
     );
 }
 
