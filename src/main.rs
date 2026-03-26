@@ -5574,6 +5574,34 @@ fn runtime_request_previous_response_id_from_value(value: &serde_json::Value) ->
         .map(str::to_string)
 }
 
+fn runtime_request_without_previous_response_id(
+    request: &RuntimeProxyRequest,
+) -> Option<RuntimeProxyRequest> {
+    let mut value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
+    let object = value.as_object_mut()?;
+    let removed = object.remove("previous_response_id")?;
+    if removed.as_str().map(str::trim).is_none_or(str::is_empty) {
+        return None;
+    }
+    let body = serde_json::to_vec(&value).ok()?;
+    Some(RuntimeProxyRequest {
+        method: request.method.clone(),
+        path_and_query: request.path_and_query.clone(),
+        headers: request.headers.clone(),
+        body,
+    })
+}
+
+fn runtime_request_text_without_previous_response_id(request_text: &str) -> Option<String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
+    let object = value.as_object_mut()?;
+    let removed = object.remove("previous_response_id")?;
+    if removed.as_str().map(str::trim).is_none_or(str::is_empty) {
+        return None;
+    }
+    serde_json::to_string(&value).ok()
+}
+
 fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
     request.headers.iter().find_map(|(name, value)| {
         name.eq_ignore_ascii_case("x-codex-turn-state")
@@ -6640,7 +6668,8 @@ fn proxy_runtime_websocket_text_message(
     shared: &RuntimeRotationProxyShared,
     websocket_session: &mut RuntimeWebsocketSessionState,
 ) -> Result<()> {
-    let previous_response_id = runtime_request_previous_response_id_from_text(request_text);
+    let mut request_text = request_text.to_string();
+    let mut previous_response_id = runtime_request_previous_response_id_from_text(&request_text);
     let request_turn_state = runtime_request_turn_state(handshake_request);
     let request_session_id = runtime_request_session_id(handshake_request);
     let mut bound_profile = previous_response_id
@@ -6670,8 +6699,10 @@ fn proxy_runtime_websocket_text_message(
     let mut candidate_turn_state_retry_profile: Option<String> = None;
     let mut candidate_turn_state_retry_value: Option<String> = None;
     let mut saw_inflight_saturation = false;
-    let selection_started_at = Instant::now();
+    let mut selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
+    let mut previous_response_fresh_fallback_used = false;
+    let mut saw_previous_response_not_found = false;
 
     loop {
         if runtime_proxy_precommit_budget_exhausted(
@@ -6686,6 +6717,36 @@ fn proxy_runtime_websocket_text_message(
                     selection_started_at.elapsed().as_millis()
                 ),
             );
+            if previous_response_id.is_some()
+                && saw_previous_response_not_found
+                && !previous_response_fresh_fallback_used
+                && pinned_profile.is_none()
+                && bound_profile.is_none()
+                && turn_state_profile.is_none()
+                && session_profile.is_none()
+                && let Some(fresh_request_text) =
+                    runtime_request_text_without_previous_response_id(&request_text)
+            {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=precommit_budget_exhausted"
+                    ),
+                );
+                request_text = fresh_request_text;
+                previous_response_id = None;
+                previous_response_fresh_fallback_used = true;
+                saw_previous_response_not_found = false;
+                previous_response_retry_candidate = None;
+                previous_response_retry_index = 0;
+                candidate_turn_state_retry_profile = None;
+                candidate_turn_state_retry_value = None;
+                excluded_profiles.clear();
+                last_failure = None;
+                selection_started_at = Instant::now();
+                selection_attempts = 0;
+                continue;
+            }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
                 pinned_profile.as_deref(),
@@ -6710,7 +6771,7 @@ fn proxy_runtime_websocket_text_message(
                         request_id,
                         local_socket,
                         handshake_request,
-                        request_text,
+                        &request_text,
                         shared,
                         websocket_session,
                         &current_profile,
@@ -6785,6 +6846,36 @@ fn proxy_runtime_websocket_text_message(
                     }
                 ),
             );
+            if previous_response_id.is_some()
+                && saw_previous_response_not_found
+                && !previous_response_fresh_fallback_used
+                && pinned_profile.is_none()
+                && bound_profile.is_none()
+                && turn_state_profile.is_none()
+                && session_profile.is_none()
+                && let Some(fresh_request_text) =
+                    runtime_request_text_without_previous_response_id(&request_text)
+            {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=candidate_exhausted"
+                    ),
+                );
+                request_text = fresh_request_text;
+                previous_response_id = None;
+                previous_response_fresh_fallback_used = true;
+                saw_previous_response_not_found = false;
+                previous_response_retry_candidate = None;
+                previous_response_retry_index = 0;
+                candidate_turn_state_retry_profile = None;
+                candidate_turn_state_retry_value = None;
+                excluded_profiles.clear();
+                last_failure = None;
+                selection_started_at = Instant::now();
+                selection_attempts = 0;
+                continue;
+            }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
                 pinned_profile.as_deref(),
@@ -6809,7 +6900,7 @@ fn proxy_runtime_websocket_text_message(
                         request_id,
                         local_socket,
                         handshake_request,
-                        request_text,
+                        &request_text,
                         shared,
                         websocket_session,
                         &current_profile,
@@ -6904,7 +6995,7 @@ fn proxy_runtime_websocket_text_message(
             request_id,
             local_socket,
             handshake_request,
-            request_text,
+            &request_text,
             shared,
             websocket_session,
             &candidate_name,
@@ -7024,6 +7115,7 @@ fn proxy_runtime_websocket_text_message(
                         turn_state
                     ),
                 );
+                saw_previous_response_not_found = true;
                 if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
                     previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
@@ -8146,9 +8238,10 @@ fn proxy_runtime_responses_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
-    let previous_response_id = runtime_request_previous_response_id(request);
-    let request_turn_state = runtime_request_turn_state(request);
-    let request_session_id = runtime_request_session_id(request);
+    let mut request = request.clone();
+    let mut previous_response_id = runtime_request_previous_response_id(&request);
+    let request_turn_state = runtime_request_turn_state(&request);
+    let request_session_id = runtime_request_session_id(&request);
     let mut bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| runtime_response_bound_profile(shared, response_id))
@@ -8176,8 +8269,10 @@ fn proxy_runtime_responses_request(
     let mut candidate_turn_state_retry_profile: Option<String> = None;
     let mut candidate_turn_state_retry_value: Option<String> = None;
     let mut saw_inflight_saturation = false;
-    let selection_started_at = Instant::now();
+    let mut selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
+    let mut previous_response_fresh_fallback_used = false;
+    let mut saw_previous_response_not_found = false;
 
     loop {
         if runtime_proxy_precommit_budget_exhausted(
@@ -8192,6 +8287,35 @@ fn proxy_runtime_responses_request(
                     selection_started_at.elapsed().as_millis()
                 ),
             );
+            if previous_response_id.is_some()
+                && saw_previous_response_not_found
+                && !previous_response_fresh_fallback_used
+                && pinned_profile.is_none()
+                && bound_profile.is_none()
+                && turn_state_profile.is_none()
+                && session_profile.is_none()
+                && let Some(fresh_request) = runtime_request_without_previous_response_id(&request)
+            {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http previous_response_fresh_fallback reason=precommit_budget_exhausted"
+                    ),
+                );
+                request = fresh_request;
+                previous_response_id = None;
+                previous_response_fresh_fallback_used = true;
+                saw_previous_response_not_found = false;
+                previous_response_retry_candidate = None;
+                previous_response_retry_index = 0;
+                candidate_turn_state_retry_profile = None;
+                candidate_turn_state_retry_value = None;
+                excluded_profiles.clear();
+                last_failure = None;
+                selection_started_at = Instant::now();
+                selection_attempts = 0;
+                continue;
+            }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
                 pinned_profile.as_deref(),
@@ -8214,7 +8338,7 @@ fn proxy_runtime_responses_request(
                     );
                     match attempt_runtime_responses_request(
                         request_id,
-                        request,
+                        &request,
                         shared,
                         &current_profile,
                         request_turn_state.as_deref(),
@@ -8291,6 +8415,35 @@ fn proxy_runtime_responses_request(
                     }
                 ),
             );
+            if previous_response_id.is_some()
+                && saw_previous_response_not_found
+                && !previous_response_fresh_fallback_used
+                && pinned_profile.is_none()
+                && bound_profile.is_none()
+                && turn_state_profile.is_none()
+                && session_profile.is_none()
+                && let Some(fresh_request) = runtime_request_without_previous_response_id(&request)
+            {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http previous_response_fresh_fallback reason=candidate_exhausted"
+                    ),
+                );
+                request = fresh_request;
+                previous_response_id = None;
+                previous_response_fresh_fallback_used = true;
+                saw_previous_response_not_found = false;
+                previous_response_retry_candidate = None;
+                previous_response_retry_index = 0;
+                candidate_turn_state_retry_profile = None;
+                candidate_turn_state_retry_value = None;
+                excluded_profiles.clear();
+                last_failure = None;
+                selection_started_at = Instant::now();
+                selection_attempts = 0;
+                continue;
+            }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
                 pinned_profile.as_deref(),
@@ -8313,7 +8466,7 @@ fn proxy_runtime_responses_request(
                     );
                     match attempt_runtime_responses_request(
                         request_id,
-                        request,
+                        &request,
                         shared,
                         &current_profile,
                         request_turn_state.as_deref(),
@@ -8408,7 +8561,7 @@ fn proxy_runtime_responses_request(
 
         match attempt_runtime_responses_request(
             request_id,
-            request,
+            &request,
             shared,
             &candidate_name,
             turn_state_override,
@@ -8512,6 +8665,7 @@ fn proxy_runtime_responses_request(
                         turn_state
                     ),
                 );
+                saw_previous_response_not_found = true;
                 if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
                     previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;

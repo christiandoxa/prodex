@@ -8307,6 +8307,9 @@ fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
 #[test]
 fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
     let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
     let backend = RuntimeProxyBackend::start_http_reset_after_first_chunk();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -8334,6 +8337,9 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
     };
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
+    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
+        .expect("latest runtime pointer should exist");
+    let log_path = PathBuf::from(log_path.trim());
 
     let client = Client::builder().build().expect("client");
     let response = client
@@ -8352,10 +8358,22 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
         backend.responses_accounts(),
         vec!["second-account".to_string()]
     );
-    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
-        .expect("latest runtime pointer should exist");
-    let tail = read_runtime_log_tail(Path::new(log_path.trim()), 32 * 1024)
-        .expect("runtime log tail should be readable");
+    let mut tail = Vec::new();
+    let mut observed = false;
+    for _ in 0..80 {
+        tail = read_runtime_log_tail(&log_path, 32 * 1024)
+            .expect("runtime log tail should be readable");
+        let text = String::from_utf8_lossy(&tail);
+        if text.contains("first_upstream_chunk")
+            && text.contains("first_local_chunk")
+            && text.contains("stream_read_error")
+        {
+            observed = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(observed, "runtime log should capture first-chunk reset markers");
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("first_upstream_chunk"));
     assert!(tail.contains("first_local_chunk"));
@@ -9558,6 +9576,197 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
             "main-account".to_string(),
             "second-account".to_string(),
         ]
+    );
+}
+
+#[test]
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_everywhere_http() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-missing\",\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+
+    assert!(
+        body.contains("\"resp-third\""),
+        "proxy should degrade to a fresh request after previous response discovery exhausts: {body}"
+    );
+    let accounts = backend.responses_accounts();
+    assert!(
+        accounts.iter().any(|account| account == "second-account"),
+        "discovery should still probe alternate owners before falling back fresh: {accounts:?}"
+    );
+    assert_eq!(
+        accounts.last().map(String::as_str),
+        Some("third-account"),
+        "fresh fallback should complete on a healthy candidate: {accounts:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_everywhere_websocket() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-missing\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-third\"")),
+        "proxy should degrade to a fresh websocket request after previous response discovery exhausts: {payloads:?}"
+    );
+    let accounts = backend.responses_accounts();
+    assert!(
+        accounts.iter().any(|account| account == "second-account"),
+        "discovery should still probe alternate websocket owners before falling back fresh: {accounts:?}"
+    );
+    assert_eq!(
+        accounts.last().map(String::as_str),
+        Some("third-account"),
+        "fresh websocket fallback should complete on a healthy candidate: {accounts:?}"
     );
 }
 
