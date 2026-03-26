@@ -121,11 +121,13 @@ enum RuntimeProxyBackendMode {
     HttpOnlyInitialBodyStall,
     HttpOnlySlowStream,
     HttpOnlyResetBeforeFirstByte,
+    HttpOnlyResetAfterFirstChunk,
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyCompactOverloaded,
     HttpOnlyUsageLimitMessage,
     HttpOnlyPlain429,
     Websocket,
+    WebsocketCloseMidTurn,
     WebsocketPreviousResponseNeedsTurnState,
 }
 
@@ -146,6 +148,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
     }
 
+    fn start_http_reset_after_first_chunk() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetAfterFirstChunk)
+    }
+
     fn start_http_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState)
     }
@@ -164,6 +170,10 @@ impl RuntimeProxyBackend {
 
     fn start_websocket() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::Websocket)
+    }
+
+    fn start_websocket_close_mid_turn() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketCloseMidTurn)
     }
 
     fn start_websocket_previous_response_needs_turn_state() -> Self {
@@ -198,6 +208,7 @@ impl RuntimeProxyBackend {
                         let websocket_enabled = matches!(
                             mode,
                             RuntimeProxyBackendMode::Websocket
+                                | RuntimeProxyBackendMode::WebsocketCloseMidTurn
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                         );
                         thread::spawn(move || {
@@ -280,7 +291,7 @@ fn handle_runtime_proxy_backend_request(
     responses_accounts: &Arc<Mutex<Vec<String>>>,
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
     usage_accounts: &Arc<Mutex<Vec<String>>>,
-    _mode: RuntimeProxyBackendMode,
+    mode: RuntimeProxyBackendMode,
 ) {
     let request = match read_http_request(&mut stream) {
         Some(request) => request,
@@ -298,7 +309,7 @@ fn handle_runtime_proxy_backend_request(
 
     if path.ends_with("/backend-api/codex/responses")
         && account_id == "main-account"
-        && matches!(_mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
+        && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
     {
         responses_accounts
             .lock()
@@ -343,7 +354,7 @@ fn handle_runtime_proxy_backend_request(
                 .push(captured_headers);
             let previous_response_id = request_previous_response_id(&request);
             match account_id.as_str() {
-                "main-account" if matches!(_mode, RuntimeProxyBackendMode::HttpOnlyPlain429) => (
+                "main-account" if matches!(mode, RuntimeProxyBackendMode::HttpOnlyPlain429) => (
                     "HTTP/1.1 429 Too Many Requests",
                     "text/plain",
                     "Too Many Requests".to_string(),
@@ -352,7 +363,7 @@ fn handle_runtime_proxy_backend_request(
                     None,
                 ),
                 "main-account" => {
-                    let body = if matches!(_mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
+                    let body = if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
                     {
                         concat!(
                             "event: response.failed\r\n",
@@ -373,15 +384,15 @@ fn handle_runtime_proxy_backend_request(
                         "text/event-stream",
                         body,
                         None,
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                             .then_some(Duration::from_millis(100)),
                     )
                 }
                 "second-account"
                     if matches!(
-                        _mode,
+                        mode,
                         RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState
                     ) && previous_response_id.as_deref() == Some("resp-second")
                         && turn_state.as_deref() != Some("turn-second") =>
@@ -421,9 +432,9 @@ fn handle_runtime_proxy_backend_request(
                         )
                         .to_string(),
                         None,
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                             .then_some(Duration::from_millis(100)),
                     )
                 }
@@ -444,7 +455,7 @@ fn handle_runtime_proxy_backend_request(
                     })
                     .to_string(),
                     None,
-                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                    matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
                     None,
                 ),
@@ -461,9 +472,9 @@ fn handle_runtime_proxy_backend_request(
                         )
                         .to_string(),
                         None,
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                             .then_some(Duration::from_millis(100)),
                 ),
                 "third-account" if previous_response_id.is_some() => (
@@ -483,7 +494,7 @@ fn handle_runtime_proxy_backend_request(
                     })
                     .to_string(),
                     None,
-                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                    matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
                     None,
                 ),
@@ -500,9 +511,9 @@ fn handle_runtime_proxy_backend_request(
                         )
                         .to_string(),
                         None,
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                             .then_some(Duration::from_millis(750)),
-                        matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                             .then_some(Duration::from_millis(100)),
                 ),
                 _ => (
@@ -515,9 +526,9 @@ fn handle_runtime_proxy_backend_request(
                         )
                         .to_string(),
                     None,
-                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                    matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                         .then_some(Duration::from_millis(750)),
-                    matches!(_mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                    matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                         .then_some(Duration::from_millis(100)),
                 ),
             }
@@ -530,7 +541,7 @@ fn handle_runtime_proxy_backend_request(
                 .lock()
                 .expect("responses_headers poisoned")
                 .push(captured_headers);
-            match (account_id.as_str(), _mode) {
+            match (account_id.as_str(), mode) {
                 ("main-account", RuntimeProxyBackendMode::HttpOnlyCompactOverloaded) => (
                     "HTTP/1.1 500 Internal Server Error",
                     "application/json",
@@ -602,6 +613,19 @@ fn handle_runtime_proxy_backend_request(
     let _ = stream.flush();
     if let Some(delay) = initial_body_stall {
         thread::sleep(delay);
+    }
+    if content_type == "text/event-stream"
+        && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetAfterFirstChunk)
+        && account_id == "second-account"
+    {
+        let reset_chunk = body
+            .split("\r\n\r\n")
+            .next()
+            .map(|chunk| format!("{chunk}\r\n\r\n"))
+            .unwrap_or_else(|| body.clone());
+        let _ = stream.write_all(reset_chunk.as_bytes());
+        let _ = stream.flush();
+        return;
     }
     if content_type == "text/event-stream"
         && let Some(delay) = chunk_delay
@@ -837,6 +861,10 @@ fn handle_runtime_proxy_backend_websocket(
                         .into(),
                     ))
                     .expect("response.created should be sent");
+                if matches!(mode, RuntimeProxyBackendMode::WebsocketCloseMidTurn) {
+                    let _ = websocket.close(None);
+                    break;
+                }
                 websocket
                     .send(WsMessage::Text(
                         serde_json::json!({
@@ -1945,6 +1973,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
             Local::now().timestamp().saturating_add(60),
         )]),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2014,6 +2043,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2111,6 +2141,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             "main".to_string(),
@@ -2185,6 +2216,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "main".to_string(),
             RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
@@ -2267,6 +2299,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2345,6 +2378,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2414,6 +2448,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
         profile_transport_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "main".to_string(),
             RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
@@ -2495,6 +2530,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "main".to_string(),
             RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT.saturating_sub(1),
@@ -2561,6 +2597,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "main".to_string(),
             RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
@@ -2617,6 +2654,7 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "main".to_string(),
             RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT.saturating_sub(1),
@@ -2681,6 +2719,7 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2774,6 +2813,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2845,6 +2885,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -2955,6 +2996,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
             "main".to_string(),
             now.saturating_add(60),
         )]),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -3062,6 +3104,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
             ("main".to_string(), now.saturating_add(90)),
             ("second".to_string(), now.saturating_add(30)),
         ]),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -3166,6 +3209,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             "main".to_string(),
@@ -3276,6 +3320,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_health_key("main", RuntimeRouteKind::Compact),
@@ -3395,6 +3440,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_bad_pairing_key("main", RuntimeRouteKind::Compact),
@@ -3514,6 +3560,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_bad_pairing_key("main", RuntimeRouteKind::Websocket),
@@ -3624,6 +3671,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([("main".to_string(), 2), ("second".to_string(), 0)]),
         profile_health: BTreeMap::new(),
     };
@@ -3728,6 +3776,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -3797,6 +3846,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             "main".to_string(),
@@ -3879,6 +3929,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -3951,6 +4002,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([
             (
@@ -4063,6 +4115,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([
             (
@@ -4172,6 +4225,7 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             route_key.clone(),
@@ -4327,6 +4381,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
         )]),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -4449,6 +4504,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         ]),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -4483,6 +4539,92 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())
+    );
+}
+
+#[test]
+fn optimistic_current_candidate_skips_open_route_circuit() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 80,
+                five_hour_reset_at: Local::now().timestamp() + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 80,
+                weekly_reset_at: Local::now().timestamp() + 86_400,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            Local::now().timestamp() + 60,
+        )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("candidate lookup should succeed"),
+        None
     );
 }
 
@@ -4563,6 +4705,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         ]),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -4701,6 +4844,7 @@ fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -4963,6 +5107,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -4988,6 +5133,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::from([("main".to_string(), Local::now().timestamp() + 60)]),
             transport_backoff_until: BTreeMap::new(),
+        route_circuit_open_until: BTreeMap::new(),
         },
         paths.clone(),
         "first",
@@ -5024,6 +5170,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::new(),
             transport_backoff_until: BTreeMap::from([("second".to_string(), Local::now().timestamp() + 120)]),
+        route_circuit_open_until: BTreeMap::new(),
         },
         paths.clone(),
         "second",
@@ -5126,6 +5273,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -5222,6 +5370,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "second".to_string(),
             RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT + 1,
@@ -5327,6 +5476,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -5407,6 +5557,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -5563,10 +5714,14 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.080 +07:00] profile_probe_refresh_start profile=second
 [2026-03-20 12:00:00.085 +07:00] profile_probe_refresh_ok profile=second
 [2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_error profile=third error=timeout
+[2026-03-20 12:00:00.095 +07:00] profile_circuit_open profile=main route=responses until=123 reason=stream_read_error score=4
+[2026-03-20 12:00:00.097 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
+[2026-03-20 12:00:00.099 +07:00] local_writer_error request=1 transport=http profile=main stage=chunk_flush chunks=1 bytes=128 elapsed_ms=20 error=broken_pipe
+[2026-03-20 12:00:00.100 +07:00] runtime_proxy_startup_audit missing_managed_dirs=1 stale_response_bindings=2 stale_session_bindings=1 active_profile_missing_dir=false
 "#,
         );
 
-    assert_eq!(summary.line_count, 17);
+    assert_eq!(summary.line_count, 21);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -5629,6 +5784,16 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_error"),
         1
     );
+    assert_eq!(runtime_doctor_marker_count(&summary, "profile_circuit_open"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog"),
+        1
+    );
+    assert_eq!(runtime_doctor_marker_count(&summary, "local_writer_error"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit"),
+        1
+    );
     assert_eq!(
         runtime_doctor_top_facet(&summary, "quota_source").as_deref(),
         Some("persisted_snapshot (1)")
@@ -5645,7 +5810,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         summary
             .last_marker_line
             .as_deref()
-            .is_some_and(|line| line.contains("profile_probe_refresh_error"))
+            .is_some_and(|line| line.contains("runtime_proxy_startup_audit"))
     );
 }
 
@@ -5699,6 +5864,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         )]),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -5787,6 +5953,7 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         )]),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -5855,6 +6022,7 @@ fn runtime_proxy_active_request_limit_is_enforced_and_released() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -5924,6 +6092,7 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -6011,6 +6180,7 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -6483,6 +6653,7 @@ fn exhausted_usage_snapshot_releases_persisted_affinity_bindings() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
@@ -6540,6 +6711,189 @@ fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
             .and_then(|fields| fields.get("reason"))
             .map(String::as_str),
         Some("connection_reset")
+    );
+}
+
+#[test]
+fn runtime_doctor_collect_summary_reports_route_circuit_diagnosis() {
+    let temp_dir = TestDir::new();
+    let pointer = runtime_proxy_latest_log_pointer_path();
+    let log_path = temp_dir.path.join("runtime-doctor.log");
+    fs::write(
+        &log_path,
+        concat!(
+            "[2026-03-26 00:00:00.000 +07:00] profile_circuit_open profile=main route=responses until=200 reason=stream_read_error score=4\n",
+            "[2026-03-26 00:00:00.050 +07:00] first_upstream_chunk route=responses transport=http profile=main\n",
+        ),
+    )
+    .expect("runtime log should be written");
+    fs::write(&pointer, format!("{}\n", log_path.display())).expect("pointer should be written");
+
+    let summary = collect_runtime_doctor_summary();
+    assert_eq!(runtime_doctor_marker_count(&summary, "profile_circuit_open"), 1);
+    assert_eq!(summary.transport_pressure, "elevated");
+    assert!(
+        summary
+            .diagnosis
+            .contains("circuit breaker")
+            || summary.diagnosis.contains("writer stall")
+    );
+}
+
+#[test]
+fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
+    let temp_dir = TestDir::new();
+    let valid_home = temp_dir.path.join("homes/valid");
+    write_auth_json(&valid_home.join("auth.json"), "valid-account");
+    let missing_home = temp_dir.path.join("homes/missing");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state: AppState {
+            active_profile: Some("valid".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "valid".to_string(),
+                    ProfileEntry {
+                        codex_home: valid_home,
+                        managed: true,
+                        email: Some("valid@example.com".to_string()),
+                    },
+                ),
+                (
+                    "missing".to_string(),
+                    ProfileEntry {
+                        codex_home: missing_home,
+                        managed: true,
+                        email: Some("missing@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::from([(
+                "resp-missing".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "missing".to_string(),
+                    bound_at: 1,
+                },
+            )]),
+            session_profile_bindings: BTreeMap::from([(
+                "sess-missing".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "missing".to_string(),
+                    bound_at: 1,
+                },
+            )]),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "valid".to_string(),
+        turn_state_bindings: BTreeMap::from([(
+            "turn-missing".to_string(),
+            ResponseProfileBinding {
+                profile_name: "missing".to_string(),
+                bound_at: 1,
+            },
+        )]),
+        session_id_bindings: BTreeMap::from([(
+            "sess-missing".to_string(),
+            ResponseProfileBinding {
+                profile_name: "missing".to_string(),
+                bound_at: 1,
+            },
+        )]),
+        profile_probe_cache: BTreeMap::from([(
+            "missing".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: Local::now().timestamp(),
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Err("stale".to_string()),
+            },
+        )]),
+        profile_usage_snapshots: BTreeMap::from([(
+            "missing".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_remaining_percent: 0,
+                five_hour_reset_at: Local::now().timestamp() + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Exhausted,
+                weekly_remaining_percent: 0,
+                weekly_reset_at: Local::now().timestamp() + 600,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::from([(
+            "missing".to_string(),
+            Local::now().timestamp() + 60,
+        )]),
+        profile_transport_backoff_until: BTreeMap::from([(
+            "missing".to_string(),
+            Local::now().timestamp() + 60,
+        )]),
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("missing", RuntimeRouteKind::Responses),
+            Local::now().timestamp() + 60,
+        )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_route_health_key("missing", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: 4,
+                updated_at: Local::now().timestamp(),
+            },
+        )]),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    audit_runtime_proxy_startup_state(&shared);
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(!runtime.state.response_profile_bindings.contains_key("resp-missing"));
+    assert!(!runtime.state.session_profile_bindings.contains_key("sess-missing"));
+    assert!(!runtime.turn_state_bindings.contains_key("turn-missing"));
+    assert!(!runtime.session_id_bindings.contains_key("sess-missing"));
+    assert!(!runtime.profile_probe_cache.contains_key("missing"));
+    assert!(!runtime.profile_usage_snapshots.contains_key("missing"));
+    assert!(!runtime.profile_retry_backoff_until.contains_key("missing"));
+    assert!(!runtime.profile_transport_backoff_until.contains_key("missing"));
+    assert!(
+        !runtime.profile_route_circuit_open_until.contains_key(
+            &runtime_profile_route_circuit_key("missing", RuntimeRouteKind::Responses)
+        )
+    );
+    assert!(
+        !runtime
+            .profile_health
+            .contains_key(&runtime_profile_route_health_key(
+                "missing",
+                RuntimeRouteKind::Responses
+            ))
     );
 }
 
@@ -6729,6 +7083,7 @@ fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -6808,6 +7163,7 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
@@ -7269,6 +7625,64 @@ fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
 }
 
 #[test]
+fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_reset_after_first_chunk();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let client = Client::builder().build().expect("client");
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    assert_eq!(response.status(), 200);
+    let _ = response.text();
+
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
+    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
+        .expect("latest runtime pointer should exist");
+    let tail = read_runtime_log_tail(Path::new(log_path.trim()), 32 * 1024)
+        .expect("runtime log tail should be readable");
+    let tail = String::from_utf8_lossy(&tail);
+    assert!(tail.contains("first_upstream_chunk"));
+    assert!(tail.contains("first_local_chunk"));
+    assert!(tail.contains("stream_read_error"));
+}
+
+#[test]
 fn runtime_proxies_bind_distinct_local_ports() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
@@ -7424,6 +7838,97 @@ fn runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error() {
         vec!["main-account".to_string(), "second-account".to_string()]
     );
 
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate() {
+    let backend = RuntimeProxyBackend::start_websocket_close_mid_turn();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => payloads.push(text.to_string()),
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed)
+            | Err(_) => break,
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.created\""))
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.completed\""))
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
     let persisted = wait_for_state(&paths, |state| {
         state.active_profile.as_deref() == Some("second")
     });

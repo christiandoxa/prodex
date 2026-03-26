@@ -795,12 +795,26 @@ fn merge_runtime_profile_backoffs(
             .and_modify(|current| *current = (*current).max(*until))
             .or_insert(*until);
     }
+    for (route_profile_key, until) in &incoming.route_circuit_open_until {
+        merged
+            .route_circuit_open_until
+            .entry(route_profile_key.clone())
+            .and_modify(|current| *current = (*current).max(*until))
+            .or_insert(*until);
+    }
     merged
         .retry_backoff_until
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
     merged
         .transport_backoff_until
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    merged
+        .route_circuit_open_until
+        .retain(|route_profile_key, until| {
+            profiles.contains_key(runtime_profile_route_circuit_profile_name(
+                route_profile_key,
+            )) && *until > now
+        });
     merged
 }
 
@@ -823,6 +837,13 @@ fn load_runtime_profile_backoffs(
     backoffs
         .transport_backoff_until
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    backoffs
+        .route_circuit_open_until
+        .retain(|route_profile_key, until| {
+            profiles.contains_key(runtime_profile_route_circuit_profile_name(
+                route_profile_key,
+            )) && *until > now
+        });
     Ok(backoffs)
 }
 
@@ -1343,6 +1364,7 @@ struct RuntimeRotationState {
     profile_usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     profile_retry_backoff_until: BTreeMap<String, i64>,
     profile_transport_backoff_until: BTreeMap<String, i64>,
+    profile_route_circuit_open_until: BTreeMap<String, i64>,
     profile_inflight: BTreeMap<String, usize>,
     profile_health: BTreeMap<String, RuntimeProfileHealth>,
 }
@@ -1369,6 +1391,7 @@ struct RuntimeProfileUsageSnapshot {
 struct RuntimeProfileBackoffs {
     retry_backoff_until: BTreeMap<String, i64>,
     transport_backoff_until: BTreeMap<String, i64>,
+    route_circuit_open_until: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1565,6 +1588,10 @@ enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
         turn_state: Option<String>,
+    },
+    ReuseWatchdogTripped {
+        profile_name: String,
+        event: &'static str,
     },
 }
 
@@ -2598,6 +2625,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "profile_transport_backoff").to_string(),
         ),
         (
+            "Route circuits".to_string(),
+            runtime_doctor_marker_count(&summary, "profile_circuit_open").to_string(),
+        ),
+        (
             "Health penalties".to_string(),
             runtime_doctor_marker_count(&summary, "profile_health").to_string(),
         ),
@@ -2614,8 +2645,16 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "selection_skip_current").to_string(),
         ),
         (
+            "WS reuse watchdog".to_string(),
+            runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog").to_string(),
+        ),
+        (
             "Stream read errors".to_string(),
             runtime_doctor_marker_count(&summary, "stream_read_error").to_string(),
+        ),
+        (
+            "Writer errors".to_string(),
+            runtime_doctor_marker_count(&summary, "local_writer_error").to_string(),
         ),
         (
             "State save errors".to_string(),
@@ -2628,6 +2667,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
         (
             "State save skipped".to_string(),
             runtime_doctor_marker_count(&summary, "state_save_skipped").to_string(),
+        ),
+        (
+            "Startup audit".to_string(),
+            runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit").to_string(),
         ),
         (
             "Admission recovered".to_string(),
@@ -2744,6 +2787,8 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         || runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
         || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
         || runtime_doctor_marker_count(&summary, "profile_transport_backoff") > 0
+        || runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0
+        || runtime_doctor_marker_count(&summary, "local_writer_error") > 0
     {
         "elevated".to_string()
     } else {
@@ -2785,10 +2830,14 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent global active-request admission limit was triggered.".to_string()
         } else if runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded") > 0 {
             "Recent proxy saturation detected before commit.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0 {
+            "Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_inflight_saturated") > 0 {
             "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_bad_pairing") > 0 {
             "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog") > 0 {
+            "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
         } else if runtime_doctor_marker_count(&summary, "selection_pick") > 0
             || runtime_doctor_marker_count(&summary, "selection_skip_current") > 0
         {
@@ -2797,6 +2846,8 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent candidate selection exhausted before commit.".to_string()
         } else if runtime_doctor_marker_count(&summary, "stream_read_error") > 0 {
             "Recent upstream stream read failure detected after commit.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "local_writer_error") > 0 {
+            "Recent local writer failure detected while forwarding an upstream stream.".to_string()
         } else if runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
             || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
         {
@@ -2810,7 +2861,7 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         } else if runtime_doctor_marker_count(&summary, "first_upstream_chunk") > 0
             && runtime_doctor_marker_count(&summary, "first_local_chunk") == 0
         {
-            "Upstream produced data but the local writer did not emit a first chunk in the sampled tail."
+            "Likely writer stall: upstream produced data but the local writer did not emit a first chunk in the sampled tail."
                 .to_string()
         } else {
             "No recent overload or stream-failure markers were detected in the sampled runtime tail."
@@ -2927,6 +2978,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "precommit_budget_exhausted",
         "profile_retry_backoff",
         "profile_transport_backoff",
+        "profile_circuit_open",
         "profile_health",
         "profile_bad_pairing",
         "selection_pick",
@@ -2934,13 +2986,16 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "selection_skip_affinity",
         "quota_release_profile_affinity",
         "websocket_reuse_skip_quota_exhausted",
+        "websocket_reuse_watchdog",
         "stream_read_error",
+        "local_writer_error",
         "first_upstream_chunk",
         "first_local_chunk",
         "state_save_ok",
         "state_save_skipped",
         "state_save_error",
         "runtime_proxy_restore_counts",
+        "runtime_proxy_startup_audit",
         "profile_probe_refresh_queued",
         "profile_probe_refresh_start",
         "profile_probe_refresh_ok",
@@ -4277,6 +4332,7 @@ fn start_runtime_rotation_proxy(
     let persisted_usage_snapshots_count = persisted_usage_snapshots.len();
     let persisted_retry_backoffs_count = persisted_backoffs.retry_backoff_until.len();
     let persisted_transport_backoffs_count = persisted_backoffs.transport_backoff_until.len();
+    let persisted_route_circuit_count = persisted_backoffs.route_circuit_open_until.len();
     let expired_usage_snapshot_count = persisted_usage_snapshots
         .values()
         .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, Local::now().timestamp()))
@@ -4325,6 +4381,7 @@ fn start_runtime_rotation_proxy(
             profile_usage_snapshots: persisted_usage_snapshots,
             profile_retry_backoff_until: persisted_backoffs.retry_backoff_until,
             profile_transport_backoff_until: persisted_backoffs.transport_backoff_until,
+            profile_route_circuit_open_until: persisted_backoffs.route_circuit_open_until,
             profile_inflight: BTreeMap::new(),
             profile_health: persisted_profile_scores,
         })),
@@ -4338,18 +4395,20 @@ fn start_runtime_rotation_proxy(
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} retry_backoffs={} transport_backoffs={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={}",
+            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} retry_backoffs={} transport_backoffs={} route_circuits={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={}",
             persisted_profile_scores_count,
             persisted_usage_snapshots_count,
             expired_usage_snapshot_count,
             persisted_retry_backoffs_count,
             persisted_transport_backoffs_count,
+            persisted_route_circuit_count,
             restored_global_scores_count,
             restored_route_scores_count,
             restored_bad_pairing_count,
             restored_success_streak_count,
         ),
     );
+    audit_runtime_proxy_startup_state(&shared);
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
     let (long_lived_sender, long_lived_receiver) =
@@ -4533,6 +4592,138 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
         RuntimeRouteKind::Responses
     } else {
         RuntimeRouteKind::Standard
+    }
+}
+
+fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
+    let Ok(mut runtime) = shared.runtime.lock() else {
+        return;
+    };
+    let missing_managed_dirs = runtime
+        .state
+        .profiles
+        .values()
+        .filter(|profile| profile.managed && !profile.codex_home.exists())
+        .count();
+    let valid_profiles = runtime
+        .state
+        .profiles
+        .iter()
+        .filter(|(_, profile)| !profile.managed || profile.codex_home.exists())
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    let stale_response_bindings = runtime
+        .state
+        .response_profile_bindings
+        .values()
+        .filter(|binding| !valid_profiles.contains(&binding.profile_name))
+        .count();
+    let stale_session_bindings = runtime
+        .state
+        .session_profile_bindings
+        .values()
+        .filter(|binding| !valid_profiles.contains(&binding.profile_name))
+        .count();
+    let stale_probe_cache = runtime
+        .profile_probe_cache
+        .keys()
+        .filter(|profile_name| !valid_profiles.contains(*profile_name))
+        .count();
+    let stale_usage_snapshots = runtime
+        .profile_usage_snapshots
+        .keys()
+        .filter(|profile_name| !valid_profiles.contains(*profile_name))
+        .count();
+    let stale_retry_backoffs = runtime
+        .profile_retry_backoff_until
+        .keys()
+        .filter(|profile_name| !valid_profiles.contains(*profile_name))
+        .count();
+    let stale_transport_backoffs = runtime
+        .profile_transport_backoff_until
+        .keys()
+        .filter(|profile_name| !valid_profiles.contains(*profile_name))
+        .count();
+    let stale_route_circuits = runtime
+        .profile_route_circuit_open_until
+        .keys()
+        .filter(|key| !valid_profiles.contains(runtime_profile_route_circuit_profile_name(key)))
+        .count();
+    let stale_health_scores = runtime
+        .profile_health
+        .keys()
+        .filter(|key| !valid_profiles.contains(runtime_profile_score_profile_name(key)))
+        .count();
+    let active_profile_missing_dir = runtime
+        .state
+        .active_profile
+        .as_deref()
+        .and_then(|name| runtime.state.profiles.get(name))
+        .is_some_and(|profile| profile.managed && !profile.codex_home.exists());
+
+    runtime
+        .state
+        .response_profile_bindings
+        .retain(|_, binding| valid_profiles.contains(&binding.profile_name));
+    runtime
+        .state
+        .session_profile_bindings
+        .retain(|_, binding| valid_profiles.contains(&binding.profile_name));
+    runtime
+        .turn_state_bindings
+        .retain(|_, binding| valid_profiles.contains(&binding.profile_name));
+    runtime
+        .session_id_bindings
+        .retain(|_, binding| valid_profiles.contains(&binding.profile_name));
+    runtime
+        .profile_probe_cache
+        .retain(|profile_name, _| valid_profiles.contains(profile_name));
+    runtime
+        .profile_usage_snapshots
+        .retain(|profile_name, _| valid_profiles.contains(profile_name));
+    runtime
+        .profile_retry_backoff_until
+        .retain(|profile_name, _| valid_profiles.contains(profile_name));
+    runtime
+        .profile_transport_backoff_until
+        .retain(|profile_name, _| valid_profiles.contains(profile_name));
+    runtime
+        .profile_route_circuit_open_until
+        .retain(|key, _| valid_profiles.contains(runtime_profile_route_circuit_profile_name(key)));
+    runtime
+        .profile_health
+        .retain(|key, _| valid_profiles.contains(runtime_profile_score_profile_name(key)));
+    let state_snapshot = runtime.state.clone();
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    let changed = stale_response_bindings > 0
+        || stale_session_bindings > 0
+        || stale_probe_cache > 0
+        || stale_usage_snapshots > 0
+        || stale_retry_backoffs > 0
+        || stale_transport_backoffs > 0
+        || stale_route_circuits > 0
+        || stale_health_scores > 0;
+    drop(runtime);
+
+    runtime_proxy_log(
+        shared,
+        format!(
+            "runtime_proxy_startup_audit missing_managed_dirs={missing_managed_dirs} stale_response_bindings={stale_response_bindings} stale_session_bindings={stale_session_bindings} stale_probe_cache={stale_probe_cache} stale_usage_snapshots={stale_usage_snapshots} stale_retry_backoffs={stale_retry_backoffs} stale_transport_backoffs={stale_transport_backoffs} stale_route_circuits={stale_route_circuits} stale_health_scores={stale_health_scores} active_profile_missing_dir={active_profile_missing_dir}",
+        ),
+    );
+    if changed {
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            backoffs_snapshot,
+            paths_snapshot,
+            "startup_audit",
+        );
     }
 }
 
@@ -5540,7 +5731,14 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (current_profile, codex_home, in_selection_backoff, inflight_count, health_score) = {
+    let (
+        current_profile,
+        codex_home,
+        in_selection_backoff,
+        circuit_open_until,
+        inflight_count,
+        health_score,
+    ) = {
         let mut runtime = shared
             .runtime
             .lock()
@@ -5559,6 +5757,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             runtime.current_profile.clone(),
             profile.codex_home.clone(),
             runtime_profile_in_selection_backoff(&runtime, &runtime.current_profile, now),
+            runtime_profile_route_circuit_open_until(
+                &runtime,
+                &runtime.current_profile,
+                route_kind,
+                now,
+            ),
             runtime_profile_inflight_count(&runtime, &runtime.current_profile),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now, route_kind),
         )
@@ -5567,12 +5771,15 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
 
     if in_selection_backoff
+        || circuit_open_until.is_some()
         || health_score > 0
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
         || quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
     {
         let reason = if in_selection_backoff {
             "selection_backoff"
+        } else if circuit_open_until.is_some() {
+            "route_circuit_open"
         } else if health_score > 0 {
             "profile_health"
         } else if quota_summary.route_band > RuntimeQuotaPressureBand::Healthy {
@@ -5583,13 +5790,14 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={} quota_source={} {}",
+                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={} circuit_until={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 current_profile,
                 reason,
                 inflight_count,
                 health_score,
                 RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+                circuit_open_until.unwrap_or_default(),
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -5972,6 +6180,10 @@ fn proxy_runtime_websocket_text_message(
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
                         }
+                        RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
+                            excluded_profiles.insert(profile_name);
+                            continue;
+                        }
                         RuntimeWebsocketAttempt::LocalSelectionBlocked { profile_name } => {
                             excluded_profiles.insert(profile_name);
                             continue;
@@ -6066,6 +6278,10 @@ fn proxy_runtime_websocket_text_message(
                         RuntimeWebsocketAttempt::PreviousResponseNotFound { payload, .. } => {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
+                        }
+                        RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
+                            excluded_profiles.insert(profile_name);
+                            continue;
                         }
                         RuntimeWebsocketAttempt::LocalSelectionBlocked { profile_name } => {
                             excluded_profiles.insert(profile_name);
@@ -6218,6 +6434,35 @@ fn proxy_runtime_websocket_text_message(
                 }
                 excluded_profiles.insert(profile_name);
             }
+            RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                profile_name,
+                event,
+            } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} websocket_reuse_watchdog_timeout profile={profile_name} event={event}"
+                    ),
+                );
+                if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
+                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                }
+                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                    pinned_profile = None;
+                    previous_response_retry_index = 0;
+                }
+                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                    turn_state_profile = None;
+                }
+                excluded_profiles.insert(profile_name);
+            }
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
                 profile_name,
                 payload,
@@ -6301,8 +6546,16 @@ fn attempt_runtime_websocket_request(
         });
     }
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
+    let reuse_started_at = reuse_existing_session.then(Instant::now);
     let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
         if reuse_existing_session {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=websocket websocket_reuse_start profile={profile_name} turn_state_override={:?}",
+                    turn_state_override
+                ),
+            );
             runtime_proxy_log(
                 shared,
                 format!(
@@ -6369,6 +6622,12 @@ fn attempt_runtime_websocket_request(
                 "request={request_id} transport=websocket upstream_send_error profile={profile_name} error={err}"
             ),
         );
+        if reuse_existing_session {
+            return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                profile_name: profile_name.to_string(),
+                event: "upstream_send_error",
+            });
+        }
         return Err(transport_error);
     }
 
@@ -6494,6 +6753,15 @@ fn attempt_runtime_websocket_request(
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
             Ok(WsMessage::Close(frame)) => {
                 websocket_session.reset();
+                if let Some(started_at) = reuse_started_at {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "websocket_reuse_watchdog profile={profile_name} event=upstream_close_before_terminal elapsed_ms={} committed={committed}",
+                            started_at.elapsed().as_millis()
+                        ),
+                    );
+                }
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -6510,10 +6778,25 @@ fn attempt_runtime_websocket_request(
                     "websocket_upstream_close",
                     &transport_error,
                 );
+                if reuse_existing_session && !committed {
+                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                        profile_name: profile_name.to_string(),
+                        event: "upstream_close_before_commit",
+                    });
+                }
                 return Err(transport_error);
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
                 websocket_session.reset();
+                if let Some(started_at) = reuse_started_at {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "websocket_reuse_watchdog profile={profile_name} event=connection_closed elapsed_ms={} committed={committed}",
+                            started_at.elapsed().as_millis()
+                        ),
+                    );
+                }
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -6529,10 +6812,25 @@ fn attempt_runtime_websocket_request(
                     "websocket_upstream_connection_closed",
                     &transport_error,
                 );
+                if reuse_existing_session && !committed {
+                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                        profile_name: profile_name.to_string(),
+                        event: "connection_closed_before_commit",
+                    });
+                }
                 return Err(transport_error);
             }
             Err(err) => {
                 websocket_session.reset();
+                if let Some(started_at) = reuse_started_at {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "websocket_reuse_watchdog profile={profile_name} event=read_error elapsed_ms={} committed={committed}",
+                            started_at.elapsed().as_millis()
+                        ),
+                    );
+                }
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -6549,6 +6847,12 @@ fn attempt_runtime_websocket_request(
                     "websocket_upstream_read",
                     &transport_error,
                 );
+                if reuse_existing_session && !committed {
+                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                        profile_name: profile_name.to_string(),
+                        event: "upstream_read_error",
+                    });
+                }
                 return Err(transport_error);
             }
         }
@@ -7792,6 +8096,7 @@ fn next_runtime_response_candidate_for_route(
         cached_usage_snapshots,
         retry_backoff_until,
         transport_backoff_until,
+        route_circuit_open_until,
         profile_inflight,
         profile_health,
     ) = {
@@ -7809,6 +8114,7 @@ fn next_runtime_response_candidate_for_route(
             runtime.profile_usage_snapshots.clone(),
             runtime.profile_retry_backoff_until.clone(),
             runtime.profile_transport_backoff_until.clone(),
+            runtime.profile_route_circuit_open_until.clone(),
             runtime.profile_inflight.clone(),
             runtime.profile_health.clone(),
         )
@@ -7998,6 +8304,8 @@ fn next_runtime_response_candidate_for_route(
                 &candidate.name,
                 &retry_backoff_until,
                 &transport_backoff_until,
+                &route_circuit_open_until,
+                route_kind,
                 now,
             )
         })
@@ -8039,6 +8347,8 @@ fn next_runtime_response_candidate_for_route(
                     &candidate.name,
                     &retry_backoff_until,
                     &transport_backoff_until,
+                    &route_circuit_open_until,
+                    route_kind,
                     now,
                 ),
                 runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
@@ -8062,6 +8372,8 @@ fn next_runtime_response_candidate_for_route(
                         &candidate.name,
                         &retry_backoff_until,
                         &transport_backoff_until,
+                        &route_circuit_open_until,
+                        route_kind,
                         now,
                     ),
                     index,
@@ -8344,15 +8656,24 @@ fn prune_runtime_profile_transport_backoff(runtime: &mut RuntimeRotationState, n
         .retain(|_, until| *until > now);
 }
 
+fn prune_runtime_profile_route_circuits(runtime: &mut RuntimeRotationState, now: i64) {
+    runtime
+        .profile_route_circuit_open_until
+        .retain(|_, until| *until > now);
+}
+
 fn prune_runtime_profile_selection_backoff(runtime: &mut RuntimeRotationState, now: i64) {
     prune_runtime_profile_retry_backoff(runtime, now);
     prune_runtime_profile_transport_backoff(runtime, now);
+    prune_runtime_profile_route_circuits(runtime, now);
 }
 
 fn runtime_profile_name_in_selection_backoff(
     profile_name: &str,
     retry_backoff_until: &BTreeMap<String, i64>,
     transport_backoff_until: &BTreeMap<String, i64>,
+    route_circuit_open_until: &BTreeMap<String, i64>,
+    route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
     retry_backoff_until
@@ -8363,14 +8684,20 @@ fn runtime_profile_name_in_selection_backoff(
             .get(profile_name)
             .copied()
             .is_some_and(|until| until > now)
+        || route_circuit_open_until
+            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+            .copied()
+            .is_some_and(|until| until > now)
 }
 
 fn runtime_profile_backoff_sort_key(
     profile_name: &str,
     retry_backoff_until: &BTreeMap<String, i64>,
     transport_backoff_until: &BTreeMap<String, i64>,
+    route_circuit_open_until: &BTreeMap<String, i64>,
+    route_kind: RuntimeRouteKind,
     now: i64,
-) -> (usize, i64, i64) {
+) -> (usize, i64, i64, i64) {
     let retry_until = retry_backoff_until
         .get(profile_name)
         .copied()
@@ -8379,15 +8706,39 @@ fn runtime_profile_backoff_sort_key(
         .get(profile_name)
         .copied()
         .filter(|until| *until > now);
+    let circuit_until = route_circuit_open_until
+        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+        .copied()
+        .filter(|until| *until > now);
 
-    match (transport_until, retry_until) {
-        (None, None) => (0, 0, 0),
-        (Some(transport_until), None) => (1, transport_until, 0),
-        (None, Some(retry_until)) => (2, retry_until, 0),
-        (Some(transport_until), Some(retry_until)) => (
-            3,
+    match (circuit_until, transport_until, retry_until) {
+        (None, None, None) => (0, 0, 0, 0),
+        (Some(circuit_until), None, None) => (1, circuit_until, 0, 0),
+        (None, Some(transport_until), None) => (2, transport_until, 0, 0),
+        (None, None, Some(retry_until)) => (3, retry_until, 0, 0),
+        (Some(circuit_until), Some(transport_until), None) => (
+            4,
+            circuit_until.min(transport_until),
+            circuit_until.max(transport_until),
+            0,
+        ),
+        (Some(circuit_until), None, Some(retry_until)) => (
+            5,
+            circuit_until.min(retry_until),
+            circuit_until.max(retry_until),
+            0,
+        ),
+        (None, Some(transport_until), Some(retry_until)) => (
+            6,
             transport_until.min(retry_until),
             transport_until.max(retry_until),
+            0,
+        ),
+        (Some(circuit_until), Some(transport_until), Some(retry_until)) => (
+            7,
+            circuit_until.min(transport_until.min(retry_until)),
+            circuit_until.max(transport_until.max(retry_until)),
+            retry_until,
         ),
     }
 }
@@ -8576,7 +8927,46 @@ fn runtime_profile_backoffs_snapshot(runtime: &RuntimeRotationState) -> RuntimeP
     RuntimeProfileBackoffs {
         retry_backoff_until: runtime.profile_retry_backoff_until.clone(),
         transport_backoff_until: runtime.profile_transport_backoff_until.clone(),
+        route_circuit_open_until: runtime.profile_route_circuit_open_until.clone(),
     }
+}
+
+const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
+const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
+
+fn runtime_profile_route_circuit_key(profile_name: &str, route_kind: RuntimeRouteKind) -> String {
+    format!(
+        "__route_circuit__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+fn runtime_profile_route_circuit_profile_name(key: &str) -> &str {
+    key.rsplit(':').next().unwrap_or(key)
+}
+
+fn runtime_profile_route_circuit_open_until(
+    runtime: &RuntimeRotationState,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> Option<i64> {
+    runtime
+        .profile_route_circuit_open_until
+        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+        .copied()
+        .filter(|until| *until > now)
+}
+
+fn clear_runtime_profile_circuit_for_route(
+    runtime: &mut RuntimeRotationState,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    runtime
+        .profile_route_circuit_open_until
+        .remove(&runtime_profile_route_circuit_key(profile_name, route_kind))
+        .is_some()
 }
 
 fn runtime_quota_source_label(source: RuntimeQuotaSource) -> &'static str {
@@ -8921,6 +9311,17 @@ fn bump_runtime_profile_health_score(
             updated_at: now,
         },
     );
+    let circuit_until = if next_score >= RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD {
+        let until = now.saturating_add(RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS);
+        runtime
+            .profile_route_circuit_open_until
+            .entry(runtime_profile_route_circuit_key(profile_name, route_kind))
+            .and_modify(|current| *current = (*current).max(until))
+            .or_insert(until);
+        Some(until)
+    } else {
+        None
+    };
     let state_snapshot = runtime.state.clone();
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
@@ -8934,6 +9335,15 @@ fn bump_runtime_profile_health_score(
             runtime_route_kind_label(route_kind)
         ),
     );
+    if let Some(until) = circuit_until {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "profile_circuit_open profile={profile_name} route={} until={until} reason={reason} score={next_score}",
+                runtime_route_kind_label(route_kind)
+            ),
+        );
+    }
     schedule_runtime_state_save(
         shared,
         state_snapshot,
@@ -9137,6 +9547,8 @@ fn commit_runtime_proxy_profile_selection(
         .profile_transport_backoff_until
         .remove(profile_name)
         .is_some();
+    let cleared_route_circuit =
+        clear_runtime_profile_circuit_for_route(&mut runtime, profile_name, route_kind);
     let cleared_health =
         clear_runtime_profile_health_for_route(&mut runtime, profile_name, route_kind, now);
     runtime.current_profile = profile_name.to_string();
@@ -9153,6 +9565,7 @@ fn commit_runtime_proxy_profile_selection(
         || state_changed
         || cleared_retry_backoff
         || cleared_transport_backoff
+        || cleared_route_circuit
         || cleared_health;
     if should_persist {
         schedule_runtime_state_save(
@@ -9168,7 +9581,7 @@ fn commit_runtime_proxy_profile_selection(
     runtime_proxy_log(
         shared,
         format!(
-            "profile_commit profile={profile_name} route={} switched={switched} persisted={should_persist}",
+            "profile_commit profile={profile_name} route={} switched={switched} persisted={should_persist} cleared_route_circuit={cleared_route_circuit}",
             runtime_route_kind_label(route_kind),
         ),
     );
@@ -9753,6 +10166,25 @@ fn write_runtime_streaming_response(
     mut response: RuntimeStreamingResponse,
 ) -> io::Result<()> {
     let mut writer = writer;
+    let started_at = Instant::now();
+    let log_writer_error = |stage: &str,
+                            chunk_count: usize,
+                            total_bytes: usize,
+                            err: &io::Error| {
+        runtime_proxy_log_to_path(
+            &response.log_path,
+            &format!(
+                "local_writer_error request={} transport=http profile={} stage={} chunks={} bytes={} elapsed_ms={} error={}",
+                response.request_id,
+                response.profile_name,
+                stage,
+                chunk_count,
+                total_bytes,
+                started_at.elapsed().as_millis(),
+                err
+            ),
+        );
+    };
     runtime_proxy_log_to_path(
         &response.log_path,
         &format!(
@@ -9768,17 +10200,29 @@ fn write_runtime_streaming_response(
         writer,
         "HTTP/1.1 {} {}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
         response.status, status
-    )?;
+    )
+    .map_err(|err| {
+        log_writer_error("headers_start", 0, 0, &err);
+        err
+    })?;
     for (name, value) in response.headers {
-        write!(writer, "{name}: {value}\r\n")?;
+        write!(writer, "{name}: {value}\r\n").map_err(|err| {
+            log_writer_error("header_line", 0, 0, &err);
+            err
+        })?;
     }
-    writer.write_all(b"\r\n")?;
-    writer.flush()?;
+    writer.write_all(b"\r\n").map_err(|err| {
+        log_writer_error("headers_end", 0, 0, &err);
+        err
+    })?;
+    writer.flush().map_err(|err| {
+        log_writer_error("headers_flush", 0, 0, &err);
+        err
+    })?;
 
     let mut buffer = [0_u8; 8192];
     let mut total_bytes = 0usize;
     let mut chunk_count = 0usize;
-    let started_at = Instant::now();
     loop {
         let read = match response.body.read(&mut buffer) {
             Ok(read) => read,
@@ -9815,13 +10259,31 @@ fn write_runtime_streaming_response(
                 ),
             );
         }
-        write!(writer, "{:X}\r\n", read)?;
-        writer.write_all(&buffer[..read])?;
-        writer.write_all(b"\r\n")?;
-        writer.flush()?;
+        write!(writer, "{:X}\r\n", read).map_err(|err| {
+            log_writer_error("chunk_size", chunk_count, total_bytes, &err);
+            err
+        })?;
+        writer.write_all(&buffer[..read]).map_err(|err| {
+            log_writer_error("chunk_body", chunk_count, total_bytes, &err);
+            err
+        })?;
+        writer.write_all(b"\r\n").map_err(|err| {
+            log_writer_error("chunk_suffix", chunk_count, total_bytes, &err);
+            err
+        })?;
+        writer.flush().map_err(|err| {
+            log_writer_error("chunk_flush", chunk_count, total_bytes, &err);
+            err
+        })?;
     }
-    writer.write_all(b"0\r\n\r\n")?;
-    writer.flush()?;
+    writer.write_all(b"0\r\n\r\n").map_err(|err| {
+        log_writer_error("trailer", chunk_count, total_bytes, &err);
+        err
+    })?;
+    writer.flush().map_err(|err| {
+        log_writer_error("trailer_flush", chunk_count, total_bytes, &err);
+        err
+    })?;
     runtime_proxy_log_to_path(
         &response.log_path,
         &format!(
