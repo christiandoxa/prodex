@@ -4442,10 +4442,155 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         value["marker_last_fields"]["selection_pick"]["quota_source"],
         "persisted_snapshot"
     );
+    summary.startup_audit_pressure = "elevated".to_string();
+    summary.persisted_retry_backoffs = 2;
+    summary.persisted_transport_backoffs = 1;
+    summary.persisted_route_circuits = 3;
+    summary.persisted_usage_snapshots = 4;
+    summary.stale_persisted_usage_snapshots = 1;
+    summary.degraded_routes = vec!["main/responses circuit=open until=123".to_string()];
+    summary.orphan_managed_dirs = vec!["ghost_profile".to_string()];
+
+    let value = runtime_doctor_json_value(&summary);
     assert_eq!(
         value["diagnosis"],
         "Recent selection decisions were logged."
     );
+    assert_eq!(value["startup_audit_pressure"], "elevated");
+    assert_eq!(value["persisted_retry_backoffs"], 2);
+    assert_eq!(value["persisted_route_circuits"], 3);
+    assert_eq!(value["persisted_usage_snapshots"], 4);
+    assert_eq!(value["stale_persisted_usage_snapshots"], 1);
+    assert_eq!(value["degraded_routes"][0], "main/responses circuit=open until=123");
+    assert_eq!(value["orphan_managed_dirs"][0], "ghost_profile");
+}
+
+#[test]
+fn collect_orphan_managed_profile_dirs_ignores_tracked_and_fresh_dirs() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+
+    let tracked = paths.managed_profiles_root.join("tracked");
+    fs::create_dir_all(&tracked).expect("tracked dir should exist");
+    fs::write(tracked.join("auth.json"), "{}").expect("tracked auth should be written");
+
+    let orphan = paths.managed_profiles_root.join("orphan");
+    fs::create_dir_all(&orphan).expect("orphan dir should exist");
+    fs::write(orphan.join("auth.json"), "{}").expect("orphan auth should be written");
+
+    let fresh = paths.managed_profiles_root.join("fresh");
+    fs::create_dir_all(&fresh).expect("fresh dir should exist");
+    fs::write(fresh.join("auth.json"), "{}").expect("fresh auth should be written");
+
+    let state = AppState {
+        active_profile: Some("tracked".to_string()),
+        profiles: BTreeMap::from([(
+            "tracked".to_string(),
+            ProfileEntry {
+                codex_home: tracked,
+                managed: true,
+                email: Some("tracked@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let future_now = SystemTime::now() + Duration::from_secs(ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS as u64 + 5);
+    assert_eq!(
+        collect_orphan_managed_profile_dirs_at(&paths, &state, future_now),
+        vec!["fresh".to_string(), "orphan".to_string()]
+    );
+}
+
+#[test]
+fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = paths.managed_profiles_root.join("main");
+    fs::create_dir_all(&main_home).expect("main home should exist");
+    fs::write(main_home.join("auth.json"), "{}").expect("main auth should be written");
+    let orphan = paths.managed_profiles_root.join("orphan");
+    fs::create_dir_all(&orphan).expect("orphan dir should exist");
+    fs::write(orphan.join("auth.json"), "{}").expect("orphan auth should be written");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 50,
+                five_hour_reset_at: 123,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 50,
+                weekly_reset_at: 456,
+            },
+        )]),
+    )
+    .expect("usage snapshots should save");
+    save_runtime_profile_scores(
+        &paths,
+        &BTreeMap::from([(
+            "__route_bad_pairing__:responses:main".to_string(),
+            RuntimeProfileHealth {
+                score: 3,
+                updated_at: Local::now().timestamp(),
+            },
+        )]),
+    )
+    .expect("scores should save");
+    save_runtime_profile_backoffs(
+        &paths,
+        &RuntimeProfileBackoffs {
+            retry_backoff_until: BTreeMap::from([("main".to_string(), Local::now().timestamp() + 30)]),
+            transport_backoff_until: BTreeMap::new(),
+            route_circuit_open_until: BTreeMap::from([(
+                "__route_circuit__:responses:main".to_string(),
+                Local::now().timestamp() + 30,
+            )]),
+        },
+    )
+    .expect("backoffs should save");
+
+    let _guard = TestEnvVarGuard::set("PRODEX_HOME", paths.root.to_str().unwrap());
+    let mut summary = RuntimeDoctorSummary::default();
+    collect_runtime_doctor_state(&paths, &mut summary);
+
+    assert_eq!(summary.persisted_retry_backoffs, 1);
+    assert_eq!(summary.persisted_route_circuits, 1);
+    assert_eq!(summary.persisted_usage_snapshots, 1);
+    assert!(summary.degraded_routes.iter().any(|line| line.contains("main/responses")));
 }
 
 #[test]

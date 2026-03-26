@@ -57,6 +57,8 @@ const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 2
 const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
 const PROD_EX_TMP_LOGIN_RETENTION_SECONDS: i64 = if cfg!(test) { 60 } else { 24 * 60 * 60 };
+const ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS: i64 =
+    if cfg!(test) { 60 } else { 7 * 24 * 60 * 60 };
 const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
 const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
@@ -785,6 +787,65 @@ fn compact_runtime_profile_backoffs(
             ))
         });
     backoffs
+}
+
+fn runtime_profile_route_key_parts<'a>(key: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
+    let rest = key.strip_prefix(prefix)?;
+    let (route, profile_name) = rest.split_once(':')?;
+    Some((route, profile_name))
+}
+
+fn runtime_managed_profile_dir_looks_safe_to_audit(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    path.join("auth.json").exists()
+        || path.join("config.toml").exists()
+        || path.join("state.json").exists()
+        || path.join(".codex").exists()
+}
+
+fn collect_orphan_managed_profile_dirs_at(
+    paths: &AppPaths,
+    state: &AppState,
+    now: SystemTime,
+) -> Vec<String> {
+    let oldest_allowed = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
+        - ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS;
+    let Ok(entries) = fs::read_dir(&paths.managed_profiles_root) else {
+        return Vec::new();
+    };
+    let mut names = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?.to_string();
+            if state.profiles.contains_key(&name) {
+                return None;
+            }
+            let metadata = fs::symlink_metadata(&path).ok()?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return None;
+            }
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(i64::MIN);
+            if modified >= oldest_allowed || !runtime_managed_profile_dir_looks_safe_to_audit(&path)
+            {
+                return None;
+            }
+            Some(name)
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn collect_orphan_managed_profile_dirs(paths: &AppPaths, state: &AppState) -> Vec<String> {
+    collect_orphan_managed_profile_dirs_at(paths, state, SystemTime::now())
 }
 
 fn prodex_runtime_log_paths_in_dir(dir: &Path) -> Vec<PathBuf> {
@@ -1647,6 +1708,14 @@ struct RuntimeDoctorSummary {
     transport_pressure: String,
     persistence_pressure: String,
     quota_freshness_pressure: String,
+    startup_audit_pressure: String,
+    persisted_retry_backoffs: usize,
+    persisted_transport_backoffs: usize,
+    persisted_route_circuits: usize,
+    persisted_usage_snapshots: usize,
+    stale_persisted_usage_snapshots: usize,
+    degraded_routes: Vec<String>,
+    orphan_managed_dirs: Vec<String>,
     diagnosis: String,
 }
 
@@ -2765,6 +2834,14 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         "transport_pressure": summary.transport_pressure,
         "persistence_pressure": summary.persistence_pressure,
         "quota_freshness_pressure": summary.quota_freshness_pressure,
+        "startup_audit_pressure": summary.startup_audit_pressure,
+        "persisted_retry_backoffs": summary.persisted_retry_backoffs,
+        "persisted_transport_backoffs": summary.persisted_transport_backoffs,
+        "persisted_route_circuits": summary.persisted_route_circuits,
+        "persisted_usage_snapshots": summary.persisted_usage_snapshots,
+        "stale_persisted_usage_snapshots": summary.stale_persisted_usage_snapshots,
+        "degraded_routes": summary.degraded_routes,
+        "orphan_managed_dirs": summary.orphan_managed_dirs,
         "diagnosis": summary.diagnosis,
     })
 }
@@ -2889,6 +2966,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit").to_string(),
         ),
         (
+            "Startup pressure".to_string(),
+            summary.startup_audit_pressure.clone(),
+        ),
+        (
             "Admission recovered".to_string(),
             runtime_doctor_marker_count(&summary, "runtime_proxy_admission_recovered").to_string(),
         ),
@@ -2941,6 +3022,38 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             summary.quota_freshness_pressure.clone(),
         ),
         (
+            "Persisted backoffs".to_string(),
+            format!(
+                "retry={} transport={} circuits={}",
+                summary.persisted_retry_backoffs,
+                summary.persisted_transport_backoffs,
+                summary.persisted_route_circuits
+            ),
+        ),
+        (
+            "Persisted snapshots".to_string(),
+            format!(
+                "{} total, {} stale",
+                summary.persisted_usage_snapshots, summary.stale_persisted_usage_snapshots
+            ),
+        ),
+        (
+            "Degraded routes".to_string(),
+            if summary.degraded_routes.is_empty() {
+                "-".to_string()
+            } else {
+                summary.degraded_routes.join(" | ")
+            },
+        ),
+        (
+            "Orphan dirs".to_string(),
+            if summary.orphan_managed_dirs.is_empty() {
+                "-".to_string()
+            } else {
+                summary.orphan_managed_dirs.join(", ")
+            },
+        ),
+        (
             "Last marker".to_string(),
             summary
                 .last_marker_line
@@ -2964,7 +3077,75 @@ fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Opti
     })
 }
 
+fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
+    let Ok(state) = AppState::load(paths) else {
+        return;
+    };
+    let now = Local::now().timestamp();
+    let usage_snapshots = load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
+    let scores = load_runtime_profile_scores(paths, &state.profiles).unwrap_or_default();
+    let backoffs = load_runtime_profile_backoffs(paths, &state.profiles).unwrap_or_default();
+    let orphan_managed_dirs = collect_orphan_managed_profile_dirs(paths, &state);
+
+    summary.persisted_retry_backoffs = backoffs.retry_backoff_until.len();
+    summary.persisted_transport_backoffs = backoffs.transport_backoff_until.len();
+    summary.persisted_route_circuits = backoffs.route_circuit_open_until.len();
+    summary.persisted_usage_snapshots = usage_snapshots.len();
+    summary.stale_persisted_usage_snapshots = usage_snapshots
+        .values()
+        .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, now))
+        .count();
+    summary.orphan_managed_dirs = orphan_managed_dirs;
+
+    let mut degraded_routes = Vec::new();
+    for (key, until) in &backoffs.route_circuit_open_until {
+        if let Some((route, profile_name)) =
+            runtime_profile_route_key_parts(key, "__route_circuit__:")
+        {
+            let state = if *until > now { "open" } else { "half-open" };
+            degraded_routes.push(format!(
+                "{profile_name}/{route} circuit={state} until={until}"
+            ));
+        }
+    }
+    for (profile_name, until) in &backoffs.transport_backoff_until {
+        degraded_routes.push(format!(
+            "{profile_name}/transport transport_backoff until={until}"
+        ));
+    }
+    for (profile_name, until) in &backoffs.retry_backoff_until {
+        degraded_routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
+    }
+    for (key, health) in &scores {
+        if let Some((route, profile_name)) =
+            runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
+        {
+            let score = runtime_profile_effective_score(
+                health,
+                now,
+                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+            );
+            if score > 0 {
+                degraded_routes.push(format!("{profile_name}/{route} bad_pairing={score}"));
+            }
+            continue;
+        }
+        if let Some((route, profile_name)) =
+            runtime_profile_route_key_parts(key, "__route_health__:")
+        {
+            let score = runtime_profile_effective_health_score(health, now);
+            if score > 0 {
+                degraded_routes.push(format!("{profile_name}/{route} health={score}"));
+            }
+        }
+    }
+    degraded_routes.sort();
+    degraded_routes.dedup();
+    summary.degraded_routes = degraded_routes.into_iter().take(8).collect();
+}
+
 fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
+    let paths = AppPaths::discover().ok();
     let pointer_path = runtime_proxy_latest_log_pointer_path();
     let pointer_content = fs::read_to_string(&pointer_path).ok();
     let log_path = pointer_content
@@ -2990,6 +3171,9 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
     summary.pointer_exists = pointer_exists;
     summary.log_exists = log_exists;
     summary.log_path = log_path;
+    if let Some(paths) = paths.as_ref() {
+        collect_runtime_doctor_state(paths, &mut summary);
+    }
     summary.selection_pressure = if runtime_doctor_marker_count(&summary, "selection_pick") > 0
         || runtime_doctor_marker_count(&summary, "selection_skip_current") > 0
         || runtime_doctor_marker_count(&summary, "selection_skip_affinity") > 0
@@ -3019,19 +3203,36 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
     } else {
         "low".to_string()
     };
-    summary.quota_freshness_pressure =
-        if runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0
-            || runtime_doctor_top_facet(&summary, "quota_source")
-                .is_some_and(|value| value.starts_with("persisted_snapshot "))
-        {
-            "stale_risk".to_string()
-        } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0
-            || runtime_doctor_marker_count(&summary, "profile_probe_refresh_ok") > 0
-        {
-            "active".to_string()
-        } else {
-            "low".to_string()
-        };
+    summary.startup_audit_pressure = if !summary.orphan_managed_dirs.is_empty()
+        || runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit") > 0
+            && summary
+                .marker_last_fields
+                .get("runtime_proxy_startup_audit")
+                .is_some_and(|fields| {
+                    fields
+                        .get("missing_managed_dirs")
+                        .is_some_and(|value| value != "0")
+                        || fields
+                            .get("orphan_managed_dirs")
+                            .is_some_and(|value| value != "0")
+                }) {
+        "elevated".to_string()
+    } else {
+        "low".to_string()
+    };
+    summary.quota_freshness_pressure = if summary.stale_persisted_usage_snapshots > 0
+        || runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0
+        || runtime_doctor_top_facet(&summary, "quota_source")
+            .is_some_and(|value| value.starts_with("persisted_snapshot "))
+    {
+        "stale_risk".to_string()
+    } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0
+        || runtime_doctor_marker_count(&summary, "profile_probe_refresh_ok") > 0
+    {
+        "active".to_string()
+    } else {
+        "low".to_string()
+    };
     if summary.diagnosis.is_empty() {
         summary.diagnosis = if !summary.pointer_exists {
             "No runtime log pointer has been created yet.".to_string()
@@ -3073,6 +3274,16 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent upstream connect failures detected.".to_string()
         } else if runtime_doctor_marker_count(&summary, "state_save_error") > 0 {
             "Recent runtime state save failures detected.".to_string()
+        } else if !summary.degraded_routes.is_empty() {
+            format!(
+                "Persisted degraded runtime routes are still active: {}",
+                summary.degraded_routes.join(", ")
+            )
+        } else if !summary.orphan_managed_dirs.is_empty() {
+            format!(
+                "Orphan managed profile directories were detected: {}",
+                summary.orphan_managed_dirs.join(", ")
+            )
         } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0 {
             "Recent background quota refresh failures detected; fresh selection may rely on stale quota snapshots.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0 {
@@ -4820,6 +5031,7 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
         return;
     };
     let now = Local::now().timestamp();
+    let orphan_managed_dirs = collect_orphan_managed_profile_dirs(&runtime.paths, &runtime.state);
     let missing_managed_dirs = runtime
         .state
         .profiles
@@ -4937,7 +5149,8 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
     runtime_proxy_log(
         shared,
         format!(
-            "runtime_proxy_startup_audit missing_managed_dirs={missing_managed_dirs} stale_response_bindings={stale_response_bindings} stale_session_bindings={stale_session_bindings} stale_probe_cache={stale_probe_cache} stale_usage_snapshots={stale_usage_snapshots} stale_retry_backoffs={stale_retry_backoffs} stale_transport_backoffs={stale_transport_backoffs} stale_route_circuits={stale_route_circuits} expired_route_circuits={expired_route_circuits} stale_health_scores={stale_health_scores} active_profile_missing_dir={active_profile_missing_dir}",
+            "runtime_proxy_startup_audit missing_managed_dirs={missing_managed_dirs} orphan_managed_dirs={} stale_response_bindings={stale_response_bindings} stale_session_bindings={stale_session_bindings} stale_probe_cache={stale_probe_cache} stale_usage_snapshots={stale_usage_snapshots} stale_retry_backoffs={stale_retry_backoffs} stale_transport_backoffs={stale_transport_backoffs} stale_route_circuits={stale_route_circuits} expired_route_circuits={expired_route_circuits} stale_health_scores={stale_health_scores} active_profile_missing_dir={active_profile_missing_dir}",
+            orphan_managed_dirs.len(),
         ),
     );
     if changed {
