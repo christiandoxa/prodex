@@ -5228,7 +5228,8 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
     };
     let now = Local::now().timestamp();
     let stale_last_run = now - APP_STATE_LAST_RUN_RETENTION_SECONDS - 5;
-    let stale_binding = now - APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS - 5;
+    let stale_response_binding = now - 365 * 24 * 60 * 60;
+    let stale_session_binding = now - APP_STATE_SESSION_BINDING_RETENTION_SECONDS - 5;
     let state = AppState {
         active_profile: Some("main".to_string()),
         profiles: BTreeMap::from([(
@@ -5255,7 +5256,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 "resp-stale".to_string(),
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
-                    bound_at: stale_binding,
+                    bound_at: stale_response_binding,
                 },
             ),
         ]),
@@ -5271,7 +5272,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 "sess-stale".to_string(),
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
-                    bound_at: stale_binding,
+                    bound_at: stale_session_binding,
                 },
             ),
         ]),
@@ -5283,11 +5284,11 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
     assert!(loaded.last_run_selected_at.contains_key("main"));
     assert!(!loaded.last_run_selected_at.contains_key("ghost"));
     assert!(loaded.response_profile_bindings.contains_key("resp-fresh"));
-    assert!(!loaded.response_profile_bindings.contains_key("resp-stale"));
+    assert!(loaded.response_profile_bindings.contains_key("resp-stale"));
     assert!(loaded.session_profile_bindings.contains_key("sess-fresh"));
     assert!(!loaded.session_profile_bindings.contains_key("sess-stale"));
     assert!(raw.contains("resp-fresh"));
-    assert!(!raw.contains("resp-stale"));
+    assert!(raw.contains("resp-stale"));
     assert!(!raw.contains("sess-stale"));
 }
 
@@ -5309,7 +5310,8 @@ fn app_state_load_compacts_stale_entries_in_memory() {
     .expect("state dir should exist");
     let now = Local::now().timestamp();
     let stale_last_run = now - APP_STATE_LAST_RUN_RETENTION_SECONDS - 5;
-    let stale_binding = now - APP_STATE_SESSION_BINDING_RETENTION_SECONDS - 5;
+    let stale_session_binding = now - APP_STATE_SESSION_BINDING_RETENTION_SECONDS - 5;
+    let stale_response_binding = now - 365 * 24 * 60 * 60;
     let raw = serde_json::json!({
         "active_profile": "main",
         "profiles": {
@@ -5326,13 +5328,13 @@ fn app_state_load_compacts_stale_entries_in_memory() {
         "response_profile_bindings": {
             "resp-stale": {
                 "profile_name": "main",
-                "bound_at": stale_binding
+                "bound_at": stale_response_binding
             }
         },
         "session_profile_bindings": {
             "sess-stale": {
                 "profile_name": "main",
-                "bound_at": stale_binding
+                "bound_at": stale_session_binding
             }
         }
     });
@@ -5346,7 +5348,7 @@ fn app_state_load_compacts_stale_entries_in_memory() {
     assert_eq!(loaded.active_profile.as_deref(), Some("main"));
     assert!(loaded.last_run_selected_at.contains_key("main"));
     assert!(!loaded.last_run_selected_at.contains_key("ghost"));
-    assert!(loaded.response_profile_bindings.is_empty());
+    assert!(loaded.response_profile_bindings.contains_key("resp-stale"));
     assert!(loaded.session_profile_bindings.is_empty());
 }
 

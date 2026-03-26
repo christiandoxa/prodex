@@ -49,8 +49,6 @@ const RESPONSE_PROFILE_BINDING_LIMIT: usize = 65_536;
 const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
 const SESSION_ID_PROFILE_BINDING_LIMIT: usize = 4_096;
 const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 = if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
-const APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS: i64 =
-    if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
 const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
@@ -623,16 +621,23 @@ fn prune_profile_bindings_for_housekeeping(
     prune_profile_bindings(bindings, max_entries);
 }
 
+fn prune_profile_bindings_for_housekeeping_without_retention(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    max_entries: usize,
+) {
+    bindings.retain(|_, binding| profiles.contains_key(&binding.profile_name));
+    prune_profile_bindings(bindings, max_entries);
+}
+
 fn compact_app_state(mut state: AppState, now: i64) -> AppState {
     state.active_profile = state
         .active_profile
         .filter(|profile_name| state.profiles.contains_key(profile_name));
     prune_last_run_selection(&mut state.last_run_selected_at, &state.profiles, now);
-    prune_profile_bindings_for_housekeeping(
+    prune_profile_bindings_for_housekeeping_without_retention(
         &mut state.response_profile_bindings,
         &state.profiles,
-        now,
-        APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS,
         RESPONSE_PROFILE_BINDING_LIMIT,
     );
     prune_profile_bindings_for_housekeeping(
@@ -5622,46 +5627,83 @@ fn runtime_response_bound_profile(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: &str,
 ) -> Result<Option<String>> {
-    let runtime = shared
+    let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    Ok(runtime
+    let now = Local::now().timestamp();
+    let profile_name = runtime
         .state
         .response_profile_bindings
         .get(previous_response_id)
         .map(|binding| binding.profile_name.clone())
-        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if let Some(profile_name) = profile_name.as_deref()
+        && let Some(binding) = runtime
+            .state
+            .response_profile_bindings
+            .get_mut(previous_response_id)
+        && binding.profile_name == profile_name
+        && binding.bound_at < now
+    {
+        binding.bound_at = now;
+    }
+    Ok(profile_name)
 }
 
 fn runtime_turn_state_bound_profile(
     shared: &RuntimeRotationProxyShared,
     turn_state: &str,
 ) -> Result<Option<String>> {
-    let runtime = shared
+    let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    Ok(runtime
+    let now = Local::now().timestamp();
+    let profile_name = runtime
         .turn_state_bindings
         .get(turn_state)
         .map(|binding| binding.profile_name.clone())
-        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if let Some(profile_name) = profile_name.as_deref()
+        && let Some(binding) = runtime.turn_state_bindings.get_mut(turn_state)
+        && binding.profile_name == profile_name
+        && binding.bound_at < now
+    {
+        binding.bound_at = now;
+    }
+    Ok(profile_name)
 }
 
 fn runtime_session_bound_profile(
     shared: &RuntimeRotationProxyShared,
     session_id: &str,
 ) -> Result<Option<String>> {
-    let runtime = shared
+    let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    Ok(runtime
+    let now = Local::now().timestamp();
+    let profile_name = runtime
         .session_id_bindings
         .get(session_id)
         .map(|binding| binding.profile_name.clone())
-        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name)))
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if let Some(profile_name) = profile_name.as_deref() {
+        if let Some(binding) = runtime.session_id_bindings.get_mut(session_id)
+            && binding.profile_name == profile_name
+            && binding.bound_at < now
+        {
+            binding.bound_at = now;
+        }
+        if let Some(binding) = runtime.state.session_profile_bindings.get_mut(session_id)
+            && binding.profile_name == profile_name
+            && binding.bound_at < now
+        {
+            binding.bound_at = now;
+        }
+    }
+    Ok(profile_name)
 }
 
 fn remember_runtime_turn_state(
