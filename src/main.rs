@@ -45,12 +45,12 @@ const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
-const RESPONSE_PROFILE_BINDING_LIMIT: usize = 16_384;
+const RESPONSE_PROFILE_BINDING_LIMIT: usize = 65_536;
 const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
 const SESSION_ID_PROFILE_BINDING_LIMIT: usize = 4_096;
 const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 = if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 const APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS: i64 =
-    if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
+    if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
 const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
@@ -120,19 +120,28 @@ static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock::new();
 static RUNTIME_PROBE_REFRESH_QUEUE: OnceLock<Arc<RuntimeProbeRefreshQueue>> = OnceLock::new();
 
+fn runtime_proxy_log_dir() -> PathBuf {
+    env::var_os("PRODEX_RUNTIME_LOG_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir)
+}
+
 fn create_runtime_proxy_log_path() -> PathBuf {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    env::temp_dir().join(format!(
+    let dir = runtime_proxy_log_dir();
+    let _ = fs::create_dir_all(&dir);
+    dir.join(format!(
         "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}.log",
         std::process::id()
     ))
 }
 
 fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
-    env::temp_dir().join(RUNTIME_PROXY_LATEST_LOG_POINTER)
+    runtime_proxy_log_dir().join(RUNTIME_PROXY_LATEST_LOG_POINTER)
 }
 
 fn initialize_runtime_proxy_log_path() -> PathBuf {
@@ -833,7 +842,7 @@ fn cleanup_runtime_proxy_latest_pointer(pointer_path: &Path) {
 }
 
 fn cleanup_runtime_proxy_log_housekeeping() {
-    let temp_dir = env::temp_dir();
+    let temp_dir = runtime_proxy_log_dir();
     cleanup_runtime_proxy_logs_in_dir(&temp_dir, SystemTime::now());
     cleanup_runtime_proxy_latest_pointer(&runtime_proxy_latest_log_pointer_path());
 }
@@ -5581,6 +5590,20 @@ fn remember_runtime_response_ids(
     Ok(())
 }
 
+fn remember_runtime_previous_response_owner(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+) -> Result<()> {
+    let Some(previous_response_id) = previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+    remember_runtime_response_ids(shared, profile_name, &[previous_response_id.to_string()])
+}
+
 fn release_runtime_quota_blocked_affinity(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -5649,6 +5672,84 @@ fn release_runtime_quota_blocked_affinity(
             shared,
             format!(
                 "quota_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
+                previous_response_id, turn_state, session_id
+            ),
+        );
+    } else {
+        drop(runtime);
+    }
+
+    Ok(changed)
+}
+
+fn release_runtime_previous_response_affinity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<bool> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let mut changed = false;
+
+    if let Some(previous_response_id) = previous_response_id
+        && runtime
+            .state
+            .response_profile_bindings
+            .get(previous_response_id)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        runtime
+            .state
+            .response_profile_bindings
+            .remove(previous_response_id);
+        changed = true;
+    }
+
+    if let Some(turn_state) = turn_state
+        && runtime
+            .turn_state_bindings
+            .get(turn_state)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        runtime.turn_state_bindings.remove(turn_state);
+        changed = true;
+    }
+
+    if let Some(session_id) = session_id
+        && runtime
+            .session_id_bindings
+            .get(session_id)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        runtime.session_id_bindings.remove(session_id);
+        runtime.state.session_profile_bindings.remove(session_id);
+        changed = true;
+    }
+
+    if changed {
+        let state_snapshot = runtime.state.clone();
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            backoffs_snapshot,
+            paths_snapshot,
+            &format!("previous_response_release:{profile_name}"),
+        );
+        runtime_proxy_log(
+            shared,
+            format!(
+                "previous_response_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
                 previous_response_id, turn_state, session_id
             ),
         );
@@ -6734,6 +6835,27 @@ fn proxy_runtime_websocket_text_message(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
+                let released_affinity = release_runtime_previous_response_affinity(
+                    shared,
+                    &profile_name,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    request_session_id.as_deref(),
+                )?;
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name}"
+                        ),
+                    );
+                }
+                if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
                 if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
                     candidate_turn_state_retry_profile = None;
                     candidate_turn_state_retry_value = None;
@@ -6761,6 +6883,7 @@ fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
+    let request_previous_response_id = runtime_request_previous_response_id_from_text(request_text);
     let request_session_id = runtime_request_session_id(handshake_request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
@@ -6902,6 +7025,11 @@ fn attempt_runtime_websocket_request(
                         shared,
                         profile_name,
                         request_session_id.as_deref(),
+                    )?;
+                    remember_runtime_previous_response_owner(
+                        shared,
+                        profile_name,
+                        request_previous_response_id.as_deref(),
                     )?;
                     remember_runtime_turn_state(
                         shared,
@@ -8195,6 +8323,27 @@ fn proxy_runtime_responses_request(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
+                let released_affinity = release_runtime_previous_response_affinity(
+                    shared,
+                    &profile_name,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    request_session_id.as_deref(),
+                )?;
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http previous_response_affinity_released profile={profile_name}"
+                        ),
+                    );
+                }
+                if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                    bound_profile = None;
+                }
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
                 if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
                     candidate_turn_state_retry_profile = None;
                     candidate_turn_state_retry_value = None;
@@ -8298,6 +8447,7 @@ fn attempt_runtime_responses_request(
     }
     prepare_runtime_proxy_responses_success(
         request_id,
+        runtime_request_previous_response_id(request).as_deref(),
         request_session_id.as_deref(),
         response,
         shared,
@@ -10245,6 +10395,7 @@ fn forward_runtime_proxy_response(
 
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
+    request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
@@ -10266,6 +10417,7 @@ fn prepare_runtime_proxy_responses_success(
             turn_state
         ),
     );
+    remember_runtime_previous_response_owner(shared, profile_name, request_previous_response_id)?;
     if !is_sse {
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
         return Ok(RuntimeResponsesAttempt::Success {
@@ -10354,7 +10506,17 @@ fn prepare_runtime_proxy_responses_success(
             });
         }
     };
-    remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+    let mut all_response_ids = response_ids;
+    if let Some(previous_response_id) = request_previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        && !all_response_ids
+            .iter()
+            .any(|value| value == previous_response_id)
+    {
+        all_response_ids.push(previous_response_id.to_string());
+    }
+    remember_runtime_response_ids(shared, profile_name, &all_response_ids)?;
 
     Ok(RuntimeResponsesAttempt::Success {
         profile_name: profile_name.to_string(),
@@ -10366,7 +10528,7 @@ fn prepare_runtime_proxy_responses_success(
                 shared.clone(),
                 profile_name.to_string(),
                 &prelude,
-                &response_ids,
+                &all_response_ids,
             )),
             request_id,
             profile_name: profile_name.to_string(),
