@@ -53,6 +53,12 @@ const APP_STATE_RESPONSE_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
 const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
+const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
+const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
+    if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
+const PROD_EX_TMP_LOGIN_RETENTION_SECONDS: i64 = if cfg!(test) { 60 } else { 24 * 60 * 60 };
+const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
+const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
 const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_000 };
@@ -130,6 +136,7 @@ fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
 }
 
 fn initialize_runtime_proxy_log_path() -> PathBuf {
+    cleanup_runtime_proxy_log_housekeeping();
     let log_path = create_runtime_proxy_log_path();
     let _ = fs::write(
         runtime_proxy_latest_log_pointer_path(),
@@ -725,6 +732,143 @@ fn runtime_profile_score_profile_name(key: &str) -> &str {
     key.rsplit(':').next().unwrap_or(key)
 }
 
+fn compact_runtime_profile_scores(
+    mut scores: BTreeMap<String, RuntimeProfileHealth>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+) -> BTreeMap<String, RuntimeProfileHealth> {
+    let oldest_allowed = now.saturating_sub(RUNTIME_SCORE_RETENTION_SECONDS);
+    scores.retain(|key, value| {
+        profiles.contains_key(runtime_profile_score_profile_name(key))
+            && value.updated_at >= oldest_allowed
+    });
+    scores
+}
+
+fn compact_runtime_usage_snapshots(
+    mut snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
+    let oldest_allowed = now.saturating_sub(RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS);
+    snapshots.retain(|profile_name, snapshot| {
+        profiles.contains_key(profile_name) && snapshot.checked_at >= oldest_allowed
+    });
+    snapshots
+}
+
+fn compact_runtime_profile_backoffs(
+    mut backoffs: RuntimeProfileBackoffs,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+) -> RuntimeProfileBackoffs {
+    backoffs
+        .retry_backoff_until
+        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    backoffs
+        .transport_backoff_until
+        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    backoffs
+        .route_circuit_open_until
+        .retain(|route_profile_key, _| {
+            profiles.contains_key(runtime_profile_route_circuit_profile_name(
+                route_profile_key,
+            ))
+        });
+    backoffs
+}
+
+fn prodex_runtime_log_paths_in_dir(dir: &Path) -> Vec<PathBuf> {
+    let mut paths = fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(|entry| entry.ok().map(|item| item.path())))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with(RUNTIME_PROXY_LOG_FILE_PREFIX) && name.ends_with(".log")
+                })
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) {
+    let now_epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let oldest_allowed = now_epoch.saturating_sub(RUNTIME_PROXY_LOG_RETENTION_SECONDS);
+    let mut paths = prodex_runtime_log_paths_in_dir(dir)
+        .into_iter()
+        .filter_map(|path| {
+            let modified = path
+                .metadata()
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(i64::MIN);
+            Some((path, modified))
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by_key(|(path, modified)| (*modified, path.clone()));
+    let excess = paths
+        .len()
+        .saturating_sub(RUNTIME_PROXY_LOG_RETENTION_COUNT);
+    for (index, (path, modified)) in paths.into_iter().enumerate() {
+        if modified < oldest_allowed || index < excess {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn cleanup_runtime_proxy_latest_pointer(pointer_path: &Path) {
+    let should_remove_pointer = fs::read_to_string(pointer_path)
+        .ok()
+        .map(|content| PathBuf::from(content.trim()))
+        .is_some_and(|path| !path.exists());
+    if should_remove_pointer {
+        let _ = fs::remove_file(pointer_path);
+    }
+}
+
+fn cleanup_runtime_proxy_log_housekeeping() {
+    let temp_dir = env::temp_dir();
+    cleanup_runtime_proxy_logs_in_dir(&temp_dir, SystemTime::now());
+    cleanup_runtime_proxy_latest_pointer(&runtime_proxy_latest_log_pointer_path());
+}
+
+fn cleanup_stale_login_dirs_at(paths: &AppPaths, now: SystemTime) {
+    let Ok(entries) = fs::read_dir(&paths.root) else {
+        return;
+    };
+    let oldest_allowed = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
+        - PROD_EX_TMP_LOGIN_RETENTION_SECONDS;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(".login-") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(i64::MIN);
+        if modified < oldest_allowed {
+            let _ = remove_dir_if_exists(&path);
+        }
+    }
+}
+
+fn cleanup_stale_login_dirs(paths: &AppPaths) {
+    cleanup_stale_login_dirs_at(paths, SystemTime::now());
+}
+
 fn merge_runtime_profile_scores(
     existing: &BTreeMap<String, RuntimeProfileHealth>,
     incoming: &BTreeMap<String, RuntimeProfileHealth>,
@@ -739,8 +883,7 @@ fn merge_runtime_profile_scores(
             merged.insert(key.clone(), value.clone());
         }
     }
-    merged.retain(|key, _| profiles.contains_key(runtime_profile_score_profile_name(key)));
-    merged
+    compact_runtime_profile_scores(merged, profiles, Local::now().timestamp())
 }
 
 fn load_runtime_profile_scores(
@@ -753,10 +896,13 @@ fn load_runtime_profile_scores(
     }
     let content =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let mut scores: BTreeMap<String, RuntimeProfileHealth> = serde_json::from_str(&content)
+    let scores: BTreeMap<String, RuntimeProfileHealth> = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    scores.retain(|key, _| profiles.contains_key(runtime_profile_score_profile_name(key)));
-    Ok(scores)
+    Ok(compact_runtime_profile_scores(
+        scores,
+        profiles,
+        Local::now().timestamp(),
+    ))
 }
 
 fn save_runtime_profile_scores(
@@ -765,8 +911,13 @@ fn save_runtime_profile_scores(
 ) -> Result<()> {
     let path = runtime_scores_file_path(paths);
     let temp_file = unique_state_temp_file_path(&path);
+    let profiles = AppState::load(paths)
+        .map(|state| state.profiles)
+        .unwrap_or_default();
+    let compacted =
+        compact_runtime_profile_scores(scores.clone(), &profiles, Local::now().timestamp());
     let json =
-        serde_json::to_string_pretty(scores).context("failed to serialize runtime scores")?;
+        serde_json::to_string_pretty(&compacted).context("failed to serialize runtime scores")?;
     fs::write(&temp_file, json)
         .with_context(|| format!("failed to write {}", temp_file.display()))?;
     fs::rename(&temp_file, &path)
@@ -788,8 +939,7 @@ fn merge_runtime_usage_snapshots(
             merged.insert(profile_name.clone(), snapshot.clone());
         }
     }
-    merged.retain(|profile_name, _| profiles.contains_key(profile_name));
-    merged
+    compact_runtime_usage_snapshots(merged, profiles, Local::now().timestamp())
 }
 
 fn load_runtime_usage_snapshots(
@@ -802,11 +952,14 @@ fn load_runtime_usage_snapshots(
     }
     let content =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let mut snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot> =
+    let snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot> =
         serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {}", path.display()))?;
-    snapshots.retain(|profile_name, _| profiles.contains_key(profile_name));
-    Ok(snapshots)
+    Ok(compact_runtime_usage_snapshots(
+        snapshots,
+        profiles,
+        Local::now().timestamp(),
+    ))
 }
 
 fn save_runtime_usage_snapshots(
@@ -815,7 +968,12 @@ fn save_runtime_usage_snapshots(
 ) -> Result<()> {
     let path = runtime_usage_snapshots_file_path(paths);
     let temp_file = unique_state_temp_file_path(&path);
-    let json = serde_json::to_string_pretty(snapshots)
+    let profiles = AppState::load(paths)
+        .map(|state| state.profiles)
+        .unwrap_or_default();
+    let compacted =
+        compact_runtime_usage_snapshots(snapshots.clone(), &profiles, Local::now().timestamp());
+    let json = serde_json::to_string_pretty(&compacted)
         .context("failed to serialize runtime usage snapshots")?;
     fs::write(&temp_file, json)
         .with_context(|| format!("failed to write {}", temp_file.display()))?;
@@ -869,7 +1027,7 @@ fn merge_runtime_profile_backoffs(
                 route_profile_key,
             ))
         });
-    merged
+    compact_runtime_profile_backoffs(merged, profiles, now)
 }
 
 fn load_runtime_profile_backoffs(
@@ -882,23 +1040,13 @@ fn load_runtime_profile_backoffs(
     }
     let content =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let mut backoffs: RuntimeProfileBackoffs = serde_json::from_str(&content)
+    let backoffs: RuntimeProfileBackoffs = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    let now = Local::now().timestamp();
-    backoffs
-        .retry_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    backoffs
-        .transport_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    backoffs
-        .route_circuit_open_until
-        .retain(|route_profile_key, _| {
-            profiles.contains_key(runtime_profile_route_circuit_profile_name(
-                route_profile_key,
-            ))
-        });
-    Ok(backoffs)
+    Ok(compact_runtime_profile_backoffs(
+        backoffs,
+        profiles,
+        Local::now().timestamp(),
+    ))
 }
 
 fn save_runtime_profile_backoffs(
@@ -907,8 +1055,13 @@ fn save_runtime_profile_backoffs(
 ) -> Result<()> {
     let path = runtime_backoffs_file_path(paths);
     let temp_file = unique_state_temp_file_path(&path);
+    let profiles = AppState::load(paths)
+        .map(|state| state.profiles)
+        .unwrap_or_default();
+    let compacted =
+        compact_runtime_profile_backoffs(backoffs.clone(), &profiles, Local::now().timestamp());
     let json =
-        serde_json::to_string_pretty(backoffs).context("failed to serialize runtime backoffs")?;
+        serde_json::to_string_pretty(&compacted).context("failed to serialize runtime backoffs")?;
     fs::write(&temp_file, json)
         .with_context(|| format!("failed to write {}", temp_file.display()))?;
     fs::rename(&temp_file, &path)
@@ -12457,6 +12610,7 @@ impl AppPaths {
 
 impl AppState {
     fn load(paths: &AppPaths) -> Result<Self> {
+        cleanup_stale_login_dirs(paths);
         if !paths.state_file.exists() {
             return Ok(Self::default());
         }
@@ -12469,6 +12623,7 @@ impl AppState {
     }
 
     fn save(&self, paths: &AppPaths) -> Result<()> {
+        cleanup_stale_login_dirs(paths);
         let _lock = acquire_state_file_lock(paths)?;
         let existing = Self::load(paths)?;
         let merged = compact_app_state(
