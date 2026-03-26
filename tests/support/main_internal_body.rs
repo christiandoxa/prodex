@@ -2146,8 +2146,13 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
     let excluded = BTreeSet::from(["main".to_string()]);
 
     assert_eq!(
-        next_runtime_previous_response_candidate(&shared, &excluded, RuntimeRouteKind::Responses)
-            .expect("candidate selection should succeed"),
+        next_runtime_previous_response_candidate(
+            &shared,
+            &excluded,
+            Some("resp-second"),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("candidate selection should succeed"),
         Some("second".to_string())
     );
 }
@@ -4972,6 +4977,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             None,
             Some("main"),
             false,
+            None,
             RuntimeRouteKind::Responses,
         )
         .expect("candidate lookup should succeed"),
@@ -5173,6 +5179,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
             None,
             None,
             true,
+            Some("resp-second"),
             RuntimeRouteKind::Responses,
         )
         .expect("candidate lookup should succeed"),
@@ -6349,7 +6356,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
         })),
     };
 
-    let owner = runtime_response_bound_profile(&shared, "resp-main")
+    let owner = runtime_response_bound_profile(&shared, "resp-main", RuntimeRouteKind::Responses)
         .expect("response binding lookup should succeed");
     assert_eq!(owner.as_deref(), Some("main"));
 
@@ -6364,6 +6371,200 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             .response_profile_bindings
             .get("resp-main")
             .is_some_and(|binding| binding.bound_at > stale_touch)
+    );
+}
+
+#[test]
+fn response_affinity_skips_recent_negative_cache_for_same_route() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::from([(
+                runtime_previous_response_negative_cache_key(
+                    "resp-main",
+                    "main",
+                    RuntimeRouteKind::Responses,
+                ),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: now,
+                },
+            )]),
+        })),
+    };
+
+    let owner = runtime_response_bound_profile(&shared, "resp-main", RuntimeRouteKind::Responses)
+        .expect("response binding lookup should succeed");
+    assert_eq!(owner, None);
+}
+
+#[test]
+fn previous_response_affinity_release_requires_repeated_not_found() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        })),
+    };
+
+    assert!(
+        !release_runtime_previous_response_affinity(
+            &shared,
+            "main",
+            Some("resp-main"),
+            None,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("first not-found should defer hard release")
+    );
+    assert!(
+        shared
+            .runtime
+            .lock()
+            .expect("runtime lock")
+            .state
+            .response_profile_bindings
+            .contains_key("resp-main")
+    );
+
+    assert!(
+        release_runtime_previous_response_affinity(
+            &shared,
+            "main",
+            Some("resp-main"),
+            None,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("second not-found should release affinity")
+    );
+    assert!(
+        !shared
+            .runtime
+            .lock()
+            .expect("runtime lock")
+            .state
+            .response_profile_bindings
+            .contains_key("resp-main")
     );
 }
 
@@ -9932,9 +10133,6 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_http() 
         accounts,
         vec![
             "third-account".to_string(),
-            "third-account".to_string(),
-            "third-account".to_string(),
-            "third-account".to_string(),
             "main-account".to_string(),
             "second-account".to_string(),
         ]
@@ -10041,9 +10239,6 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
     assert_eq!(
         backend.responses_accounts(),
         vec![
-            "third-account".to_string(),
-            "third-account".to_string(),
-            "third-account".to_string(),
             "third-account".to_string(),
             "main-account".to_string(),
             "second-account".to_string(),

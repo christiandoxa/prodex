@@ -119,6 +119,8 @@ const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
 const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
+const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS: i64 = if cfg!(test) { 5 } else { 180 };
+const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD: u32 = 2;
 const CLI_WIDTH: usize = 110;
 const CLI_MIN_WIDTH: usize = 60;
 const CLI_LABEL_WIDTH: usize = 16;
@@ -3229,6 +3231,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "profile_bad_pairing").to_string(),
         ),
         (
+            "Prev not found".to_string(),
+            runtime_doctor_marker_count(&summary, "previous_response_negative_cache").to_string(),
+        ),
+        (
             "Selection picks".to_string(),
             runtime_doctor_marker_count(&summary, "selection_pick").to_string(),
         ),
@@ -3869,6 +3875,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "profile_health",
         "profile_latency",
         "profile_bad_pairing",
+        "previous_response_negative_cache",
         "selection_pick",
         "selection_skip_current",
         "selection_skip_affinity",
@@ -6161,6 +6168,154 @@ fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
     now.saturating_sub(bound_at) >= RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS
 }
 
+fn runtime_previous_response_negative_cache_key(
+    previous_response_id: &str,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__previous_response_not_found__:{}:{}:{profile_name}",
+        runtime_route_kind_label(route_kind),
+        previous_response_id
+    )
+}
+
+fn runtime_previous_response_negative_cache_failures(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    previous_response_id: &str,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> u32 {
+    runtime_profile_effective_score_from_map(
+        profile_health,
+        &runtime_previous_response_negative_cache_key(
+            previous_response_id,
+            profile_name,
+            route_kind,
+        ),
+        now,
+        RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
+    )
+}
+
+fn runtime_previous_response_negative_cache_active(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    previous_response_id: &str,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    runtime_previous_response_negative_cache_failures(
+        profile_health,
+        previous_response_id,
+        profile_name,
+        route_kind,
+        now,
+    ) > 0
+}
+
+fn clear_runtime_previous_response_negative_cache(
+    runtime: &mut RuntimeRotationState,
+    previous_response_id: &str,
+    profile_name: &str,
+) -> bool {
+    let mut changed = false;
+    for route_kind in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Standard,
+    ] {
+        changed = runtime
+            .profile_health
+            .remove(&runtime_previous_response_negative_cache_key(
+                previous_response_id,
+                profile_name,
+                route_kind,
+            ))
+            .is_some()
+            || changed;
+    }
+    changed
+}
+
+fn note_runtime_previous_response_not_found(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    route_kind: RuntimeRouteKind,
+) -> Result<u32> {
+    let Some(previous_response_id) = previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(0);
+    };
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    let key = runtime_previous_response_negative_cache_key(
+        previous_response_id,
+        profile_name,
+        route_kind,
+    );
+    let next_failures = runtime_profile_effective_score_from_map(
+        &runtime.profile_health,
+        &key,
+        now,
+        RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
+    )
+    .saturating_add(1)
+    .min(RUNTIME_PROFILE_HEALTH_MAX_SCORE);
+    runtime.profile_health.insert(
+        key,
+        RuntimeProfileHealth {
+            score: next_failures,
+            updated_at: now,
+        },
+    );
+    let state_snapshot = runtime.state.clone();
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "previous_response_negative_cache profile={profile_name} route={} response_id={} failures={next_failures}",
+            runtime_route_kind_label(route_kind),
+            previous_response_id,
+        ),
+    );
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!(
+            "previous_response_negative_cache:{profile_name}:{}",
+            runtime_route_kind_label(route_kind)
+        ),
+    );
+    if next_failures >= RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD {
+        let _ = bump_runtime_profile_bad_pairing_score(
+            shared,
+            profile_name,
+            route_kind,
+            1,
+            "previous_response_not_found",
+        );
+    }
+    Ok(next_failures)
+}
+
 fn schedule_runtime_binding_touch_save(
     shared: &RuntimeRotationProxyShared,
     runtime: &RuntimeRotationState,
@@ -6180,6 +6335,7 @@ fn schedule_runtime_binding_touch_save(
 fn runtime_response_bound_profile(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: &str,
+    route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     let mut runtime = shared
         .runtime
@@ -6192,6 +6348,26 @@ fn runtime_response_bound_profile(
         .get(previous_response_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if let Some(profile_name) = profile_name.as_deref()
+        && runtime_previous_response_negative_cache_active(
+            &runtime.profile_health,
+            previous_response_id,
+            profile_name,
+            route_kind,
+            now,
+        )
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=previous_response profile={} reason=negative_cache response_id={}",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+                previous_response_id,
+            ),
+        );
+        return Ok(None);
+    }
     let mut touched = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = runtime
@@ -6417,6 +6593,9 @@ fn remember_runtime_response_ids(
     let bound_at = Local::now().timestamp();
     let mut changed = false;
     for response_id in response_ids {
+        changed =
+            clear_runtime_previous_response_negative_cache(&mut runtime, response_id, profile_name)
+                || changed;
         let should_update = runtime
             .state
             .response_profile_bindings
@@ -6565,7 +6744,25 @@ fn release_runtime_previous_response_affinity(
     previous_response_id: Option<&str>,
     turn_state: Option<&str>,
     session_id: Option<&str>,
+    route_kind: RuntimeRouteKind,
 ) -> Result<bool> {
+    let previous_response_failures = note_runtime_previous_response_not_found(
+        shared,
+        profile_name,
+        previous_response_id,
+        route_kind,
+    )?;
+    if previous_response_failures < RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "previous_response_release_deferred profile={profile_name} route={} previous_response_id={:?} failures={previous_response_failures}",
+                runtime_route_kind_label(route_kind),
+                previous_response_id,
+            ),
+        );
+        return Ok(false);
+    }
     let mut runtime = shared
         .runtime
         .lock()
@@ -6807,6 +7004,7 @@ fn select_runtime_response_candidate_for_route(
     turn_state_profile: Option<&str>,
     session_profile: Option<&str>,
     discover_previous_response_owner: bool,
+    previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     if let Some(profile_name) = pinned_profile.filter(|name| !excluded_profiles.contains(*name)) {
@@ -6853,7 +7051,12 @@ fn select_runtime_response_candidate_for_route(
     }
 
     if discover_previous_response_owner {
-        return next_runtime_previous_response_candidate(shared, excluded_profiles, route_kind);
+        return next_runtime_previous_response_candidate(
+            shared,
+            excluded_profiles,
+            previous_response_id,
+            route_kind,
+        );
     }
 
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
@@ -6889,18 +7092,44 @@ fn select_runtime_response_candidate_for_route(
 fn next_runtime_previous_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
+    previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (state, current_profile) = {
+    let (state, current_profile, profile_health) = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        (runtime.state.clone(), runtime.current_profile.clone())
+        (
+            runtime.state.clone(),
+            runtime.current_profile.clone(),
+            runtime.profile_health.clone(),
+        )
     };
+    let now = Local::now().timestamp();
 
     for name in active_profile_selection_order(&state, &current_profile) {
         if excluded_profiles.contains(&name) {
+            continue;
+        }
+        if let Some(previous_response_id) = previous_response_id
+            && runtime_previous_response_negative_cache_active(
+                &profile_health,
+                previous_response_id,
+                &name,
+                route_kind,
+                now,
+            )
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason=negative_cache response_id={}",
+                    runtime_route_kind_label(route_kind),
+                    name,
+                    previous_response_id,
+                ),
+            );
             continue;
         }
         let Some(profile) = state.profiles.get(&name) else {
@@ -7323,7 +7552,9 @@ fn proxy_runtime_websocket_text_message(
     let request_session_id = runtime_request_session_id(handshake_request);
     let mut bound_profile = previous_response_id
         .as_deref()
-        .map(|response_id| runtime_response_bound_profile(shared, response_id))
+        .map(|response_id| {
+            runtime_response_bound_profile(shared, response_id, RuntimeRouteKind::Websocket)
+        })
         .transpose()?
         .flatten();
     let mut turn_state_profile = request_turn_state
@@ -7484,6 +7715,7 @@ fn proxy_runtime_websocket_text_message(
             turn_state_profile.as_deref(),
             session_profile.as_deref(),
             previous_response_id.is_some(),
+            previous_response_id.as_deref(),
             RuntimeRouteKind::Websocket,
         )?
         else {
@@ -7773,12 +8005,14 @@ fn proxy_runtime_websocket_text_message(
                     previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
                 }
-                if turn_state.is_some() {
+                let has_turn_state_retry = turn_state.is_some();
+                if has_turn_state_retry {
                     candidate_turn_state_retry_profile = Some(profile_name.clone());
                     candidate_turn_state_retry_value = turn_state;
                 }
-                if let Some(delay) =
-                    runtime_previous_response_retry_delay(previous_response_retry_index)
+                if has_turn_state_retry
+                    && let Some(delay) =
+                        runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
                     last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
@@ -7799,6 +8033,7 @@ fn proxy_runtime_websocket_text_message(
                     previous_response_id.as_deref(),
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
+                    RuntimeRouteKind::Websocket,
                 )?;
                 if released_affinity {
                     runtime_proxy_log(
@@ -8522,6 +8757,7 @@ fn proxy_runtime_standard_request(
             None,
             None,
             false,
+            None,
             RuntimeRouteKind::Standard,
         )? {
             return proxy_runtime_standard_request_for_profile(
@@ -8599,6 +8835,7 @@ fn proxy_runtime_standard_request(
             None,
             session_profile.as_deref(),
             false,
+            None,
             RuntimeRouteKind::Compact,
         )?
         else {
@@ -8923,7 +9160,9 @@ fn proxy_runtime_responses_request(
     let request_session_id = runtime_request_session_id(&request);
     let mut bound_profile = previous_response_id
         .as_deref()
-        .map(|response_id| runtime_response_bound_profile(shared, response_id))
+        .map(|response_id| {
+            runtime_response_bound_profile(shared, response_id, RuntimeRouteKind::Responses)
+        })
         .transpose()?
         .flatten();
     let mut turn_state_profile = request_turn_state
@@ -9083,6 +9322,7 @@ fn proxy_runtime_responses_request(
             turn_state_profile.as_deref(),
             session_profile.as_deref(),
             previous_response_id.is_some(),
+            previous_response_id.as_deref(),
             RuntimeRouteKind::Responses,
         )?
         else {
@@ -9353,12 +9593,14 @@ fn proxy_runtime_responses_request(
                     previous_response_retry_candidate = Some(profile_name.clone());
                     previous_response_retry_index = 0;
                 }
-                if turn_state.is_some() {
+                let has_turn_state_retry = turn_state.is_some();
+                if has_turn_state_retry {
                     candidate_turn_state_retry_profile = Some(profile_name.clone());
                     candidate_turn_state_retry_value = turn_state;
                 }
-                if let Some(delay) =
-                    runtime_previous_response_retry_delay(previous_response_retry_index)
+                if has_turn_state_retry
+                    && let Some(delay) =
+                        runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
                     last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
@@ -9379,6 +9621,7 @@ fn proxy_runtime_responses_request(
                     previous_response_id.as_deref(),
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
+                    RuntimeRouteKind::Responses,
                 )?;
                 if released_affinity {
                     runtime_proxy_log(
