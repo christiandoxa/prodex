@@ -2229,11 +2229,13 @@ fn precommit_budget_exhausts_by_attempt_limit_or_elapsed_time() {
     assert!(!runtime_proxy_precommit_budget_exhausted(
         Instant::now(),
         0,
+        false,
         false
     ));
     assert!(runtime_proxy_precommit_budget_exhausted(
         Instant::now(),
         RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
+        false,
         false
     ));
 
@@ -2241,12 +2243,13 @@ fn precommit_budget_exhausts_by_attempt_limit_or_elapsed_time() {
         .checked_sub(Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_BUDGET_MS + 1))
         .expect("elapsed start should be constructible");
     assert!(runtime_proxy_precommit_budget_exhausted(
-        started_at, 0, false
+        started_at, 0, false, false
     ));
     assert!(!runtime_proxy_precommit_budget_exhausted(
         Instant::now(),
         RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
-        true
+        true,
+        false
     ));
 }
 
@@ -4590,6 +4593,11 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.persisted_route_circuits = 3;
     summary.persisted_usage_snapshots = 4;
     summary.stale_persisted_usage_snapshots = 1;
+    summary.recovered_state_file = true;
+    summary.recovered_scores_file = false;
+    summary.recovered_usage_snapshots_file = true;
+    summary.recovered_backoffs_file = false;
+    summary.last_good_backups_present = 3;
     summary.degraded_routes = vec!["main/responses circuit=open until=123".to_string()];
     summary.orphan_managed_dirs = vec!["ghost_profile".to_string()];
     summary.profiles = vec![RuntimeDoctorProfileSummary {
@@ -4621,6 +4629,9 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["persisted_route_circuits"], 3);
     assert_eq!(value["persisted_usage_snapshots"], 4);
     assert_eq!(value["stale_persisted_usage_snapshots"], 1);
+    assert_eq!(value["recovered_state_file"], true);
+    assert_eq!(value["recovered_usage_snapshots_file"], true);
+    assert_eq!(value["last_good_backups_present"], 3);
     assert_eq!(value["degraded_routes"][0], "main/responses circuit=open until=123");
     assert_eq!(value["orphan_managed_dirs"][0], "ghost_profile");
     assert_eq!(value["profiles"][0]["profile"], "main");
@@ -5997,6 +6008,73 @@ fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
     )
     .expect_err("injected save failure should bubble up");
     assert!(err.to_string().contains("injected runtime state save failure"));
+}
+
+#[test]
+fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/main"),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-1".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let backup_json =
+        serde_json::to_string_pretty(&state).expect("state backup should serialize cleanly");
+    fs::write(state_last_good_file_path(&paths), backup_json)
+        .expect("last-good backup should be writable");
+    fs::write(&paths.state_file, "{ not valid json").expect("broken primary state should write");
+
+    let loaded = AppState::load_with_recovery(&paths).expect("backup recovery should succeed");
+
+    assert!(loaded.recovered_from_backup);
+    assert_eq!(loaded.value.active_profile.as_deref(), Some("main"));
+    assert_eq!(
+        loaded
+            .value
+            .response_profile_bindings
+            .get("resp-1")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+}
+
+#[test]
+fn runtime_proxy_pressure_mode_shrinks_precommit_budget() {
+    let started_at = Instant::now()
+        .checked_sub(Duration::from_millis(
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS + 5,
+        ))
+        .expect("checked_sub should succeed");
+
+    assert!(runtime_proxy_precommit_budget_exhausted(
+        started_at, 0, false, true
+    ));
+    assert!(!runtime_proxy_precommit_budget_exhausted(
+        started_at, 0, false, false
+    ));
 }
 
 #[test]

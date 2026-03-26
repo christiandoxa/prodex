@@ -73,6 +73,15 @@ const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 
 const RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
 const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
 const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
+const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 25 } else { 200 };
+const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
+    if cfg!(test) { 25 } else { 200 };
+const RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 150 } else { 800 };
+const RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_BUDGET_MS: u64 =
+    if cfg!(test) { 250 } else { 1_500 };
+const RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 2 } else { 6 };
+const RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
+    if cfg!(test) { 4 } else { 8 };
 const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
@@ -109,6 +118,7 @@ const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
+const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
 const CLI_WIDTH: usize = 110;
 const CLI_MIN_WIDTH: usize = 60;
 const CLI_LABEL_WIDTH: usize = 16;
@@ -719,35 +729,106 @@ fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState 
 }
 
 fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()> {
-    let temp_file = unique_state_temp_file_path(&paths.state_file);
     if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE") {
         bail!("injected runtime state save failure");
     }
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    fs::rename(&temp_file, &paths.state_file).with_context(|| {
-        format!(
-            "failed to replace state file {}",
-            paths.state_file.display()
-        )
-    })?;
-    let written = fs::read_to_string(&paths.state_file)
-        .with_context(|| format!("failed to re-read {}", paths.state_file.display()))?;
-    let _: AppState = serde_json::from_str(&written)
-        .with_context(|| format!("failed to validate {}", paths.state_file.display()))?;
-    Ok(())
+    write_json_file_with_backup(
+        &paths.state_file,
+        &state_last_good_file_path(paths),
+        json,
+        |content| {
+            let _: AppState =
+                serde_json::from_str(content).context("failed to validate prodex state")?;
+            Ok(())
+        },
+    )
 }
 
 fn runtime_scores_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-scores.json")
 }
 
+fn state_last_good_file_path(paths: &AppPaths) -> PathBuf {
+    last_good_file_path(&paths.state_file)
+}
+
 fn runtime_usage_snapshots_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-usage-snapshots.json")
 }
 
+fn runtime_scores_last_good_file_path(paths: &AppPaths) -> PathBuf {
+    last_good_file_path(&runtime_scores_file_path(paths))
+}
+
+fn runtime_usage_snapshots_last_good_file_path(paths: &AppPaths) -> PathBuf {
+    last_good_file_path(&runtime_usage_snapshots_file_path(paths))
+}
+
 fn runtime_backoffs_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-backoffs.json")
+}
+
+fn runtime_backoffs_last_good_file_path(paths: &AppPaths) -> PathBuf {
+    last_good_file_path(&runtime_backoffs_file_path(paths))
+}
+
+fn last_good_file_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("snapshot.json");
+    path.with_file_name(format!("{file_name}{LAST_GOOD_FILE_SUFFIX}"))
+}
+
+fn write_json_file_with_backup(
+    path: &Path,
+    backup_path: &Path,
+    json: &str,
+    validate: impl Fn(&str) -> Result<()>,
+) -> Result<()> {
+    let temp_file = unique_state_temp_file_path(path);
+    fs::write(&temp_file, json)
+        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    validate(json).with_context(|| format!("failed to validate staged {}", temp_file.display()))?;
+    fs::rename(&temp_file, path)
+        .with_context(|| format!("failed to replace {}", path.display()))?;
+    let written = fs::read_to_string(path)
+        .with_context(|| format!("failed to re-read {}", path.display()))?;
+    validate(&written).with_context(|| format!("failed to validate {}", path.display()))?;
+    fs::write(backup_path, &written)
+        .with_context(|| format!("failed to refresh {}", backup_path.display()))?;
+    Ok(())
+}
+
+fn load_json_file_with_backup<T>(path: &Path, backup_path: &Path) -> Result<RecoveredLoad<T>>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let primary =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()));
+    match primary.and_then(|content| {
+        serde_json::from_str::<T>(&content)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    }) {
+        Ok(value) => Ok(RecoveredLoad {
+            value,
+            recovered_from_backup: false,
+        }),
+        Err(primary_err) => {
+            let backup_content = fs::read_to_string(backup_path)
+                .with_context(|| format!("failed to read {}", backup_path.display()))?;
+            let value = serde_json::from_str::<T>(&backup_content).with_context(|| {
+                format!(
+                    "failed to parse {} after primary load error: {primary_err:#}",
+                    backup_path.display()
+                )
+            })?;
+            Ok(RecoveredLoad {
+                value,
+                recovered_from_backup: true,
+            })
+        }
+    }
 }
 
 fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
@@ -979,10 +1060,11 @@ fn load_runtime_profile_scores(
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let scores: BTreeMap<String, RuntimeProfileHealth> = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let scores = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
+        &path,
+        &runtime_scores_last_good_file_path(paths),
+    )?
+    .value;
     Ok(compact_runtime_profile_scores(
         scores,
         profiles,
@@ -990,12 +1072,32 @@ fn load_runtime_profile_scores(
     ))
 }
 
+fn load_runtime_profile_scores_with_recovery(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<RecoveredLoad<BTreeMap<String, RuntimeProfileHealth>>> {
+    let path = runtime_scores_file_path(paths);
+    if !path.exists() && !runtime_scores_last_good_file_path(paths).exists() {
+        return Ok(RecoveredLoad {
+            value: BTreeMap::new(),
+            recovered_from_backup: false,
+        });
+    }
+    let loaded = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
+        &path,
+        &runtime_scores_last_good_file_path(paths),
+    )?;
+    Ok(RecoveredLoad {
+        value: compact_runtime_profile_scores(loaded.value, profiles, Local::now().timestamp()),
+        recovered_from_backup: loaded.recovered_from_backup,
+    })
+}
+
 fn save_runtime_profile_scores(
     paths: &AppPaths,
     scores: &BTreeMap<String, RuntimeProfileHealth>,
 ) -> Result<()> {
     let path = runtime_scores_file_path(paths);
-    let temp_file = unique_state_temp_file_path(&path);
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
@@ -1003,10 +1105,16 @@ fn save_runtime_profile_scores(
         compact_runtime_profile_scores(scores.clone(), &profiles, Local::now().timestamp());
     let json =
         serde_json::to_string_pretty(&compacted).context("failed to serialize runtime scores")?;
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    fs::rename(&temp_file, &path)
-        .with_context(|| format!("failed to replace runtime scores file {}", path.display()))?;
+    write_json_file_with_backup(
+        &path,
+        &runtime_scores_last_good_file_path(paths),
+        &json,
+        |content| {
+            let _: BTreeMap<String, RuntimeProfileHealth> =
+                serde_json::from_str(content).context("failed to validate runtime scores")?;
+            Ok(())
+        },
+    )?;
     Ok(())
 }
 
@@ -1035,11 +1143,11 @@ fn load_runtime_usage_snapshots(
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot> =
-        serde_json::from_str(&content)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
+    let snapshots = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileUsageSnapshot>>(
+        &path,
+        &runtime_usage_snapshots_last_good_file_path(paths),
+    )?
+    .value;
     Ok(compact_runtime_usage_snapshots(
         snapshots,
         profiles,
@@ -1047,12 +1155,32 @@ fn load_runtime_usage_snapshots(
     ))
 }
 
+fn load_runtime_usage_snapshots_with_recovery(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<RecoveredLoad<BTreeMap<String, RuntimeProfileUsageSnapshot>>> {
+    let path = runtime_usage_snapshots_file_path(paths);
+    if !path.exists() && !runtime_usage_snapshots_last_good_file_path(paths).exists() {
+        return Ok(RecoveredLoad {
+            value: BTreeMap::new(),
+            recovered_from_backup: false,
+        });
+    }
+    let loaded = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileUsageSnapshot>>(
+        &path,
+        &runtime_usage_snapshots_last_good_file_path(paths),
+    )?;
+    Ok(RecoveredLoad {
+        value: compact_runtime_usage_snapshots(loaded.value, profiles, Local::now().timestamp()),
+        recovered_from_backup: loaded.recovered_from_backup,
+    })
+}
+
 fn save_runtime_usage_snapshots(
     paths: &AppPaths,
     snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
 ) -> Result<()> {
     let path = runtime_usage_snapshots_file_path(paths);
-    let temp_file = unique_state_temp_file_path(&path);
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
@@ -1060,14 +1188,16 @@ fn save_runtime_usage_snapshots(
         compact_runtime_usage_snapshots(snapshots.clone(), &profiles, Local::now().timestamp());
     let json = serde_json::to_string_pretty(&compacted)
         .context("failed to serialize runtime usage snapshots")?;
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    fs::rename(&temp_file, &path).with_context(|| {
-        format!(
-            "failed to replace runtime usage snapshots file {}",
-            path.display()
-        )
-    })?;
+    write_json_file_with_backup(
+        &path,
+        &runtime_usage_snapshots_last_good_file_path(paths),
+        &json,
+        |content| {
+            let _: BTreeMap<String, RuntimeProfileUsageSnapshot> = serde_json::from_str(content)
+                .context("failed to validate runtime usage snapshots")?;
+            Ok(())
+        },
+    )?;
     Ok(())
 }
 
@@ -1123,10 +1253,11 @@ fn load_runtime_profile_backoffs(
     if !path.exists() {
         return Ok(RuntimeProfileBackoffs::default());
     }
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let backoffs: RuntimeProfileBackoffs = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let backoffs = load_json_file_with_backup::<RuntimeProfileBackoffs>(
+        &path,
+        &runtime_backoffs_last_good_file_path(paths),
+    )?
+    .value;
     Ok(compact_runtime_profile_backoffs(
         backoffs,
         profiles,
@@ -1134,12 +1265,32 @@ fn load_runtime_profile_backoffs(
     ))
 }
 
+fn load_runtime_profile_backoffs_with_recovery(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<RecoveredLoad<RuntimeProfileBackoffs>> {
+    let path = runtime_backoffs_file_path(paths);
+    if !path.exists() && !runtime_backoffs_last_good_file_path(paths).exists() {
+        return Ok(RecoveredLoad {
+            value: RuntimeProfileBackoffs::default(),
+            recovered_from_backup: false,
+        });
+    }
+    let loaded = load_json_file_with_backup::<RuntimeProfileBackoffs>(
+        &path,
+        &runtime_backoffs_last_good_file_path(paths),
+    )?;
+    Ok(RecoveredLoad {
+        value: compact_runtime_profile_backoffs(loaded.value, profiles, Local::now().timestamp()),
+        recovered_from_backup: loaded.recovered_from_backup,
+    })
+}
+
 fn save_runtime_profile_backoffs(
     paths: &AppPaths,
     backoffs: &RuntimeProfileBackoffs,
 ) -> Result<()> {
     let path = runtime_backoffs_file_path(paths);
-    let temp_file = unique_state_temp_file_path(&path);
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
@@ -1147,10 +1298,16 @@ fn save_runtime_profile_backoffs(
         compact_runtime_profile_backoffs(backoffs.clone(), &profiles, Local::now().timestamp());
     let json =
         serde_json::to_string_pretty(&compacted).context("failed to serialize runtime backoffs")?;
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    fs::rename(&temp_file, &path)
-        .with_context(|| format!("failed to replace runtime backoffs file {}", path.display()))?;
+    write_json_file_with_backup(
+        &path,
+        &runtime_backoffs_last_good_file_path(paths),
+        &json,
+        |content| {
+            let _: RuntimeProfileBackoffs =
+                serde_json::from_str(content).context("failed to validate runtime backoffs")?;
+            Ok(())
+        },
+    )?;
     Ok(())
 }
 
@@ -1586,6 +1743,12 @@ struct RuntimeProxyRequest {
 }
 
 #[derive(Debug, Clone)]
+struct RecoveredLoad<T> {
+    value: T,
+    recovered_from_backup: bool,
+}
+
+#[derive(Debug, Clone)]
 struct RuntimeRotationProxyShared {
     async_client: reqwest::Client,
     async_runtime: Arc<TokioRuntime>,
@@ -1729,6 +1892,11 @@ struct RuntimeDoctorSummary {
     persisted_route_circuits: usize,
     persisted_usage_snapshots: usize,
     stale_persisted_usage_snapshots: usize,
+    recovered_state_file: bool,
+    recovered_scores_file: bool,
+    recovered_usage_snapshots_file: bool,
+    recovered_backoffs_file: bool,
+    last_good_backups_present: usize,
     degraded_routes: Vec<String>,
     orphan_managed_dirs: Vec<String>,
     profiles: Vec<RuntimeDoctorProfileSummary>,
@@ -2382,6 +2550,13 @@ fn runtime_proxy_admission_wait_budget_ms() -> u64 {
     )
 }
 
+fn runtime_proxy_pressure_admission_wait_budget_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS",
+        RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS,
+    )
+}
+
 fn runtime_proxy_admission_wait_poll_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS",
@@ -2393,6 +2568,13 @@ fn runtime_proxy_long_lived_queue_wait_budget_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
         RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
+    )
+}
+
+fn runtime_proxy_pressure_long_lived_queue_wait_budget_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
+        RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
     )
 }
 
@@ -2947,6 +3129,11 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         "persisted_route_circuits": summary.persisted_route_circuits,
         "persisted_usage_snapshots": summary.persisted_usage_snapshots,
         "stale_persisted_usage_snapshots": summary.stale_persisted_usage_snapshots,
+        "recovered_state_file": summary.recovered_state_file,
+        "recovered_scores_file": summary.recovered_scores_file,
+        "recovered_usage_snapshots_file": summary.recovered_usage_snapshots_file,
+        "recovered_backoffs_file": summary.recovered_backoffs_file,
+        "last_good_backups_present": summary.last_good_backups_present,
         "degraded_routes": summary.degraded_routes,
         "orphan_managed_dirs": summary.orphan_managed_dirs,
         "profiles": profiles,
@@ -3150,6 +3337,17 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             ),
         ),
         (
+            "Recovered state".to_string(),
+            format!(
+                "state={} scores={} usage={} backoffs={} backups={}",
+                summary.recovered_state_file,
+                summary.recovered_scores_file,
+                summary.recovered_usage_snapshots_file,
+                summary.recovered_backoffs_file,
+                summary.last_good_backups_present
+            ),
+        ),
+        (
             "Degraded routes".to_string(),
             if summary.degraded_routes.is_empty() {
                 "-".to_string()
@@ -3298,29 +3496,61 @@ fn runtime_doctor_profile_summaries(
 }
 
 fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
-    let Ok(state) = AppState::load(paths) else {
+    let Ok(state) = AppState::load_with_recovery(paths) else {
         return;
     };
     let now = Local::now().timestamp();
-    let usage_snapshots = load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
-    let scores = load_runtime_profile_scores(paths, &state.profiles).unwrap_or_default();
-    let backoffs = load_runtime_profile_backoffs(paths, &state.profiles).unwrap_or_default();
-    let orphan_managed_dirs = collect_orphan_managed_profile_dirs(paths, &state);
+    let usage_snapshots = load_runtime_usage_snapshots_with_recovery(paths, &state.value.profiles)
+        .unwrap_or(RecoveredLoad {
+            value: BTreeMap::new(),
+            recovered_from_backup: false,
+        });
+    let scores = load_runtime_profile_scores_with_recovery(paths, &state.value.profiles).unwrap_or(
+        RecoveredLoad {
+            value: BTreeMap::new(),
+            recovered_from_backup: false,
+        },
+    );
+    let backoffs = load_runtime_profile_backoffs_with_recovery(paths, &state.value.profiles)
+        .unwrap_or(RecoveredLoad {
+            value: RuntimeProfileBackoffs::default(),
+            recovered_from_backup: false,
+        });
+    let orphan_managed_dirs = collect_orphan_managed_profile_dirs(paths, &state.value);
 
-    summary.persisted_retry_backoffs = backoffs.retry_backoff_until.len();
-    summary.persisted_transport_backoffs = backoffs.transport_backoff_until.len();
-    summary.persisted_route_circuits = backoffs.route_circuit_open_until.len();
-    summary.persisted_usage_snapshots = usage_snapshots.len();
+    summary.persisted_retry_backoffs = backoffs.value.retry_backoff_until.len();
+    summary.persisted_transport_backoffs = backoffs.value.transport_backoff_until.len();
+    summary.persisted_route_circuits = backoffs.value.route_circuit_open_until.len();
+    summary.persisted_usage_snapshots = usage_snapshots.value.len();
     summary.stale_persisted_usage_snapshots = usage_snapshots
+        .value
         .values()
         .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, now))
         .count();
+    summary.recovered_state_file = state.recovered_from_backup;
+    summary.recovered_scores_file = scores.recovered_from_backup;
+    summary.recovered_usage_snapshots_file = usage_snapshots.recovered_from_backup;
+    summary.recovered_backoffs_file = backoffs.recovered_from_backup;
+    summary.last_good_backups_present = [
+        state_last_good_file_path(paths),
+        runtime_scores_last_good_file_path(paths),
+        runtime_usage_snapshots_last_good_file_path(paths),
+        runtime_backoffs_last_good_file_path(paths),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .count();
     summary.orphan_managed_dirs = orphan_managed_dirs;
-    summary.profiles =
-        runtime_doctor_profile_summaries(&state, &usage_snapshots, &scores, &backoffs, now);
+    summary.profiles = runtime_doctor_profile_summaries(
+        &state.value,
+        &usage_snapshots.value,
+        &scores.value,
+        &backoffs.value,
+        now,
+    );
 
     let mut degraded_routes = Vec::new();
-    for (key, until) in &backoffs.route_circuit_open_until {
+    for (key, until) in &backoffs.value.route_circuit_open_until {
         if let Some((route, profile_name)) =
             runtime_profile_route_key_parts(key, "__route_circuit__:")
         {
@@ -3330,15 +3560,15 @@ fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSum
             ));
         }
     }
-    for (profile_name, until) in &backoffs.transport_backoff_until {
+    for (profile_name, until) in &backoffs.value.transport_backoff_until {
         degraded_routes.push(format!(
             "{profile_name}/transport transport_backoff until={until}"
         ));
     }
-    for (profile_name, until) in &backoffs.retry_backoff_until {
+    for (profile_name, until) in &backoffs.value.retry_backoff_until {
         degraded_routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
     }
-    for (key, health) in &scores {
+    for (key, health) in &scores.value {
         if let Some((route, profile_name)) =
             runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
         {
@@ -4980,34 +5210,59 @@ fn start_runtime_rotation_proxy(
         worker_count,
         long_lived_worker_count,
     ));
+    let persisted_state = AppState::load_with_recovery(paths).unwrap_or(RecoveredLoad {
+        value: state.clone(),
+        recovered_from_backup: false,
+    });
+    let restored_state = merge_runtime_state_snapshot(state.clone(), &persisted_state.value);
     let persisted_profile_scores =
-        load_runtime_profile_scores(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
+        load_runtime_profile_scores_with_recovery(paths, &restored_state.profiles).unwrap_or(
+            RecoveredLoad {
+                value: BTreeMap::new(),
+                recovered_from_backup: false,
+            },
+        );
     let persisted_usage_snapshots =
-        load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_else(|_| BTreeMap::new());
+        load_runtime_usage_snapshots_with_recovery(paths, &restored_state.profiles).unwrap_or(
+            RecoveredLoad {
+                value: BTreeMap::new(),
+                recovered_from_backup: false,
+            },
+        );
     let persisted_backoffs =
-        load_runtime_profile_backoffs(paths, &state.profiles).unwrap_or_default();
-    let persisted_profile_scores_count = persisted_profile_scores.len();
-    let persisted_usage_snapshots_count = persisted_usage_snapshots.len();
-    let persisted_retry_backoffs_count = persisted_backoffs.retry_backoff_until.len();
-    let persisted_transport_backoffs_count = persisted_backoffs.transport_backoff_until.len();
-    let persisted_route_circuit_count = persisted_backoffs.route_circuit_open_until.len();
+        load_runtime_profile_backoffs_with_recovery(paths, &restored_state.profiles).unwrap_or(
+            RecoveredLoad {
+                value: RuntimeProfileBackoffs::default(),
+                recovered_from_backup: false,
+            },
+        );
+    let persisted_profile_scores_count = persisted_profile_scores.value.len();
+    let persisted_usage_snapshots_count = persisted_usage_snapshots.value.len();
+    let persisted_retry_backoffs_count = persisted_backoffs.value.retry_backoff_until.len();
+    let persisted_transport_backoffs_count = persisted_backoffs.value.transport_backoff_until.len();
+    let persisted_route_circuit_count = persisted_backoffs.value.route_circuit_open_until.len();
     let expired_usage_snapshot_count = persisted_usage_snapshots
+        .value
         .values()
         .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, Local::now().timestamp()))
         .count();
     let restored_global_scores_count = persisted_profile_scores
+        .value
         .keys()
         .filter(|key| !key.starts_with("__route_"))
         .count();
     let restored_route_scores_count = persisted_profile_scores
+        .value
         .keys()
         .filter(|key| key.starts_with("__route_health__"))
         .count();
     let restored_bad_pairing_count = persisted_profile_scores
+        .value
         .keys()
         .filter(|key| key.starts_with("__route_bad_pairing__"))
         .count();
     let restored_success_streak_count = persisted_profile_scores
+        .value
         .keys()
         .filter(|key| key.starts_with("__route_success__"))
         .count();
@@ -5029,19 +5284,19 @@ fn start_runtime_rotation_proxy(
         lane_admission: lane_admission.clone(),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths: paths.clone(),
-            state: state.clone(),
+            state: restored_state.clone(),
             upstream_base_url: upstream_base_url.clone(),
             include_code_review,
             current_profile: current_profile.to_string(),
             turn_state_bindings: BTreeMap::new(),
-            session_id_bindings: state.session_profile_bindings.clone(),
+            session_id_bindings: restored_state.session_profile_bindings.clone(),
             profile_probe_cache: BTreeMap::new(),
-            profile_usage_snapshots: persisted_usage_snapshots,
-            profile_retry_backoff_until: persisted_backoffs.retry_backoff_until,
-            profile_transport_backoff_until: persisted_backoffs.transport_backoff_until,
-            profile_route_circuit_open_until: persisted_backoffs.route_circuit_open_until,
+            profile_usage_snapshots: persisted_usage_snapshots.value,
+            profile_retry_backoff_until: persisted_backoffs.value.retry_backoff_until,
+            profile_transport_backoff_until: persisted_backoffs.value.transport_backoff_until,
+            profile_route_circuit_open_until: persisted_backoffs.value.route_circuit_open_until,
             profile_inflight: BTreeMap::new(),
-            profile_health: persisted_profile_scores,
+            profile_health: persisted_profile_scores.value,
         })),
     };
     runtime_proxy_log_to_path(
@@ -5053,7 +5308,7 @@ fn start_runtime_rotation_proxy(
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} retry_backoffs={} transport_backoffs={} route_circuits={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={}",
+            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} retry_backoffs={} transport_backoffs={} route_circuits={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={} recovered_state={} recovered_scores={} recovered_usage_snapshots={} recovered_backoffs={}",
             persisted_profile_scores_count,
             persisted_usage_snapshots_count,
             expired_usage_snapshot_count,
@@ -5064,6 +5319,10 @@ fn start_runtime_rotation_proxy(
             restored_route_scores_count,
             restored_bad_pairing_count,
             restored_success_streak_count,
+            persisted_state.recovered_from_backup,
+            persisted_profile_scores.recovered_from_backup,
+            persisted_usage_snapshots.recovered_from_backup,
+            persisted_backoffs.recovered_from_backup,
         ),
     );
     audit_runtime_proxy_startup_state(&shared);
@@ -5251,6 +5510,11 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
     } else {
         RuntimeRouteKind::Standard
     }
+}
+
+fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxyShared) -> bool {
+    let now = Local::now().timestamp().max(0) as u64;
+    shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
 }
 
 fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
@@ -5459,7 +5723,12 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
     path: &str,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
     let started_at = Instant::now();
-    let budget = Duration::from_millis(runtime_proxy_admission_wait_budget_ms());
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let budget = Duration::from_millis(if pressure_mode {
+        runtime_proxy_pressure_admission_wait_budget_ms()
+    } else {
+        runtime_proxy_admission_wait_budget_ms()
+    });
     let poll = Duration::from_millis(runtime_proxy_admission_wait_poll_ms().max(1));
     let mut waited = false;
     loop {
@@ -5482,7 +5751,7 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "runtime_proxy_admission_wait_exhausted transport={transport} path={path} waited_ms={} reason={}",
+                            "runtime_proxy_admission_wait_exhausted transport={transport} path={path} waited_ms={} reason={} pressure_mode={pressure_mode}",
                             elapsed.as_millis(),
                             match rejection {
                                 RuntimeProxyAdmissionRejection::GlobalLimit =>
@@ -5498,7 +5767,7 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "runtime_proxy_admission_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason={}",
+                            "runtime_proxy_admission_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason={} pressure_mode={pressure_mode}",
                             budget.as_millis(),
                             poll.as_millis(),
                             match rejection {
@@ -5528,7 +5797,12 @@ where
     F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
 {
     let started_at = Instant::now();
-    let budget = Duration::from_millis(runtime_proxy_long_lived_queue_wait_budget_ms());
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let budget = Duration::from_millis(if pressure_mode {
+        runtime_proxy_pressure_long_lived_queue_wait_budget_ms()
+    } else {
+        runtime_proxy_long_lived_queue_wait_budget_ms()
+    });
     let poll = Duration::from_millis(runtime_proxy_long_lived_queue_wait_poll_ms().max(1));
     let mut waited = false;
     loop {
@@ -5552,7 +5826,7 @@ where
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_full",
+                            "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
                             elapsed.as_millis()
                         ),
                     );
@@ -5562,7 +5836,7 @@ where
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason=long_lived_queue_full",
+                            "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
                             budget.as_millis(),
                             poll.as_millis()
                         ),
@@ -6394,11 +6668,22 @@ fn runtime_proxy_precommit_budget_exhausted(
     started_at: Instant,
     attempts: usize,
     continuation: bool,
+    pressure_mode: bool,
 ) -> bool {
-    let (attempt_limit, budget_ms) = if continuation {
+    let (attempt_limit, budget_ms) = if continuation && pressure_mode {
+        (
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_BUDGET_MS,
+        )
+    } else if continuation {
         (
             RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
             RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS,
+        )
+    } else if pressure_mode {
+        (
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
         )
     } else {
         (
@@ -7069,15 +7354,17 @@ fn proxy_runtime_websocket_text_message(
     let mut saw_previous_response_not_found = false;
 
     loop {
+        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
         if runtime_proxy_precommit_budget_exhausted(
             selection_started_at,
             selection_attempts,
             previous_response_id.is_some(),
+            pressure_mode,
         ) {
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} websocket_session={session_id} precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={}",
+                    "request={request_id} websocket_session={session_id} precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
                     selection_started_at.elapsed().as_millis()
                 ),
             );
@@ -8260,12 +8547,17 @@ fn proxy_runtime_standard_request(
     let mut selection_attempts = 0usize;
 
     loop {
-        if runtime_proxy_precommit_budget_exhausted(selection_started_at, selection_attempts, false)
-        {
+        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+        if runtime_proxy_precommit_budget_exhausted(
+            selection_started_at,
+            selection_attempts,
+            false,
+            pressure_mode,
+        ) {
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http compact_precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={}",
+                    "request={request_id} transport=http compact_precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
                     selection_started_at.elapsed().as_millis()
                 ),
             );
@@ -8662,15 +8954,17 @@ fn proxy_runtime_responses_request(
     let mut saw_previous_response_not_found = false;
 
     loop {
+        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
         if runtime_proxy_precommit_budget_exhausted(
             selection_started_at,
             selection_attempts,
             previous_response_id.is_some(),
+            pressure_mode,
         ) {
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={}",
+                    "request={request_id} transport=http precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
                     selection_started_at.elapsed().as_millis()
                 ),
             );
@@ -13769,17 +14063,27 @@ impl AppPaths {
 }
 
 impl AppState {
-    fn load(paths: &AppPaths) -> Result<Self> {
+    fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>> {
         cleanup_stale_login_dirs(paths);
-        if !paths.state_file.exists() {
-            return Ok(Self::default());
+        if !paths.state_file.exists() && !state_last_good_file_path(paths).exists() {
+            return Ok(RecoveredLoad {
+                value: Self::default(),
+                recovered_from_backup: false,
+            });
         }
 
-        let content = fs::read_to_string(&paths.state_file)
-            .with_context(|| format!("failed to read {}", paths.state_file.display()))?;
-        let state = serde_json::from_str(&content)
-            .with_context(|| format!("failed to parse {}", paths.state_file.display()))?;
-        Ok(compact_app_state(state, Local::now().timestamp()))
+        let loaded = load_json_file_with_backup::<Self>(
+            &paths.state_file,
+            &state_last_good_file_path(paths),
+        )?;
+        Ok(RecoveredLoad {
+            value: compact_app_state(loaded.value, Local::now().timestamp()),
+            recovered_from_backup: loaded.recovered_from_backup,
+        })
+    }
+
+    fn load(paths: &AppPaths) -> Result<Self> {
+        Ok(Self::load_with_recovery(paths)?.value)
     }
 
     fn save(&self, paths: &AppPaths) -> Result<()> {
