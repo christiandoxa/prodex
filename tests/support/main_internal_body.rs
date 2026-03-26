@@ -1801,6 +1801,73 @@ fn unique_profile_name_adds_numeric_suffix() {
 }
 
 #[test]
+fn unique_profile_name_reclaims_untracked_managed_directory() {
+    let temp_dir = TestDir::new();
+    let state = AppState::default();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let stale_dir = paths.managed_profiles_root.join("main_example.com");
+    fs::create_dir_all(&stale_dir).expect("stale managed directory should exist");
+    fs::write(stale_dir.join("stale.txt"), "old").expect("stale file should be written");
+
+    assert_eq!(
+        unique_profile_name_for_email(&paths, &state, "main@example.com"),
+        "main_example.com"
+    );
+    assert!(
+        !stale_dir.exists(),
+        "untracked managed directory should be reclaimed before suffixing"
+    );
+}
+
+#[test]
+fn remove_profile_deletes_managed_home_by_default() {
+    let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profile root should exist");
+    let profile_home = paths.managed_profiles_root.join("main");
+    fs::create_dir_all(&profile_home).expect("managed profile home should exist");
+    fs::write(profile_home.join("auth.json"), "{}").expect("auth file should exist");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    handle_remove_profile(RemoveProfileArgs {
+        name: "main".to_string(),
+        delete_home: false,
+    })
+    .expect("managed profile remove should succeed");
+
+    let reloaded = AppState::load(&paths).expect("state should reload");
+    assert!(!reloaded.profiles.contains_key("main"));
+    assert!(
+        !profile_home.exists(),
+        "managed profile home should be deleted even without --delete-home"
+    );
+}
+
+#[test]
 fn parses_email_from_chatgpt_id_token() {
     let id_token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn19.c2ln";
 

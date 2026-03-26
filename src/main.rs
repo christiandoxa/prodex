@@ -2220,8 +2220,9 @@ fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         bail!("profile '{}' does not exist", args.name);
     };
 
-    if args.delete_home {
-        if !profile.managed {
+    let should_delete_home = profile.managed || args.delete_home;
+    if should_delete_home {
+        if !profile.managed && args.delete_home {
             bail!(
                 "refusing to delete external path {}",
                 profile.codex_home.display()
@@ -3302,12 +3303,14 @@ fn profile_name_from_email(email: &str) -> String {
 
 fn unique_profile_name_for_email(paths: &AppPaths, state: &AppState, email: &str) -> String {
     let base_name = profile_name_from_email(email);
+    reclaim_stale_managed_profile_path(paths, state, &base_name);
     if is_available_profile_name(paths, state, &base_name) {
         return base_name;
     }
 
     for suffix in 2.. {
         let candidate = format!("{base_name}-{suffix}");
+        reclaim_stale_managed_profile_path(paths, state, &candidate);
         if is_available_profile_name(paths, state, &candidate) {
             return candidate;
         }
@@ -3318,6 +3321,16 @@ fn unique_profile_name_for_email(paths: &AppPaths, state: &AppState, email: &str
 
 fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
     !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
+}
+
+fn reclaim_stale_managed_profile_path(paths: &AppPaths, state: &AppState, candidate: &str) {
+    if state.profiles.contains_key(candidate) {
+        return;
+    }
+    let candidate_path = paths.managed_profiles_root.join(candidate);
+    if candidate_path.exists() {
+        let _ = remove_dir_if_exists(&candidate_path);
+    }
 }
 
 fn persist_login_home(source: &Path, destination: &Path) -> Result<()> {
