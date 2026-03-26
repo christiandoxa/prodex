@@ -6202,6 +6202,94 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
 }
 
 #[test]
+fn response_affinity_touch_persists_recent_use_for_housekeeping() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let stale_touch = now - RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS - 2;
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: stale_touch,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("initial state save should succeed");
+
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths: paths.clone(),
+            state: state.clone(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        })),
+    };
+
+    let owner = runtime_response_bound_profile(&shared, "resp-main")
+        .expect("response binding lookup should succeed");
+    assert_eq!(owner.as_deref(), Some("main"));
+
+    let persisted = wait_for_state(&paths, |state| {
+        state
+            .response_profile_bindings
+            .get("resp-main")
+            .is_some_and(|binding| binding.bound_at > stale_touch)
+    });
+    assert!(
+        persisted
+            .response_profile_bindings
+            .get("resp-main")
+            .is_some_and(|binding| binding.bound_at > stale_touch)
+    );
+}
+
+#[test]
 fn session_affinity_prefers_bound_profile_for_compact_requests() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();

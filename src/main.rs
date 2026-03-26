@@ -85,6 +85,7 @@ const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
 const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
+const RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS: i64 = if cfg!(test) { 1 } else { 60 };
 const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
@@ -5882,6 +5883,26 @@ fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     })
 }
 
+fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
+    now.saturating_sub(bound_at) >= RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS
+}
+
+fn schedule_runtime_binding_touch_save(
+    shared: &RuntimeRotationProxyShared,
+    runtime: &RuntimeRotationState,
+    reason: &str,
+) {
+    schedule_runtime_state_save(
+        shared,
+        runtime.state.clone(),
+        runtime.profile_health.clone(),
+        runtime.profile_usage_snapshots.clone(),
+        runtime_profile_backoffs_snapshot(runtime),
+        runtime.paths.clone(),
+        reason,
+    );
+}
+
 fn runtime_response_bound_profile(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: &str,
@@ -5897,15 +5918,27 @@ fn runtime_response_bound_profile(
         .get(previous_response_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    let mut touched = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = runtime
             .state
             .response_profile_bindings
             .get_mut(previous_response_id)
         && binding.profile_name == profile_name
-        && binding.bound_at < now
     {
-        binding.bound_at = now;
+        if runtime_binding_touch_should_persist(binding.bound_at, now) {
+            touched = true;
+        }
+        if binding.bound_at < now {
+            binding.bound_at = now;
+        }
+    }
+    if touched {
+        schedule_runtime_binding_touch_save(
+            shared,
+            &runtime,
+            &format!("response_touch:{previous_response_id}"),
+        );
     }
     Ok(profile_name)
 }
@@ -5924,12 +5957,24 @@ fn runtime_turn_state_bound_profile(
         .get(turn_state)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    let mut touched = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = runtime.turn_state_bindings.get_mut(turn_state)
         && binding.profile_name == profile_name
-        && binding.bound_at < now
     {
-        binding.bound_at = now;
+        if runtime_binding_touch_should_persist(binding.bound_at, now) {
+            touched = true;
+        }
+        if binding.bound_at < now {
+            binding.bound_at = now;
+        }
+    }
+    if touched {
+        schedule_runtime_binding_touch_save(
+            shared,
+            &runtime,
+            &format!("turn_state_touch:{turn_state}"),
+        );
     }
     Ok(profile_name)
 }
@@ -5948,19 +5993,35 @@ fn runtime_session_bound_profile(
         .get(session_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    let mut touched = false;
     if let Some(profile_name) = profile_name.as_deref() {
         if let Some(binding) = runtime.session_id_bindings.get_mut(session_id)
             && binding.profile_name == profile_name
-            && binding.bound_at < now
         {
-            binding.bound_at = now;
+            if runtime_binding_touch_should_persist(binding.bound_at, now) {
+                touched = true;
+            }
+            if binding.bound_at < now {
+                binding.bound_at = now;
+            }
         }
         if let Some(binding) = runtime.state.session_profile_bindings.get_mut(session_id)
             && binding.profile_name == profile_name
-            && binding.bound_at < now
         {
-            binding.bound_at = now;
+            if runtime_binding_touch_should_persist(binding.bound_at, now) {
+                touched = true;
+            }
+            if binding.bound_at < now {
+                binding.bound_at = now;
+            }
         }
+    }
+    if touched {
+        schedule_runtime_binding_touch_save(
+            shared,
+            &runtime,
+            &format!("session_touch:{session_id}"),
+        );
     }
     Ok(profile_name)
 }
