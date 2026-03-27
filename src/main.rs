@@ -113,6 +113,8 @@ const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
 const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 300_000 };
 const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 15_000 };
+const RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS: u64 =
+    if cfg!(test) { 120 } else { 8_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
@@ -328,6 +330,7 @@ fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
 fn schedule_runtime_state_save(
     shared: &RuntimeRotationProxyShared,
     state: AppState,
+    continuations: RuntimeContinuationStore,
     profile_scores: BTreeMap<String, RuntimeProfileHealth>,
     usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     backoffs: RuntimeProfileBackoffs,
@@ -345,6 +348,7 @@ fn schedule_runtime_state_save(
         RuntimeStateSaveJob {
             paths,
             state,
+            continuations,
             profile_scores,
             usage_snapshots,
             backoffs,
@@ -428,6 +432,7 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
             match save_runtime_state_snapshot_if_latest(
                 &job.paths,
                 &job.state,
+                &job.continuations,
                 &job.profile_scores,
                 &job.usage_snapshots,
                 &job.backoffs,
@@ -772,6 +777,14 @@ fn runtime_backoffs_last_good_file_path(paths: &AppPaths) -> PathBuf {
     last_good_file_path(&runtime_backoffs_file_path(paths))
 }
 
+fn runtime_continuations_file_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join("runtime-continuations.json")
+}
+
+fn runtime_continuations_last_good_file_path(paths: &AppPaths) -> PathBuf {
+    last_good_file_path(&runtime_continuations_file_path(paths))
+}
+
 fn last_good_file_path(path: &Path) -> PathBuf {
     let file_name = path
         .file_name()
@@ -883,6 +896,127 @@ fn compact_runtime_profile_backoffs(
             ))
         });
     backoffs
+}
+
+fn runtime_continuation_store_from_app_state(state: &AppState) -> RuntimeContinuationStore {
+    RuntimeContinuationStore {
+        response_profile_bindings: state.response_profile_bindings.clone(),
+        session_profile_bindings: state.session_profile_bindings.clone(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: state.session_profile_bindings.clone(),
+    }
+}
+
+fn compact_runtime_continuation_store(
+    mut continuations: RuntimeContinuationStore,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> RuntimeContinuationStore {
+    prune_profile_bindings_for_housekeeping_without_retention(
+        &mut continuations.response_profile_bindings,
+        profiles,
+    );
+    prune_profile_bindings_for_housekeeping_without_retention(
+        &mut continuations.session_profile_bindings,
+        profiles,
+    );
+    prune_profile_bindings_for_housekeeping_without_retention(
+        &mut continuations.turn_state_bindings,
+        profiles,
+    );
+    prune_profile_bindings_for_housekeeping_without_retention(
+        &mut continuations.session_id_bindings,
+        profiles,
+    );
+    prune_profile_bindings(
+        &mut continuations.turn_state_bindings,
+        TURN_STATE_PROFILE_BINDING_LIMIT,
+    );
+    prune_profile_bindings(
+        &mut continuations.session_profile_bindings,
+        SESSION_ID_PROFILE_BINDING_LIMIT,
+    );
+    prune_profile_bindings(
+        &mut continuations.session_id_bindings,
+        SESSION_ID_PROFILE_BINDING_LIMIT,
+    );
+    continuations
+}
+
+fn merge_runtime_continuation_store(
+    existing: &RuntimeContinuationStore,
+    incoming: &RuntimeContinuationStore,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> RuntimeContinuationStore {
+    compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings: merge_profile_bindings(
+                &existing.response_profile_bindings,
+                &incoming.response_profile_bindings,
+                profiles,
+            ),
+            session_profile_bindings: merge_profile_bindings(
+                &existing.session_profile_bindings,
+                &incoming.session_profile_bindings,
+                profiles,
+            ),
+            turn_state_bindings: merge_profile_bindings(
+                &existing.turn_state_bindings,
+                &incoming.turn_state_bindings,
+                profiles,
+            ),
+            session_id_bindings: merge_profile_bindings(
+                &existing.session_id_bindings,
+                &incoming.session_id_bindings,
+                profiles,
+            ),
+        },
+        profiles,
+    )
+}
+
+fn load_runtime_continuations_with_recovery(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<RecoveredLoad<RuntimeContinuationStore>> {
+    let path = runtime_continuations_file_path(paths);
+    if !path.exists() && !runtime_continuations_last_good_file_path(paths).exists() {
+        return Ok(RecoveredLoad {
+            value: RuntimeContinuationStore::default(),
+            recovered_from_backup: false,
+        });
+    }
+    let loaded = load_json_file_with_backup::<RuntimeContinuationStore>(
+        &path,
+        &runtime_continuations_last_good_file_path(paths),
+    )?;
+    Ok(RecoveredLoad {
+        value: compact_runtime_continuation_store(loaded.value, profiles),
+        recovered_from_backup: loaded.recovered_from_backup,
+    })
+}
+
+fn save_runtime_continuations(
+    paths: &AppPaths,
+    continuations: &RuntimeContinuationStore,
+) -> Result<()> {
+    let path = runtime_continuations_file_path(paths);
+    let profiles = AppState::load(paths)
+        .map(|state| state.profiles)
+        .unwrap_or_default();
+    let compacted = compact_runtime_continuation_store(continuations.clone(), &profiles);
+    let json = serde_json::to_string_pretty(&compacted)
+        .context("failed to serialize runtime continuations")?;
+    write_json_file_with_backup(
+        &path,
+        &runtime_continuations_last_good_file_path(paths),
+        &json,
+        |content| {
+            let _: RuntimeContinuationStore = serde_json::from_str(content)
+                .context("failed to validate runtime continuations")?;
+            Ok(())
+        },
+    )?;
+    Ok(())
 }
 
 fn runtime_profile_route_key_parts<'a>(key: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
@@ -1314,6 +1448,7 @@ fn save_runtime_profile_backoffs(
 fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
     snapshot: &AppState,
+    continuations: &RuntimeContinuationStore,
     profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
     usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     backoffs: &RuntimeProfileBackoffs,
@@ -1332,6 +1467,11 @@ fn save_runtime_state_snapshot_if_latest(
 
     let existing = AppState::load(paths)?;
     let merged = merge_runtime_state_snapshot(existing, snapshot);
+    let merged_continuations =
+        compact_runtime_continuation_store(continuations.clone(), &merged.profiles);
+    let mut merged = merged;
+    merged.response_profile_bindings = merged_continuations.response_profile_bindings.clone();
+    merged.session_profile_bindings = merged_continuations.session_profile_bindings.clone();
     let json = serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
     let existing_scores = load_runtime_profile_scores(paths, &merged.profiles)?;
     let merged_scores =
@@ -1352,6 +1492,7 @@ fn save_runtime_state_snapshot_if_latest(
     }
 
     write_state_json_atomic(paths, &json)?;
+    save_runtime_continuations(paths, &merged_continuations)?;
     save_runtime_profile_scores(paths, &merged_scores)?;
     save_runtime_usage_snapshots(paths, &merged_usage_snapshots)?;
     save_runtime_profile_backoffs(paths, &merged_backoffs)?;
@@ -1499,7 +1640,7 @@ struct ProfileEntry {
     email: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ResponseProfileBinding {
     profile_name: String,
     bound_at: i64,
@@ -1772,6 +1913,7 @@ struct RuntimeStateSaveQueue {
 struct RuntimeStateSaveJob {
     paths: AppPaths,
     state: AppState,
+    continuations: RuntimeContinuationStore,
     profile_scores: BTreeMap<String, RuntimeProfileHealth>,
     usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     backoffs: RuntimeProfileBackoffs,
@@ -1849,6 +1991,18 @@ struct RuntimeProfileBackoffs {
     route_circuit_open_until: BTreeMap<String, i64>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeContinuationStore {
+    #[serde(default)]
+    response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
+    #[serde(default)]
+    session_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
+    #[serde(default)]
+    turn_state_bindings: BTreeMap<String, ResponseProfileBinding>,
+    #[serde(default)]
+    session_id_bindings: BTreeMap<String, ResponseProfileBinding>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeProbeCacheFreshness {
     Fresh,
@@ -1891,11 +2045,16 @@ struct RuntimeDoctorSummary {
     persisted_transport_backoffs: usize,
     persisted_route_circuits: usize,
     persisted_usage_snapshots: usize,
+    persisted_response_bindings: usize,
+    persisted_session_bindings: usize,
+    persisted_turn_state_bindings: usize,
+    persisted_session_id_bindings: usize,
     stale_persisted_usage_snapshots: usize,
     recovered_state_file: bool,
     recovered_scores_file: bool,
     recovered_usage_snapshots_file: bool,
     recovered_backoffs_file: bool,
+    recovered_continuations_file: bool,
     last_good_backups_present: usize,
     degraded_routes: Vec<String>,
     orphan_managed_dirs: Vec<String>,
@@ -1936,6 +2095,35 @@ struct RuntimeRotationProxy {
 
 type RuntimeLocalWebSocket = WsSocket<Box<dyn TinyReadWrite + Send>>;
 type RuntimeUpstreamWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
+
+fn runtime_set_upstream_websocket_io_timeout(
+    socket: &mut RuntimeUpstreamWebSocket,
+    timeout: Option<Duration>,
+) -> io::Result<()> {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => {
+            stream.set_read_timeout(timeout)?;
+            stream.set_write_timeout(timeout)?;
+        }
+        MaybeTlsStream::Rustls(stream) => {
+            stream.sock.set_read_timeout(timeout)?;
+            stream.sock.set_write_timeout(timeout)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn runtime_websocket_timeout_error(err: &WsError) -> bool {
+    matches!(
+        err,
+        WsError::Io(io_err)
+            if matches!(
+                io_err.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            )
+    )
+}
 
 enum RuntimeResponsesAttempt {
     Success {
@@ -2543,6 +2731,13 @@ fn runtime_proxy_websocket_connect_timeout_ms() -> u64 {
     )
 }
 
+fn runtime_proxy_websocket_precommit_progress_timeout_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
+        RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS,
+    )
+}
+
 fn runtime_proxy_admission_wait_budget_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
@@ -3128,8 +3323,13 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         "persisted_transport_backoffs": summary.persisted_transport_backoffs,
         "persisted_route_circuits": summary.persisted_route_circuits,
         "persisted_usage_snapshots": summary.persisted_usage_snapshots,
+        "persisted_response_bindings": summary.persisted_response_bindings,
+        "persisted_session_bindings": summary.persisted_session_bindings,
+        "persisted_turn_state_bindings": summary.persisted_turn_state_bindings,
+        "persisted_session_id_bindings": summary.persisted_session_id_bindings,
         "stale_persisted_usage_snapshots": summary.stale_persisted_usage_snapshots,
         "recovered_state_file": summary.recovered_state_file,
+        "recovered_continuations_file": summary.recovered_continuations_file,
         "recovered_scores_file": summary.recovered_scores_file,
         "recovered_usage_snapshots_file": summary.recovered_usage_snapshots_file,
         "recovered_backoffs_file": summary.recovered_backoffs_file,
@@ -3245,6 +3445,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog").to_string(),
         ),
         (
+            "WS first-frame timeouts".to_string(),
+            runtime_doctor_marker_count(&summary, "websocket_precommit_frame_timeout").to_string(),
+        ),
+        (
             "Stream read errors".to_string(),
             runtime_doctor_marker_count(&summary, "stream_read_error").to_string(),
         ),
@@ -3341,10 +3545,21 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             ),
         ),
         (
+            "Persisted continuations".to_string(),
+            format!(
+                "responses={} sessions={} turns={} session_ids={}",
+                summary.persisted_response_bindings,
+                summary.persisted_session_bindings,
+                summary.persisted_turn_state_bindings,
+                summary.persisted_session_id_bindings
+            ),
+        ),
+        (
             "Recovered state".to_string(),
             format!(
-                "state={} scores={} usage={} backoffs={} backups={}",
+                "state={} continuations={} scores={} usage={} backoffs={} backups={}",
                 summary.recovered_state_file,
+                summary.recovered_continuations_file,
                 summary.recovered_scores_file,
                 summary.recovered_usage_snapshots_file,
                 summary.recovered_backoffs_file,
@@ -3515,6 +3730,11 @@ fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSum
             recovered_from_backup: false,
         },
     );
+    let continuations = load_runtime_continuations_with_recovery(paths, &state.value.profiles)
+        .unwrap_or(RecoveredLoad {
+            value: RuntimeContinuationStore::default(),
+            recovered_from_backup: false,
+        });
     let backoffs = load_runtime_profile_backoffs_with_recovery(paths, &state.value.profiles)
         .unwrap_or(RecoveredLoad {
             value: RuntimeProfileBackoffs::default(),
@@ -3526,17 +3746,23 @@ fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSum
     summary.persisted_transport_backoffs = backoffs.value.transport_backoff_until.len();
     summary.persisted_route_circuits = backoffs.value.route_circuit_open_until.len();
     summary.persisted_usage_snapshots = usage_snapshots.value.len();
+    summary.persisted_response_bindings = continuations.value.response_profile_bindings.len();
+    summary.persisted_session_bindings = continuations.value.session_profile_bindings.len();
+    summary.persisted_turn_state_bindings = continuations.value.turn_state_bindings.len();
+    summary.persisted_session_id_bindings = continuations.value.session_id_bindings.len();
     summary.stale_persisted_usage_snapshots = usage_snapshots
         .value
         .values()
         .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, now))
         .count();
     summary.recovered_state_file = state.recovered_from_backup;
+    summary.recovered_continuations_file = continuations.recovered_from_backup;
     summary.recovered_scores_file = scores.recovered_from_backup;
     summary.recovered_usage_snapshots_file = usage_snapshots.recovered_from_backup;
     summary.recovered_backoffs_file = backoffs.recovered_from_backup;
     summary.last_good_backups_present = [
         state_last_good_file_path(paths),
+        runtime_continuations_last_good_file_path(paths),
         runtime_scores_last_good_file_path(paths),
         runtime_usage_snapshots_last_good_file_path(paths),
         runtime_backoffs_last_good_file_path(paths),
@@ -3645,6 +3871,7 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         || runtime_doctor_marker_count(&summary, "profile_transport_backoff") > 0
         || runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0
         || runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe") > 0
+        || runtime_doctor_marker_count(&summary, "websocket_precommit_frame_timeout") > 0
         || runtime_doctor_marker_count(&summary, "local_writer_error") > 0
     {
         "elevated".to_string()
@@ -3708,6 +3935,8 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe") > 0 {
             "Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "websocket_precommit_frame_timeout") > 0 {
+            "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_inflight_saturated") > 0 {
             "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_bad_pairing") > 0 {
@@ -3880,6 +4109,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "quota_release_profile_affinity",
         "websocket_reuse_skip_quota_exhausted",
         "websocket_reuse_watchdog",
+        "websocket_precommit_frame_timeout",
         "stream_read_error",
         "local_writer_error",
         "first_upstream_chunk",
@@ -5219,7 +5449,32 @@ fn start_runtime_rotation_proxy(
         value: state.clone(),
         recovered_from_backup: false,
     });
-    let restored_state = merge_runtime_state_snapshot(state.clone(), &persisted_state.value);
+    let mut restored_state = merge_runtime_state_snapshot(state.clone(), &persisted_state.value);
+    let persisted_continuations =
+        load_runtime_continuations_with_recovery(paths, &restored_state.profiles).unwrap_or(
+            RecoveredLoad {
+                value: RuntimeContinuationStore::default(),
+                recovered_from_backup: false,
+            },
+        );
+    let fallback_continuations = runtime_continuation_store_from_app_state(&restored_state);
+    let restored_continuations = merge_runtime_continuation_store(
+        &fallback_continuations,
+        &persisted_continuations.value,
+        &restored_state.profiles,
+    );
+    let continuation_sidecar_present = runtime_continuations_file_path(paths).exists()
+        || runtime_continuations_last_good_file_path(paths).exists();
+    let continuation_migration_needed = !continuation_sidecar_present
+        && (restored_continuations != RuntimeContinuationStore::default());
+    let restored_session_id_bindings = merge_profile_bindings(
+        &restored_continuations.session_profile_bindings,
+        &restored_continuations.session_id_bindings,
+        &restored_state.profiles,
+    );
+    restored_state.response_profile_bindings =
+        restored_continuations.response_profile_bindings.clone();
+    restored_state.session_profile_bindings = restored_session_id_bindings.clone();
     let persisted_profile_scores =
         load_runtime_profile_scores_with_recovery(paths, &restored_state.profiles).unwrap_or(
             RecoveredLoad {
@@ -5243,6 +5498,10 @@ fn start_runtime_rotation_proxy(
         );
     let persisted_profile_scores_count = persisted_profile_scores.value.len();
     let persisted_usage_snapshots_count = persisted_usage_snapshots.value.len();
+    let persisted_response_binding_count = restored_continuations.response_profile_bindings.len();
+    let persisted_session_binding_count = restored_continuations.session_profile_bindings.len();
+    let persisted_turn_state_binding_count = restored_continuations.turn_state_bindings.len();
+    let persisted_session_id_binding_count = restored_session_id_bindings.len();
     let persisted_retry_backoffs_count = persisted_backoffs.value.retry_backoff_until.len();
     let persisted_transport_backoffs_count = persisted_backoffs.value.transport_backoff_until.len();
     let persisted_route_circuit_count = persisted_backoffs.value.route_circuit_open_until.len();
@@ -5293,8 +5552,8 @@ fn start_runtime_rotation_proxy(
             upstream_base_url: upstream_base_url.clone(),
             include_code_review,
             current_profile: current_profile.to_string(),
-            turn_state_bindings: BTreeMap::new(),
-            session_id_bindings: restored_state.session_profile_bindings.clone(),
+            turn_state_bindings: restored_continuations.turn_state_bindings.clone(),
+            session_id_bindings: restored_session_id_bindings,
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: persisted_usage_snapshots.value,
             profile_retry_backoff_until: persisted_backoffs.value.retry_backoff_until,
@@ -5313,10 +5572,14 @@ fn start_runtime_rotation_proxy(
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} retry_backoffs={} transport_backoffs={} route_circuits={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={} recovered_state={} recovered_scores={} recovered_usage_snapshots={} recovered_backoffs={}",
+            "runtime_proxy_restore_counts persisted_scores={} persisted_usage_snapshots={} expired_usage_snapshots={} response_bindings={} session_bindings={} turn_state_bindings={} session_id_bindings={} retry_backoffs={} transport_backoffs={} route_circuits={} global_scores={} route_scores={} bad_pairing_scores={} success_streak_scores={} recovered_state={} recovered_continuations={} recovered_scores={} recovered_usage_snapshots={} recovered_backoffs={}",
             persisted_profile_scores_count,
             persisted_usage_snapshots_count,
             expired_usage_snapshot_count,
+            persisted_response_binding_count,
+            persisted_session_binding_count,
+            persisted_turn_state_binding_count,
+            persisted_session_id_binding_count,
             persisted_retry_backoffs_count,
             persisted_transport_backoffs_count,
             persisted_route_circuit_count,
@@ -5325,12 +5588,25 @@ fn start_runtime_rotation_proxy(
             restored_bad_pairing_count,
             restored_success_streak_count,
             persisted_state.recovered_from_backup,
+            persisted_continuations.recovered_from_backup,
             persisted_profile_scores.recovered_from_backup,
             persisted_usage_snapshots.recovered_from_backup,
             persisted_backoffs.recovered_from_backup,
         ),
     );
     audit_runtime_proxy_startup_state(&shared);
+    if continuation_migration_needed && let Ok(runtime) = shared.runtime.lock() {
+        schedule_runtime_state_save(
+            &shared,
+            runtime.state.clone(),
+            runtime_continuation_store_snapshot(&runtime),
+            runtime.profile_health.clone(),
+            runtime.profile_usage_snapshots.clone(),
+            runtime_profile_backoffs_snapshot(&runtime),
+            runtime.paths.clone(),
+            "startup_continuation_migration",
+        );
+    }
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
     let (long_lived_sender, long_lived_receiver) =
@@ -5627,6 +5903,7 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
     let expired_route_circuits = route_circuit_count_after_profile_prune
         .saturating_sub(runtime.profile_route_circuit_open_until.len());
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -5653,6 +5930,7 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
         schedule_runtime_state_save(
             shared,
             state_snapshot,
+            continuations_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
             backoffs_snapshot,
@@ -6294,6 +6572,7 @@ fn note_runtime_previous_response_not_found(
         },
     );
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -6310,6 +6589,7 @@ fn note_runtime_previous_response_not_found(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -6339,6 +6619,7 @@ fn schedule_runtime_binding_touch_save(
     schedule_runtime_state_save(
         shared,
         runtime.state.clone(),
+        runtime_continuation_store_snapshot(runtime),
         runtime.profile_health.clone(),
         runtime.profile_usage_snapshots.clone(),
         runtime_profile_backoffs_snapshot(runtime),
@@ -6521,10 +6802,29 @@ fn remember_runtime_turn_state(
             &mut runtime.turn_state_bindings,
             TURN_STATE_PROFILE_BINDING_LIMIT,
         );
+        let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            continuations_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            backoffs_snapshot,
+            paths_snapshot,
+            &format!("turn_state:{profile_name}"),
+        );
         runtime_proxy_log(
             shared,
             format!("binding turn_state profile={profile_name} value={turn_state}"),
         );
+    } else {
+        drop(runtime);
     }
     Ok(())
 }
@@ -6568,6 +6868,7 @@ fn remember_runtime_session_id(
             SESSION_ID_PROFILE_BINDING_LIMIT,
         );
         let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -6576,6 +6877,7 @@ fn remember_runtime_session_id(
         schedule_runtime_state_save(
             shared,
             state_snapshot,
+            continuations_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
             backoffs_snapshot,
@@ -6633,6 +6935,7 @@ fn remember_runtime_response_ids(
             RESPONSE_PROFILE_BINDING_LIMIT,
         );
         let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -6641,6 +6944,7 @@ fn remember_runtime_response_ids(
         schedule_runtime_state_save(
             shared,
             state_snapshot,
+            continuations_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
             backoffs_snapshot,
@@ -6711,6 +7015,7 @@ fn release_runtime_quota_blocked_affinity(
 
     if changed {
         let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -6719,6 +7024,7 @@ fn release_runtime_quota_blocked_affinity(
         schedule_runtime_state_save(
             shared,
             state_snapshot,
+            continuations_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
             backoffs_snapshot,
@@ -6807,6 +7113,7 @@ fn release_runtime_previous_response_affinity(
 
     if changed {
         let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -6815,6 +7122,7 @@ fn release_runtime_previous_response_affinity(
         schedule_runtime_state_save(
             shared,
             state_snapshot,
+            continuations_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
             backoffs_snapshot,
@@ -7583,6 +7891,7 @@ fn proxy_runtime_websocket_text_message(
     let mut selection_attempts = 0usize;
     let mut previous_response_fresh_fallback_used = false;
     let mut saw_previous_response_not_found = false;
+    let mut websocket_reuse_fresh_retry_profiles = BTreeSet::new();
 
     loop {
         let pressure_mode = runtime_proxy_pressure_mode_active(shared);
@@ -7626,6 +7935,7 @@ fn proxy_runtime_websocket_text_message(
                 pinned_profile = None;
                 turn_state_profile = None;
                 session_profile = None;
+                websocket_reuse_fresh_retry_profiles.clear();
                 excluded_profiles.clear();
                 last_failure = None;
                 selection_started_at = Instant::now();
@@ -7836,6 +8146,7 @@ fn proxy_runtime_websocket_text_message(
                 pinned_profile = None;
                 turn_state_profile = None;
                 session_profile = None;
+                websocket_reuse_fresh_retry_profiles.clear();
                 excluded_profiles.clear();
                 last_failure = None;
                 selection_started_at = Instant::now();
@@ -8121,6 +8432,12 @@ fn proxy_runtime_websocket_text_message(
                 profile_name,
                 event,
             } => {
+                let retry_same_profile_with_fresh_connect = !websocket_reuse_fresh_retry_profiles
+                    .contains(&profile_name)
+                    && (bound_profile.as_deref() == Some(profile_name.as_str())
+                        || turn_state_profile.as_deref() == Some(profile_name.as_str())
+                        || (request_session_id.is_some()
+                            && session_profile.as_deref() == Some(profile_name.as_str())));
                 let reuse_failed_bound_previous_response = previous_response_id.is_some()
                     && !previous_response_fresh_fallback_used
                     && (bound_profile.as_deref() == Some(profile_name.as_str())
@@ -8131,6 +8448,16 @@ fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} websocket_reuse_watchdog_timeout profile={profile_name} event={event}"
                     ),
                 );
+                if retry_same_profile_with_fresh_connect {
+                    websocket_reuse_fresh_retry_profiles.insert(profile_name.clone());
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} websocket_reuse_owner_fresh_retry profile={profile_name} event={event}"
+                        ),
+                    );
+                    continue;
+                }
                 if reuse_failed_bound_previous_response
                     && !runtime_request_text_requires_previous_response_affinity(&request_text)
                     && let Some(fresh_request_text) =
@@ -8157,6 +8484,7 @@ fn proxy_runtime_websocket_text_message(
                     session_profile = None;
                     pinned_profile = None;
                     turn_state_profile = None;
+                    websocket_reuse_fresh_retry_profiles.clear();
                     excluded_profiles.clear();
                     last_failure = None;
                     selection_started_at = Instant::now();
@@ -8291,6 +8619,7 @@ fn attempt_runtime_websocket_request(
     }
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
     let reuse_started_at = reuse_existing_session.then(Instant::now);
+    let precommit_started_at = Instant::now();
     let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
         if reuse_existing_session {
             runtime_proxy_log(
@@ -8347,6 +8676,13 @@ fn attempt_runtime_websocket_request(
                 }
             }
         };
+    runtime_set_upstream_websocket_io_timeout(
+        &mut upstream_socket,
+        Some(Duration::from_millis(
+            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+        )),
+    )
+    .context("failed to configure runtime websocket pre-commit timeout")?;
 
     if let Err(err) = upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
         let _ = upstream_socket.close(None);
@@ -8376,9 +8712,18 @@ fn attempt_runtime_websocket_request(
     }
 
     let mut committed = false;
+    let mut first_upstream_frame_seen = false;
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
+                if !first_upstream_frame_seen {
+                    first_upstream_frame_seen = true;
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
+                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                    )
+                    .context("failed to restore runtime websocket idle timeout")?;
+                }
                 if let Some(turn_state) = extract_runtime_turn_state_from_payload(text.as_ref()) {
                     remember_runtime_turn_state(shared, profile_name, Some(turn_state.as_str()))?;
                     upstream_turn_state = Some(turn_state);
@@ -8458,6 +8803,14 @@ fn attempt_runtime_websocket_request(
                 }
             }
             Ok(WsMessage::Binary(payload)) => {
+                if !first_upstream_frame_seen {
+                    first_upstream_frame_seen = true;
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
+                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                    )
+                    .context("failed to restore runtime websocket idle timeout")?;
+                }
                 if !committed {
                     remember_runtime_session_id(
                         shared,
@@ -8490,11 +8843,28 @@ fn attempt_runtime_websocket_request(
                     })?;
             }
             Ok(WsMessage::Ping(payload)) => {
+                if !first_upstream_frame_seen {
+                    first_upstream_frame_seen = true;
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
+                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                    )
+                    .context("failed to restore runtime websocket idle timeout")?;
+                }
                 upstream_socket
                     .send(WsMessage::Pong(payload))
                     .context("failed to respond to upstream websocket ping")?;
             }
-            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {
+                if !first_upstream_frame_seen {
+                    first_upstream_frame_seen = true;
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
+                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                    )
+                    .context("failed to restore runtime websocket idle timeout")?;
+                }
+            }
             Ok(WsMessage::Close(frame)) => {
                 websocket_session.reset();
                 if let Some(started_at) = reuse_started_at {
@@ -8566,6 +8936,39 @@ fn attempt_runtime_websocket_request(
             }
             Err(err) => {
                 websocket_session.reset();
+                if !committed && !first_upstream_frame_seen && runtime_websocket_timeout_error(&err)
+                {
+                    let elapsed_ms = precommit_started_at.elapsed().as_millis();
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "websocket_precommit_frame_timeout profile={profile_name} event=no_first_upstream_frame_before_deadline elapsed_ms={elapsed_ms} reuse={reuse_existing_session}"
+                        ),
+                    );
+                    let transport_error = anyhow::anyhow!(
+                        "runtime websocket upstream produced no first frame before the pre-commit deadline: {err}"
+                    );
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Websocket,
+                        "websocket_first_frame_timeout",
+                        &transport_error,
+                    );
+                    if reuse_existing_session {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "websocket_reuse_watchdog profile={profile_name} event=no_first_upstream_frame_before_deadline elapsed_ms={elapsed_ms} committed={committed}"
+                            ),
+                        );
+                        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                            profile_name: profile_name.to_string(),
+                            event: "no_first_upstream_frame_before_deadline",
+                        });
+                    }
+                    return Err(transport_error);
+                }
                 if let Some(started_at) = reuse_started_at {
                     runtime_proxy_log(
                         shared,
@@ -8799,7 +9202,7 @@ fn connect_runtime_proxy_upstream_tcp_stream(
         _ => 80,
     });
     let connect_timeout = Duration::from_millis(runtime_proxy_websocket_connect_timeout_ms());
-    let io_timeout = Duration::from_millis(runtime_proxy_stream_idle_timeout_ms());
+    let io_timeout = Duration::from_millis(runtime_proxy_websocket_precommit_progress_timeout_ms());
     let addrs = (host, port).to_socket_addrs().map_err(WsError::Io)?;
 
     for addr in addrs {
@@ -10281,6 +10684,7 @@ fn next_runtime_response_candidate_for_route(
             }
         }
         let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
         let profile_scores_snapshot = runtime.profile_health.clone();
         let usage_snapshots = runtime.profile_usage_snapshots.clone();
         let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -10290,6 +10694,7 @@ fn next_runtime_response_candidate_for_route(
             schedule_runtime_state_save(
                 shared,
                 state_snapshot,
+                continuations_snapshot,
                 profile_scores_snapshot,
                 usage_snapshots,
                 backoffs_snapshot,
@@ -10558,6 +10963,7 @@ fn update_runtime_profile_probe_cache_with_usage(
         );
     }
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -10566,6 +10972,7 @@ fn update_runtime_profile_probe_cache_with_usage(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -11033,6 +11440,15 @@ fn runtime_profile_backoffs_snapshot(runtime: &RuntimeRotationState) -> RuntimeP
     }
 }
 
+fn runtime_continuation_store_snapshot(runtime: &RuntimeRotationState) -> RuntimeContinuationStore {
+    RuntimeContinuationStore {
+        response_profile_bindings: runtime.state.response_profile_bindings.clone(),
+        session_profile_bindings: runtime.state.session_profile_bindings.clone(),
+        turn_state_bindings: runtime.turn_state_bindings.clone(),
+        session_id_bindings: runtime.session_id_bindings.clone(),
+    }
+}
+
 const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
 const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
 const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
@@ -11095,6 +11511,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe(
         .profile_route_circuit_open_until
         .insert(key, reserve_until);
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -11110,6 +11527,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -11583,6 +12001,7 @@ fn bump_runtime_profile_bad_pairing_score(
         },
     );
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -11598,6 +12017,7 @@ fn bump_runtime_profile_bad_pairing_score(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -11650,6 +12070,7 @@ fn bump_runtime_profile_health_score(
         None
     };
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -11674,6 +12095,7 @@ fn bump_runtime_profile_health_score(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -11751,6 +12173,7 @@ fn mark_runtime_profile_retry_backoff(
         .profile_retry_backoff_until
         .insert(profile_name.to_string(), until);
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -11763,6 +12186,7 @@ fn mark_runtime_profile_retry_backoff(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -11805,6 +12229,7 @@ fn mark_runtime_profile_transport_backoff(
         .and_modify(|current| *current = (*current).max(until))
         .or_insert(until);
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -11819,6 +12244,7 @@ fn mark_runtime_profile_transport_backoff(
     schedule_runtime_state_save(
         shared,
         state_snapshot,
+        continuations_snapshot,
         profile_scores_snapshot,
         usage_snapshots,
         backoffs_snapshot,
@@ -11865,8 +12291,9 @@ fn commit_runtime_proxy_profile_selection(
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let switch_runtime_profile = runtime.current_profile != profile_name;
     let switch_global_profile = !matches!(route_kind, RuntimeRouteKind::Compact);
-    let switched = switch_global_profile && runtime.current_profile != profile_name;
+    let switched = switch_runtime_profile;
     let now = Local::now().timestamp();
     let cleared_retry_backoff = runtime
         .profile_retry_backoff_until
@@ -11880,7 +12307,7 @@ fn commit_runtime_proxy_profile_selection(
         clear_runtime_profile_circuit_for_route(&mut runtime, profile_name, route_kind);
     let cleared_health =
         clear_runtime_profile_health_for_route(&mut runtime, profile_name, route_kind, now);
-    if switch_global_profile {
+    if switch_runtime_profile {
         runtime.current_profile = profile_name.to_string();
     }
     let state_changed =
@@ -11890,6 +12317,7 @@ fn commit_runtime_proxy_profile_selection(
         record_run_selection(&mut runtime.state, profile_name);
     }
     let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
     let profile_scores_snapshot = runtime.profile_health.clone();
     let usage_snapshots = runtime.profile_usage_snapshots.clone();
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
@@ -11905,6 +12333,7 @@ fn commit_runtime_proxy_profile_selection(
         schedule_runtime_state_save(
             shared,
             state_snapshot,
+            continuations_snapshot,
             profile_scores_snapshot,
             usage_snapshots,
             backoffs_snapshot,

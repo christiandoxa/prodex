@@ -177,6 +177,33 @@ where
     }
 }
 
+fn wait_for_runtime_continuations<F>(paths: &AppPaths, predicate: F) -> RuntimeContinuationStore
+where
+    F: Fn(&RuntimeContinuationStore) -> bool,
+{
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Ok(continuations) = load_runtime_continuations_with_recovery(
+            paths,
+            &AppState::load(paths).unwrap_or_default().profiles,
+        )
+        .map(|loaded| loaded.value)
+            && predicate(&continuations)
+        {
+            return continuations;
+        }
+        if Instant::now() >= deadline {
+            return load_runtime_continuations_with_recovery(
+                paths,
+                &AppState::load(paths).unwrap_or_default().profiles,
+            )
+            .map(|loaded| loaded.value)
+            .expect("runtime continuations should reload");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 struct RuntimeProxyBackend {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
@@ -1020,7 +1047,7 @@ fn handle_runtime_proxy_backend_websocket(
             }
             "second-account" => {
                 if matches!(mode, RuntimeProxyBackendMode::WebsocketReuseSilentHang)
-                    && request_count >= 2
+                    && request_count == 2
                 {
                     thread::sleep(Duration::from_millis(
                         runtime_proxy_stream_idle_timeout_ms() + 100,
@@ -4306,7 +4333,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
 }
 
 #[test]
-fn commit_runtime_proxy_profile_selection_does_not_switch_global_profile_for_compact() {
+fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profile_for_compact() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -4382,9 +4409,9 @@ fn commit_runtime_proxy_profile_selection_does_not_switch_global_profile_for_com
     let switched = commit_runtime_proxy_profile_selection(&shared, "second", RuntimeRouteKind::Compact)
         .expect("compact profile commit should succeed");
 
-    assert!(!switched, "compact commit should not switch the global profile");
+    assert!(switched, "compact commit should switch the runtime current profile");
     let runtime = shared.runtime.lock().expect("runtime should lock");
-    assert_eq!(runtime.current_profile, "main");
+    assert_eq!(runtime.current_profile, "second");
     assert_eq!(runtime.state.active_profile.as_deref(), Some("main"));
 }
 
@@ -5980,6 +6007,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
         save_runtime_state_snapshot_if_latest(
             &paths,
             &snapshot,
+            &runtime_continuation_store_from_app_state(&snapshot),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &RuntimeProfileBackoffs::default(),
@@ -6073,15 +6101,17 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         })),
     };
 
+    let first_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("main".to_string(), now - 20)]),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
     schedule_runtime_state_save(
         &shared,
-        AppState {
-            active_profile: Some("main".to_string()),
-            profiles: profiles.clone(),
-            last_run_selected_at: BTreeMap::from([("main".to_string(), now - 20)]),
-            response_profile_bindings: BTreeMap::new(),
-            session_profile_bindings: BTreeMap::new(),
-        },
+        first_state.clone(),
+        runtime_continuation_store_from_app_state(&first_state),
         BTreeMap::from([(
             runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
             RuntimeProfileHealth {
@@ -6093,32 +6123,34 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
             transport_backoff_until: BTreeMap::new(),
-        route_circuit_open_until: BTreeMap::new(),
+            route_circuit_open_until: BTreeMap::new(),
         },
         paths.clone(),
         "first",
     );
+    let second_state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("second".to_string(), now - 10)]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now - 10,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now - 10,
+            },
+        )]),
+    };
     schedule_runtime_state_save(
         &shared,
-        AppState {
-            active_profile: Some("second".to_string()),
-            profiles: profiles.clone(),
-            last_run_selected_at: BTreeMap::from([("second".to_string(), now - 10)]),
-            response_profile_bindings: BTreeMap::from([(
-                "resp-second".to_string(),
-                ResponseProfileBinding {
-                    profile_name: "second".to_string(),
-                    bound_at: now - 10,
-                },
-            )]),
-            session_profile_bindings: BTreeMap::from([(
-                "sess-second".to_string(),
-                ResponseProfileBinding {
-                    profile_name: "second".to_string(),
-                    bound_at: now - 10,
-                },
-            )]),
-        },
+        second_state.clone(),
+        runtime_continuation_store_from_app_state(&second_state),
         BTreeMap::from([(
             runtime_profile_route_health_key("second", RuntimeRouteKind::Compact),
             RuntimeProfileHealth {
@@ -6130,7 +6162,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::new(),
             transport_backoff_until: BTreeMap::from([("second".to_string(), now + 120)]),
-        route_circuit_open_until: BTreeMap::new(),
+            route_circuit_open_until: BTreeMap::new(),
         },
         paths.clone(),
         "second",
@@ -6207,6 +6239,7 @@ fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
     let err = save_runtime_state_snapshot_if_latest(
         &paths,
         &snapshot,
+        &runtime_continuation_store_from_app_state(&snapshot),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &RuntimeProfileBackoffs::default(),
@@ -10052,7 +10085,9 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
         tail = read_runtime_log_tail(&log_path, 32 * 1024)
             .expect("runtime log tail should be readable");
         let text = String::from_utf8_lossy(&tail);
-        if text.contains("websocket_reuse_watchdog") {
+        if text.contains("websocket_reuse_watchdog")
+            && text.contains("websocket_precommit_frame_timeout")
+        {
             observed = true;
             break;
         }
@@ -10061,6 +10096,154 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     assert!(observed, "runtime log should capture websocket reuse watchdog");
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("websocket_reuse_watchdog"));
+    assert!(tail.contains("websocket_precommit_frame_timeout"));
+}
+
+#[test]
+fn runtime_proxy_retries_bound_previous_response_on_same_profile_after_websocket_reuse_watchdog() {
+    let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
+    let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for first request")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\""))
+    );
+
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("bound continuation websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for bound continuation")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second-next\"")),
+        "bound continuation should reconnect to the same owner after reuse watchdog: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "backend should see the original request, the failed reuse request, and the owner reconnect retry"
+    );
+    assert!(
+        backend
+            .websocket_requests()
+            .last()
+            .is_some_and(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "owner reconnect retry should preserve previous_response_id"
+    );
 }
 
 #[test]
@@ -10387,6 +10570,271 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
             "second-account".to_string(),
         ]
     );
+}
+
+#[test]
+fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )]),
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+
+    let proxy =
+        start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+            .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+    assert!(body.contains("\"resp-second-next\""));
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save state");
+
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths: paths.clone(),
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        })),
+    };
+
+    remember_runtime_turn_state(&shared, "second", Some("turn-second"))
+        .expect("turn-state should persist");
+    let persisted = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .turn_state_bindings
+            .get("turn-second")
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        persisted
+            .turn_state_bindings
+            .get("turn-second")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+}
+
+#[test]
+fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            turn_state_bindings: BTreeMap::from([(
+                "turn-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )]),
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+
+    let proxy =
+        start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+            .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("x-codex-turn-state", "turn-second")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+    assert!(body.contains("\"resp-second\""));
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
 }
 
 #[test]
