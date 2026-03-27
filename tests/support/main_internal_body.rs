@@ -182,6 +182,7 @@ struct RuntimeProxyBackend {
     shutdown: Arc<AtomicBool>,
     responses_accounts: Arc<Mutex<Vec<String>>>,
     responses_headers: Arc<Mutex<Vec<BTreeMap<String, String>>>>,
+    websocket_requests: Arc<Mutex<Vec<String>>>,
     usage_accounts: Arc<Mutex<Vec<String>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -274,10 +275,12 @@ impl RuntimeProxyBackend {
         let shutdown = Arc::new(AtomicBool::new(false));
         let responses_accounts = Arc::new(Mutex::new(Vec::new()));
         let responses_headers = Arc::new(Mutex::new(Vec::new()));
+        let websocket_requests = Arc::new(Mutex::new(Vec::new()));
         let usage_accounts = Arc::new(Mutex::new(Vec::new()));
         let shutdown_flag = Arc::clone(&shutdown);
         let responses_accounts_flag = Arc::clone(&responses_accounts);
         let responses_headers_flag = Arc::clone(&responses_headers);
+        let websocket_requests_flag = Arc::clone(&websocket_requests);
         let usage_accounts_flag = Arc::clone(&usage_accounts);
         let thread = thread::spawn(move || {
             while !shutdown_flag.load(Ordering::SeqCst) {
@@ -285,6 +288,7 @@ impl RuntimeProxyBackend {
                     Ok((stream, _)) => {
                         let responses_accounts_flag = Arc::clone(&responses_accounts_flag);
                         let responses_headers_flag = Arc::clone(&responses_headers_flag);
+                        let websocket_requests_flag = Arc::clone(&websocket_requests_flag);
                         let usage_accounts_flag = Arc::clone(&usage_accounts_flag);
                         let websocket_enabled = matches!(
                             mode,
@@ -301,6 +305,7 @@ impl RuntimeProxyBackend {
                                     stream,
                                     &responses_accounts_flag,
                                     &responses_headers_flag,
+                                    &websocket_requests_flag,
                                     mode,
                                 );
                             } else {
@@ -327,6 +332,7 @@ impl RuntimeProxyBackend {
             shutdown,
             responses_accounts,
             responses_headers,
+            websocket_requests,
             usage_accounts,
             thread: Some(thread),
         }
@@ -347,6 +353,13 @@ impl RuntimeProxyBackend {
         self.responses_headers
             .lock()
             .expect("responses_headers poisoned")
+            .clone()
+    }
+
+    fn websocket_requests(&self) -> Vec<String> {
+        self.websocket_requests
+            .lock()
+            .expect("websocket_requests poisoned")
             .clone()
     }
 
@@ -768,6 +781,7 @@ fn handle_runtime_proxy_backend_websocket(
     stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
+    websocket_requests: &Arc<Mutex<Vec<String>>>,
     mode: RuntimeProxyBackendMode,
 ) {
     let account_id = Arc::new(Mutex::new(String::new()));
@@ -865,6 +879,10 @@ fn handle_runtime_proxy_backend_websocket(
             Ok(other) => panic!("backend websocket expects text requests, got {other:?}"),
             Err(err) => panic!("backend websocket failed to read request: {err}"),
         };
+        websocket_requests
+            .lock()
+            .expect("websocket_requests poisoned")
+            .push(request.clone());
         request_count += 1;
         let previous_response_id = runtime_request_previous_response_id_from_text(&request);
 
@@ -7411,9 +7429,12 @@ fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
         .header("Content-Type", "application/json")
         .header("session_id", "sess-123")
         .header("x-openai-subagent", "compact-remote")
-        .header("x-codex-turn-metadata", r#"{"source":"resume"}"#)
+        .header(
+            "x-codex-turn-metadata",
+            r#"{"source":"resume","session_id":"sess-123"}"#,
+        )
         .header("x-codex-beta-features", "remote-sync,realtime")
-        .header("User-Agent", "codex-cli/0.116.0")
+        .header("User-Agent", "codex-cli/0.117.0")
         .body("{\"input\":[]}")
         .send()
         .expect("runtime proxy request should succeed");
@@ -7438,7 +7459,7 @@ fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
     );
     assert_eq!(
         first.get("x-codex-turn-metadata").map(String::as_str),
-        Some(r#"{"source":"resume"}"#)
+        Some(r#"{"source":"resume","session_id":"sess-123"}"#)
     );
     assert_eq!(
         first.get("x-codex-beta-features").map(String::as_str),
@@ -7446,12 +7467,202 @@ fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
     );
     assert_eq!(
         first.get("user-agent").map(String::as_str),
-        Some("codex-cli/0.116.0")
+        Some("codex-cli/0.117.0")
     );
     assert_eq!(
         first.get("chatgpt-account-id").map(String::as_str),
         Some("second-account")
     );
+}
+
+#[test]
+fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
+        .into_client_request()
+        .expect("websocket request should build");
+    request
+        .headers_mut()
+        .insert("session_id", "sess-123".parse().expect("valid header value"));
+    request.headers_mut().insert(
+        "x-openai-subagent",
+        "compact-remote".parse().expect("valid header value"),
+    );
+    request.headers_mut().insert(
+        "x-codex-turn-metadata",
+        r#"{"source":"resume","session_id":"sess-123"}"#
+            .parse()
+            .expect("valid header value"),
+    );
+    request.headers_mut().insert(
+        "x-codex-beta-features",
+        "remote-sync,realtime".parse().expect("valid header value"),
+    );
+    request
+        .headers_mut()
+        .insert("User-Agent", "codex-cli/0.117.0".parse().expect("valid header value"));
+
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) if is_runtime_terminal_event(&text) => break,
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Text(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    let headers = backend.responses_headers();
+    let first = headers
+        .first()
+        .expect("backend should capture websocket request headers");
+    assert_eq!(
+        first.get("session_id").map(String::as_str),
+        Some("sess-123")
+    );
+    assert_eq!(
+        first.get("x-openai-subagent").map(String::as_str),
+        Some("compact-remote")
+    );
+    assert_eq!(
+        first.get("x-codex-turn-metadata").map(String::as_str),
+        Some(r#"{"source":"resume","session_id":"sess-123"}"#)
+    );
+    assert_eq!(
+        first.get("x-codex-beta-features").map(String::as_str),
+        Some("remote-sync,realtime")
+    );
+    assert_eq!(
+        first.get("user-agent").map(String::as_str),
+        Some("codex-cli/0.117.0")
+    );
+    assert_eq!(
+        first.get("chatgpt-account-id").map(String::as_str),
+        Some("second-account")
+    );
+}
+
+#[test]
+fn runtime_proxy_preserves_websocket_request_client_metadata_payload() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    let payload = serde_json::json!({
+        "input": [],
+        "client_metadata": {
+            "w3c_trace_context": {
+                "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+            },
+            "custom_marker": "keep-me"
+        },
+        "other_field": {
+            "nested": true
+        }
+    })
+    .to_string();
+    socket
+        .send(WsMessage::Text(payload.into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) if is_runtime_terminal_event(&text) => break,
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Text(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    let request = backend
+        .websocket_requests()
+        .into_iter()
+        .last()
+        .expect("backend should capture websocket request payload");
+    assert!(request.contains("\"client_metadata\""));
+    assert!(request.contains("\"w3c_trace_context\""));
+    assert!(request.contains("\"traceparent\""));
+    assert!(request.contains("\"custom_marker\":\"keep-me\""));
+    assert!(request.contains("\"other_field\":{\"nested\":true}"));
 }
 
 #[test]
@@ -10703,5 +10914,147 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
     assert_eq!(
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
+fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let mut request =
+        tungstenite::client::IntoClientRequest::into_client_request(format!(
+            "ws://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .expect("client request should build");
+    request
+        .headers_mut()
+        .insert("session_id", "sess-ws-123".parse().expect("session header"));
+    request.headers_mut().insert(
+        "x-openai-subagent",
+        "compact-remote".parse().expect("subagent header"),
+    );
+    request.headers_mut().insert(
+        "x-codex-turn-metadata",
+        r#"{"source":"resume","session_id":"sess-ws-123"}"#
+            .parse()
+            .expect("turn metadata header"),
+    );
+    request.headers_mut().insert(
+        "x-codex-beta-features",
+        "remote-sync,realtime".parse().expect("beta header"),
+    );
+    request
+        .headers_mut()
+        .insert("User-Agent", "codex-cli/0.117.0".parse().expect("ua header"));
+
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+    let request_payload = serde_json::json!({
+        "input": [],
+        "client_metadata": {
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "session_id": "sess-ws-123",
+            "turn_id": "turn-xyz"
+        }
+    })
+    .to_string();
+    socket
+        .send(WsMessage::Text(request_payload.clone().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads: {payloads:?}"
+    );
+
+    let headers = backend.responses_headers();
+    let first = headers
+        .first()
+        .expect("backend should capture websocket handshake headers");
+    assert_eq!(
+        first.get("session_id").map(String::as_str),
+        Some("sess-ws-123")
+    );
+    assert_eq!(
+        first.get("x-openai-subagent").map(String::as_str),
+        Some("compact-remote")
+    );
+    assert_eq!(
+        first.get("x-codex-turn-metadata").map(String::as_str),
+        Some(r#"{"source":"resume","session_id":"sess-ws-123"}"#)
+    );
+    assert_eq!(
+        first.get("x-codex-beta-features").map(String::as_str),
+        Some("remote-sync,realtime")
+    );
+    assert_eq!(
+        first.get("user-agent").map(String::as_str),
+        Some("codex-cli/0.117.0")
+    );
+    assert_eq!(
+        first.get("chatgpt-account-id").map(String::as_str),
+        Some("second-account")
+    );
+
+    let upstream_requests = backend.websocket_requests();
+    assert_eq!(
+        upstream_requests.last().map(String::as_str),
+        Some(request_payload.as_str())
     );
 }
