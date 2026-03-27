@@ -6119,6 +6119,34 @@ fn runtime_request_without_previous_response_affinity(
     Some(runtime_request_without_turn_state_header(&request))
 }
 
+fn runtime_request_value_requires_previous_response_affinity(value: &serde_json::Value) -> bool {
+    value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                let Some(object) = item.as_object() else {
+                    return false;
+                };
+                let item_type = object
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let has_call_id = object
+                    .get("call_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|call_id| !call_id.trim().is_empty());
+                has_call_id && item_type.ends_with("_call_output")
+            })
+        })
+}
+
+fn runtime_request_requires_previous_response_affinity(request: &RuntimeProxyRequest) -> bool {
+    serde_json::from_slice::<serde_json::Value>(&request.body)
+        .map(|value| runtime_request_value_requires_previous_response_affinity(&value))
+        .unwrap_or(false)
+}
+
 fn runtime_request_text_without_previous_response_id(request_text: &str) -> Option<String> {
     let mut value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
     let object = value.as_object_mut()?;
@@ -6127,6 +6155,12 @@ fn runtime_request_text_without_previous_response_id(request_text: &str) -> Opti
         return None;
     }
     serde_json::to_string(&value).ok()
+}
+
+fn runtime_request_text_requires_previous_response_affinity(request_text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(request_text)
+        .map(|value| runtime_request_value_requires_previous_response_affinity(&value))
+        .unwrap_or(false)
 }
 
 fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
@@ -7568,6 +7602,7 @@ fn proxy_runtime_websocket_text_message(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
+                && !runtime_request_text_requires_previous_response_affinity(&request_text)
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -7777,6 +7812,7 @@ fn proxy_runtime_websocket_text_message(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
+                && !runtime_request_text_requires_previous_response_affinity(&request_text)
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -8096,6 +8132,7 @@ fn proxy_runtime_websocket_text_message(
                     ),
                 );
                 if reuse_failed_bound_previous_response
+                    && !runtime_request_text_requires_previous_response_affinity(&request_text)
                     && let Some(fresh_request_text) =
                         runtime_request_text_without_previous_response_id(&request_text)
                 {
@@ -9372,6 +9409,7 @@ fn proxy_runtime_responses_request(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
+                && !runtime_request_requires_previous_response_affinity(&request)
                 && let Some(fresh_request) =
                     runtime_request_without_previous_response_affinity(&request)
             {
@@ -9580,6 +9618,7 @@ fn proxy_runtime_responses_request(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
+                && !runtime_request_requires_previous_response_affinity(&request)
                 && let Some(fresh_request) =
                     runtime_request_without_previous_response_affinity(&request)
             {

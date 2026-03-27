@@ -1516,6 +1516,10 @@ fn runtime_request_strips_previous_response_id_from_function_call_output_payload
         runtime_request_without_previous_response_id(&request).is_some(),
         "helper should still be able to strip previous_response_id when explicitly asked"
     );
+    assert!(
+        runtime_request_requires_previous_response_affinity(&request),
+        "function call outputs should keep previous_response affinity during normal proxying"
+    );
 }
 
 #[test]
@@ -8057,7 +8061,7 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
 }
 
 #[test]
-fn runtime_proxy_fresh_fallbacks_function_call_output_requests_when_previous_response_missing() {
+fn runtime_proxy_preserves_function_call_output_affinity_when_previous_response_missing() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();
     let paths = AppPaths {
@@ -8104,15 +8108,15 @@ fn runtime_proxy_fresh_fallbacks_function_call_output_requests_when_previous_res
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert_eq!(status.as_u16(), 200, "unexpected status: {status}");
+    assert_eq!(status.as_u16(), 400, "unexpected status: {status}");
     assert!(
-        body.contains("\"response.created\""),
-        "function call output request should degrade to a fresh request: {body}"
+        body.contains("\"previous_response_not_found\""),
+        "function call output request should preserve previous_response failure instead of degrading to fresh: {body}"
     );
 }
 
 #[test]
-fn runtime_proxy_websocket_fresh_fallbacks_function_call_output_requests_when_previous_response_missing(
+fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing(
 ) {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_websocket();
@@ -8165,7 +8169,8 @@ fn runtime_proxy_websocket_fresh_fallbacks_function_call_output_requests_when_pr
         {
             WsMessage::Text(text) => {
                 let text = text.to_string();
-                let done = is_runtime_terminal_event(&text);
+                let done = is_runtime_terminal_event(&text)
+                    || text.contains("\"previous_response_not_found\"");
                 payloads.push(text);
                 if done {
                     break;
@@ -8184,8 +8189,8 @@ fn runtime_proxy_websocket_fresh_fallbacks_function_call_output_requests_when_pr
     assert!(
         payloads
             .iter()
-            .any(|payload| payload.contains("\"response.created\"")),
-        "function call output websocket request should degrade to a fresh request: {payloads:?}"
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "function call output websocket request should preserve previous_response failure instead of degrading to fresh: {payloads:?}"
     );
 }
 
