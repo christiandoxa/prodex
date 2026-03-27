@@ -5553,6 +5553,52 @@ fn app_state_load_compacts_stale_entries_in_memory() {
 }
 
 #[test]
+fn app_state_response_binding_cap_only_prunes_when_state_is_oversized() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let mut response_profile_bindings = BTreeMap::new();
+    for index in 0..(RESPONSE_PROFILE_BINDING_LIMIT + 3) {
+        response_profile_bindings.insert(
+            format!("resp-{index:06}-{}", "x".repeat(64)),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now + index as i64,
+            },
+        );
+    }
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/main"),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings,
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    assert!(
+        app_state_response_binding_housekeeping_needed(&state),
+        "test fixture should exceed the response-binding housekeeping threshold"
+    );
+
+    let compacted = compact_app_state(state, now);
+    assert_eq!(
+        compacted.response_profile_bindings.len(),
+        RESPONSE_PROFILE_BINDING_LIMIT
+    );
+    assert!(
+        !compacted
+            .response_profile_bindings
+            .contains_key(&format!("resp-{:06}-{}", 0, "x".repeat(64)))
+    );
+}
+
+#[test]
 fn runtime_sidecar_housekeeping_prunes_stale_entries() {
     let temp_dir = TestDir::new();
     let now = Local::now().timestamp();
