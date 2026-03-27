@@ -8167,7 +8167,10 @@ fn proxy_runtime_websocket_text_message(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let mut compact_followup_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+    let mut compact_followup_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
+        && turn_state_profile.is_none()
+    {
         runtime_compact_followup_bound_profile(
             shared,
             request_turn_state.as_deref(),
@@ -8184,7 +8187,8 @@ fn proxy_runtime_websocket_text_message(
             ),
         );
     }
-    let mut session_profile = if bound_profile.is_none()
+    let mut session_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
     {
@@ -10227,7 +10231,10 @@ fn proxy_runtime_responses_request(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let mut compact_followup_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+    let mut compact_followup_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
+        && turn_state_profile.is_none()
+    {
         runtime_compact_followup_bound_profile(
             shared,
             request_turn_state.as_deref(),
@@ -10244,7 +10251,8 @@ fn proxy_runtime_responses_request(
             ),
         );
     }
-    let mut session_profile = if bound_profile.is_none()
+    let mut session_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
     {
