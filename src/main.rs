@@ -903,7 +903,7 @@ fn runtime_continuation_store_from_app_state(state: &AppState) -> RuntimeContinu
         response_profile_bindings: state.response_profile_bindings.clone(),
         session_profile_bindings: state.session_profile_bindings.clone(),
         turn_state_bindings: BTreeMap::new(),
-        session_id_bindings: state.session_profile_bindings.clone(),
+        session_id_bindings: runtime_external_session_id_bindings(&state.session_profile_bindings),
     }
 }
 
@@ -2061,6 +2061,9 @@ struct RuntimeDoctorSummary {
     profiles: Vec<RuntimeDoctorProfileSummary>,
     diagnosis: String,
 }
+
+const RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX: &str = "__compact_session__:";
+const RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX: &str = "__compact_turn_state__:";
 
 #[derive(Debug, Clone, Default)]
 struct RuntimeDoctorProfileSummary {
@@ -3433,6 +3436,10 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "previous_response_negative_cache").to_string(),
         ),
         (
+            "Compact guard".to_string(),
+            runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked").to_string(),
+        ),
+        (
             "Selection picks".to_string(),
             runtime_doctor_marker_count(&summary, "selection_pick").to_string(),
         ),
@@ -3941,6 +3948,8 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
         } else if runtime_doctor_marker_count(&summary, "profile_bad_pairing") > 0 {
             "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked") > 0 {
+            "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
         } else if runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog") > 0 {
             "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
         } else if runtime_doctor_marker_count(&summary, "selection_pick") > 0
@@ -4037,6 +4046,7 @@ fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                 "event",
                 "stage",
                 "state",
+                "source",
             ] {
                 if let Some(value) = fields.get(facet).cloned() {
                     *summary
@@ -4103,6 +4113,10 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "profile_latency",
         "profile_bad_pairing",
         "previous_response_negative_cache",
+        "compact_committed_owner",
+        "compact_followup_owner",
+        "compact_fresh_fallback_blocked",
+        "compact_lineage_released",
         "selection_pick",
         "selection_skip_current",
         "selection_skip_affinity",
@@ -5469,7 +5483,7 @@ fn start_runtime_rotation_proxy(
         && (restored_continuations != RuntimeContinuationStore::default());
     let restored_session_id_bindings = merge_profile_bindings(
         &restored_continuations.session_profile_bindings,
-        &restored_continuations.session_id_bindings,
+        &runtime_external_session_id_bindings(&restored_continuations.session_id_bindings),
         &restored_state.profiles,
     );
     restored_state.response_profile_bindings =
@@ -6461,6 +6475,103 @@ fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
     now.saturating_sub(bound_at) >= RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS
 }
 
+fn runtime_compact_session_lineage_key(session_id: &str) -> String {
+    format!("{RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX}{session_id}")
+}
+
+fn runtime_compact_turn_state_lineage_key(turn_state: &str) -> String {
+    format!("{RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX}{turn_state}")
+}
+
+fn runtime_is_compact_session_lineage_key(key: &str) -> bool {
+    key.starts_with(RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX)
+}
+
+fn runtime_is_compact_turn_state_lineage_key(key: &str) -> bool {
+    key.starts_with(RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX)
+}
+
+fn runtime_external_session_id_bindings(
+    bindings: &BTreeMap<String, ResponseProfileBinding>,
+) -> BTreeMap<String, ResponseProfileBinding> {
+    bindings
+        .iter()
+        .filter(|(key, _)| !runtime_is_compact_session_lineage_key(key))
+        .map(|(key, binding)| (key.clone(), binding.clone()))
+        .collect()
+}
+
+fn runtime_touch_compact_lineage_binding(
+    shared: &RuntimeRotationProxyShared,
+    runtime: &mut RuntimeRotationState,
+    key: &str,
+    reason: &str,
+    session_binding: bool,
+) -> Option<String> {
+    let now = Local::now().timestamp();
+    let bindings = if session_binding {
+        &mut runtime.session_id_bindings
+    } else {
+        &mut runtime.turn_state_bindings
+    };
+    let profile_name = bindings
+        .get(key)
+        .map(|binding| binding.profile_name.clone())
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    let mut touched = false;
+    if let Some(profile_name) = profile_name.as_deref()
+        && let Some(binding) = bindings.get_mut(key)
+        && binding.profile_name == profile_name
+    {
+        if runtime_binding_touch_should_persist(binding.bound_at, now) {
+            touched = true;
+        }
+        if binding.bound_at < now {
+            binding.bound_at = now;
+        }
+    }
+    if touched {
+        schedule_runtime_binding_touch_save(shared, runtime, reason);
+    }
+    profile_name
+}
+
+fn runtime_compact_followup_bound_profile(
+    shared: &RuntimeRotationProxyShared,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<Option<(String, &'static str)>> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    if let Some(turn_state) = turn_state.map(str::trim).filter(|value| !value.is_empty()) {
+        let key = runtime_compact_turn_state_lineage_key(turn_state);
+        if let Some(profile_name) = runtime_touch_compact_lineage_binding(
+            shared,
+            &mut runtime,
+            &key,
+            &format!("compact_turn_state_touch:{turn_state}"),
+            false,
+        ) {
+            return Ok(Some((profile_name, "turn_state")));
+        }
+    }
+    if let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) {
+        let key = runtime_compact_session_lineage_key(session_id);
+        if let Some(profile_name) = runtime_touch_compact_lineage_binding(
+            shared,
+            &mut runtime,
+            &key,
+            &format!("compact_session_touch:{session_id}"),
+            true,
+        ) {
+            return Ok(Some((profile_name, "session_id")));
+        }
+    }
+    Ok(None)
+}
+
 fn runtime_previous_response_negative_cache_key(
     previous_response_id: &str,
     profile_name: &str,
@@ -6894,6 +7005,166 @@ fn remember_runtime_session_id(
     Ok(())
 }
 
+fn remember_runtime_compact_lineage(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    session_id: Option<&str>,
+    turn_state: Option<&str>,
+) -> Result<()> {
+    let session_id = session_id.map(str::trim).filter(|value| !value.is_empty());
+    let turn_state = turn_state.map(str::trim).filter(|value| !value.is_empty());
+    if session_id.is_none() && turn_state.is_none() {
+        return Ok(());
+    }
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let bound_at = Local::now().timestamp();
+    let mut changed = false;
+
+    if let Some(session_id) = session_id {
+        let key = runtime_compact_session_lineage_key(session_id);
+        let should_update = runtime.session_id_bindings.get(&key).is_none_or(|binding| {
+            binding.profile_name != profile_name || binding.bound_at < bound_at
+        });
+        if should_update {
+            runtime.session_id_bindings.insert(
+                key,
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+        }
+    }
+
+    if let Some(turn_state) = turn_state {
+        let key = runtime_compact_turn_state_lineage_key(turn_state);
+        let should_update = runtime.turn_state_bindings.get(&key).is_none_or(|binding| {
+            binding.profile_name != profile_name || binding.bound_at < bound_at
+        });
+        if should_update {
+            runtime.turn_state_bindings.insert(
+                key,
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+        }
+    }
+
+    if changed {
+        prune_profile_bindings(
+            &mut runtime.turn_state_bindings,
+            TURN_STATE_PROFILE_BINDING_LIMIT,
+        );
+        prune_profile_bindings(
+            &mut runtime.session_id_bindings,
+            SESSION_ID_PROFILE_BINDING_LIMIT,
+        );
+        let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            continuations_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            backoffs_snapshot,
+            paths_snapshot,
+            &format!("compact_lineage:{profile_name}"),
+        );
+    } else {
+        drop(runtime);
+    }
+    Ok(())
+}
+
+fn release_runtime_compact_lineage(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    session_id: Option<&str>,
+    turn_state: Option<&str>,
+    reason: &str,
+) -> Result<bool> {
+    let session_id = session_id.map(str::trim).filter(|value| !value.is_empty());
+    let turn_state = turn_state.map(str::trim).filter(|value| !value.is_empty());
+    if session_id.is_none() && turn_state.is_none() {
+        return Ok(false);
+    }
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let mut changed = false;
+
+    if let Some(session_id) = session_id {
+        let key = runtime_compact_session_lineage_key(session_id);
+        if runtime
+            .session_id_bindings
+            .get(&key)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+        {
+            runtime.session_id_bindings.remove(&key);
+            changed = true;
+        }
+    }
+
+    if let Some(turn_state) = turn_state {
+        let key = runtime_compact_turn_state_lineage_key(turn_state);
+        if runtime
+            .turn_state_bindings
+            .get(&key)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+        {
+            runtime.turn_state_bindings.remove(&key);
+            changed = true;
+        }
+    }
+
+    if changed {
+        let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            continuations_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            backoffs_snapshot,
+            paths_snapshot,
+            &format!("compact_lineage_release:{profile_name}"),
+        );
+        runtime_proxy_log(
+            shared,
+            format!(
+                "compact_lineage_released profile={profile_name} reason={reason} session={} turn_state={}",
+                session_id.unwrap_or("-"),
+                turn_state.unwrap_or("-"),
+            ),
+        );
+    } else {
+        drop(runtime);
+    }
+    Ok(changed)
+}
+
 fn remember_runtime_response_ids(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -7309,6 +7580,7 @@ fn runtime_profile_quota_summary_for_route(
 fn select_runtime_response_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
+    strict_affinity_profile: Option<&str>,
     pinned_profile: Option<&str>,
     turn_state_profile: Option<&str>,
     session_profile: Option<&str>,
@@ -7316,6 +7588,31 @@ fn select_runtime_response_candidate_for_route(
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
+    if let Some(profile_name) = strict_affinity_profile {
+        if excluded_profiles.contains(profile_name) {
+            return Ok(None);
+        }
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+            return Ok(Some(profile_name.to_string()));
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=compact_followup profile={} reason={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+                runtime_quota_pressure_band_reason(quota_summary.route_band),
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(None);
+    }
+
     if let Some(profile_name) = pinned_profile.filter(|name| !excluded_profiles.contains(*name)) {
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
@@ -7870,7 +8167,27 @@ fn proxy_runtime_websocket_text_message(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let mut session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+    let mut compact_followup_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+        runtime_compact_followup_bound_profile(
+            shared,
+            request_turn_state.as_deref(),
+            request_session_id.as_deref(),
+        )?
+    } else {
+        None
+    };
+    if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} websocket_session={session_id} compact_followup_owner profile={profile_name} source={source}"
+            ),
+        );
+    }
+    let mut session_profile = if bound_profile.is_none()
+        && turn_state_profile.is_none()
+        && compact_followup_profile.is_none()
+    {
         websocket_session.profile_name.clone().or(request_session_id
             .as_deref()
             .map(|session_id| runtime_session_bound_profile(shared, session_id))
@@ -7879,7 +8196,12 @@ fn proxy_runtime_websocket_text_message(
     } else {
         None
     };
-    let mut pinned_profile = bound_profile.clone().or(session_profile.clone());
+    let mut pinned_profile = bound_profile
+        .clone()
+        .or(compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, _)| profile_name.clone()))
+        .or(session_profile.clone());
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -7941,6 +8263,36 @@ fn proxy_runtime_websocket_text_message(
                 selection_started_at = Instant::now();
                 selection_attempts = 0;
                 continue;
+            }
+            if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted"
+                    ),
+                );
+                match last_failure {
+                    Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
+                        forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                    }
+                    _ if saw_inflight_saturation => {
+                        send_runtime_proxy_websocket_error(
+                            local_socket,
+                            503,
+                            "service_unavailable",
+                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                        )?;
+                    }
+                    _ => {
+                        send_runtime_proxy_websocket_error(
+                            local_socket,
+                            503,
+                            "service_unavailable",
+                            runtime_proxy_local_selection_failure_message(),
+                        )?;
+                    }
+                }
+                return Ok(());
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
@@ -8032,6 +8384,13 @@ fn proxy_runtime_websocket_text_message(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Websocket,
                             )?;
+                            let released_compact_lineage = release_runtime_compact_lineage(
+                                shared,
+                                &profile_name,
+                                request_session_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                "previous_response_not_found",
+                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -8057,6 +8416,13 @@ fn proxy_runtime_websocket_text_message(
                             }
                             if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                                 turn_state_profile = None;
+                            }
+                            if compact_followup_profile
+                                .as_ref()
+                                .is_some_and(|(owner, _)| owner == &profile_name)
+                                || released_compact_lineage
+                            {
+                                compact_followup_profile = None;
                             }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
@@ -8100,6 +8466,9 @@ fn proxy_runtime_websocket_text_message(
         let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             &excluded_profiles,
+            compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
             pinned_profile.as_deref(),
             turn_state_profile.as_deref(),
             session_profile.as_deref(),
@@ -8152,6 +8521,36 @@ fn proxy_runtime_websocket_text_message(
                 selection_started_at = Instant::now();
                 selection_attempts = 0;
                 continue;
+            }
+            if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted"
+                    ),
+                );
+                match last_failure {
+                    Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
+                        forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                    }
+                    _ if saw_inflight_saturation => {
+                        send_runtime_proxy_websocket_error(
+                            local_socket,
+                            503,
+                            "service_unavailable",
+                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                        )?;
+                    }
+                    _ => {
+                        send_runtime_proxy_websocket_error(
+                            local_socket,
+                            503,
+                            "service_unavailable",
+                            runtime_proxy_local_selection_failure_message(),
+                        )?;
+                    }
+                }
+                return Ok(());
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
@@ -8243,6 +8642,13 @@ fn proxy_runtime_websocket_text_message(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Websocket,
                             )?;
+                            let released_compact_lineage = release_runtime_compact_lineage(
+                                shared,
+                                &profile_name,
+                                request_session_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                "previous_response_not_found",
+                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -8268,6 +8674,13 @@ fn proxy_runtime_websocket_text_message(
                             }
                             if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                                 turn_state_profile = None;
+                            }
+                            if compact_followup_profile
+                                .as_ref()
+                                .is_some_and(|(owner, _)| owner == &profile_name)
+                                || released_compact_lineage
+                            {
+                                compact_followup_profile = None;
                             }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
@@ -8557,6 +8970,13 @@ fn proxy_runtime_websocket_text_message(
                     request_session_id.as_deref(),
                     RuntimeRouteKind::Websocket,
                 )?;
+                let released_compact_lineage = release_runtime_compact_lineage(
+                    shared,
+                    &profile_name,
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    "previous_response_not_found",
+                )?;
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -8581,6 +9001,13 @@ fn proxy_runtime_websocket_text_message(
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
                 }
+                if compact_followup_profile
+                    .as_ref()
+                    .is_some_and(|(owner, _)| owner == &profile_name)
+                    || released_compact_lineage
+                {
+                    compact_followup_profile = None;
+                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
@@ -8599,6 +9026,7 @@ fn attempt_runtime_websocket_request(
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
     let request_session_id = runtime_request_session_id(handshake_request);
+    let request_turn_state = runtime_request_turn_state(handshake_request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
     if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
@@ -8775,11 +9203,17 @@ fn attempt_runtime_websocket_request(
                     );
                     committed = true;
                 }
-                remember_runtime_response_ids(
-                    shared,
-                    profile_name,
-                    &extract_runtime_response_ids_from_payload(text.as_ref()),
-                )?;
+                let response_ids = extract_runtime_response_ids_from_payload(text.as_ref());
+                remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+                if !response_ids.is_empty() {
+                    let _ = release_runtime_compact_lineage(
+                        shared,
+                        profile_name,
+                        request_session_id.as_deref(),
+                        request_turn_state.as_deref(),
+                        "response_committed",
+                    );
+                }
                 local_socket
                     .send(WsMessage::Text(text.clone()))
                     .with_context(|| {
@@ -9347,6 +9781,7 @@ fn proxy_runtime_standard_request(
             None,
             None,
             None,
+            None,
             false,
             None,
             RuntimeRouteKind::Standard,
@@ -9431,6 +9866,7 @@ fn proxy_runtime_standard_request(
         let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             &excluded_profiles,
+            None,
             None,
             None,
             session_profile.as_deref(),
@@ -9702,21 +10138,40 @@ fn attempt_runtime_standard_request(
                 err
             })?;
     if !is_runtime_compact_path(&request.path_and_query) || response.status().is_success() {
+        let response_turn_state = is_runtime_compact_path(&request.path_and_query)
+            .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
+            .flatten();
+        let response =
+            forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Compact,
+                    "compact_forward_response",
+                    &err,
+                );
+                err
+            })?;
         remember_runtime_session_id(shared, profile_name, request_session_id.as_deref())?;
+        if is_runtime_compact_path(&request.path_and_query) {
+            remember_runtime_compact_lineage(
+                shared,
+                profile_name,
+                request_session_id.as_deref(),
+                response_turn_state.as_deref(),
+            )?;
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http compact_committed_owner profile={profile_name} session={} turn_state={}",
+                    request_session_id.as_deref().unwrap_or("-"),
+                    response_turn_state.as_deref().unwrap_or("-"),
+                ),
+            );
+        }
         return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
-            response: forward_runtime_proxy_response(shared, response, Vec::new()).map_err(
-                |err| {
-                    note_runtime_profile_transport_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Compact,
-                        "compact_forward_response",
-                        &err,
-                    );
-                    err
-                },
-            )?,
+            response,
         });
     }
 
@@ -9772,7 +10227,27 @@ fn proxy_runtime_responses_request(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let mut session_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+    let mut compact_followup_profile = if bound_profile.is_none() && turn_state_profile.is_none() {
+        runtime_compact_followup_bound_profile(
+            shared,
+            request_turn_state.as_deref(),
+            request_session_id.as_deref(),
+        )?
+    } else {
+        None
+    };
+    if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_followup_owner profile={profile_name} source={source}"
+            ),
+        );
+    }
+    let mut session_profile = if bound_profile.is_none()
+        && turn_state_profile.is_none()
+        && compact_followup_profile.is_none()
+    {
         request_session_id
             .as_deref()
             .map(|session_id| runtime_session_bound_profile(shared, session_id))
@@ -9781,7 +10256,9 @@ fn proxy_runtime_responses_request(
     } else {
         None
     };
-    let mut pinned_profile = bound_profile.clone();
+    let mut pinned_profile = bound_profile.clone().or(compact_followup_profile
+        .as_ref()
+        .map(|(profile_name, _)| profile_name.clone()));
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -9840,6 +10317,29 @@ fn proxy_runtime_responses_request(
                 selection_started_at = Instant::now();
                 selection_attempts = 0;
                 continue;
+            }
+            if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted"
+                    ),
+                );
+                return Ok(match last_failure {
+                    Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
+                    _ if saw_inflight_saturation => {
+                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                            503,
+                            "service_unavailable",
+                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                        ))
+                    }
+                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        runtime_proxy_local_selection_failure_message(),
+                    )),
+                });
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
@@ -9942,6 +10442,13 @@ fn proxy_runtime_responses_request(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Responses,
                             )?;
+                            let released_compact_lineage = release_runtime_compact_lineage(
+                                shared,
+                                &profile_name,
+                                request_session_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                "previous_response_not_found",
+                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -9967,6 +10474,13 @@ fn proxy_runtime_responses_request(
                             }
                             if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                                 turn_state_profile = None;
+                            }
+                            if compact_followup_profile
+                                .as_ref()
+                                .is_some_and(|(owner, _)| owner == &profile_name)
+                                || released_compact_lineage
+                            {
+                                compact_followup_profile = None;
                             }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
@@ -9999,6 +10513,9 @@ fn proxy_runtime_responses_request(
         let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             &excluded_profiles,
+            compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
             pinned_profile.as_deref(),
             turn_state_profile.as_deref(),
             session_profile.as_deref(),
@@ -10049,6 +10566,29 @@ fn proxy_runtime_responses_request(
                 selection_started_at = Instant::now();
                 selection_attempts = 0;
                 continue;
+            }
+            if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted"
+                    ),
+                );
+                return Ok(match last_failure {
+                    Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
+                    _ if saw_inflight_saturation => {
+                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                            503,
+                            "service_unavailable",
+                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                        ))
+                    }
+                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        runtime_proxy_local_selection_failure_message(),
+                    )),
+                });
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
@@ -10151,6 +10691,13 @@ fn proxy_runtime_responses_request(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Responses,
                             )?;
+                            let released_compact_lineage = release_runtime_compact_lineage(
+                                shared,
+                                &profile_name,
+                                request_session_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                "previous_response_not_found",
+                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -10176,6 +10723,13 @@ fn proxy_runtime_responses_request(
                             }
                             if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                                 turn_state_profile = None;
+                            }
+                            if compact_followup_profile
+                                .as_ref()
+                                .is_some_and(|(owner, _)| owner == &profile_name)
+                                || released_compact_lineage
+                            {
+                                compact_followup_profile = None;
                             }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
@@ -10383,6 +10937,13 @@ fn proxy_runtime_responses_request(
                     request_session_id.as_deref(),
                     RuntimeRouteKind::Responses,
                 )?;
+                let released_compact_lineage = release_runtime_compact_lineage(
+                    shared,
+                    &profile_name,
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    "previous_response_not_found",
+                )?;
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -10406,6 +10967,13 @@ fn proxy_runtime_responses_request(
                 }
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
+                }
+                if compact_followup_profile
+                    .as_ref()
+                    .is_some_and(|(owner, _)| owner == &profile_name)
+                    || released_compact_lineage
+                {
+                    compact_followup_profile = None;
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
@@ -10501,6 +11069,7 @@ fn attempt_runtime_responses_request(
     prepare_runtime_proxy_responses_success(
         request_id,
         request_session_id.as_deref(),
+        runtime_request_turn_state(request).as_deref(),
         response,
         shared,
         profile_name,
@@ -10948,12 +11517,12 @@ fn update_runtime_profile_probe_cache_with_usage(
             .state
             .session_profile_bindings
             .retain(|_, binding| binding.profile_name != profile_name);
-        runtime
-            .turn_state_bindings
-            .retain(|_, binding| binding.profile_name != profile_name);
-        runtime
-            .session_id_bindings
-            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime.turn_state_bindings.retain(|key, binding| {
+            binding.profile_name != profile_name || runtime_is_compact_turn_state_lineage_key(key)
+        });
+        runtime.session_id_bindings.retain(|key, binding| {
+            binding.profile_name != profile_name || runtime_is_compact_session_lineage_key(key)
+        });
         runtime_proxy_log(
             shared,
             format!(
@@ -12672,6 +13241,7 @@ fn forward_runtime_proxy_response(
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
     request_session_id: Option<&str>,
+    request_turn_state: Option<&str>,
     response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -12697,6 +13267,13 @@ fn prepare_runtime_proxy_responses_success(
         let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
         if !response_ids.is_empty() {
             remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+            let _ = release_runtime_compact_lineage(
+                shared,
+                profile_name,
+                request_session_id,
+                request_turn_state,
+                "response_committed",
+            );
         }
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
@@ -12787,6 +13364,15 @@ fn prepare_runtime_proxy_responses_success(
         }
     };
     remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+    if !response_ids.is_empty() {
+        let _ = release_runtime_compact_lineage(
+            shared,
+            profile_name,
+            request_session_id,
+            request_turn_state,
+            "response_committed",
+        );
+    }
 
     Ok(RuntimeResponsesAttempt::Success {
         profile_name: profile_name.to_string(),

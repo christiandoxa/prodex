@@ -744,7 +744,7 @@ fn handle_runtime_proxy_backend_request(
                         "output": []
                     })
                     .to_string(),
-                    None,
+                    Some("compact-turn-second".to_string()),
                     None,
                     None,
                 ),
@@ -755,7 +755,7 @@ fn handle_runtime_proxy_backend_request(
                         "output": []
                     })
                     .to_string(),
-                    None,
+                    Some("compact-turn-third".to_string()),
                     None,
                     None,
                 ),
@@ -766,7 +766,13 @@ fn handle_runtime_proxy_backend_request(
                         "output": []
                     })
                     .to_string(),
-                    None,
+                    Some(match account_id.as_str() {
+                        "main-account" => "compact-turn-main",
+                        "second-account" => "compact-turn-second",
+                        "third-account" => "compact-turn-third",
+                        _ => "compact-turn-unknown",
+                    }
+                    .to_string()),
                     None,
                     None,
                 ),
@@ -4739,6 +4745,12 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.line_count = 3;
     summary.marker_counts.insert("selection_pick", 2);
     summary.marker_counts.insert("selection_skip_current", 1);
+    summary
+        .marker_counts
+        .insert("compact_followup_owner", 1);
+    summary
+        .marker_counts
+        .insert("compact_fresh_fallback_blocked", 1);
     summary.first_timestamp = Some("2026-03-25 00:00:00.000 +07:00".to_string());
     summary.last_timestamp = Some("2026-03-25 00:00:05.000 +07:00".to_string());
     summary.facet_counts.insert(
@@ -4765,6 +4777,8 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["last_timestamp"], "2026-03-25 00:00:05.000 +07:00");
     assert_eq!(value["marker_counts"]["selection_pick"], 2);
     assert_eq!(value["marker_counts"]["selection_skip_current"], 1);
+    assert_eq!(value["marker_counts"]["compact_followup_owner"], 1);
+    assert_eq!(value["marker_counts"]["compact_fresh_fallback_blocked"], 1);
     assert_eq!(value["facet_counts"]["route"]["responses"], 2);
     assert_eq!(
         value["facet_counts"]["quota_source"]["persisted_snapshot"],
@@ -5161,6 +5175,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             &BTreeSet::new(),
             None,
             None,
+            None,
             Some("main"),
             false,
             None,
@@ -5361,6 +5376,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         select_runtime_response_candidate_for_route(
             &shared,
             &BTreeSet::new(),
+            None,
             None,
             None,
             None,
@@ -8887,6 +8903,364 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
             .get("sess-main")
             .map(|binding| binding.profile_name.as_str()),
         Some("second")
+    );
+}
+
+#[test]
+fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+    let compact = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .body("{\"input\":[],\"instructions\":\"compact\"}")
+        .send()
+        .expect("compact request should succeed");
+    let compact_turn_state = compact
+        .headers()
+        .get("x-codex-turn-state")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .expect("compact response should expose turn state");
+    assert!(compact.status().is_success());
+    assert_eq!(
+        compact.text().expect("compact response body should be readable"),
+        "{\"output\":[]}"
+    );
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .session_id_bindings
+            .get(&runtime_compact_session_lineage_key("sess-compact"))
+            .is_some_and(|binding| binding.profile_name == "second")
+            && continuations
+                .turn_state_bindings
+                .get(&runtime_compact_turn_state_lineage_key("compact-turn-second"))
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        continuations
+            .session_id_bindings
+            .get(&runtime_compact_session_lineage_key("sess-compact"))
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert_eq!(
+        continuations
+            .turn_state_bindings
+            .get(&runtime_compact_turn_state_lineage_key(&compact_turn_state))
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "main-account".to_string(),
+            "second-account".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+    let compact = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .body("{\"input\":[],\"instructions\":\"compact\"}")
+        .send()
+        .expect("compact request should succeed");
+    let compact_turn_state = compact
+        .headers()
+        .get("x-codex-turn-state")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .expect("compact response should expose turn state");
+    assert!(compact.status().is_success());
+    assert_eq!(
+        compact.text().expect("compact response body should be readable"),
+        "{\"output\":[]}"
+    );
+
+    let followup = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .header("x-codex-turn-state", compact_turn_state.as_str())
+        .body("{\"input\":[]}")
+        .send()
+        .expect("follow-up request should succeed");
+    let followup_body = followup
+        .text()
+        .expect("follow-up response body should be readable");
+    assert!(followup_body.contains("\"resp-second\""));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ]
+    );
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        !continuations
+            .session_id_bindings
+            .contains_key(&runtime_compact_session_lineage_key("sess-compact"))
+            && !continuations
+                .turn_state_bindings
+                .contains_key(&runtime_compact_turn_state_lineage_key("compact-turn-second"))
+    });
+    assert!(
+        !continuations
+            .session_id_bindings
+            .contains_key(&runtime_compact_session_lineage_key("sess-compact"))
+    );
+    assert!(
+        !continuations
+            .turn_state_bindings
+            .contains_key(&runtime_compact_turn_state_lineage_key("compact-turn-second"))
+    );
+}
+
+#[test]
+fn runtime_proxy_restores_compact_followup_owner_across_restart() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let initial_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    initial_state
+        .save(&paths)
+        .expect("failed to save initial state");
+
+    let client = Client::builder().build().expect("client");
+    let compact_turn_state = {
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
+                .expect("runtime proxy should start");
+        let compact = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses/compact",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .header("session_id", "sess-compact")
+            .body("{\"input\":[],\"instructions\":\"compact\"}")
+            .send()
+            .expect("compact request should succeed");
+        let compact_turn_state = compact
+            .headers()
+            .get("x-codex-turn-state")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .expect("compact response should expose turn state");
+        assert!(compact.status().is_success());
+        assert_eq!(
+            compact.text().expect("compact response body should be readable"),
+            "{\"output\":[]}"
+        );
+        compact_turn_state
+    };
+
+    let _ = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .session_id_bindings
+            .get(&runtime_compact_session_lineage_key("sess-compact"))
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+
+    let mut resumed_state = AppState::load(&paths).expect("state should reload");
+    resumed_state.active_profile = Some("third".to_string());
+    resumed_state
+        .save(&paths)
+        .expect("failed to save resumed state");
+
+    let resumed_proxy =
+        start_runtime_rotation_proxy(&paths, &resumed_state, "third", backend.base_url(), false)
+            .expect("resumed runtime proxy should start");
+    let followup = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            resumed_proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .header("x-codex-turn-state", compact_turn_state.as_str())
+        .body("{\"input\":[]}")
+        .send()
+        .expect("follow-up request should succeed");
+    let followup_body = followup
+        .text()
+        .expect("follow-up response body should be readable");
+    assert!(followup_body.contains("\"resp-second\""));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ]
     );
 }
 
