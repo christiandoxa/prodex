@@ -1675,7 +1675,13 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
         ]),
         last_run_selected_at: BTreeMap::new(),
         response_profile_bindings: BTreeMap::new(),
-        session_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
     };
     let reports = vec![
         RunProfileProbeReport {
@@ -1973,7 +1979,13 @@ fn rotates_profiles_after_current_profile() {
         ]),
         last_run_selected_at: BTreeMap::new(),
         response_profile_bindings: BTreeMap::new(),
-        session_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
     };
 
     assert_eq!(
@@ -4287,6 +4299,89 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
         0,
         "unchanged commit should not enqueue a state save"
     );
+}
+
+#[test]
+fn commit_runtime_proxy_profile_selection_does_not_switch_global_profile_for_compact() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    let switched = commit_runtime_proxy_profile_selection(&shared, "second", RuntimeRouteKind::Compact)
+        .expect("compact profile commit should succeed");
+
+    assert!(!switched, "compact commit should not switch the global profile");
+    let runtime = shared.runtime.lock().expect("runtime should lock");
+    assert_eq!(runtime.current_profile, "main");
+    assert_eq!(runtime.state.active_profile.as_deref(), Some("main"));
 }
 
 #[test]
@@ -8659,9 +8754,87 @@ fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
     );
 
     let persisted = wait_for_state(&paths, |state| {
-        state.active_profile.as_deref() == Some("second")
+        state.active_profile.as_deref() == Some("main")
     });
-    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    assert_eq!(persisted.active_profile.as_deref(), Some("main"));
+}
+
+#[test]
+fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-main")
+        .body("{\"input\":[],\"instructions\":\"compact\"}")
+        .send()
+        .expect("runtime proxy compact request should complete");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status.as_u16(), 500, "bound compact should preserve upstream failure");
+    assert!(body.contains("backend under high demand"));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "main-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("main")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("main"));
 }
 
 #[test]
