@@ -190,6 +190,7 @@ struct RuntimeProxyBackend {
 #[derive(Clone, Copy)]
 enum RuntimeProxyBackendMode {
     HttpOnly,
+    HttpOnlyBufferedJson,
     HttpOnlyInitialBodyStall,
     HttpOnlySlowStream,
     HttpOnlyStallAfterSeveralChunks,
@@ -212,6 +213,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_initial_body_stall() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+    }
+
+    fn start_http_buffered_json() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyBufferedJson)
     }
 
     fn start_http_slow_stream() -> Self {
@@ -517,6 +522,25 @@ fn handle_runtime_proxy_backend_request(
                         None,
                     )
                 }
+                "second-account"
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson)
+                        && previous_response_id.as_deref() == Some("resp-second") =>
+                {
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        serde_json::json!({
+                            "id": "resp-second-next",
+                            "object": "response",
+                            "status": "completed",
+                            "output": []
+                        })
+                        .to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                }
                 "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
                     (
                         "HTTP/1.1 200 OK",
@@ -562,28 +586,47 @@ fn handle_runtime_proxy_backend_request(
                         .then_some(Duration::from_millis(750)),
                     None,
                 ),
-                "second-account" => (
-                    "HTTP/1.1 200 OK",
-                    "text/event-stream",
-                    concat!(
-                        "event: response.created\r\n",
-                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second\"}}\r\n",
-                        "\r\n",
-                        "event: response.completed\r\n",
-                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n",
-                        "\r\n"
+                "second-account" => {
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson) {
+                        (
+                            "HTTP/1.1 200 OK",
+                            "application/json",
+                            serde_json::json!({
+                                "id": "resp-second",
+                                "object": "response",
+                                "status": "completed",
+                                "output": []
+                            })
+                            .to_string(),
+                            None,
+                            None,
+                            None,
                         )
-                        .to_string(),
-                        None,
-                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
-                            .then_some(Duration::from_millis(750)),
-                        matches!(
-                            mode,
-                            RuntimeProxyBackendMode::HttpOnlySlowStream
-                                | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
+                    } else {
+                        (
+                            "HTTP/1.1 200 OK",
+                            "text/event-stream",
+                            concat!(
+                                "event: response.created\r\n",
+                                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second\"}}\r\n",
+                                "\r\n",
+                                "event: response.completed\r\n",
+                                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n",
+                                "\r\n"
+                                )
+                                .to_string(),
+                                None,
+                                matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                                    .then_some(Duration::from_millis(750)),
+                                matches!(
+                                    mode,
+                                    RuntimeProxyBackendMode::HttpOnlySlowStream
+                                        | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
+                                )
+                                    .then_some(Duration::from_millis(100)),
                         )
-                            .then_some(Duration::from_millis(100)),
-                ),
+                    }
+                }
                 "third-account" if previous_response_id.is_some() => (
                     "HTTP/1.1 400 Bad Request",
                     "application/json",
@@ -10060,6 +10103,98 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
         .post(format!(
             "http://{}/backend-api/codex/responses",
             resumed_proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .send()
+        .expect("second runtime proxy request should succeed");
+    let second_body = second
+        .text()
+        .expect("second response body should be readable");
+    assert!(second_body.contains("\"resp-second-next\""));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn runtime_proxy_persists_previous_response_affinity_for_buffered_json_responses() {
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let first = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("first runtime proxy request should succeed");
+    let first_body = first
+        .text()
+        .expect("first response body should be readable");
+    assert!(first_body.contains("\"resp-second\""));
+
+    let second = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
         .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")

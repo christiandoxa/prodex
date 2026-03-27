@@ -11896,6 +11896,10 @@ fn prepare_runtime_proxy_responses_success(
     remember_runtime_previous_response_owner(shared, profile_name, request_previous_response_id)?;
     if !is_sse {
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
+        let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
+        if !response_ids.is_empty() {
+            remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+        }
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
             response: RuntimeResponsesReply::Buffered(build_runtime_proxy_response_from_parts(
@@ -12854,6 +12858,13 @@ fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn extract_runtime_response_ids_from_body_bytes(body: &[u8]) -> Vec<String> {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .map(|value| extract_runtime_response_ids_from_value(&value))
+        .unwrap_or_default()
+}
+
 fn extract_runtime_turn_state_from_payload(payload: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()
@@ -12861,12 +12872,27 @@ fn extract_runtime_turn_state_from_payload(payload: &str) -> Option<String> {
 }
 
 fn extract_runtime_response_ids_from_value(value: &serde_json::Value) -> Vec<String> {
-    value
+    let mut response_ids = Vec::new();
+
+    if let Some(id) = value
         .get("response")
         .and_then(|response| response.get("id"))
         .and_then(serde_json::Value::as_str)
-        .map(|id| vec![id.to_string()])
-        .unwrap_or_default()
+    {
+        response_ids.push(id.to_string());
+    }
+
+    if value
+        .get("object")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|object| object == "response")
+        && let Some(id) = value.get("id").and_then(serde_json::Value::as_str)
+        && !response_ids.iter().any(|existing| existing == id)
+    {
+        response_ids.push(id.to_string());
+    }
+
+    response_ids
 }
 
 fn extract_runtime_turn_state_from_value(value: &serde_json::Value) -> Option<String> {
