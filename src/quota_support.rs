@@ -1,0 +1,1051 @@
+use super::*;
+
+#[derive(Debug)]
+pub(crate) struct BlockedLimit {
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AuthSummary {
+    pub(crate) label: String,
+    pub(crate) quota_compatible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UsageAuth {
+    pub(crate) access_token: String,
+    pub(crate) account_id: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct QuotaReport {
+    pub(crate) name: String,
+    pub(crate) active: bool,
+    pub(crate) auth: AuthSummary,
+    pub(crate) result: std::result::Result<UsageResponse, String>,
+}
+
+#[derive(Debug)]
+struct QuotaFetchJob {
+    name: String,
+    active: bool,
+    codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+struct ProfileSummaryJob {
+    name: String,
+    active: bool,
+    managed: bool,
+    email: Option<String>,
+    codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+pub(crate) struct ProfileSummaryReport {
+    pub(crate) name: String,
+    pub(crate) active: bool,
+    pub(crate) managed: bool,
+    pub(crate) auth: AuthSummary,
+    pub(crate) email: Option<String>,
+    pub(crate) codex_home: PathBuf,
+}
+
+#[derive(Debug)]
+pub(crate) struct DoctorProfileReport {
+    pub(crate) summary: ProfileSummaryReport,
+    pub(crate) quota: Option<std::result::Result<UsageResponse, String>>,
+}
+
+pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
+    let jobs = state
+        .profiles
+        .iter()
+        .map(|(name, profile)| QuotaFetchJob {
+            name: name.clone(),
+            active: state.active_profile.as_deref() == Some(name.as_str()),
+            codex_home: profile.codex_home.clone(),
+        })
+        .collect();
+    let base_url = base_url.map(str::to_owned);
+
+    map_parallel(jobs, |job| QuotaReport {
+        name: job.name,
+        active: job.active,
+        auth: read_auth_summary(&job.codex_home),
+        result: fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string()),
+    })
+}
+
+pub(crate) fn collect_profile_summaries(state: &AppState) -> Vec<ProfileSummaryReport> {
+    let jobs = state
+        .profiles
+        .iter()
+        .map(|(name, profile)| ProfileSummaryJob {
+            name: name.clone(),
+            active: state.active_profile.as_deref() == Some(name.as_str()),
+            managed: profile.managed,
+            email: profile.email.clone(),
+            codex_home: profile.codex_home.clone(),
+        })
+        .collect();
+
+    map_parallel(jobs, |job| ProfileSummaryReport {
+        name: job.name,
+        active: job.active,
+        managed: job.managed,
+        auth: read_auth_summary(&job.codex_home),
+        email: job.email,
+        codex_home: job.codex_home,
+    })
+}
+
+pub(crate) fn collect_doctor_profile_reports(
+    state: &AppState,
+    include_quota: bool,
+) -> Vec<DoctorProfileReport> {
+    map_parallel(collect_profile_summaries(state), |summary| {
+        DoctorProfileReport {
+            quota: include_quota
+                .then(|| fetch_usage(&summary.codex_home, None).map_err(|err| err.to_string())),
+            summary,
+        }
+    })
+}
+
+pub(crate) fn fetch_usage(codex_home: &Path, base_url: Option<&str>) -> Result<UsageResponse> {
+    let usage: UsageResponse = serde_json::from_value(fetch_usage_json(codex_home, base_url)?)
+        .with_context(|| {
+            format!(
+                "invalid JSON returned by quota backend for {}",
+                codex_home.display()
+            )
+        })?;
+    Ok(usage)
+}
+
+pub(crate) fn fetch_usage_json(
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> Result<serde_json::Value> {
+    let auth = read_usage_auth(codex_home)?;
+    let usage_url = usage_url(&quota_base_url(base_url));
+    let client = Client::builder()
+        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
+        .build()
+        .context("failed to build quota HTTP client")?;
+
+    let mut request = client
+        .get(&usage_url)
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .header("User-Agent", "codex-cli");
+
+    if let Some(account_id) = auth.account_id.as_deref() {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+
+    let response = request
+        .send()
+        .with_context(|| format!("failed to request quota endpoint {}", usage_url))?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .context("failed to read quota response body")?;
+
+    if !status.is_success() {
+        let body_text = format_response_body(&body);
+        if body_text.is_empty() {
+            bail!("request failed (HTTP {}) to {}", status.as_u16(), usage_url);
+        }
+        bail!(
+            "request failed (HTTP {}) to {}: {}",
+            status.as_u16(),
+            usage_url,
+            body_text
+        );
+    }
+
+    let usage = serde_json::from_slice(&body).with_context(|| {
+        format!(
+            "invalid JSON returned by quota backend for {}",
+            codex_home.display()
+        )
+    })?;
+
+    Ok(usage)
+}
+
+pub(crate) fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
+    print!("{}", render_quota_reports(reports, detail));
+}
+
+pub(crate) fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
+    render_quota_reports_with_layout(reports, detail, None, current_cli_width())
+}
+
+#[derive(Clone, Copy)]
+struct QuotaReportColumnWidths {
+    profile: usize,
+    current: usize,
+    auth: usize,
+    account: usize,
+    plan: usize,
+    remaining: usize,
+}
+
+fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
+    const MIN_WIDTHS: [usize; 6] = [12, 3, 4, 14, 4, 13];
+    const EXTRA_WEIGHTS: [usize; 6] = [12, 1, 3, 13, 4, 18];
+    const DISTRIBUTION_ORDER: [usize; 6] = [5, 3, 0, 4, 2, 1];
+
+    let gap_width = text_width(CLI_TABLE_GAP) * 5;
+    let min_total = MIN_WIDTHS.iter().sum::<usize>();
+    let available = total_width.saturating_sub(gap_width).max(min_total);
+
+    let mut widths = MIN_WIDTHS;
+    let mut remaining_extra = available.saturating_sub(min_total);
+    let total_weight = EXTRA_WEIGHTS.iter().sum::<usize>().max(1);
+
+    for (width, weight) in widths.iter_mut().zip(EXTRA_WEIGHTS) {
+        let extra = remaining_extra * weight / total_weight;
+        *width += extra;
+    }
+
+    let assigned = widths.iter().sum::<usize>().saturating_sub(min_total);
+    remaining_extra = remaining_extra.saturating_sub(assigned);
+    for index in DISTRIBUTION_ORDER.into_iter().cycle().take(remaining_extra) {
+        widths[index] += 1;
+    }
+
+    QuotaReportColumnWidths {
+        profile: widths[0],
+        current: widths[1],
+        auth: widths[2],
+        account: widths[3],
+        plan: widths[4],
+        remaining: widths[5],
+    }
+}
+
+pub(crate) fn render_quota_reports_with_line_limit(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+) -> String {
+    render_quota_reports_with_layout(reports, detail, max_lines, current_cli_width())
+}
+
+pub(crate) fn render_quota_reports_with_layout(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+    total_width: usize,
+) -> String {
+    let column_widths = quota_report_column_widths(total_width);
+
+    let mut sections = Vec::new();
+
+    for report in sort_quota_reports_for_display(reports) {
+        let active = if report.active { "*" } else { "" }.to_string();
+        let auth = report.auth.label.clone();
+
+        let (email, plan, main, status, resets) = match &report.result {
+            Ok(usage) => {
+                let blocked = collect_blocked_limits(usage, false);
+                let status = if blocked.is_empty() {
+                    "Ready".to_string()
+                } else {
+                    format!("Blocked: {}", format_blocked_limits(&blocked))
+                };
+                (
+                    display_optional(usage.email.as_deref()).to_string(),
+                    display_optional(usage.plan_type.as_deref()).to_string(),
+                    format_main_windows_compact(usage),
+                    status,
+                    Some(format!("resets: {}", format_main_reset_summary(usage))),
+                )
+            }
+            Err(err) => (
+                "-".to_string(),
+                "-".to_string(),
+                "-".to_string(),
+                format!("Error: {}", first_line_of_error(err)),
+                Some("resets: unavailable".to_string()),
+            ),
+        };
+
+        let mut section = Vec::new();
+        section.push(format!(
+            "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
+            fit_cell(&report.name, column_widths.profile),
+            CLI_TABLE_GAP,
+            fit_cell(&active, column_widths.current),
+            CLI_TABLE_GAP,
+            fit_cell(&auth, column_widths.auth),
+            CLI_TABLE_GAP,
+            fit_cell(&email, column_widths.account),
+            CLI_TABLE_GAP,
+            fit_cell(&plan, column_widths.plan),
+            CLI_TABLE_GAP,
+            fit_cell(&main, column_widths.remaining),
+            name_w = column_widths.profile,
+            act_w = column_widths.current,
+            auth_w = column_widths.auth,
+            email_w = column_widths.account,
+            plan_w = column_widths.plan,
+            main_w = column_widths.remaining,
+        ));
+        section.extend(
+            wrap_text(
+                &format!("status: {status}"),
+                total_width.saturating_sub(2).max(1),
+            )
+            .into_iter()
+            .map(|line| format!("  {line}")),
+        );
+        if detail {
+            if let Some(resets) = resets.as_deref() {
+                section.extend(
+                    wrap_text(resets, total_width.saturating_sub(2).max(1))
+                        .into_iter()
+                        .map(|line| format!("  {line}")),
+                );
+            }
+        }
+        section.push(String::new());
+        sections.push(section);
+    }
+
+    let header = format!(
+        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}",
+        "PROFILE",
+        "CUR",
+        "AUTH",
+        "ACCOUNT",
+        "PLAN",
+        "REMAINING",
+        name_w = column_widths.profile,
+        act_w = column_widths.current,
+        auth_w = column_widths.auth,
+        email_w = column_widths.account,
+        plan_w = column_widths.plan,
+        main_w = column_widths.remaining,
+    );
+    let mut output = vec![
+        section_header_with_width("Quota Overview", total_width),
+        header.clone(),
+        "-".repeat(text_width(&header)),
+    ];
+    if let Some(max_lines) = max_lines {
+        let mut remaining = max_lines.saturating_sub(output.len());
+        let total_profiles = sections.len();
+        let mut shown_profiles = 0_usize;
+
+        for (index, section) in sections.into_iter().enumerate() {
+            let more_profiles_remain = index + 1 < total_profiles;
+            let reserve_for_notice = usize::from(more_profiles_remain);
+            if section.len() + reserve_for_notice > remaining {
+                break;
+            }
+            remaining = remaining.saturating_sub(section.len());
+            output.extend(section);
+            shown_profiles += 1;
+        }
+
+        let hidden_profiles = total_profiles.saturating_sub(shown_profiles);
+        if hidden_profiles > 0 {
+            let notice = format!(
+                "  showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
+            );
+            if remaining == 0 && !output.is_empty() {
+                output.pop();
+            }
+            output.push(notice);
+        }
+    } else {
+        for section in sections {
+            output.extend(section);
+        }
+    }
+    output.join("\n")
+}
+
+pub(crate) fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
+    let mut sorted = reports.iter().collect::<Vec<_>>();
+    sorted.sort_by(|left, right| {
+        quota_report_sort_key(left)
+            .cmp(&quota_report_sort_key(right))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    sorted
+}
+
+fn quota_report_sort_key(report: &QuotaReport) -> (usize, i64) {
+    (
+        quota_report_status_rank(report),
+        quota_report_earliest_main_reset_epoch(report).unwrap_or(i64::MAX),
+    )
+}
+
+fn quota_report_status_rank(report: &QuotaReport) -> usize {
+    match &report.result {
+        Ok(usage) if collect_blocked_limits(usage, false).is_empty() => 0,
+        Ok(_) => 1,
+        Err(_) => 2,
+    }
+}
+
+fn quota_report_earliest_main_reset_epoch(report: &QuotaReport) -> Option<i64> {
+    earliest_required_main_reset_epoch(report.result.as_ref().ok()?)
+}
+
+fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
+    ["5h", "weekly"]
+        .into_iter()
+        .filter_map(|label| {
+            find_main_window(usage.rate_limit.as_ref()?, label).and_then(|window| window.reset_at)
+        })
+        .min()
+}
+
+pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
+    usage
+        .rate_limit
+        .as_ref()
+        .map(format_window_pair)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
+    usage
+        .rate_limit
+        .as_ref()
+        .map(format_window_pair_compact)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+pub(crate) fn format_main_reset_summary(usage: &UsageResponse) -> String {
+    usage
+        .rate_limit
+        .as_ref()
+        .map(format_main_reset_pair)
+        .unwrap_or_else(|| "5h unavailable | weekly unavailable".to_string())
+}
+
+fn format_main_reset_pair(rate_limit: &WindowPair) -> String {
+    [
+        format_main_reset_window(rate_limit, "5h"),
+        format_main_reset_window(rate_limit, "weekly"),
+    ]
+    .join(" | ")
+}
+
+fn format_main_reset_window(rate_limit: &WindowPair, label: &str) -> String {
+    match find_main_window(rate_limit, label) {
+        Some(window) => {
+            let reset = window
+                .reset_at
+                .map(|epoch| format_precise_reset_time(Some(epoch)))
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("{label} {reset}")
+        }
+        None => format!("{label} unavailable"),
+    }
+}
+
+fn format_window_pair(rate_limit: &WindowPair) -> String {
+    let mut parts = Vec::new();
+    if let Some(primary) = rate_limit.primary_window.as_ref() {
+        parts.push(format_window_status(primary));
+    }
+    if let Some(secondary) = rate_limit.secondary_window.as_ref() {
+        parts.push(format_window_status(secondary));
+    }
+
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join(" | ")
+    }
+}
+
+fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
+    let mut parts = Vec::new();
+    if let Some(primary) = rate_limit.primary_window.as_ref() {
+        parts.push(format_window_status_compact(primary));
+    }
+    if let Some(secondary) = rate_limit.secondary_window.as_ref() {
+        parts.push(format_window_status_compact(secondary));
+    }
+
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join(" | ")
+    }
+}
+
+fn format_named_window_status(label: &str, window: &UsageWindow) -> String {
+    format!("{label}: {}", format_window_details(window))
+}
+
+pub(crate) fn format_window_status(window: &UsageWindow) -> String {
+    format_named_window_status(&window_label(window.limit_window_seconds), window)
+}
+
+pub(crate) fn format_window_status_compact(window: &UsageWindow) -> String {
+    let label = window_label(window.limit_window_seconds);
+    match window.used_percent {
+        Some(used) => {
+            let remaining = remaining_percent(Some(used));
+            format!("{label} {remaining}% left")
+        }
+        None => format!("{label} ?"),
+    }
+}
+
+fn format_window_details(window: &UsageWindow) -> String {
+    let reset = format_reset_time(window.reset_at);
+    match window.used_percent {
+        Some(used) => {
+            let remaining = remaining_percent(window.used_percent);
+            format!("{remaining}% left ({used}% used), resets {reset}")
+        }
+        None => format!("usage unknown, resets {reset}"),
+    }
+}
+
+pub(crate) fn collect_blocked_limits(
+    usage: &UsageResponse,
+    include_code_review: bool,
+) -> Vec<BlockedLimit> {
+    let mut blocked = Vec::new();
+
+    if let Some(main) = usage.rate_limit.as_ref() {
+        push_required_main_window(&mut blocked, main, "5h");
+        push_required_main_window(&mut blocked, main, "weekly");
+    } else {
+        blocked.push(BlockedLimit {
+            message: "5h quota unavailable".to_string(),
+        });
+        blocked.push(BlockedLimit {
+            message: "weekly quota unavailable".to_string(),
+        });
+    }
+
+    for additional in &usage.additional_rate_limits {
+        let label = additional
+            .limit_name
+            .as_deref()
+            .or(additional.metered_feature.as_deref());
+        push_blocked_window(
+            &mut blocked,
+            label,
+            additional.rate_limit.primary_window.as_ref(),
+        );
+        push_blocked_window(
+            &mut blocked,
+            label,
+            additional.rate_limit.secondary_window.as_ref(),
+        );
+    }
+
+    if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {
+        push_blocked_window(
+            &mut blocked,
+            Some("code-review"),
+            code_review.primary_window.as_ref(),
+        );
+        push_blocked_window(
+            &mut blocked,
+            Some("code-review"),
+            code_review.secondary_window.as_ref(),
+        );
+    }
+
+    blocked
+}
+
+fn push_required_main_window(
+    blocked: &mut Vec<BlockedLimit>,
+    main: &WindowPair,
+    required_label: &str,
+) {
+    let Some(window) = find_main_window(main, required_label) else {
+        blocked.push(BlockedLimit {
+            message: format!("{required_label} quota unavailable"),
+        });
+        return;
+    };
+
+    match window.used_percent {
+        Some(used) if used < 100 => {}
+        Some(_) => blocked.push(BlockedLimit {
+            message: format!(
+                "{required_label} exhausted until {}",
+                format_reset_time(window.reset_at)
+            ),
+        }),
+        None => blocked.push(BlockedLimit {
+            message: format!("{required_label} quota unknown"),
+        }),
+    }
+}
+
+pub(crate) fn find_main_window<'a>(
+    main: &'a WindowPair,
+    expected_label: &str,
+) -> Option<&'a UsageWindow> {
+    [main.primary_window.as_ref(), main.secondary_window.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|window| window_label(window.limit_window_seconds) == expected_label)
+}
+
+fn push_blocked_window(
+    blocked: &mut Vec<BlockedLimit>,
+    name: Option<&str>,
+    window: Option<&UsageWindow>,
+) {
+    let Some(window) = window else {
+        return;
+    };
+    let Some(used) = window.used_percent else {
+        return;
+    };
+    if used < 100 {
+        return;
+    }
+
+    let label = match name {
+        Some(base) if !base.is_empty() => {
+            format!("{base} {}", window_label(window.limit_window_seconds))
+        }
+        _ => window_label(window.limit_window_seconds),
+    };
+
+    blocked.push(BlockedLimit {
+        message: format!(
+            "{label} exhausted until {}",
+            format_reset_time(window.reset_at)
+        ),
+    });
+}
+
+pub(crate) fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
+    blocked
+        .iter()
+        .map(|limit| limit.message.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub(crate) fn remaining_percent(used_percent: Option<i64>) -> i64 {
+    let Some(used) = used_percent else {
+        return 0;
+    };
+    (100 - used).clamp(0, 100)
+}
+
+pub(crate) fn window_label(seconds: Option<i64>) -> String {
+    let Some(seconds) = seconds else {
+        return "usage".to_string();
+    };
+
+    if (17_700..=18_300).contains(&seconds) {
+        return "5h".to_string();
+    }
+    if (601_200..=608_400).contains(&seconds) {
+        return "weekly".to_string();
+    }
+    if (2_505_600..=2_678_400).contains(&seconds) {
+        return "monthly".to_string();
+    }
+
+    format!("{seconds}s")
+}
+
+pub(crate) fn format_reset_time(epoch: Option<i64>) -> String {
+    let Some(epoch) = epoch else {
+        return "-".to_string();
+    };
+
+    Local
+        .timestamp_opt(epoch, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M %Z").to_string())
+        .unwrap_or_else(|| epoch.to_string())
+}
+
+pub(crate) fn format_precise_reset_time(epoch: Option<i64>) -> String {
+    let Some(epoch) = epoch else {
+        return "-".to_string();
+    };
+
+    Local
+        .timestamp_opt(epoch, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S %Z").to_string())
+        .unwrap_or_else(|| epoch.to_string())
+}
+
+fn display_optional(value: Option<&str>) -> &str {
+    value.unwrap_or("-")
+}
+
+pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
+    let blocked = collect_blocked_limits(usage, false);
+    let status = if blocked.is_empty() {
+        "Ready".to_string()
+    } else {
+        format!("Blocked ({})", format_blocked_limits(&blocked))
+    };
+    let mut fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        (
+            "Account".to_string(),
+            display_optional(usage.email.as_deref()).to_string(),
+        ),
+        (
+            "Plan".to_string(),
+            display_optional(usage.plan_type.as_deref()).to_string(),
+        ),
+        ("Status".to_string(), status),
+        ("Main".to_string(), format_main_windows(usage)),
+    ];
+
+    if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
+        fields.push(("Code review".to_string(), format_window_pair(code_review)));
+    }
+
+    for (name, value) in format_additional_limits(usage) {
+        fields.push((name, value));
+    }
+
+    render_panel(&format!("Quota {profile_name}"), &fields)
+}
+
+fn format_additional_limits(usage: &UsageResponse) -> Vec<(String, String)> {
+    let mut lines = Vec::new();
+
+    for additional in &usage.additional_rate_limits {
+        let name = additional
+            .limit_name
+            .as_deref()
+            .or(additional.metered_feature.as_deref())
+            .unwrap_or("Additional");
+
+        if let Some(primary) = additional.rate_limit.primary_window.as_ref() {
+            lines.push((
+                additional_window_label(name, primary),
+                format_window_details(primary),
+            ));
+        }
+        if let Some(secondary) = additional.rate_limit.secondary_window.as_ref() {
+            lines.push((
+                additional_window_label(name, secondary),
+                format_window_details(secondary),
+            ));
+        }
+    }
+
+    lines
+}
+
+fn additional_window_label(base: &str, window: &UsageWindow) -> String {
+    format!("{base} {}", window_label(window.limit_window_seconds))
+}
+
+pub(crate) fn first_line_of_error(input: &str) -> String {
+    input
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("-")
+        .trim()
+        .to_string()
+}
+
+pub(crate) fn quota_watch_enabled(args: &QuotaArgs) -> bool {
+    !args.raw && !args.once
+}
+
+pub(crate) fn render_profile_quota_watch_output(
+    profile_name: &str,
+    updated: &str,
+    usage_result: std::result::Result<UsageResponse, String>,
+) -> String {
+    let header = render_panel(
+        "Quota Watch",
+        &[
+            ("Profile".to_string(), profile_name.to_string()),
+            ("Updated".to_string(), updated.to_string()),
+        ],
+    );
+    let body = match usage_result {
+        Ok(usage) => render_profile_quota(profile_name, &usage),
+        Err(err) => render_panel(
+            "Quota Watch",
+            &[("Error".to_string(), first_line_of_error(&err))],
+        ),
+    };
+    format!("{header}\n\n{body}\n")
+}
+
+pub(crate) fn render_all_quota_watch_output(
+    updated: &str,
+    state_result: std::result::Result<AppState, String>,
+    base_url: Option<&str>,
+    detail: bool,
+) -> String {
+    match state_result {
+        Ok(state) if !state.profiles.is_empty() => {
+            let header = render_panel(
+                "Quota Watch",
+                &[
+                    ("Profiles".to_string(), state.profiles.len().to_string()),
+                    ("Updated".to_string(), updated.to_string()),
+                ],
+            );
+            let reports = collect_quota_reports(&state, base_url);
+            let available_report_lines = quota_watch_available_report_lines(&header);
+            format!(
+                "{header}\n\n{}\n",
+                render_quota_reports_with_line_limit(&reports, detail, available_report_lines)
+            )
+        }
+        Ok(_) => {
+            render_panel(
+                "Quota Watch",
+                &[
+                    ("Updated".to_string(), updated.to_string()),
+                    ("Error".to_string(), "No profiles configured".to_string()),
+                ],
+            ) + "\n"
+        }
+        Err(err) => {
+            render_panel(
+                "Quota Watch",
+                &[
+                    ("Updated".to_string(), updated.to_string()),
+                    ("Error".to_string(), first_line_of_error(&err)),
+                ],
+            ) + "\n"
+        }
+    }
+}
+
+fn redraw_quota_watch(output: &str) -> Result<()> {
+    print!("\x1b[H\x1b[2J{output}");
+    io::stdout()
+        .flush()
+        .context("failed to flush quota watch output")?;
+    Ok(())
+}
+
+fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
+    let terminal_height = terminal_height_lines()?;
+    let reserved = header.lines().count().saturating_add(1);
+    Some(terminal_height.saturating_sub(reserved))
+}
+
+pub(crate) fn watch_quota(
+    profile_name: &str,
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> Result<()> {
+    loop {
+        let updated = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+        let output = render_profile_quota_watch_output(
+            profile_name,
+            &updated,
+            fetch_usage(codex_home, base_url).map_err(|err| err.to_string()),
+        );
+        redraw_quota_watch(&output)?;
+        thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+    }
+}
+
+pub(crate) fn watch_all_quotas(
+    paths: &AppPaths,
+    base_url: Option<&str>,
+    detail: bool,
+) -> Result<()> {
+    loop {
+        let updated = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+        let output = render_all_quota_watch_output(
+            &updated,
+            AppState::load(paths).map_err(|err| err.to_string()),
+            base_url,
+            detail,
+        );
+        redraw_quota_watch(&output)?;
+        thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+    }
+}
+
+pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
+    let auth_path = codex_home.join("auth.json");
+    if !auth_path.is_file() {
+        return AuthSummary {
+            label: "no-auth".to_string(),
+            quota_compatible: false,
+        };
+    }
+
+    let content = match fs::read_to_string(&auth_path) {
+        Ok(content) => content,
+        Err(_) => {
+            return AuthSummary {
+                label: "unreadable-auth".to_string(),
+                quota_compatible: false,
+            };
+        }
+    };
+
+    let stored_auth: StoredAuth = match serde_json::from_str(&content) {
+        Ok(auth) => auth,
+        Err(_) => {
+            return AuthSummary {
+                label: "invalid-auth".to_string(),
+                quota_compatible: false,
+            };
+        }
+    };
+
+    let has_chatgpt_token = stored_auth
+        .tokens
+        .as_ref()
+        .and_then(|tokens| tokens.access_token.as_deref())
+        .is_some_and(|token| !token.trim().is_empty());
+    let has_api_key = stored_auth
+        .openai_api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty());
+
+    if has_chatgpt_token {
+        return AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        };
+    }
+
+    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+        return AuthSummary {
+            label: "api-key".to_string(),
+            quota_compatible: false,
+        };
+    }
+
+    AuthSummary {
+        label: stored_auth
+            .auth_mode
+            .unwrap_or_else(|| "auth-present".to_string()),
+        quota_compatible: false,
+    }
+}
+
+pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
+    let auth_path = codex_home.join("auth.json");
+    if !auth_path.is_file() {
+        bail!(
+            "auth file not found at {}. Run `codex login` first.",
+            auth_path.display()
+        );
+    }
+
+    let content = fs::read_to_string(&auth_path)
+        .with_context(|| format!("failed to read {}", auth_path.display()))?;
+    let stored_auth: StoredAuth = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+
+    let has_api_key = stored_auth
+        .openai_api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty());
+    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+        bail!("quota endpoint requires a ChatGPT access token. Run `codex login` first.");
+    }
+
+    let tokens = stored_auth
+        .tokens
+        .as_ref()
+        .context("auth tokens are missing from auth.json")?;
+    let access_token = tokens
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .context("access token not found in auth.json")?
+        .to_string();
+    let account_id = tokens
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|account_id| !account_id.is_empty())
+        .map(ToOwned::to_owned);
+
+    Ok(UsageAuth {
+        access_token,
+        account_id,
+    })
+}
+
+pub(crate) fn quota_base_url(explicit: Option<&str>) -> String {
+    explicit
+        .map(ToOwned::to_owned)
+        .or_else(|| env::var("CODEX_CHATGPT_BASE_URL").ok())
+        .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+pub(crate) fn usage_url(base_url: &str) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    if base_url.contains("/backend-api") {
+        format!("{base_url}/wham/usage")
+    } else {
+        format!("{base_url}/api/codex/usage")
+    }
+}
+
+pub(crate) fn format_response_body(body: &[u8]) -> String {
+    if body.is_empty() {
+        return String::new();
+    }
+
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        return serde_json::to_string_pretty(&value)
+            .unwrap_or_else(|_| String::from_utf8_lossy(body).trim().to_string());
+    }
+
+    String::from_utf8_lossy(body).trim().to_string()
+}
+
+pub(crate) fn format_binary_resolution(binary: &OsString) -> String {
+    let configured = binary.to_string_lossy();
+    match resolve_binary_path(binary) {
+        Some(path) => format!("{configured} ({})", path.display()),
+        None => format!("{configured} (not found)"),
+    }
+}
+
+pub(crate) fn resolve_binary_path(binary: &OsString) -> Option<PathBuf> {
+    let candidate = PathBuf::from(binary);
+    if candidate.components().count() > 1 {
+        if candidate.is_file() {
+            return Some(fs::canonicalize(&candidate).unwrap_or(candidate));
+        }
+        return None;
+    }
+
+    let path_var = env::var_os("PATH")?;
+    for directory in env::split_paths(&path_var) {
+        let full_path = directory.join(&candidate);
+        if full_path.is_file() {
+            return Some(full_path);
+        }
+    }
+
+    None
+}
