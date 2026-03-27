@@ -8824,17 +8824,32 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert_eq!(status.as_u16(), 500, "bound compact should preserve upstream failure");
-    assert!(body.contains("backend under high demand"));
+    assert!(status.is_success(), "bound compact should rotate pre-commit after owner overload: {status}");
+    assert_eq!(body, "{\"output\":[]}");
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string(), "main-account".to_string()]
+        vec![
+            "main-account".to_string(),
+            "main-account".to_string(),
+            "second-account".to_string()
+        ]
     );
 
     let persisted = wait_for_state(&paths, |state| {
         state.active_profile.as_deref() == Some("main")
+            && state
+                .session_profile_bindings
+                .get("sess-main")
+                .is_some_and(|binding| binding.profile_name == "second")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("main"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-main")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
 }
 
 #[test]

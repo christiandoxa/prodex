@@ -8929,7 +8929,6 @@ fn proxy_runtime_standard_request(
     let compact_owner_profile = session_profile
         .clone()
         .unwrap_or_else(|| current_profile.clone());
-    let preserve_owner_compact = session_profile.is_some();
     let mut excluded_profiles = BTreeSet::new();
     let mut conservative_overload_retried_profiles = BTreeSet::new();
     let mut last_failure = None;
@@ -8989,67 +8988,62 @@ fn proxy_runtime_standard_request(
         }
         selection_attempts = selection_attempts.saturating_add(1);
 
-        let candidate_name = if preserve_owner_compact {
-            compact_owner_profile.clone()
-        } else {
-            let Some(candidate_name) = select_runtime_response_candidate_for_route(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+            shared,
+            &excluded_profiles,
+            None,
+            None,
+            session_profile.as_deref(),
+            false,
+            None,
+            RuntimeRouteKind::Compact,
+        )?
+        else {
+            runtime_proxy_log(
                 shared,
-                &excluded_profiles,
-                None,
-                None,
-                None,
-                false,
-                None,
-                RuntimeRouteKind::Compact,
-            )?
-            else {
-                runtime_proxy_log(
+                format!(
+                    "request={request_id} transport=http compact_candidate_exhausted last_failure={}",
+                    if last_failure.is_some() {
+                        "http"
+                    } else {
+                        "none"
+                    }
+                ),
+            );
+            return match last_failure {
+                Some(response) => Ok(response),
+                None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+                    503,
+                    "service_unavailable",
+                    "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                )),
+                None => match attempt_runtime_standard_request(
+                    request_id,
+                    request,
                     shared,
-                    format!(
-                        "request={request_id} transport=http compact_candidate_exhausted last_failure={}",
-                        if last_failure.is_some() {
-                            "http"
-                        } else {
-                            "none"
-                        }
-                    ),
-                );
-                return match last_failure {
-                    Some(response) => Ok(response),
-                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )),
-                    None => match attempt_runtime_standard_request(
-                        request_id,
-                        request,
-                        shared,
-                        &compact_owner_profile,
-                    )? {
-                        RuntimeStandardAttempt::Success {
-                            profile_name,
-                            response,
-                        } => {
-                            commit_runtime_proxy_profile_selection_with_notice(
-                                shared,
-                                &profile_name,
-                                RuntimeRouteKind::Compact,
-                            )?;
-                            Ok(response)
-                        }
-                        RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
-                        RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
-                            Ok(build_runtime_proxy_json_error_response(
-                                503,
-                                "service_unavailable",
-                                runtime_proxy_local_selection_failure_message(),
-                            ))
-                        }
-                    },
-                };
+                    &compact_owner_profile,
+                )? {
+                    RuntimeStandardAttempt::Success {
+                        profile_name,
+                        response,
+                    } => {
+                        commit_runtime_proxy_profile_selection_with_notice(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Compact,
+                        )?;
+                        Ok(response)
+                    }
+                    RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+                    RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
+                        Ok(build_runtime_proxy_json_error_response(
+                            503,
+                            "service_unavailable",
+                            runtime_proxy_local_selection_failure_message(),
+                        ))
+                    }
+                },
             };
-            candidate_name
         };
 
         if excluded_profiles.contains(&candidate_name) {
@@ -9075,15 +9069,6 @@ fn proxy_runtime_standard_request(
                     "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}",
                 ),
             );
-            if preserve_owner_compact {
-                return Ok(last_failure.unwrap_or_else(|| {
-                    build_runtime_proxy_json_error_response(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )
-                }));
-            }
             excluded_profiles.insert(candidate_name);
             saw_inflight_saturation = true;
             continue;
@@ -9114,7 +9099,8 @@ fn proxy_runtime_standard_request(
             } => {
                 let should_retry_same_profile = overload
                     && !conservative_overload_retried_profiles.contains(&profile_name)
-                    && (preserve_owner_compact || current_profile == profile_name);
+                    && (session_profile.as_deref() == Some(profile_name.as_str())
+                        || current_profile == profile_name);
                 if should_retry_same_profile {
                     conservative_overload_retried_profiles.insert(profile_name.clone());
                     runtime_proxy_log(
@@ -9149,15 +9135,6 @@ fn proxy_runtime_standard_request(
                         "compact_overload",
                     );
                 }
-                if preserve_owner_compact {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http compact_owner_preserved profile={profile_name} reason=preserve_native_session_continuity"
-                        ),
-                    );
-                    return Ok(response);
-                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(response);
             }
@@ -9168,15 +9145,6 @@ fn proxy_runtime_standard_request(
                         "request={request_id} transport=http local_selection_blocked profile={profile_name} route=compact reason=quota_exhausted_before_send"
                     ),
                 );
-                if preserve_owner_compact {
-                    return Ok(last_failure.unwrap_or_else(|| {
-                        build_runtime_proxy_json_error_response(
-                            503,
-                            "service_unavailable",
-                            runtime_proxy_local_selection_failure_message(),
-                        )
-                    }));
-                }
                 excluded_profiles.insert(profile_name);
             }
         }
