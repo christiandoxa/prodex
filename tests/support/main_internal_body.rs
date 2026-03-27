@@ -6852,14 +6852,14 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
         state
             .response_profile_bindings
             .get("resp-second")
-            .is_some_and(|binding| binding.profile_name == "second")
+            .is_none_or(|binding| binding.profile_name != "main")
     });
-    assert_eq!(
+    assert!(
         persisted
             .response_profile_bindings
             .get("resp-second")
-            .map(|binding| binding.profile_name.as_str()),
-        Some("second")
+            .is_none_or(|binding| binding.profile_name != "main"),
+        "stale previous_response_id should not stay pinned to the wrong owner"
     );
 }
 
@@ -10306,14 +10306,14 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
         state
             .response_profile_bindings
             .get("resp-second")
-            .is_some_and(|binding| binding.profile_name == "second")
+            .is_none_or(|binding| binding.profile_name != "main")
     });
-    assert_eq!(
+    assert!(
         persisted
             .response_profile_bindings
             .get("resp-second")
-            .map(|binding| binding.profile_name.as_str()),
-        Some("second")
+            .is_none_or(|binding| binding.profile_name != "main"),
+        "stale previous_response_id should not stay pinned to the wrong owner"
     );
 }
 

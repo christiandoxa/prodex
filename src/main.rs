@@ -6637,20 +6637,6 @@ fn remember_runtime_response_ids(
     Ok(())
 }
 
-fn remember_runtime_previous_response_owner(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    previous_response_id: Option<&str>,
-) -> Result<()> {
-    let Some(previous_response_id) = previous_response_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
-    remember_runtime_response_ids(shared, profile_name, &[previous_response_id.to_string()])
-}
-
 fn release_runtime_quota_blocked_affinity(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -8067,7 +8053,6 @@ fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
-    let request_previous_response_id = runtime_request_previous_response_id_from_text(request_text);
     let request_session_id = runtime_request_session_id(handshake_request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
@@ -8209,11 +8194,6 @@ fn attempt_runtime_websocket_request(
                         shared,
                         profile_name,
                         request_session_id.as_deref(),
-                    )?;
-                    remember_runtime_previous_response_owner(
-                        shared,
-                        profile_name,
-                        request_previous_response_id.as_deref(),
                     )?;
                     remember_runtime_turn_state(
                         shared,
@@ -9731,7 +9711,6 @@ fn attempt_runtime_responses_request(
     }
     prepare_runtime_proxy_responses_success(
         request_id,
-        runtime_request_previous_response_id(request).as_deref(),
         request_session_id.as_deref(),
         response,
         shared,
@@ -11871,7 +11850,6 @@ fn forward_runtime_proxy_response(
 
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
-    request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
@@ -11893,7 +11871,6 @@ fn prepare_runtime_proxy_responses_success(
             turn_state
         ),
     );
-    remember_runtime_previous_response_owner(shared, profile_name, request_previous_response_id)?;
     if !is_sse {
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
         let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
@@ -11988,17 +11965,7 @@ fn prepare_runtime_proxy_responses_success(
             });
         }
     };
-    let mut all_response_ids = response_ids;
-    if let Some(previous_response_id) = request_previous_response_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        && !all_response_ids
-            .iter()
-            .any(|value| value == previous_response_id)
-    {
-        all_response_ids.push(previous_response_id.to_string());
-    }
-    remember_runtime_response_ids(shared, profile_name, &all_response_ids)?;
+    remember_runtime_response_ids(shared, profile_name, &response_ids)?;
 
     Ok(RuntimeResponsesAttempt::Success {
         profile_name: profile_name.to_string(),
@@ -12010,7 +11977,7 @@ fn prepare_runtime_proxy_responses_success(
                 shared.clone(),
                 profile_name.to_string(),
                 &prelude,
-                &all_response_ids,
+                &response_ids,
             )),
             request_id,
             profile_name: profile_name.to_string(),
