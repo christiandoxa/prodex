@@ -51,11 +51,6 @@ const SESSION_ID_PROFILE_BINDING_LIMIT: usize = 4_096;
 const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 = if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
-const APP_STATE_RESPONSE_BINDING_PRUNE_BYTES: usize = if cfg!(test) {
-    16 * 1024
-} else {
-    100 * 1024 * 1024
-};
 const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
 const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
@@ -642,19 +637,8 @@ fn prune_profile_bindings_for_housekeeping(
 fn prune_profile_bindings_for_housekeeping_without_retention(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     profiles: &BTreeMap<String, ProfileEntry>,
-    max_entries: usize,
-    enforce_cap: bool,
 ) {
     bindings.retain(|_, binding| profiles.contains_key(&binding.profile_name));
-    if enforce_cap {
-        prune_profile_bindings(bindings, max_entries);
-    }
-}
-
-fn app_state_response_binding_housekeeping_needed(state: &AppState) -> bool {
-    serde_json::to_vec(state)
-        .map(|json| json.len() >= APP_STATE_RESPONSE_BINDING_PRUNE_BYTES)
-        .unwrap_or(false)
 }
 
 fn compact_app_state(mut state: AppState, now: i64) -> AppState {
@@ -662,12 +646,9 @@ fn compact_app_state(mut state: AppState, now: i64) -> AppState {
         .active_profile
         .filter(|profile_name| state.profiles.contains_key(profile_name));
     prune_last_run_selection(&mut state.last_run_selected_at, &state.profiles, now);
-    let prune_response_binding_cap = app_state_response_binding_housekeeping_needed(&state);
     prune_profile_bindings_for_housekeeping_without_retention(
         &mut state.response_profile_bindings,
         &state.profiles,
-        RESPONSE_PROFILE_BINDING_LIMIT,
-        prune_response_binding_cap,
     );
     prune_profile_bindings_for_housekeeping(
         &mut state.session_profile_bindings,

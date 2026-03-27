@@ -5553,7 +5553,7 @@ fn app_state_load_compacts_stale_entries_in_memory() {
 }
 
 #[test]
-fn app_state_response_binding_cap_only_prunes_when_state_is_oversized() {
+fn app_state_response_bindings_are_not_pruned_just_for_size() {
     let temp_dir = TestDir::new();
     let now = Local::now().timestamp();
     let mut response_profile_bindings = BTreeMap::new();
@@ -5581,18 +5581,13 @@ fn app_state_response_binding_cap_only_prunes_when_state_is_oversized() {
         session_profile_bindings: BTreeMap::new(),
     };
 
-    assert!(
-        app_state_response_binding_housekeeping_needed(&state),
-        "test fixture should exceed the response-binding housekeeping threshold"
-    );
-
     let compacted = compact_app_state(state, now);
     assert_eq!(
         compacted.response_profile_bindings.len(),
-        RESPONSE_PROFILE_BINDING_LIMIT
+        RESPONSE_PROFILE_BINDING_LIMIT + 3
     );
     assert!(
-        !compacted
+        compacted
             .response_profile_bindings
             .contains_key(&format!("resp-{:06}-{}", 0, "x".repeat(64)))
     );
