@@ -6073,44 +6073,6 @@ fn runtime_request_previous_response_id_from_value(value: &serde_json::Value) ->
         .map(str::to_string)
 }
 
-fn runtime_request_contains_function_call_output(request: &RuntimeProxyRequest) -> bool {
-    runtime_request_contains_function_call_output_from_bytes(&request.body)
-}
-
-fn runtime_request_contains_function_call_output_from_bytes(body: &[u8]) -> bool {
-    if body.is_empty() {
-        return false;
-    }
-    serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .is_some_and(|value| runtime_request_contains_function_call_output_from_value(&value))
-}
-
-fn runtime_request_contains_function_call_output_from_text(request_text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(request_text)
-        .ok()
-        .is_some_and(|value| runtime_request_contains_function_call_output_from_value(&value))
-}
-
-fn runtime_request_contains_function_call_output_from_value(value: &serde_json::Value) -> bool {
-    value
-        .get("input")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                let Some(object) = item.as_object() else {
-                    return false;
-                };
-                object
-                    .get("type")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|value| value == "function_call_output")
-                    || (object.contains_key("call_id")
-                        && (object.contains_key("output") || object.contains_key("status")))
-            })
-        })
-}
-
 fn runtime_request_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
@@ -7523,8 +7485,6 @@ fn proxy_runtime_websocket_text_message(
 ) -> Result<()> {
     let mut request_text = request_text.to_string();
     let mut previous_response_id = runtime_request_previous_response_id_from_text(&request_text);
-    let request_contains_function_call_output =
-        runtime_request_contains_function_call_output_from_text(&request_text);
     let request_turn_state = runtime_request_turn_state(handshake_request);
     let request_session_id = runtime_request_session_id(handshake_request);
     let mut bound_profile = previous_response_id
@@ -7578,7 +7538,6 @@ fn proxy_runtime_websocket_text_message(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
-                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -7709,7 +7668,6 @@ fn proxy_runtime_websocket_text_message(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
-                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -9125,8 +9083,6 @@ fn proxy_runtime_responses_request(
 ) -> Result<RuntimeResponsesReply> {
     let mut request = request.clone();
     let mut previous_response_id = runtime_request_previous_response_id(&request);
-    let request_contains_function_call_output =
-        runtime_request_contains_function_call_output(&request);
     let request_turn_state = runtime_request_turn_state(&request);
     let request_session_id = runtime_request_session_id(&request);
     let mut bound_profile = previous_response_id
@@ -9180,7 +9136,6 @@ fn proxy_runtime_responses_request(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
-                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()
@@ -9310,7 +9265,6 @@ fn proxy_runtime_responses_request(
             );
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
-                && !request_contains_function_call_output
                 && !previous_response_fresh_fallback_used
                 && pinned_profile.is_none()
                 && bound_profile.is_none()

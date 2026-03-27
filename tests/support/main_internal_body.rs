@@ -1504,7 +1504,7 @@ fn runtime_fault_injection_consumes_budget() {
 }
 
 #[test]
-fn runtime_request_detects_function_call_output_payloads() {
+fn runtime_request_strips_previous_response_id_from_function_call_output_payloads() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
@@ -1512,7 +1512,6 @@ fn runtime_request_detects_function_call_output_payloads() {
         body: br#"{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
     };
 
-    assert!(runtime_request_contains_function_call_output(&request));
     assert!(
         runtime_request_without_previous_response_id(&request).is_some(),
         "helper should still be able to strip previous_response_id when explicitly asked"
@@ -7963,7 +7962,7 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
 }
 
 #[test]
-fn runtime_proxy_does_not_fresh_fallback_function_call_output_requests() {
+fn runtime_proxy_fresh_fallbacks_function_call_output_requests_when_previous_response_missing() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();
     let paths = AppPaths {
@@ -8010,14 +8009,88 @@ fn runtime_proxy_does_not_fresh_fallback_function_call_output_requests() {
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert_eq!(status.as_u16(), 400, "unexpected status: {status}");
+    assert_eq!(status.as_u16(), 200, "unexpected status: {status}");
     assert!(
-        body.contains("previous_response_not_found"),
-        "expected upstream continuation error, got: {body}"
+        body.contains("\"response.created\""),
+        "function call output request should degrade to a fresh request: {body}"
     );
+}
+
+#[test]
+fn runtime_proxy_websocket_fresh_fallbacks_function_call_output_requests_when_previous_response_missing(
+) {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text(
+            r#"{"previous_response_id":"resp-missing","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
     assert!(
-        !body.contains("\"response.created\""),
-        "function call output request must not be retried as a fresh request"
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.created\"")),
+        "function call output websocket request should degrade to a fresh request: {payloads:?}"
     );
 }
 
