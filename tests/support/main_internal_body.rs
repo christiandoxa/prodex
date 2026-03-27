@@ -231,6 +231,7 @@ enum RuntimeProxyBackendMode {
     WebsocketReuseSilentHang,
     WebsocketCloseMidTurn,
     WebsocketPreviousResponseNeedsTurnState,
+    WebsocketStaleReuseNeedsTurnState,
 }
 
 impl RuntimeProxyBackend {
@@ -294,6 +295,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState)
     }
 
+    fn start_websocket_stale_reuse_needs_turn_state() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState)
+    }
+
     fn start_with_mode(mode: RuntimeProxyBackendMode) -> Self {
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("failed to bind runtime proxy backend");
@@ -328,6 +333,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketReuseSilentHang
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                                | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                         );
                         thread::spawn(move || {
                             if websocket_enabled
@@ -899,6 +905,7 @@ fn handle_runtime_proxy_backend_websocket(
         if matches!(
             mode,
             RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
         ) && req
             .headers()
             .get("ChatGPT-Account-Id")
@@ -935,6 +942,7 @@ fn handle_runtime_proxy_backend_websocket(
     let response_turn_state = (matches!(
         mode,
         RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+            | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
     ) && account_id == "second-account")
         .then(|| "turn-second".to_string());
     let mut request_count = 0usize;
@@ -983,6 +991,7 @@ fn handle_runtime_proxy_backend_websocket(
                 if matches!(
                     mode,
                     RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
+                        | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                 ) && previous_response_id.as_deref() == Some("resp-second")
                     && effective_turn_state.as_deref() != Some("turn-second") =>
             {
@@ -1006,6 +1015,16 @@ fn handle_runtime_proxy_backend_websocket(
                     .expect("previous_response_not_found should be sent");
             }
             "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
+                ) && request_count == 2
+                {
+                    thread::sleep(Duration::from_millis(
+                        runtime_proxy_websocket_precommit_progress_timeout_ms() + 100,
+                    ));
+                    break;
+                }
                 websocket
                     .send(WsMessage::Text(
                         serde_json::json!({
@@ -10622,6 +10641,143 @@ fn runtime_proxy_retries_bound_previous_response_on_same_profile_after_websocket
             .is_some_and(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
         "owner reconnect retry should preserve previous_response_id"
     );
+}
+
+#[test]
+fn runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport() {
+    let backend = RuntimeProxyBackend::start_websocket_stale_reuse_needs_turn_state();
+    let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let _stale_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS", "1");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for first request")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\""))
+    );
+
+    thread::sleep(Duration::from_millis(10));
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("bound continuation websocket request should be sent");
+
+    let mut saw_close = false;
+    for _ in 0..4 {
+        match socket.read() {
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => {
+                saw_close = true;
+                break;
+            }
+            Ok(WsMessage::Text(text)) => {
+                panic!("stale websocket reuse should not forward text payloads: {text}");
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+            Err(_) => {
+                saw_close = true;
+                break;
+            }
+        }
+    }
+    assert!(saw_close, "stale websocket reuse should close the local transport");
+    assert_eq!(
+        backend.websocket_requests().len(),
+        2,
+        "proxy should stop after the failed reuse request instead of reconnecting with previous_response_id"
+    );
+
+    let mut observed = false;
+    for _ in 0..80 {
+        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+            .into_iter()
+            .next_back()
+        else {
+            thread::sleep(Duration::from_millis(10));
+            continue;
+        };
+        let tail = read_runtime_log_tail(&log_path, 32 * 1024)
+            .expect("runtime log tail should be readable");
+        let text = String::from_utf8_lossy(&tail);
+        if text.contains("websocket_reuse_stale_previous_response_blocked") {
+            observed = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(observed, "runtime log should capture stale websocket reuse blocking");
 }
 
 #[test]

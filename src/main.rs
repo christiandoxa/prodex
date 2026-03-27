@@ -115,6 +115,8 @@ const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 
 const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 15_000 };
 const RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS: u64 =
     if cfg!(test) { 120 } else { 8_000 };
+const RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS: u64 =
+    if cfg!(test) { 60_000 } else { 60_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
@@ -2739,6 +2741,13 @@ fn runtime_proxy_websocket_precommit_progress_timeout_ms() -> u64 {
         "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
         RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS,
     )
+}
+
+fn runtime_proxy_websocket_previous_response_reuse_stale_ms() -> u64 {
+    env::var("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS)
 }
 
 fn runtime_proxy_admission_wait_budget_ms() -> u64 {
@@ -7983,6 +7992,7 @@ struct RuntimeWebsocketSessionState {
     profile_name: Option<String>,
     turn_state: Option<String>,
     inflight_guard: Option<RuntimeProfileInFlightGuard>,
+    last_terminal_at: Option<Instant>,
 }
 
 impl RuntimeWebsocketSessionState {
@@ -7996,6 +8006,10 @@ impl RuntimeWebsocketSessionState {
         self.upstream_socket.take()
     }
 
+    fn last_terminal_elapsed(&self) -> Option<Duration> {
+        self.last_terminal_at.map(|timestamp| timestamp.elapsed())
+    }
+
     fn store(
         &mut self,
         socket: RuntimeUpstreamWebSocket,
@@ -8006,6 +8020,7 @@ impl RuntimeWebsocketSessionState {
         self.upstream_socket = Some(socket);
         self.profile_name = Some(profile_name.to_string());
         self.turn_state = turn_state;
+        self.last_terminal_at = Some(Instant::now());
         if let Some(inflight_guard) = inflight_guard {
             self.inflight_guard = Some(inflight_guard);
         }
@@ -8849,6 +8864,7 @@ fn proxy_runtime_websocket_text_message(
                 profile_name,
                 event,
             } => {
+                let reuse_terminal_idle = websocket_session.last_terminal_elapsed();
                 let retry_same_profile_with_fresh_connect = !websocket_reuse_fresh_retry_profiles
                     .contains(&profile_name)
                     && (bound_profile.as_deref() == Some(profile_name.as_str())
@@ -8859,12 +8875,35 @@ fn proxy_runtime_websocket_text_message(
                     && !previous_response_fresh_fallback_used
                     && (bound_profile.as_deref() == Some(profile_name.as_str())
                         || pinned_profile.as_deref() == Some(profile_name.as_str()));
+                let stale_previous_response_reuse = reuse_failed_bound_previous_response
+                    && turn_state_override.is_none()
+                    && reuse_terminal_idle.is_some_and(|elapsed| {
+                        elapsed
+                            >= Duration::from_millis(
+                                runtime_proxy_websocket_previous_response_reuse_stale_ms(),
+                            )
+                    });
                 runtime_proxy_log(
                     shared,
                     format!(
                         "request={request_id} websocket_session={session_id} websocket_reuse_watchdog_timeout profile={profile_name} event={event}"
                     ),
                 );
+                if stale_previous_response_reuse {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} websocket_reuse_stale_previous_response_blocked profile={profile_name} event={event} elapsed_ms={} threshold_ms={}",
+                            reuse_terminal_idle
+                                .map(|elapsed| elapsed.as_millis())
+                                .unwrap_or(0),
+                            runtime_proxy_websocket_previous_response_reuse_stale_ms(),
+                        ),
+                    );
+                    return Err(anyhow::anyhow!(
+                        "runtime websocket upstream closed before response.completed after stale previous_response_id reuse watchdog: profile={profile_name} event={event}"
+                    ));
+                }
                 if retry_same_profile_with_fresh_connect {
                     websocket_reuse_fresh_retry_profiles.insert(profile_name.clone());
                     runtime_proxy_log(
