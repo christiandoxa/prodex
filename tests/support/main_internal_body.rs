@@ -10899,6 +10899,94 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
 }
 
 #[test]
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_stale_turn_state_http(
+) {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("x-codex-turn-state", "turn-stale")
+        .body("{\"previous_response_id\":\"resp-missing\",\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status.as_u16(), 200, "unexpected status: {status} body={body}");
+    assert!(
+        body.contains("\"resp-third\""),
+        "proxy should degrade to a fresh request after previous response discovery exhausts: {body}"
+    );
+
+    let headers = backend.responses_headers();
+    let final_headers = headers.last().expect("final request should be captured");
+    assert_eq!(
+        final_headers.get("chatgpt-account-id").map(String::as_str),
+        Some("third-account"),
+        "fresh fallback should complete on a healthy candidate: {headers:?}"
+    );
+    assert!(
+        !final_headers.contains_key("x-codex-turn-state"),
+        "fresh fallback should strip stale turn-state before the final attempt: {headers:?}"
+    );
+}
+
+#[test]
 fn runtime_proxy_retries_previous_response_with_upstream_turn_state_http() {
     let backend = RuntimeProxyBackend::start_http_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
