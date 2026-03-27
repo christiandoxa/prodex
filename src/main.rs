@@ -2036,6 +2036,8 @@ struct RuntimeDoctorSummary {
     last_marker_line: Option<String>,
     marker_last_fields: BTreeMap<&'static str, BTreeMap<String, String>>,
     facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
+    previous_response_not_found_by_route: BTreeMap<String, usize>,
+    previous_response_not_found_by_transport: BTreeMap<String, usize>,
     first_timestamp: Option<String>,
     last_timestamp: Option<String>,
     selection_pressure: String,
@@ -3289,6 +3291,16 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
             (facet.clone(), serde_json::Value::Object(counts))
         })
         .collect::<serde_json::Map<String, serde_json::Value>>();
+    let previous_response_not_found_by_route = summary
+        .previous_response_not_found_by_route
+        .iter()
+        .map(|(route, count)| (route.clone(), serde_json::Value::from(*count)))
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+    let previous_response_not_found_by_transport = summary
+        .previous_response_not_found_by_transport
+        .iter()
+        .map(|(transport, count)| (transport.clone(), serde_json::Value::from(*count)))
+        .collect::<serde_json::Map<String, serde_json::Value>>();
     let profiles = summary
         .profiles
         .iter()
@@ -3325,6 +3337,8 @@ fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Valu
         "marker_counts": marker_counts,
         "marker_last_fields": marker_last_fields,
         "facet_counts": facet_counts,
+        "previous_response_not_found_by_route": previous_response_not_found_by_route,
+        "previous_response_not_found_by_transport": previous_response_not_found_by_transport,
         "last_marker_line": summary.last_marker_line,
         "selection_pressure": summary.selection_pressure,
         "transport_pressure": summary.transport_pressure,
@@ -3442,6 +3456,18 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
         ),
         (
             "Prev not found".to_string(),
+            runtime_doctor_marker_count(&summary, "previous_response_not_found").to_string(),
+        ),
+        (
+            "Prev not found routes".to_string(),
+            runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route),
+        ),
+        (
+            "Prev not found xport".to_string(),
+            runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_transport),
+        ),
+        (
+            "Prev negative cache".to_string(),
             runtime_doctor_marker_count(&summary, "previous_response_negative_cache").to_string(),
         ),
         (
@@ -3611,6 +3637,17 @@ fn runtime_doctor_fields() -> Vec<(String, String)> {
 
 fn runtime_doctor_marker_count(summary: &RuntimeDoctorSummary, marker: &'static str) -> usize {
     summary.marker_counts.get(marker).copied().unwrap_or(0)
+}
+
+fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -> String {
+    if counts.is_empty() {
+        return "-".to_string();
+    }
+    counts
+        .iter()
+        .map(|(label, count)| format!("{label}={count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Option<String> {
@@ -3959,6 +3996,11 @@ fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
         } else if runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked") > 0 {
             "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "previous_response_not_found") > 0 {
+            format!(
+                "Recent previous_response_id continuity failures were observed: {}.",
+                runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
+            )
         } else if runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog") > 0 {
             "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
         } else if runtime_doctor_marker_count(&summary, "selection_pick") > 0
@@ -4040,6 +4082,20 @@ fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             *summary.marker_counts.entry(marker).or_insert(0) += 1;
             summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
             let fields = runtime_doctor_parse_fields(line);
+            if marker == "previous_response_not_found" {
+                if let Some(route) = fields.get("route").cloned() {
+                    *summary
+                        .previous_response_not_found_by_route
+                        .entry(route)
+                        .or_insert(0) += 1;
+                }
+                if let Some(transport) = fields.get("transport").cloned() {
+                    *summary
+                        .previous_response_not_found_by_transport
+                        .entry(transport)
+                        .or_insert(0) += 1;
+                }
+            }
             for facet in [
                 "lane",
                 "route",
@@ -4121,6 +4177,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "profile_health",
         "profile_latency",
         "profile_bad_pairing",
+        "previous_response_not_found",
         "previous_response_negative_cache",
         "compact_committed_owner",
         "compact_followup_owner",
@@ -8360,7 +8417,7 @@ fn proxy_runtime_websocket_text_message(
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                    "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
                                     turn_state
                                 ),
                             );
@@ -8618,7 +8675,7 @@ fn proxy_runtime_websocket_text_message(
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                    "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
                                     turn_state
                                 ),
                             );
@@ -8974,7 +9031,7 @@ fn proxy_runtime_websocket_text_message(
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
+                        "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
                         turn_state
                     ),
                 );
@@ -10447,7 +10504,7 @@ fn proxy_runtime_responses_request(
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=http previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                    "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
                                     turn_state
                                 ),
                             );
@@ -10696,7 +10753,7 @@ fn proxy_runtime_responses_request(
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=http previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                    "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
                                     turn_state
                                 ),
                             );
@@ -10945,7 +11002,7 @@ fn proxy_runtime_responses_request(
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} transport=http previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
+                        "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
                         turn_state
                     ),
                 );
@@ -13390,7 +13447,7 @@ fn prepare_runtime_proxy_responses_success(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http sse_previous_response_not_found profile={profile_name} prelude_bytes={}",
+                    "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} stage=sse_prelude prelude_bytes={}",
                     prelude.len()
                 ),
             );

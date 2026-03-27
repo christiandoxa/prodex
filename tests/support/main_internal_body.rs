@@ -36,6 +36,18 @@ fn usage_with_main_windows(
     }
 }
 
+fn runtime_proxy_backend_next_second_response_id(
+    previous_response_id: Option<&str>,
+) -> Option<String> {
+    match previous_response_id {
+        Some("resp-second") => Some("resp-second-next".to_string()),
+        Some(previous_response_id) if previous_response_id.starts_with("resp-second-next") => {
+            Some(format!("{previous_response_id}-next"))
+        }
+        _ => None,
+    }
+}
+
 struct TestDir {
     path: PathBuf,
 }
@@ -531,7 +543,10 @@ fn handle_runtime_proxy_backend_request(
                     if matches!(
                         mode,
                         RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState
-                    ) && previous_response_id.as_deref() == Some("resp-second")
+                    ) && runtime_proxy_backend_next_second_response_id(
+                        previous_response_id.as_deref()
+                    )
+                    .is_some()
                         && turn_state.as_deref() != Some("turn-second") =>
                 {
                     (
@@ -557,13 +572,20 @@ fn handle_runtime_proxy_backend_request(
                 }
                 "second-account"
                     if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson)
-                        && previous_response_id.as_deref() == Some("resp-second") =>
+                        && runtime_proxy_backend_next_second_response_id(
+                            previous_response_id.as_deref()
+                        )
+                        .is_some() =>
                 {
+                    let next_response_id = runtime_proxy_backend_next_second_response_id(
+                        previous_response_id.as_deref(),
+                    )
+                    .expect("next response id should exist");
                     (
                         "HTTP/1.1 200 OK",
                         "application/json",
                         serde_json::json!({
-                            "id": "resp-second-next",
+                            "id": next_response_id,
                             "object": "response",
                             "status": "completed",
                             "output": []
@@ -574,17 +596,30 @@ fn handle_runtime_proxy_backend_request(
                         None,
                     )
                 }
-                "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
+                "second-account"
+                    if runtime_proxy_backend_next_second_response_id(
+                        previous_response_id.as_deref()
+                    )
+                    .is_some() =>
+                {
+                    let next_response_id = runtime_proxy_backend_next_second_response_id(
+                        previous_response_id.as_deref(),
+                    )
+                    .expect("next response id should exist");
                     (
                         "HTTP/1.1 200 OK",
                         "text/event-stream",
-                        concat!(
-                            "event: response.created\r\n",
-                            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second-next\"}}\r\n",
-                            "\r\n",
-                            "event: response.completed\r\n",
-                            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second-next\"}}\r\n",
-                            "\r\n"
+                        format!(
+                            concat!(
+                                "event: response.created\r\n",
+                                "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                "\r\n",
+                                "event: response.completed\r\n",
+                                "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                "\r\n"
+                            ),
+                            next_response_id.clone(),
+                            next_response_id
                         )
                         .to_string(),
                         None,
@@ -992,7 +1027,8 @@ fn handle_runtime_proxy_backend_websocket(
                     mode,
                     RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                         | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
-                ) && previous_response_id.as_deref() == Some("resp-second")
+                ) && runtime_proxy_backend_next_second_response_id(previous_response_id.as_deref())
+                    .is_some()
                     && effective_turn_state.as_deref() != Some("turn-second") =>
             {
                 websocket
@@ -1014,7 +1050,13 @@ fn handle_runtime_proxy_backend_websocket(
                     ))
                     .expect("previous_response_not_found should be sent");
             }
-            "second-account" if previous_response_id.as_deref() == Some("resp-second") => {
+            "second-account"
+                if runtime_proxy_backend_next_second_response_id(previous_response_id.as_deref())
+                    .is_some() =>
+            {
+                let next_response_id =
+                    runtime_proxy_backend_next_second_response_id(previous_response_id.as_deref())
+                        .expect("next response id should exist");
                 if matches!(
                     mode,
                     RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
@@ -1030,7 +1072,7 @@ fn handle_runtime_proxy_backend_websocket(
                         serde_json::json!({
                             "type": "response.created",
                             "response": {
-                                "id": "resp-second-next"
+                                "id": next_response_id.clone()
                             }
                         })
                         .to_string()
@@ -1042,7 +1084,7 @@ fn handle_runtime_proxy_backend_websocket(
                         serde_json::json!({
                             "type": "response.completed",
                             "response": {
-                                "id": "resp-second-next"
+                                "id": next_response_id
                             }
                         })
                         .to_string()
@@ -4766,6 +4808,9 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.marker_counts.insert("selection_skip_current", 1);
     summary
         .marker_counts
+        .insert("previous_response_not_found", 2);
+    summary
+        .marker_counts
         .insert("compact_followup_owner", 1);
     summary
         .marker_counts
@@ -4780,6 +4825,12 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         "quota_source".to_string(),
         BTreeMap::from([("persisted_snapshot".to_string(), 1)]),
     );
+    summary.previous_response_not_found_by_route = BTreeMap::from([
+        ("responses".to_string(), 1),
+        ("websocket".to_string(), 1),
+    ]);
+    summary.previous_response_not_found_by_transport =
+        BTreeMap::from([("http".to_string(), 1), ("websocket".to_string(), 1)]);
     summary.marker_last_fields.insert(
         "selection_pick",
         BTreeMap::from([
@@ -4796,8 +4847,25 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["last_timestamp"], "2026-03-25 00:00:05.000 +07:00");
     assert_eq!(value["marker_counts"]["selection_pick"], 2);
     assert_eq!(value["marker_counts"]["selection_skip_current"], 1);
+    assert_eq!(value["marker_counts"]["previous_response_not_found"], 2);
     assert_eq!(value["marker_counts"]["compact_followup_owner"], 1);
     assert_eq!(value["marker_counts"]["compact_fresh_fallback_blocked"], 1);
+    assert_eq!(
+        value["previous_response_not_found_by_route"]["responses"],
+        1
+    );
+    assert_eq!(
+        value["previous_response_not_found_by_route"]["websocket"],
+        1
+    );
+    assert_eq!(
+        value["previous_response_not_found_by_transport"]["http"],
+        1
+    );
+    assert_eq!(
+        value["previous_response_not_found_by_transport"]["websocket"],
+        1
+    );
     assert_eq!(value["facet_counts"]["route"]["responses"], 2);
     assert_eq!(
         value["facet_counts"]["quota_source"]["persisted_snapshot"],
@@ -7135,12 +7203,14 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.095 +07:00] profile_circuit_open profile=main route=responses until=123 reason=stream_read_error score=4
 [2026-03-20 12:00:00.096 +07:00] profile_circuit_half_open_probe profile=main route=responses until=128 health=3
 [2026-03-20 12:00:00.097 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
+[2026-03-20 12:00:00.098 +07:00] request=2 transport=http route=responses previous_response_not_found profile=second response_id=resp-second retry_index=0
+[2026-03-20 12:00:00.098 +07:00] request=3 transport=websocket route=websocket previous_response_not_found profile=second response_id=resp-second retry_index=0
 [2026-03-20 12:00:00.099 +07:00] local_writer_error request=1 transport=http profile=main stage=chunk_flush chunks=1 bytes=128 elapsed_ms=20 error=broken_pipe
 [2026-03-20 12:00:00.100 +07:00] runtime_proxy_startup_audit missing_managed_dirs=1 stale_response_bindings=2 stale_session_bindings=1 active_profile_missing_dir=false
 "#,
         );
 
-    assert_eq!(summary.line_count, 22);
+    assert_eq!(summary.line_count, 24);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -7212,6 +7282,10 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog"),
         1
     );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "previous_response_not_found"),
+        2
+    );
     assert_eq!(runtime_doctor_marker_count(&summary, "local_writer_error"), 1);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit"),
@@ -7220,6 +7294,18 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     assert_eq!(
         runtime_doctor_top_facet(&summary, "quota_source").as_deref(),
         Some("persisted_snapshot (1)")
+    );
+    assert_eq!(
+        summary.previous_response_not_found_by_route,
+        BTreeMap::from([("responses".to_string(), 1), ("websocket".to_string(), 1)])
+    );
+    assert_eq!(
+        summary.previous_response_not_found_by_transport,
+        BTreeMap::from([("http".to_string(), 1), ("websocket".to_string(), 1)])
+    );
+    assert_eq!(
+        summary.previous_response_not_found_by_route.get("websocket"),
+        Some(&1)
     );
     assert_eq!(
         summary
@@ -11567,6 +11653,174 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
 }
 
 #[test]
+fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websocket() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "third".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second-next\"")),
+        "unexpected websocket retry payloads: {payloads:?}"
+    );
+    let accounts = backend.responses_accounts();
+    assert_eq!(
+        accounts.first().map(String::as_str),
+        Some("third-account"),
+        "stale bound profile should be tried first: {accounts:?}"
+    );
+    assert_eq!(
+        accounts.last().map(String::as_str),
+        Some("second-account"),
+        "owner should be rediscovered after stale binding release: {accounts:?}"
+    );
+
+    let first_request_count = backend.responses_accounts().len();
+    let (mut retry_socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("second runtime proxy websocket handshake should succeed");
+    retry_socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("second runtime proxy websocket request should be sent");
+
+    let mut retry_payloads = Vec::new();
+    loop {
+        match retry_socket
+            .read()
+            .expect("second runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                retry_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                retry_socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        retry_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second-next\"")),
+        "unexpected websocket retry-after-release payloads: {retry_payloads:?}"
+    );
+    let retry_accounts = backend.responses_accounts()[first_request_count..].to_vec();
+    assert_eq!(
+        retry_accounts,
+        vec!["second-account".to_string()],
+        "follow-up websocket discovery should not retry the stale owner once negative cache is active"
+    );
+}
+
+#[test]
 fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
     let temp_dir = TestDir::new();
@@ -12516,6 +12770,240 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() 
     assert_eq!(
         backend.responses_accounts(),
         vec!["second-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
+fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+
+    let mut previous_response_id: Option<String> = None;
+    for expected_response_id in ["resp-second", "resp-second-next", "resp-second-next-next"] {
+        let request = previous_response_id
+            .as_deref()
+            .map(|previous_response_id| {
+                format!("{{\"previous_response_id\":\"{previous_response_id}\",\"input\":[]}}")
+            })
+            .unwrap_or_else(|| "{\"input\":[]}".to_string());
+        socket
+            .send(WsMessage::Text(request.into()))
+            .expect("runtime proxy websocket request should be sent");
+
+        let mut payloads = Vec::new();
+        loop {
+            match socket
+                .read()
+                .expect("runtime proxy websocket should stay open across chained turns")
+            {
+                WsMessage::Text(text) => {
+                    let text = text.to_string();
+                    let done = is_runtime_terminal_event(&text);
+                    payloads.push(text);
+                    if done {
+                        break;
+                    }
+                }
+                WsMessage::Ping(payload) => {
+                    socket
+                        .send(WsMessage::Pong(payload))
+                        .expect("pong should be sent");
+                }
+                WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+                other => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+
+        assert!(
+            !payloads
+                .iter()
+                .any(|payload| payload.contains("\"previous_response_not_found\"")),
+            "chained websocket continuation should not degrade into previous_response_not_found: {payloads:?}"
+        );
+        let seen_response_ids = payloads
+            .iter()
+            .flat_map(|payload| extract_runtime_response_ids_from_payload(payload))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            seen_response_ids.last().map(String::as_str),
+            Some(expected_response_id),
+            "unexpected websocket continuation chain payloads: {payloads:?}"
+        );
+        previous_response_id = Some(expected_response_id.to_string());
+    }
+
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "backend should see each chained websocket continuation request"
+    );
+}
+
+#[test]
+fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let initial_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    initial_state
+        .save(&paths)
+        .expect("failed to save initial state");
+
+    let client = Client::builder().build().expect("client");
+    let mut previous_response_id = {
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
+                .expect("runtime proxy should start");
+
+        let first = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("first runtime proxy request should succeed");
+        let first_body = first
+            .text()
+            .expect("first response body should be readable");
+        assert!(
+            first_body.contains("\"resp-second\""),
+            "unexpected first continuation body: {first_body}"
+        );
+        let _ = wait_for_runtime_continuations(&paths, |continuations| {
+            continuations
+                .response_profile_bindings
+                .get("resp-second")
+                .is_some_and(|binding| binding.profile_name == "second")
+        });
+        "resp-second".to_string()
+    };
+
+    for expected_response_id in ["resp-second-next", "resp-second-next-next"] {
+        let mut resumed_state = AppState::load(&paths).expect("state should reload");
+        resumed_state.active_profile = Some("third".to_string());
+        resumed_state
+            .save(&paths)
+            .expect("failed to save resumed state");
+
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &resumed_state, "third", backend.base_url(), false)
+                .expect("resumed runtime proxy should start");
+
+        let response = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body(format!(
+                "{{\"previous_response_id\":\"{previous_response_id}\",\"input\":[]}}"
+            ))
+            .send()
+            .expect("continued runtime proxy request should succeed");
+        let body = response.text().expect("response body should be readable");
+        assert!(
+            body.contains(&format!("\"{expected_response_id}\"")),
+            "unexpected continued body: {body}"
+        );
+        let expected_response_id_owned = expected_response_id.to_string();
+        let _ = wait_for_runtime_continuations(&paths, |continuations| {
+            continuations
+                .response_profile_bindings
+                .get(expected_response_id)
+                .is_some_and(|binding| binding.profile_name == "second")
+        });
+        previous_response_id = expected_response_id_owned;
+    }
+
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ],
+        "restarts should keep the continuation chain pinned to the original owner"
     );
 }
 
