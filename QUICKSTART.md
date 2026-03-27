@@ -153,7 +153,7 @@ If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whe
 - `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
 - that auto-create flow relies on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
 - built-in quota checks only work for profiles using ChatGPT auth
-- managed Prodex profiles share the default `~/.codex` session history store, so `/resume` shows the same saved threads across accounts
+- managed Prodex profiles share selected native Codex state from the default `~/.codex`, including session history, rules, skills, config, and memories, so rotation stays closer to direct `codex`
 - `prodex run <session-id>` is a shortcut for resuming a saved Codex session through the Prodex proxy
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity

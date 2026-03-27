@@ -127,8 +127,15 @@ const CLI_LABEL_WIDTH: usize = 16;
 const CLI_MIN_LABEL_WIDTH: usize = 10;
 const CLI_MAX_LABEL_WIDTH: usize = 24;
 const CLI_TABLE_GAP: &str = "  ";
-const SHARED_CODEX_DIR_NAMES: &[&str] = &["sessions", "archived_sessions", "shell_snapshots"];
-const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl"];
+const SHARED_CODEX_DIR_NAMES: &[&str] = &[
+    "sessions",
+    "archived_sessions",
+    "shell_snapshots",
+    "memories",
+    "rules",
+    "skills",
+];
+const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl", "config.toml"];
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -4904,7 +4911,7 @@ fn migrate_shared_codex_entry(
         SharedCodexEntryKind::Directory => {
             if !metadata.is_dir() {
                 bail!(
-                    "expected {} to be a directory for shared Codex session state",
+                    "expected {} to be a directory for shared Codex state",
                     local_path.display()
                 );
             }
@@ -4915,7 +4922,7 @@ fn migrate_shared_codex_entry(
             }
             if !shared_path.is_dir() {
                 bail!(
-                    "expected {} to be a directory for shared Codex session state",
+                    "expected {} to be a directory for shared Codex state",
                     shared_path.display()
                 );
             }
@@ -4927,7 +4934,7 @@ fn migrate_shared_codex_entry(
         SharedCodexEntryKind::File => {
             if !metadata.is_file() {
                 bail!(
-                    "expected {} to be a file for shared Codex session state",
+                    "expected {} to be a file for shared Codex state",
                     local_path.display()
                 );
             }
@@ -4938,7 +4945,7 @@ fn migrate_shared_codex_entry(
             }
             if !shared_path.is_file() {
                 bail!(
-                    "expected {} to be a file for shared Codex session state",
+                    "expected {} to be a file for shared Codex state",
                     shared_path.display()
                 );
             }
@@ -5051,7 +5058,7 @@ fn create_symlink(target: &Path, link: &Path, _kind: SharedCodexEntryKind) -> Re
     {
         std::os::unix::fs::symlink(target, link).with_context(|| {
             format!(
-                "failed to link shared Codex session state {} -> {}",
+                "failed to link shared Codex state {} -> {}",
                 link.display(),
                 target.display()
             )
@@ -5066,7 +5073,7 @@ fn create_symlink(target: &Path, link: &Path, _kind: SharedCodexEntryKind) -> Re
         }
         .with_context(|| {
             format!(
-                "failed to link shared Codex session state {} -> {}",
+                "failed to link shared Codex state {} -> {}",
                 link.display(),
                 target.display()
             )

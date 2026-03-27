@@ -407,6 +407,11 @@ if [ -n "$session_marker" ]; then
   printf '%s\n' "$session_marker" >> "$CODEX_HOME/history.jsonl"
   printf '{"marker":"%s"}\n' "$session_marker" > "$CODEX_HOME/sessions/$session_marker.json"
 fi
+memory_marker="${TEST_MEMORY_MARKER:-}"
+if [ -n "$memory_marker" ]; then
+  mkdir -p "$CODEX_HOME/memories"
+  printf '{"memory":"%s"}\n' "$memory_marker" > "$CODEX_HOME/memories/$memory_marker.json"
+fi
 exit 0
 "#,
     );
@@ -858,6 +863,172 @@ fn run_shares_resume_history_across_managed_profiles() {
                 .expect("failed to inspect second sessions")
                 .file_type()
                 .is_symlink()
+        );
+    }
+}
+
+#[test]
+fn run_shares_housekeeping_memories_across_managed_profiles() {
+    let fixture = setup_fixture();
+    fs::create_dir_all(fixture.main_home.join("memories")).expect("failed to create memories dir");
+    fs::write(
+        fixture.main_home.join("memories/seed-memory.json"),
+        "{\"seed\":true}\n",
+    )
+    .expect("failed to seed memory");
+
+    let first_output = run_prodex_with_env(
+        &fixture,
+        &["run", "--profile", "main", "--skip-quota-check"],
+        &[("TEST_MEMORY_MARKER", "main-memory")],
+    );
+    assert!(
+        first_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    let second_output = run_prodex_with_env(
+        &fixture,
+        &["run", "--profile", "second", "--skip-quota-check"],
+        &[("TEST_MEMORY_MARKER", "second-memory")],
+    );
+    assert!(
+        second_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+
+    for home in [&fixture.main_home, &fixture.second_home] {
+        assert!(home.join("memories/seed-memory.json").is_file());
+        assert!(home.join("memories/main-memory.json").is_file());
+        assert!(home.join("memories/second-memory.json").is_file());
+    }
+
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("memories"))
+                .expect("failed to read main memories link"),
+            fixture.shared_codex_home.join("memories")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("memories"))
+                .expect("failed to read second memories link"),
+            fixture.shared_codex_home.join("memories")
+        );
+        assert!(
+            fs::symlink_metadata(fixture.main_home.join("memories"))
+                .expect("failed to inspect main memories")
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(fixture.second_home.join("memories"))
+                .expect("failed to inspect second memories")
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
+
+#[test]
+fn run_shares_native_codex_behavior_state_across_managed_profiles() {
+    let fixture = setup_fixture();
+    fs::write(
+        fixture.main_home.join("config.toml"),
+        "model = \"gpt-5.4\"\nmodel_reasoning_effort = \"xhigh\"\n",
+    )
+    .expect("failed to seed config");
+    fs::create_dir_all(fixture.main_home.join("rules")).expect("failed to create main rules dir");
+    fs::write(
+        fixture.main_home.join("rules/default.rules"),
+        "main-rule = true\n",
+    )
+    .expect("failed to seed main rule");
+    fs::create_dir_all(fixture.main_home.join("skills/main-skill"))
+        .expect("failed to create main skill dir");
+    fs::write(
+        fixture.main_home.join("skills/main-skill/SKILL.md"),
+        "# Main Skill\n",
+    )
+    .expect("failed to seed main skill");
+
+    let first_output = run_prodex(
+        &fixture,
+        &["run", "--profile", "main", "--skip-quota-check"],
+    );
+    assert!(
+        first_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    fs::create_dir_all(fixture.second_home.join("rules"))
+        .expect("failed to create second rules dir");
+    fs::write(
+        fixture.second_home.join("rules/team.rules"),
+        "second-rule = true\n",
+    )
+    .expect("failed to seed second rule");
+    fs::create_dir_all(fixture.second_home.join("skills/second-skill"))
+        .expect("failed to create second skill dir");
+    fs::write(
+        fixture.second_home.join("skills/second-skill/SKILL.md"),
+        "# Second Skill\n",
+    )
+    .expect("failed to seed second skill");
+
+    let second_output = run_prodex(
+        &fixture,
+        &["run", "--profile", "second", "--skip-quota-check"],
+    );
+    assert!(
+        second_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+
+    for home in [&fixture.main_home, &fixture.second_home] {
+        let config = fs::read_to_string(home.join("config.toml"))
+            .expect("shared config.toml should be readable");
+        assert!(config.contains("model_reasoning_effort = \"xhigh\""));
+        assert!(home.join("rules/default.rules").is_file());
+        assert!(home.join("rules/team.rules").is_file());
+        assert!(home.join("skills/main-skill/SKILL.md").is_file());
+        assert!(home.join("skills/second-skill/SKILL.md").is_file());
+    }
+
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("config.toml"))
+                .expect("failed to read main config link"),
+            fixture.shared_codex_home.join("config.toml")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("config.toml"))
+                .expect("failed to read second config link"),
+            fixture.shared_codex_home.join("config.toml")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("rules")).expect("failed to read main rules link"),
+            fixture.shared_codex_home.join("rules")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("rules"))
+                .expect("failed to read second rules link"),
+            fixture.shared_codex_home.join("rules")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("skills"))
+                .expect("failed to read main skills link"),
+            fixture.shared_codex_home.join("skills")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("skills"))
+                .expect("failed to read second skills link"),
+            fixture.shared_codex_home.join("skills")
         );
     }
 }
