@@ -7898,12 +7898,44 @@ fn proxy_runtime_websocket_text_message(
                 profile_name,
                 event,
             } => {
+                let reuse_failed_bound_previous_response = previous_response_id.is_some()
+                    && !previous_response_fresh_fallback_used
+                    && (bound_profile.as_deref() == Some(profile_name.as_str())
+                        || pinned_profile.as_deref() == Some(profile_name.as_str()));
                 runtime_proxy_log(
                     shared,
                     format!(
                         "request={request_id} websocket_session={session_id} websocket_reuse_watchdog_timeout profile={profile_name} event={event}"
                     ),
                 );
+                if reuse_failed_bound_previous_response
+                    && let Some(fresh_request_text) =
+                        runtime_request_text_without_previous_response_id(&request_text)
+                {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=websocket_reuse_watchdog"
+                        ),
+                    );
+                    request_text = fresh_request_text;
+                    previous_response_id = None;
+                    previous_response_fresh_fallback_used = true;
+                    saw_previous_response_not_found = false;
+                    previous_response_retry_candidate = None;
+                    previous_response_retry_index = 0;
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                    bound_profile = None;
+                    session_profile = None;
+                    pinned_profile = None;
+                    turn_state_profile = None;
+                    excluded_profiles.clear();
+                    last_failure = None;
+                    selection_started_at = Instant::now();
+                    selection_attempts = 0;
+                    continue;
+                }
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
                     bound_profile = None;
                 }
