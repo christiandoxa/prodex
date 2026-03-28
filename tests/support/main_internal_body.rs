@@ -216,6 +216,20 @@ where
     }
 }
 
+fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16, String) {
+    let status = response.status_code().0;
+    let mut bytes = Vec::new();
+    response
+        .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+        .expect("response should serialize");
+    let text = String::from_utf8(bytes).expect("response bytes should be utf8");
+    let body = text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_default();
+    (status, body)
+}
+
 struct RuntimeProxyBackend {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
@@ -1778,7 +1792,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
     };
     let reports = vec![
@@ -2082,7 +2096,7 @@ fn rotates_profiles_after_current_profile() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
     };
 
@@ -2284,6 +2298,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::from([(
@@ -2362,6 +2377,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -2463,6 +2479,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -2538,6 +2555,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -2611,6 +2629,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([(
             "main".to_string(),
             RuntimeProfileProbeCacheEntry {
@@ -2690,6 +2709,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([(
             "main".to_string(),
             RuntimeProfileProbeCacheEntry {
@@ -2770,6 +2790,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
@@ -2852,6 +2873,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -2919,6 +2941,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -2976,6 +2999,7 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -3041,6 +3065,7 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -3135,6 +3160,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -3207,6 +3233,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -3292,6 +3319,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -3400,6 +3428,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -3508,6 +3537,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -3619,6 +3649,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -3739,6 +3770,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -3859,6 +3891,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -3970,6 +4003,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -4075,6 +4109,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -4180,6 +4215,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([
             (
                 "main".to_string(),
@@ -4279,6 +4315,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -4362,6 +4399,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -4446,6 +4484,7 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -4518,6 +4557,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -4631,6 +4671,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -4741,6 +4782,7 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -4840,6 +4882,16 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         ]),
     );
     summary.diagnosis = "Recent selection decisions were logged.".to_string();
+    summary.persisted_verified_continuations = 2;
+    summary.persisted_warm_continuations = 1;
+    summary.persisted_suspect_continuations = 1;
+    summary.persisted_continuation_journal_response_bindings = 3;
+    summary.persisted_continuation_journal_session_bindings = 2;
+    summary.persisted_continuation_journal_turn_state_bindings = 1;
+    summary.persisted_continuation_journal_session_id_bindings = 4;
+    summary.continuation_journal_saved_at = Some(123);
+    summary.suspect_continuation_bindings = vec!["turn-second:suspect".to_string()];
+    summary.recovered_continuation_journal_file = true;
 
     let value = runtime_doctor_json_value(&summary);
     assert_eq!(value["line_count"], 3);
@@ -4879,6 +4931,15 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         value["marker_last_fields"]["selection_pick"]["quota_source"],
         "persisted_snapshot"
     );
+    assert_eq!(value["persisted_verified_continuations"], 2);
+    assert_eq!(value["persisted_warm_continuations"], 1);
+    assert_eq!(value["persisted_suspect_continuations"], 1);
+    assert_eq!(value["persisted_continuation_journal_response_bindings"], 3);
+    assert_eq!(value["persisted_continuation_journal_session_bindings"], 2);
+    assert_eq!(value["persisted_continuation_journal_turn_state_bindings"], 1);
+    assert_eq!(value["persisted_continuation_journal_session_id_bindings"], 4);
+    assert_eq!(value["continuation_journal_saved_at"], 123);
+    assert_eq!(value["suspect_continuation_bindings"][0], "turn-second:suspect");
     summary.startup_audit_pressure = "elevated".to_string();
     summary.persisted_retry_backoffs = 2;
     summary.persisted_transport_backoffs = 1;
@@ -4923,6 +4984,7 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["stale_persisted_usage_snapshots"], 1);
     assert_eq!(value["recovered_state_file"], true);
     assert_eq!(value["recovered_usage_snapshots_file"], true);
+    assert_eq!(value["recovered_continuation_journal_file"], true);
     assert_eq!(value["last_good_backups_present"], 3);
     assert_eq!(value["degraded_routes"][0], "main/responses circuit=open until=123");
     assert_eq!(value["orphan_managed_dirs"][0], "ghost_profile");
@@ -5049,6 +5111,36 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
         },
     )
     .expect("backoffs should save");
+    let journal_saved_at = Local::now().timestamp();
+    save_runtime_continuation_journal(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: journal_saved_at,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-main".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Suspect,
+                        last_touched_at: Some(journal_saved_at),
+                        last_verified_at: None,
+                        last_not_found_at: Some(journal_saved_at),
+                        success_count: 0,
+                        failure_count: 1,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+        journal_saved_at,
+    )
+    .expect("continuation journal should save");
 
     let _guard = TestEnvVarGuard::set("PRODEX_HOME", paths.root.to_str().unwrap());
     let mut summary = RuntimeDoctorSummary::default();
@@ -5057,6 +5149,13 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     assert_eq!(summary.persisted_retry_backoffs, 1);
     assert_eq!(summary.persisted_route_circuits, 1);
     assert_eq!(summary.persisted_usage_snapshots, 1);
+    assert_eq!(summary.persisted_continuation_journal_response_bindings, 1);
+    assert_eq!(summary.persisted_suspect_continuations, 1);
+    assert_eq!(summary.continuation_journal_saved_at, Some(journal_saved_at));
+    assert_eq!(
+        summary.suspect_continuation_bindings,
+        vec!["resp-main:suspect".to_string()]
+    );
     assert!(summary.degraded_routes.iter().any(|line| line.contains("main/responses")));
 }
 
@@ -5095,6 +5194,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::from([(
             "main".to_string(),
@@ -5187,7 +5287,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
     };
     let runtime = RuntimeRotationState {
@@ -5202,8 +5302,9 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::from([
             (
@@ -5307,6 +5408,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::from([(
             "main".to_string(),
@@ -5407,6 +5509,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::from([
             (
@@ -5574,6 +5677,7 @@ fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -5642,14 +5746,14 @@ fn app_state_save_merges_existing_runtime_bindings() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-existing".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
-            },
+                },
         )]),
     };
     existing
@@ -5721,14 +5825,14 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: now,
-                },
+                    },
             ),
             (
                 "resp-stale".to_string(),
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: stale_response_binding,
-                },
+                    },
             ),
         ]),
         session_profile_bindings: BTreeMap::from([
@@ -5737,14 +5841,14 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: now,
-                },
+                    },
             ),
             (
                 "sess-stale".to_string(),
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: stale_session_binding,
-                },
+                    },
             ),
         ]),
     };
@@ -5834,7 +5938,7 @@ fn app_state_response_bindings_are_not_pruned_just_for_size() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now + index as i64,
-            },
+                },
         );
     }
     let state = AppState {
@@ -6095,14 +6199,14 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
-            },
+                },
         )]),
     };
     let revision = AtomicU64::new(1);
@@ -6194,6 +6298,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -6240,14 +6345,14 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: now - 10,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-second".to_string(),
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: now - 10,
-            },
+                },
         )]),
     };
     schedule_runtime_state_save(
@@ -6380,7 +6485,7 @@ fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -6470,9 +6575,10 @@ fn turn_state_affinity_prefers_bound_profile() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -6567,9 +6673,10 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -6652,7 +6759,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: stale_touch,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -6682,6 +6789,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -6739,7 +6847,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -6768,6 +6876,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -6822,7 +6931,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -6851,6 +6960,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -6956,8 +7066,9 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -7005,6 +7116,107 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
 }
 
 #[test]
+fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: backend.base_url(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let pressure_until = Local::now().timestamp().saturating_add(60).max(0) as u64;
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(pressure_until)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(1, &request, &shared)
+        .expect("fresh compact request should receive a local response");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 503);
+    assert!(
+        body.contains("Fresh compact requests are temporarily deferred"),
+        "unexpected compact pressure response body: {body}"
+    );
+    assert!(
+        backend.responses_accounts().is_empty(),
+        "fresh compact request should be shed before reaching upstream"
+    );
+}
+
+#[test]
 fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
@@ -7039,6 +7251,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
         current_profile: "second".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -7358,6 +7571,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::from([(
             "main".to_string(),
@@ -7447,6 +7661,7 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::from([(
             "main".to_string(),
@@ -7527,6 +7742,7 @@ fn runtime_proxy_active_request_limit_is_enforced_and_released() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -7597,6 +7813,7 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -7685,6 +7902,7 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -8396,7 +8614,7 @@ fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
     };
     state.save(&paths).expect("failed to save initial state");
@@ -8470,14 +8688,14 @@ fn exhausted_usage_snapshot_releases_persisted_affinity_bindings() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-123".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
     };
     state.save(&paths).expect("failed to save initial state");
@@ -8490,6 +8708,7 @@ fn exhausted_usage_snapshot_releases_persisted_affinity_bindings() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: state.session_profile_bindings.clone(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -8622,14 +8841,14 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
                 ResponseProfileBinding {
                     profile_name: "missing".to_string(),
                     bound_at: 1,
-                },
+                    },
             )]),
             session_profile_bindings: BTreeMap::from([(
                 "sess-missing".to_string(),
                 ResponseProfileBinding {
                     profile_name: "missing".to_string(),
                     bound_at: 1,
-                },
+                    },
             )]),
         },
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -8640,15 +8859,16 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
             ResponseProfileBinding {
                 profile_name: "missing".to_string(),
                 bound_at: 1,
-            },
+                },
         )]),
         session_id_bindings: BTreeMap::from([(
             "sess-missing".to_string(),
             ResponseProfileBinding {
                 profile_name: "missing".to_string(),
                 bound_at: 1,
-            },
+                },
         )]),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([(
             "missing".to_string(),
             RuntimeProfileProbeCacheEntry {
@@ -8771,6 +8991,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_is_single_flight() {
         current_profile: "main".to_string(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
@@ -8965,7 +9186,7 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-            },
+                },
         )]),
     };
     state.save(&paths).expect("failed to save initial state");
@@ -9470,6 +9691,7 @@ fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -9550,6 +9772,7 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -10896,6 +11119,7 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
             current_profile: "second".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -11252,12 +11476,114 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar()
                 ResponseProfileBinding {
                     profile_name: "second".to_string(),
                     bound_at: Local::now().timestamp(),
-                },
+                    },
             )]),
             ..RuntimeContinuationStore::default()
         },
     )
     .expect("failed to save continuation sidecar");
+
+    let proxy =
+        start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+            .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+    assert!(body.contains("\"resp-second-next\""));
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    let saved_at = Local::now().timestamp();
+    save_runtime_continuation_journal(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: saved_at,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-second".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        last_touched_at: Some(saved_at),
+                        last_verified_at: Some(saved_at),
+                        last_not_found_at: None,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+        saved_at,
+    )
+    .expect("failed to save continuation journal");
 
     let proxy =
         start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
@@ -11343,6 +11669,7 @@ fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
             current_profile: "main".to_string(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: BTreeMap::new(),
             profile_retry_backoff_until: BTreeMap::new(),
@@ -11430,7 +11757,7 @@ fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
                 ResponseProfileBinding {
                     profile_name: "second".to_string(),
                     bound_at: Local::now().timestamp(),
-                },
+                    },
             )]),
             ..RuntimeContinuationStore::default()
         },
@@ -11595,7 +11922,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -11698,7 +12025,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
             ResponseProfileBinding {
                 profile_name: "third".to_string(),
                 bound_at: now,
-            },
+                },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -12196,7 +12523,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_http() {
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
-                },
+                    },
             )]),
             ..RuntimeContinuationStore::default()
         },
@@ -12295,7 +12622,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
-                },
+                    },
             )]),
             ..RuntimeContinuationStore::default()
         },

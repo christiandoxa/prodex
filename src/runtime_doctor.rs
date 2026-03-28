@@ -71,44 +71,194 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
             })
         })
         .collect::<Vec<_>>();
-    serde_json::json!({
-        "log_path": summary.log_path.as_ref().map(|path| path.display().to_string()),
-        "pointer_exists": summary.pointer_exists,
-        "log_exists": summary.log_exists,
-        "line_count": summary.line_count,
-        "first_timestamp": summary.first_timestamp,
-        "last_timestamp": summary.last_timestamp,
-        "marker_counts": marker_counts,
-        "marker_last_fields": marker_last_fields,
-        "facet_counts": facet_counts,
-        "previous_response_not_found_by_route": previous_response_not_found_by_route,
-        "previous_response_not_found_by_transport": previous_response_not_found_by_transport,
-        "last_marker_line": summary.last_marker_line,
-        "selection_pressure": summary.selection_pressure,
-        "transport_pressure": summary.transport_pressure,
-        "persistence_pressure": summary.persistence_pressure,
-        "quota_freshness_pressure": summary.quota_freshness_pressure,
-        "startup_audit_pressure": summary.startup_audit_pressure,
-        "persisted_retry_backoffs": summary.persisted_retry_backoffs,
-        "persisted_transport_backoffs": summary.persisted_transport_backoffs,
-        "persisted_route_circuits": summary.persisted_route_circuits,
-        "persisted_usage_snapshots": summary.persisted_usage_snapshots,
-        "persisted_response_bindings": summary.persisted_response_bindings,
-        "persisted_session_bindings": summary.persisted_session_bindings,
-        "persisted_turn_state_bindings": summary.persisted_turn_state_bindings,
-        "persisted_session_id_bindings": summary.persisted_session_id_bindings,
-        "stale_persisted_usage_snapshots": summary.stale_persisted_usage_snapshots,
-        "recovered_state_file": summary.recovered_state_file,
-        "recovered_continuations_file": summary.recovered_continuations_file,
-        "recovered_scores_file": summary.recovered_scores_file,
-        "recovered_usage_snapshots_file": summary.recovered_usage_snapshots_file,
-        "recovered_backoffs_file": summary.recovered_backoffs_file,
-        "last_good_backups_present": summary.last_good_backups_present,
-        "degraded_routes": summary.degraded_routes,
-        "orphan_managed_dirs": summary.orphan_managed_dirs,
-        "profiles": profiles,
-        "diagnosis": summary.diagnosis,
-    })
+    let mut value = serde_json::Map::new();
+    value.insert(
+        "log_path".to_string(),
+        serde_json::Value::from(
+            summary
+                .log_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        ),
+    );
+    value.insert(
+        "pointer_exists".to_string(),
+        serde_json::Value::from(summary.pointer_exists),
+    );
+    value.insert(
+        "log_exists".to_string(),
+        serde_json::Value::from(summary.log_exists),
+    );
+    value.insert(
+        "line_count".to_string(),
+        serde_json::Value::from(summary.line_count),
+    );
+    value.insert(
+        "first_timestamp".to_string(),
+        serde_json::Value::from(summary.first_timestamp.clone()),
+    );
+    value.insert(
+        "last_timestamp".to_string(),
+        serde_json::Value::from(summary.last_timestamp.clone()),
+    );
+    value.insert(
+        "marker_counts".to_string(),
+        serde_json::Value::Object(marker_counts),
+    );
+    value.insert(
+        "marker_last_fields".to_string(),
+        serde_json::Value::Object(marker_last_fields),
+    );
+    value.insert(
+        "facet_counts".to_string(),
+        serde_json::Value::Object(facet_counts),
+    );
+    value.insert(
+        "previous_response_not_found_by_route".to_string(),
+        serde_json::Value::Object(previous_response_not_found_by_route),
+    );
+    value.insert(
+        "previous_response_not_found_by_transport".to_string(),
+        serde_json::Value::Object(previous_response_not_found_by_transport),
+    );
+    value.insert(
+        "last_marker_line".to_string(),
+        serde_json::Value::from(summary.last_marker_line.clone()),
+    );
+    value.insert(
+        "selection_pressure".to_string(),
+        serde_json::Value::from(summary.selection_pressure.clone()),
+    );
+    value.insert(
+        "transport_pressure".to_string(),
+        serde_json::Value::from(summary.transport_pressure.clone()),
+    );
+    value.insert(
+        "persistence_pressure".to_string(),
+        serde_json::Value::from(summary.persistence_pressure.clone()),
+    );
+    value.insert(
+        "quota_freshness_pressure".to_string(),
+        serde_json::Value::from(summary.quota_freshness_pressure.clone()),
+    );
+    value.insert(
+        "startup_audit_pressure".to_string(),
+        serde_json::Value::from(summary.startup_audit_pressure.clone()),
+    );
+    value.insert(
+        "persisted_retry_backoffs".to_string(),
+        serde_json::Value::from(summary.persisted_retry_backoffs),
+    );
+    value.insert(
+        "persisted_transport_backoffs".to_string(),
+        serde_json::Value::from(summary.persisted_transport_backoffs),
+    );
+    value.insert(
+        "persisted_route_circuits".to_string(),
+        serde_json::Value::from(summary.persisted_route_circuits),
+    );
+    value.insert(
+        "persisted_usage_snapshots".to_string(),
+        serde_json::Value::from(summary.persisted_usage_snapshots),
+    );
+    value.insert(
+        "persisted_response_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_response_bindings),
+    );
+    value.insert(
+        "persisted_session_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_session_bindings),
+    );
+    value.insert(
+        "persisted_turn_state_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_turn_state_bindings),
+    );
+    value.insert(
+        "persisted_session_id_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_session_id_bindings),
+    );
+    value.insert(
+        "persisted_verified_continuations".to_string(),
+        serde_json::Value::from(summary.persisted_verified_continuations),
+    );
+    value.insert(
+        "persisted_warm_continuations".to_string(),
+        serde_json::Value::from(summary.persisted_warm_continuations),
+    );
+    value.insert(
+        "persisted_suspect_continuations".to_string(),
+        serde_json::Value::from(summary.persisted_suspect_continuations),
+    );
+    value.insert(
+        "persisted_continuation_journal_response_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_continuation_journal_response_bindings),
+    );
+    value.insert(
+        "persisted_continuation_journal_session_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_continuation_journal_session_bindings),
+    );
+    value.insert(
+        "persisted_continuation_journal_turn_state_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_continuation_journal_turn_state_bindings),
+    );
+    value.insert(
+        "persisted_continuation_journal_session_id_bindings".to_string(),
+        serde_json::Value::from(summary.persisted_continuation_journal_session_id_bindings),
+    );
+    value.insert(
+        "continuation_journal_saved_at".to_string(),
+        serde_json::Value::from(summary.continuation_journal_saved_at),
+    );
+    value.insert(
+        "suspect_continuation_bindings".to_string(),
+        serde_json::Value::from(summary.suspect_continuation_bindings.clone()),
+    );
+    value.insert(
+        "stale_persisted_usage_snapshots".to_string(),
+        serde_json::Value::from(summary.stale_persisted_usage_snapshots),
+    );
+    value.insert(
+        "recovered_state_file".to_string(),
+        serde_json::Value::from(summary.recovered_state_file.clone()),
+    );
+    value.insert(
+        "recovered_continuations_file".to_string(),
+        serde_json::Value::from(summary.recovered_continuations_file.clone()),
+    );
+    value.insert(
+        "recovered_continuation_journal_file".to_string(),
+        serde_json::Value::from(summary.recovered_continuation_journal_file.clone()),
+    );
+    value.insert(
+        "recovered_scores_file".to_string(),
+        serde_json::Value::from(summary.recovered_scores_file.clone()),
+    );
+    value.insert(
+        "recovered_usage_snapshots_file".to_string(),
+        serde_json::Value::from(summary.recovered_usage_snapshots_file.clone()),
+    );
+    value.insert(
+        "recovered_backoffs_file".to_string(),
+        serde_json::Value::from(summary.recovered_backoffs_file.clone()),
+    );
+    value.insert(
+        "last_good_backups_present".to_string(),
+        serde_json::Value::from(summary.last_good_backups_present.clone()),
+    );
+    value.insert(
+        "degraded_routes".to_string(),
+        serde_json::Value::from(summary.degraded_routes.clone()),
+    );
+    value.insert(
+        "orphan_managed_dirs".to_string(),
+        serde_json::Value::from(summary.orphan_managed_dirs.clone()),
+    );
+    value.insert("profiles".to_string(), serde_json::Value::from(profiles));
+    value.insert(
+        "diagnosis".to_string(),
+        serde_json::Value::from(summary.diagnosis.clone()),
+    );
+    serde_json::Value::Object(value)
 }
 
 pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
@@ -219,6 +369,10 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked").to_string(),
         ),
         (
+            "Compact shed".to_string(),
+            runtime_doctor_marker_count(&summary, "compact_pressure_shed").to_string(),
+        ),
+        (
             "Selection picks".to_string(),
             runtime_doctor_marker_count(&summary, "selection_pick").to_string(),
         ),
@@ -247,8 +401,16 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
             runtime_doctor_marker_count(&summary, "state_save_error").to_string(),
         ),
         (
+            "Cont journal err".to_string(),
+            runtime_doctor_marker_count(&summary, "continuation_journal_save_error").to_string(),
+        ),
+        (
             "State save ok".to_string(),
             runtime_doctor_marker_count(&summary, "state_save_ok").to_string(),
+        ),
+        (
+            "Cont journal ok".to_string(),
+            runtime_doctor_marker_count(&summary, "continuation_journal_save_ok").to_string(),
         ),
         (
             "State save skipped".to_string(),
@@ -341,11 +503,35 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
             ),
         ),
         (
+            "Continuation states".to_string(),
+            format!(
+                "verified={} warm={} suspect={}",
+                summary.persisted_verified_continuations,
+                summary.persisted_warm_continuations,
+                summary.persisted_suspect_continuations
+            ),
+        ),
+        (
+            "Continuation journal".to_string(),
+            format!(
+                "responses={} sessions={} turns={} session_ids={} saved_at={}",
+                summary.persisted_continuation_journal_response_bindings,
+                summary.persisted_continuation_journal_session_bindings,
+                summary.persisted_continuation_journal_turn_state_bindings,
+                summary.persisted_continuation_journal_session_id_bindings,
+                summary
+                    .continuation_journal_saved_at
+                    .map(|epoch| format_precise_reset_time(Some(epoch)))
+                    .unwrap_or_else(|| "-".to_string())
+            ),
+        ),
+        (
             "Recovered state".to_string(),
             format!(
-                "state={} continuations={} scores={} usage={} backoffs={} backups={}",
+                "state={} continuations={} journal={} scores={} usage={} backoffs={} backups={}",
                 summary.recovered_state_file,
                 summary.recovered_continuations_file,
+                summary.recovered_continuation_journal_file,
                 summary.recovered_scores_file,
                 summary.recovered_usage_snapshots_file,
                 summary.recovered_backoffs_file,
@@ -366,6 +552,14 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
                 "-".to_string()
             } else {
                 summary.orphan_managed_dirs.join(", ")
+            },
+        ),
+        (
+            "Suspect continuations".to_string(),
+            if summary.suspect_continuation_bindings.is_empty() {
+                "-".to_string()
+            } else {
+                summary.suspect_continuation_bindings.join(", ")
             },
         ),
         (
@@ -538,6 +732,18 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
             value: RuntimeContinuationStore::default(),
             recovered_from_backup: false,
         });
+    let continuation_journal =
+        load_runtime_continuation_journal_with_recovery(paths, &state.value.profiles).unwrap_or(
+            RecoveredLoad {
+                value: RuntimeContinuationJournal::default(),
+                recovered_from_backup: false,
+            },
+        );
+    let merged_continuations = merge_runtime_continuation_store(
+        &continuations.value,
+        &continuation_journal.value.continuations,
+        &state.value.profiles,
+    );
     let backoffs = load_runtime_profile_backoffs_with_recovery(paths, &state.value.profiles)
         .unwrap_or(RecoveredLoad {
             value: RuntimeProfileBackoffs::default(),
@@ -553,6 +759,28 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
     summary.persisted_session_bindings = continuations.value.session_profile_bindings.len();
     summary.persisted_turn_state_bindings = continuations.value.turn_state_bindings.len();
     summary.persisted_session_id_bindings = continuations.value.session_id_bindings.len();
+    summary.persisted_continuation_journal_response_bindings = continuation_journal
+        .value
+        .continuations
+        .response_profile_bindings
+        .len();
+    summary.persisted_continuation_journal_session_bindings = continuation_journal
+        .value
+        .continuations
+        .session_profile_bindings
+        .len();
+    summary.persisted_continuation_journal_turn_state_bindings = continuation_journal
+        .value
+        .continuations
+        .turn_state_bindings
+        .len();
+    summary.persisted_continuation_journal_session_id_bindings = continuation_journal
+        .value
+        .continuations
+        .session_id_bindings
+        .len();
+    summary.continuation_journal_saved_at =
+        (continuation_journal.value.saved_at > 0).then_some(continuation_journal.value.saved_at);
     summary.stale_persisted_usage_snapshots = usage_snapshots
         .value
         .values()
@@ -563,9 +791,11 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
     summary.recovered_scores_file = scores.recovered_from_backup;
     summary.recovered_usage_snapshots_file = usage_snapshots.recovered_from_backup;
     summary.recovered_backoffs_file = backoffs.recovered_from_backup;
+    summary.recovered_continuation_journal_file = continuation_journal.recovered_from_backup;
     summary.last_good_backups_present = [
         state_last_good_file_path(paths),
         runtime_continuations_last_good_file_path(paths),
+        runtime_continuation_journal_last_good_file_path(paths),
         runtime_scores_last_good_file_path(paths),
         runtime_usage_snapshots_last_good_file_path(paths),
         runtime_backoffs_last_good_file_path(paths),
@@ -573,6 +803,30 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
     .into_iter()
     .filter(|path| path.exists())
     .count();
+    for statuses in [
+        &merged_continuations.statuses.response,
+        &merged_continuations.statuses.turn_state,
+        &merged_continuations.statuses.session_id,
+    ] {
+        for (key, status) in statuses {
+            match status.state {
+                RuntimeContinuationBindingLifecycle::Verified => {
+                    summary.persisted_verified_continuations += 1;
+                }
+                RuntimeContinuationBindingLifecycle::Warm => {
+                    summary.persisted_warm_continuations += 1;
+                }
+                RuntimeContinuationBindingLifecycle::Suspect => {
+                    summary.persisted_suspect_continuations += 1;
+                    summary.suspect_continuation_bindings.push(format!(
+                        "{key}:{}",
+                        runtime_continuation_status_label(status)
+                    ));
+                }
+            }
+        }
+    }
+    summary.suspect_continuation_bindings.sort();
     summary.orphan_managed_dirs = orphan_managed_dirs;
     summary.profiles = runtime_doctor_profile_summaries(
         &state.value,
@@ -682,6 +936,7 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         "low".to_string()
     };
     summary.persistence_pressure = if runtime_doctor_marker_count(&summary, "state_save_error") > 0
+        || runtime_doctor_marker_count(&summary, "continuation_journal_save_error") > 0
     {
         "elevated".to_string()
     } else if runtime_doctor_marker_count(&summary, "state_save_skipped") > 0 {
@@ -746,10 +1001,17 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
         } else if runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked") > 0 {
             "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "compact_pressure_shed") > 0 {
+            "Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic.".to_string()
         } else if runtime_doctor_marker_count(&summary, "previous_response_not_found") > 0 {
             format!(
                 "Recent previous_response_id continuity failures were observed: {}.",
                 runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
+            )
+        } else if !summary.suspect_continuation_bindings.is_empty() {
+            format!(
+                "Some persisted continuations are currently suspect: {}.",
+                summary.suspect_continuation_bindings.join(", ")
             )
         } else if runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog") > 0 {
             "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
@@ -932,6 +1194,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "compact_committed_owner",
         "compact_followup_owner",
         "compact_fresh_fallback_blocked",
+        "compact_pressure_shed",
         "compact_lineage_released",
         "selection_pick",
         "selection_skip_current",
@@ -947,6 +1210,8 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "state_save_ok",
         "state_save_skipped",
         "state_save_error",
+        "continuation_journal_save_ok",
+        "continuation_journal_save_error",
         "runtime_proxy_restore_counts",
         "runtime_proxy_startup_audit",
         "profile_probe_refresh_queued",
