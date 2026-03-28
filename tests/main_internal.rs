@@ -24,6 +24,16 @@ mod prodex_impl {
             shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
         }
 
+        fn save_runtime_continuations(
+            paths: &AppPaths,
+            continuations: &RuntimeContinuationStore,
+        ) -> Result<()> {
+            let profiles = AppState::load(paths)
+                .map(|state| state.profiles)
+                .unwrap_or_default();
+            save_runtime_continuations_for_profiles(paths, continuations, &profiles)
+        }
+
         fn select_runtime_response_candidate(
             shared: &RuntimeRotationProxyShared,
             excluded_profiles: &BTreeSet<String>,

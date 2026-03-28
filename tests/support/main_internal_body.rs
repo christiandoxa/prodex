@@ -13609,3 +13609,68 @@ fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
         Some(request_payload.as_str())
     );
 }
+
+#[test]
+fn version_is_newer_compares_semver_like_versions() {
+    assert!(version_is_newer("0.2.47", "0.2.46"));
+    assert!(version_is_newer("1.0.0", "0.9.9"));
+    assert!(!version_is_newer("0.2.46", "0.2.46"));
+    assert!(!version_is_newer("0.2.45", "0.2.46"));
+}
+
+#[test]
+fn update_notice_is_suppressed_for_machine_output_modes() {
+    assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
+        quota: false,
+        runtime: true,
+        json: true,
+    })));
+    assert!(!should_emit_update_notice(&Commands::Quota(QuotaArgs {
+        profile: None,
+        all: false,
+        detail: false,
+        raw: true,
+        watch: false,
+        once: false,
+        base_url: None,
+    })));
+    assert!(should_emit_update_notice(&Commands::Current));
+}
+
+#[test]
+fn update_check_cache_ttl_is_short_when_cached_version_matches_current() {
+    assert_eq!(
+        update_check_cache_ttl_seconds("0.2.47", "0.2.47"),
+        UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS
+    );
+    assert_eq!(
+        update_check_cache_ttl_seconds("0.2.46", "0.2.47"),
+        UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS
+    );
+    assert_eq!(
+        update_check_cache_ttl_seconds("0.2.48", "0.2.47"),
+        UPDATE_CHECK_CACHE_TTL_SECONDS
+    );
+}
+
+#[test]
+fn normalize_run_codex_args_rewrites_session_id_to_resume() {
+    let args = vec![
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("continue from here"),
+    ];
+    assert_eq!(
+        normalize_run_codex_args(&args),
+        vec![
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("continue from here"),
+        ]
+    );
+}
+
+#[test]
+fn normalize_run_codex_args_keeps_regular_prompt_intact() {
+    let args = vec![OsString::from("fix this bug")];
+    assert_eq!(normalize_run_codex_args(&args), args);
+}
