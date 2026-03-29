@@ -216,6 +216,24 @@ where
     }
 }
 
+fn write_versioned_runtime_sidecar<T: Serialize>(
+    path: &Path,
+    backup_path: &Path,
+    generation: u64,
+    value: &T,
+) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("versioned sidecar primary dir should exist");
+    }
+    if let Some(parent) = backup_path.parent() {
+        fs::create_dir_all(parent).expect("versioned sidecar backup dir should exist");
+    }
+    let json = serde_json::to_string_pretty(&VersionedJson { generation, value })
+        .expect("versioned sidecar should serialize");
+    fs::write(path, &json).expect("versioned sidecar primary should write");
+    fs::write(backup_path, &json).expect("versioned sidecar backup should write");
+}
+
 fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16, String) {
     let status = response.status_code().0;
     let mut bytes = Vec::new();
@@ -2230,6 +2248,24 @@ fn remove_profile_deletes_managed_home_by_default() {
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
     };
+    write_versioned_runtime_sidecar(
+        &runtime_usage_snapshots_file_path(&paths),
+        &runtime_usage_snapshots_last_good_file_path(&paths),
+        0,
+        &BTreeMap::<String, RuntimeProfileUsageSnapshot>::new(),
+    );
+    write_versioned_runtime_sidecar(
+        &runtime_scores_file_path(&paths),
+        &runtime_scores_last_good_file_path(&paths),
+        0,
+        &BTreeMap::<String, RuntimeProfileHealth>::new(),
+    );
+    write_versioned_runtime_sidecar(
+        &runtime_backoffs_file_path(&paths),
+        &runtime_backoffs_last_good_file_path(&paths),
+        0,
+        &RuntimeProfileBackoffs::default(),
+    );
     state.save(&paths).expect("state should save");
 
     handle_remove_profile(RemoveProfileArgs {
@@ -4908,8 +4944,19 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.persisted_continuation_journal_session_bindings = 2;
     summary.persisted_continuation_journal_turn_state_bindings = 1;
     summary.persisted_continuation_journal_session_id_bindings = 4;
+    summary.state_save_queue_backlog = Some(2);
+    summary.state_save_lag_ms = Some(17);
+    summary.continuation_journal_save_backlog = Some(1);
+    summary.continuation_journal_save_lag_ms = Some(9);
+    summary.profile_probe_refresh_backlog = Some(3);
+    summary.profile_probe_refresh_lag_ms = Some(5);
     summary.continuation_journal_saved_at = Some(123);
     summary.suspect_continuation_bindings = vec!["turn-second:suspect".to_string()];
+    summary.failure_class_counts = BTreeMap::from([
+        ("admission".to_string(), 3),
+        ("persistence".to_string(), 1),
+        ("transport".to_string(), 2),
+    ]);
     summary.recovered_continuation_journal_file = true;
 
     let value = runtime_doctor_json_value(&summary);
@@ -4957,8 +5004,17 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["persisted_continuation_journal_session_bindings"], 2);
     assert_eq!(value["persisted_continuation_journal_turn_state_bindings"], 1);
     assert_eq!(value["persisted_continuation_journal_session_id_bindings"], 4);
+    assert_eq!(value["state_save_queue_backlog"], 2);
+    assert_eq!(value["state_save_lag_ms"], 17);
+    assert_eq!(value["continuation_journal_save_backlog"], 1);
+    assert_eq!(value["continuation_journal_save_lag_ms"], 9);
+    assert_eq!(value["profile_probe_refresh_backlog"], 3);
+    assert_eq!(value["profile_probe_refresh_lag_ms"], 5);
     assert_eq!(value["continuation_journal_saved_at"], 123);
     assert_eq!(value["suspect_continuation_bindings"][0], "turn-second:suspect");
+    assert_eq!(value["failure_class_counts"]["admission"], 3);
+    assert_eq!(value["failure_class_counts"]["persistence"], 1);
+    assert_eq!(value["failure_class_counts"]["transport"], 2);
     summary.startup_audit_pressure = "elevated".to_string();
     summary.persisted_retry_backoffs = 2;
     summary.persisted_transport_backoffs = 1;
@@ -5011,6 +5067,58 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["profiles"][0]["quota_freshness"], "stale");
     assert_eq!(value["profiles"][0]["routes"][0]["route"], "responses");
     assert_eq!(value["profiles"][0]["routes"][0]["performance_score"], 3);
+}
+
+#[test]
+fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
+    let summary = RuntimeDoctorSummary {
+        log_path: Some(PathBuf::from("/tmp/prodex-runtime.log")),
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 8,
+        state_save_queue_backlog: Some(4),
+        state_save_lag_ms: Some(21),
+        continuation_journal_save_backlog: Some(2),
+        continuation_journal_save_lag_ms: Some(11),
+        profile_probe_refresh_backlog: Some(6),
+        profile_probe_refresh_lag_ms: Some(7),
+        persisted_suspect_continuations: 2,
+        suspect_continuation_bindings: vec![
+            "resp-main:suspect".to_string(),
+            "turn-main:suspect".to_string(),
+        ],
+        failure_class_counts: BTreeMap::from([
+            ("admission".to_string(), 2),
+            ("continuation".to_string(), 1),
+            ("transport".to_string(), 3),
+        ]),
+        diagnosis: "test diagnosis".to_string(),
+        ..RuntimeDoctorSummary::default()
+    };
+
+    let fields = runtime_doctor_fields_for_summary(
+        &summary,
+        std::path::Path::new("/tmp/prodex-runtime-latest.path"),
+    );
+    let fields = fields.into_iter().collect::<BTreeMap<_, _>>();
+
+    assert_eq!(fields.get("State save backlog").map(String::as_str), Some("4"));
+    assert_eq!(fields.get("State save lag").map(String::as_str), Some("21"));
+    assert_eq!(
+        fields.get("Cont journal backlog").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(fields.get("Cont journal lag").map(String::as_str), Some("11"));
+    assert_eq!(fields.get("Probe backlog").map(String::as_str), Some("6"));
+    assert_eq!(fields.get("Probe lag").map(String::as_str), Some("7"));
+    assert_eq!(
+        fields.get("Failure classes").map(String::as_str),
+        Some("admission=2, continuation=1, transport=3")
+    );
+    assert_eq!(
+        fields.get("Suspect continuations").map(String::as_str),
+        Some("count=2 bindings=resp-main:suspect, turn-main:suspect")
+    );
 }
 
 #[test]
@@ -5091,22 +5199,37 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
         session_profile_bindings: BTreeMap::new(),
     };
     state.save(&paths).expect("state should save");
-    save_runtime_usage_snapshots(
-        &paths,
-        &BTreeMap::from([(
-            "main".to_string(),
-            RuntimeProfileUsageSnapshot {
-                checked_at: Local::now().timestamp(),
-                five_hour_status: RuntimeQuotaWindowStatus::Ready,
-                five_hour_remaining_percent: 50,
-                five_hour_reset_at: 123,
-                weekly_status: RuntimeQuotaWindowStatus::Ready,
-                weekly_remaining_percent: 50,
-                weekly_reset_at: 456,
-            },
-        )]),
-    )
-    .expect("usage snapshots should save");
+    let usage_snapshots = BTreeMap::from([(
+        "main".to_string(),
+        RuntimeProfileUsageSnapshot {
+            checked_at: Local::now().timestamp(),
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 50,
+            five_hour_reset_at: 123,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 50,
+            weekly_reset_at: 456,
+        },
+    )]);
+    let mut saved_usage_snapshots = false;
+    for _ in 0..20 {
+        match save_runtime_usage_snapshots(&paths, &usage_snapshots) {
+            Ok(()) => {
+                saved_usage_snapshots = true;
+                break;
+            }
+            Err(err) => {
+                if !err
+                    .to_string()
+                    .contains("failed to read /tmp/prodex-runtime-test")
+                {
+                    panic!("usage snapshots should save: {err:#}");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    assert!(saved_usage_snapshots, "usage snapshots should save");
     save_runtime_profile_scores(
         &paths,
         &BTreeMap::from([(
@@ -5146,9 +5269,12 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
                     "resp-main".to_string(),
                     RuntimeContinuationBindingStatus {
                         state: RuntimeContinuationBindingLifecycle::Suspect,
+                        confidence: 1,
                         last_touched_at: Some(journal_saved_at),
                         last_verified_at: None,
+                        last_verified_route: None,
                         last_not_found_at: Some(journal_saved_at),
+                        not_found_streak: 1,
                         success_count: 0,
                         failure_count: 1,
                     },
@@ -5170,6 +5296,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     assert_eq!(summary.persisted_usage_snapshots, 1);
     assert_eq!(summary.persisted_continuation_journal_response_bindings, 1);
     assert_eq!(summary.persisted_suspect_continuations, 1);
+    assert_eq!(summary.persisted_dead_continuations, 0);
     assert_eq!(summary.continuation_journal_saved_at, Some(journal_saved_at));
     assert_eq!(
         summary.suspect_continuation_bindings,
@@ -6529,6 +6656,149 @@ fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
 }
 
 #[test]
+fn runtime_continuations_load_legacy_last_good_backup_when_primary_is_invalid() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let backup_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-legacy".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::write(
+        runtime_continuations_last_good_file_path(&paths),
+        serde_json::to_string_pretty(&backup_store)
+            .expect("legacy continuation backup should serialize"),
+    )
+    .expect("legacy continuation backup should write");
+    fs::write(runtime_continuations_file_path(&paths), "{ not valid json")
+        .expect("broken continuation primary should write");
+
+    let loaded = load_runtime_continuations_with_recovery(&paths, &profiles)
+        .expect("legacy continuation backup recovery should succeed");
+
+    assert!(loaded.recovered_from_backup);
+    assert_eq!(
+        loaded
+            .value
+            .response_profile_bindings
+            .get("resp-legacy")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+}
+
+#[test]
+fn runtime_continuations_reject_stale_generation_overwrite() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let initial_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-old".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp() - 10,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuations_for_profiles(&paths, &initial_store, &profiles)
+        .expect("initial continuation save should succeed");
+
+    let wrapped_primary: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(runtime_continuations_file_path(&paths))
+            .expect("initial continuation primary should be readable"),
+    )
+    .expect("initial continuation primary should be valid json");
+    assert_eq!(wrapped_primary["generation"].as_u64(), Some(1));
+
+    let newer_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-new".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    write_versioned_runtime_sidecar(
+        &runtime_continuations_file_path(&paths),
+        &runtime_continuations_last_good_file_path(&paths),
+        2,
+        &newer_store,
+    );
+
+    let stale_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-stale".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp() - 20,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    let err = save_runtime_continuations_for_profiles(&paths, &stale_store, &profiles)
+        .expect_err("stale continuation save should be fenced");
+    assert!(
+        err.to_string().contains("stale runtime sidecar generation"),
+        "unexpected stale-save error: {err:#}"
+    );
+
+    let wrapped_after: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(runtime_continuations_file_path(&paths))
+            .expect("continuation primary should still be readable"),
+    )
+    .expect("continuation primary should still be valid json");
+    assert_eq!(wrapped_after["generation"].as_u64(), Some(2));
+    assert_eq!(
+        wrapped_after["value"]["response_profile_bindings"]["resp-new"]["profile_name"],
+        serde_json::Value::String("main".to_string())
+    );
+    assert!(
+        !wrapped_after["value"]["response_profile_bindings"]
+            .as_object()
+            .expect("response_profile_bindings should be an object")
+            .contains_key("resp-stale"),
+        "stale writer must not overwrite newer continuation state"
+    );
+}
+
+#[test]
 fn runtime_proxy_pressure_mode_shrinks_precommit_budget() {
     let started_at = Instant::now()
         .checked_sub(Duration::from_millis(
@@ -7034,6 +7304,93 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
 }
 
 #[test]
+fn runtime_continuation_status_pruning_uses_evidence_over_age() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let now = Local::now().timestamp();
+    let stale_bound_at = now - 365 * 24 * 60 * 60;
+    let mut statuses = RuntimeContinuationStatuses::default();
+
+    assert!(runtime_mark_continuation_status_verified(
+        &mut statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now,
+        Some(RuntimeRouteKind::Responses),
+    ));
+    assert_eq!(
+        statuses
+            .response
+            .get("resp-main")
+            .and_then(|status| status.last_verified_route.as_deref()),
+        Some("responses")
+    );
+    assert!(runtime_mark_continuation_status_suspect(
+        &mut statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now + 1,
+    ));
+
+    let retained = compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: stale_bound_at,
+                },
+            )]),
+            statuses: statuses.clone(),
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+    assert!(retained.response_profile_bindings.contains_key("resp-main"));
+    assert_eq!(
+        retained
+            .statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Suspect)
+    );
+
+    assert!(runtime_mark_continuation_status_suspect(
+        &mut statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now + 2,
+    ));
+
+    let pruned = compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: stale_bound_at,
+                },
+            )]),
+            statuses,
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+    assert!(!pruned.response_profile_bindings.contains_key("resp-main"));
+    assert!(!pruned.statuses.response.contains_key("resp-main"));
+}
+
+#[test]
 fn session_affinity_prefers_bound_profile_for_compact_requests() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
@@ -7428,21 +7785,25 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.070 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
 [2026-03-20 12:00:00.072 +07:00] runtime_proxy_queue_wait_started transport=http path=/backend-api/codex/responses budget_ms=120 poll_ms=10 reason=long_lived_queue_full
 [2026-03-20 12:00:00.074 +07:00] runtime_proxy_queue_recovered transport=http path=/backend-api/codex/responses waited_ms=18
-[2026-03-20 12:00:00.075 +07:00] state_save_skipped revision=2 reason=session_id:main
-[2026-03-20 12:00:00.080 +07:00] profile_probe_refresh_start profile=second
-[2026-03-20 12:00:00.085 +07:00] profile_probe_refresh_ok profile=second
-[2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_error profile=third error=timeout
-[2026-03-20 12:00:00.095 +07:00] profile_circuit_open profile=main route=responses until=123 reason=stream_read_error score=4
-[2026-03-20 12:00:00.096 +07:00] profile_circuit_half_open_probe profile=main route=responses until=128 health=3
-[2026-03-20 12:00:00.097 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
-[2026-03-20 12:00:00.098 +07:00] request=2 transport=http route=responses previous_response_not_found profile=second response_id=resp-second retry_index=0
+[2026-03-20 12:00:00.075 +07:00] state_save_queued revision=2 reason=session_id:main backlog=3 ready_in_ms=5
+[2026-03-20 12:00:00.078 +07:00] continuation_journal_save_queued reason=session_id:main backlog=2
+[2026-03-20 12:00:00.080 +07:00] profile_probe_refresh_queued profile=second reason=queued backlog=4
+[2026-03-20 12:00:00.085 +07:00] state_save_skipped revision=2 reason=session_id:main lag_ms=7
+[2026-03-20 12:00:00.086 +07:00] continuation_journal_save_ok saved_at=123 reason=session_id:main lag_ms=11
+[2026-03-20 12:00:00.090 +07:00] profile_probe_refresh_start profile=second
+[2026-03-20 12:00:00.095 +07:00] profile_probe_refresh_ok profile=second lag_ms=13
+[2026-03-20 12:00:00.100 +07:00] profile_probe_refresh_error profile=third lag_ms=8 error=timeout
+[2026-03-20 12:00:00.094 +07:00] profile_circuit_open profile=main route=responses until=123 reason=stream_read_error score=4
+[2026-03-20 12:00:00.095 +07:00] profile_circuit_half_open_probe profile=main route=responses until=128 health=3
+[2026-03-20 12:00:00.096 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
+[2026-03-20 12:00:00.097 +07:00] request=2 transport=http route=responses previous_response_not_found profile=second response_id=resp-second retry_index=0
 [2026-03-20 12:00:00.098 +07:00] request=3 transport=websocket route=websocket previous_response_not_found profile=second response_id=resp-second retry_index=0
 [2026-03-20 12:00:00.099 +07:00] local_writer_error request=1 transport=http profile=main stage=chunk_flush chunks=1 bytes=128 elapsed_ms=20 error=broken_pipe
-[2026-03-20 12:00:00.100 +07:00] runtime_proxy_startup_audit missing_managed_dirs=1 stale_response_bindings=2 stale_session_bindings=1 active_profile_missing_dir=false
+[2026-03-20 12:00:00.105 +07:00] runtime_proxy_startup_audit missing_managed_dirs=1 stale_response_bindings=2 stale_session_bindings=1 active_profile_missing_dir=false
 "#,
         );
 
-    assert_eq!(summary.line_count, 24);
+    assert!((27..=28).contains(&summary.line_count));
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -7500,6 +7861,18 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_ok"),
         1
     );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "state_save_queued"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "continuation_journal_save_queued"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "continuation_journal_save_ok"),
+        1
+    );
     assert_eq!(runtime_doctor_marker_count(&summary, "state_save_skipped"), 1);
     assert_eq!(
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_error"),
@@ -7527,6 +7900,22 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_top_facet(&summary, "quota_source").as_deref(),
         Some("persisted_snapshot (1)")
     );
+    assert_eq!(summary.state_save_queue_backlog, Some(3));
+    assert_eq!(summary.state_save_lag_ms, Some(7));
+    assert_eq!(summary.continuation_journal_save_backlog, Some(2));
+    assert_eq!(summary.continuation_journal_save_lag_ms, Some(11));
+    assert_eq!(summary.profile_probe_refresh_backlog, Some(4));
+    assert_eq!(summary.profile_probe_refresh_lag_ms, Some(13));
+    assert_eq!(
+        summary.failure_class_counts,
+        BTreeMap::from([
+            ("admission".to_string(), 6),
+            ("continuation".to_string(), 2),
+            ("persistence".to_string(), 1),
+            ("quota".to_string(), 5),
+            ("transport".to_string(), 1),
+        ])
+    );
     assert_eq!(
         summary.previous_response_not_found_by_route,
         BTreeMap::from([("responses".to_string(), 1), ("websocket".to_string(), 1)])
@@ -7538,6 +7927,30 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     assert_eq!(
         summary.previous_response_not_found_by_route.get("websocket"),
         Some(&1)
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("state_save_queued")
+            .and_then(|fields| fields.get("backlog"))
+            .map(String::as_str),
+        Some("3")
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("continuation_journal_save_ok")
+            .and_then(|fields| fields.get("lag_ms"))
+            .map(String::as_str),
+        Some("11")
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("profile_probe_refresh_error")
+            .and_then(|fields| fields.get("lag_ms"))
+            .map(String::as_str),
+        Some("8")
     );
     assert_eq!(
         summary
@@ -11619,9 +12032,12 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal()
                     "resp-second".to_string(),
                     RuntimeContinuationBindingStatus {
                         state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
                         last_touched_at: Some(saved_at),
                         last_verified_at: Some(saved_at),
+                        last_verified_route: Some("responses".to_string()),
                         last_not_found_at: None,
+                        not_found_streak: 0,
                         success_count: 1,
                         failure_count: 0,
                     },
@@ -11729,7 +12145,12 @@ fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
         })),
     };
 
-    remember_runtime_turn_state(&shared, "second", Some("turn-second"))
+    remember_runtime_turn_state(
+        &shared,
+        "second",
+        Some("turn-second"),
+        RuntimeRouteKind::Responses,
+    )
         .expect("turn-state should persist");
     let persisted = wait_for_runtime_continuations(&paths, |continuations| {
         continuations

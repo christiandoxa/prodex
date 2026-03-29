@@ -118,6 +118,9 @@ const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
 const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
+const RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD: usize = 8;
+const RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD: usize = 8;
+const RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD: usize = 16;
 const RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS: i64 = if cfg!(test) { 1 } else { 60 };
 const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
@@ -150,6 +153,11 @@ const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
 const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS: i64 = if cfg!(test) { 5 } else { 180 };
 const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD: u32 = 2;
 const RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS: i64 = if cfg!(test) { 5 } else { 120 };
+const RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT: u32 = 2;
+const RUNTIME_CONTINUATION_CONFIDENCE_MAX: u32 = 8;
+const RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS: u32 = 2;
+const RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS: u32 = 1;
+const RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY: u32 = 1;
 const CLI_WIDTH: usize = 110;
 const CLI_MIN_WIDTH: usize = 60;
 const CLI_LABEL_WIDTH: usize = 16;
@@ -172,6 +180,7 @@ static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock
 static RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE: OnceLock<Arc<RuntimeContinuationJournalSaveQueue>> =
     OnceLock::new();
 static RUNTIME_PROBE_REFRESH_QUEUE: OnceLock<Arc<RuntimeProbeRefreshQueue>> = OnceLock::new();
+static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
 
 fn runtime_proxy_log_dir() -> PathBuf {
     env::var_os("PRODEX_RUNTIME_LOG_DIR")
@@ -367,6 +376,8 @@ fn schedule_runtime_state_save(
     reason: &str,
 ) {
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
+    let queued_at = Instant::now();
+    let ready_at = queued_at + runtime_state_save_debounce(reason);
     let queue = runtime_state_save_queue();
     let mut pending = queue
         .pending
@@ -385,11 +396,32 @@ fn schedule_runtime_state_save(
             latest_revision: Arc::clone(&shared.state_save_revision),
             log_path: shared.log_path.clone(),
             reason: reason.to_string(),
-            ready_at: Instant::now() + runtime_state_save_debounce(reason),
+            queued_at,
+            ready_at,
         },
     );
+    let backlog = pending.len().saturating_sub(1);
     drop(pending);
     queue.wake.notify_one();
+    runtime_proxy_log(
+        shared,
+        format!(
+            "state_save_queued revision={} reason={} backlog={} ready_in_ms={}",
+            revision,
+            reason,
+            backlog,
+            ready_at.saturating_duration_since(queued_at).as_millis()
+        ),
+    );
+    if runtime_proxy_queue_pressure_active(backlog, 0, 0) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "state_save_queue_backpressure revision={} reason={} backlog={backlog}",
+                revision, reason
+            ),
+        );
+    }
     if runtime_state_save_reason_requires_continuation_journal(reason) {
         schedule_runtime_continuation_journal_save(shared, continuations, paths, reason);
     }
@@ -431,6 +463,40 @@ fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
     }))
 }
 
+fn runtime_state_save_queue_backlog() -> usize {
+    runtime_state_save_queue()
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len()
+}
+
+fn runtime_continuation_journal_queue_backlog() -> usize {
+    runtime_continuation_journal_save_queue()
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len()
+}
+
+fn runtime_probe_refresh_queue_backlog() -> usize {
+    runtime_probe_refresh_queue()
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len()
+}
+
+fn runtime_proxy_queue_pressure_active(
+    state_save_backlog: usize,
+    continuation_journal_backlog: usize,
+    probe_refresh_backlog: usize,
+) -> bool {
+    state_save_backlog >= RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD
+        || continuation_journal_backlog >= RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD
+        || probe_refresh_backlog >= RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD
+}
+
 fn schedule_runtime_continuation_journal_save(
     shared: &RuntimeRotationProxyShared,
     continuations: RuntimeContinuationStore,
@@ -451,10 +517,28 @@ fn schedule_runtime_continuation_journal_save(
             log_path: shared.log_path.clone(),
             reason: reason.to_string(),
             saved_at: Local::now().timestamp(),
+            queued_at: Instant::now(),
         },
     );
+    let backlog = pending.len().saturating_sub(1);
     drop(pending);
     queue.wake.notify_one();
+    runtime_proxy_log(
+        shared,
+        format!(
+            "continuation_journal_save_queued reason={} backlog={}",
+            reason, backlog
+        ),
+    );
+    if runtime_proxy_queue_pressure_active(0, backlog, 0) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "continuation_journal_queue_backpressure reason={} backlog={backlog}",
+                reason
+            ),
+        );
+    }
 }
 
 fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
@@ -512,22 +596,28 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
                 Ok(true) => runtime_proxy_log_to_path(
                     &job.log_path,
                     &format!(
-                        "state_save_ok revision={} reason={}",
-                        job.revision, job.reason
+                        "state_save_ok revision={} reason={} lag_ms={}",
+                        job.revision,
+                        job.reason,
+                        job.queued_at.elapsed().as_millis()
                     ),
                 ),
                 Ok(false) => runtime_proxy_log_to_path(
                     &job.log_path,
                     &format!(
-                        "state_save_skipped revision={} reason={}",
-                        job.revision, job.reason
+                        "state_save_skipped revision={} reason={} lag_ms={}",
+                        job.revision,
+                        job.reason,
+                        job.queued_at.elapsed().as_millis()
                     ),
                 ),
                 Err(err) => runtime_proxy_log_to_path(
                     &job.log_path,
                     &format!(
-                        "state_save_error revision={} reason={} stage=write error={err:#}",
-                        job.revision, job.reason
+                        "state_save_error revision={} reason={} lag_ms={} stage=write error={err:#}",
+                        job.revision,
+                        job.reason,
+                        job.queued_at.elapsed().as_millis()
                     ),
                 ),
             }
@@ -556,15 +646,19 @@ fn runtime_continuation_journal_save_worker_loop(queue: Arc<RuntimeContinuationJ
                 Ok(()) => runtime_proxy_log_to_path(
                     &job.log_path,
                     &format!(
-                        "continuation_journal_save_ok saved_at={} reason={}",
-                        job.saved_at, job.reason
+                        "continuation_journal_save_ok saved_at={} reason={} lag_ms={}",
+                        job.saved_at,
+                        job.reason,
+                        job.queued_at.elapsed().as_millis()
                     ),
                 ),
                 Err(err) => runtime_proxy_log_to_path(
                     &job.log_path,
                     &format!(
-                        "continuation_journal_save_error saved_at={} reason={} stage=write error={err:#}",
-                        job.saved_at, job.reason
+                        "continuation_journal_save_error saved_at={} reason={} lag_ms={} stage=write error={err:#}",
+                        job.saved_at,
+                        job.reason,
+                        job.queued_at.elapsed().as_millis()
                     ),
                 ),
             }
@@ -617,6 +711,7 @@ fn schedule_runtime_probe_refresh(
     } else {
         "queued"
     };
+    let queued_at = Instant::now();
     pending.insert(
         (state_file.clone(), profile_name.to_string()),
         RuntimeProbeRefreshJob {
@@ -624,14 +719,24 @@ fn schedule_runtime_probe_refresh(
             profile_name: profile_name.to_string(),
             codex_home: codex_home.to_path_buf(),
             upstream_base_url,
+            queued_at,
         },
     );
+    let backlog = pending.len().saturating_sub(1);
     drop(pending);
     queue.wake.notify_one();
     runtime_proxy_log(
         shared,
-        format!("profile_probe_refresh_queued profile={profile_name} reason={reason}"),
+        format!(
+            "profile_probe_refresh_queued profile={profile_name} reason={reason} backlog={backlog}"
+        ),
     );
+    if runtime_proxy_queue_pressure_active(0, 0, backlog) {
+        runtime_proxy_log(
+            shared,
+            format!("profile_probe_refresh_backpressure profile={profile_name} backlog={backlog}"),
+        );
+    }
 }
 
 fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
@@ -676,13 +781,18 @@ fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
             match result {
                 Ok(_) => runtime_proxy_log(
                     &job.shared,
-                    format!("profile_probe_refresh_ok profile={}", job.profile_name),
+                    format!(
+                        "profile_probe_refresh_ok profile={} lag_ms={}",
+                        job.profile_name,
+                        job.queued_at.elapsed().as_millis()
+                    ),
                 ),
                 Err(err) => runtime_proxy_log(
                     &job.shared,
                     format!(
-                        "profile_probe_refresh_error profile={} error={err}",
-                        job.profile_name
+                        "profile_probe_refresh_error profile={} lag_ms={} error={err}",
+                        job.profile_name,
+                        job.queued_at.elapsed().as_millis()
                     ),
                 ),
             }
@@ -706,7 +816,54 @@ fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
 }
 
 fn state_lock_file_path(state_file: &Path) -> PathBuf {
-    state_file.with_extension("json.lock")
+    json_lock_file_path(state_file)
+}
+
+fn json_lock_file_path(path: &Path) -> PathBuf {
+    path.with_extension("json.lock")
+}
+
+fn acquire_json_file_lock(path: &Path) -> Result<JsonFileLock> {
+    let lock_path = json_lock_file_path(path);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open {}", lock_path.display()))?;
+    file.lock_exclusive()
+        .with_context(|| format!("failed to lock {}", lock_path.display()))?;
+    Ok(JsonFileLock { file })
+}
+
+fn runtime_sidecar_generation_cache() -> &'static Mutex<BTreeMap<PathBuf, u64>> {
+    RUNTIME_SIDECAR_GENERATION_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn runtime_sidecar_cached_generation(path: &Path) -> Option<u64> {
+    runtime_sidecar_generation_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(path)
+        .copied()
+}
+
+fn remember_runtime_sidecar_generation(path: &Path, generation: u64) {
+    runtime_sidecar_generation_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf(), generation);
+}
+
+#[derive(Debug)]
+struct JsonFileLock {
+    file: fs::File,
+}
+
+impl Drop for JsonFileLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 fn merge_last_run_selection(
@@ -754,16 +911,71 @@ fn merge_profile_bindings(
     merged
 }
 
-fn runtime_continuation_status_recency(status: &RuntimeContinuationBindingStatus) -> i64 {
-    [
-        status.last_touched_at,
-        status.last_verified_at,
-        status.last_not_found_at,
-    ]
-    .into_iter()
-    .flatten()
-    .max()
-    .unwrap_or_default()
+fn runtime_continuation_binding_lifecycle_rank(state: RuntimeContinuationBindingLifecycle) -> u8 {
+    match state {
+        RuntimeContinuationBindingLifecycle::Dead => 0,
+        RuntimeContinuationBindingLifecycle::Suspect => 1,
+        RuntimeContinuationBindingLifecycle::Warm => 2,
+        RuntimeContinuationBindingLifecycle::Verified => 3,
+    }
+}
+
+fn runtime_continuation_status_evidence_sort_key(
+    status: &RuntimeContinuationBindingStatus,
+) -> (u8, u32, u32, u32, u8, i64, i64, i64) {
+    (
+        runtime_continuation_binding_lifecycle_rank(status.state),
+        status.confidence.min(RUNTIME_CONTINUATION_CONFIDENCE_MAX),
+        status.success_count,
+        u32::MAX.saturating_sub(status.not_found_streak),
+        if status.last_verified_route.is_some() {
+            1
+        } else {
+            0
+        },
+        status.last_verified_at.unwrap_or(i64::MIN),
+        status.last_touched_at.unwrap_or(i64::MIN),
+        status.last_not_found_at.unwrap_or(i64::MIN),
+    )
+}
+
+fn runtime_continuation_status_is_more_evidenced(
+    candidate: &RuntimeContinuationBindingStatus,
+    current: &RuntimeContinuationBindingStatus,
+) -> bool {
+    runtime_continuation_status_evidence_sort_key(candidate)
+        > runtime_continuation_status_evidence_sort_key(current)
+}
+
+fn runtime_continuation_status_is_terminal(status: &RuntimeContinuationBindingStatus) -> bool {
+    status.state == RuntimeContinuationBindingLifecycle::Dead
+        || status.not_found_streak >= RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT
+        || (status.state == RuntimeContinuationBindingLifecycle::Suspect
+            && status.confidence == 0
+            && status.failure_count > 0)
+}
+
+fn runtime_continuation_status_should_retain(
+    status: &RuntimeContinuationBindingStatus,
+    now: i64,
+) -> bool {
+    match status.state {
+        RuntimeContinuationBindingLifecycle::Dead => false,
+        RuntimeContinuationBindingLifecycle::Verified
+        | RuntimeContinuationBindingLifecycle::Warm => {
+            status.confidence > 0
+                || status.success_count > 0
+                || status.last_verified_at.is_some()
+                || status.last_touched_at.is_some()
+        }
+        RuntimeContinuationBindingLifecycle::Suspect => {
+            status.not_found_streak < RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT
+                && status.confidence > 0
+                && status.last_not_found_at.is_some_and(|last| {
+                    now.saturating_sub(last) < RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
+                })
+        }
+    }
 }
 
 fn merge_runtime_continuation_status_map(
@@ -773,10 +985,9 @@ fn merge_runtime_continuation_status_map(
 ) -> BTreeMap<String, RuntimeContinuationBindingStatus> {
     let mut merged = existing.clone();
     for (key, status) in incoming {
-        let should_replace = merged.get(key).is_none_or(|current| {
-            runtime_continuation_status_recency(current)
-                <= runtime_continuation_status_recency(status)
-        });
+        let should_replace = merged
+            .get(key)
+            .is_none_or(|current| runtime_continuation_status_is_more_evidenced(status, current));
         if should_replace {
             merged.insert(key.clone(), status.clone());
         }
@@ -815,13 +1026,38 @@ fn compact_runtime_continuation_statuses(
     statuses: RuntimeContinuationStatuses,
     continuations: &RuntimeContinuationStore,
 ) -> RuntimeContinuationStatuses {
-    merge_runtime_continuation_statuses(
+    let now = Local::now().timestamp();
+    let mut merged = merge_runtime_continuation_statuses(
         &RuntimeContinuationStatuses::default(),
         &statuses,
         &continuations.response_profile_bindings,
         &continuations.turn_state_bindings,
         &continuations.session_id_bindings,
-    )
+    );
+    merged.response.retain(|key, status| {
+        runtime_continuation_status_should_retain(status, now)
+            && continuations.response_profile_bindings.contains_key(key)
+    });
+    merged.turn_state.retain(|key, status| {
+        runtime_continuation_status_should_retain(status, now)
+            && continuations.turn_state_bindings.contains_key(key)
+    });
+    merged.session_id.retain(|key, status| {
+        runtime_continuation_status_should_retain(status, now)
+            && continuations.session_id_bindings.contains_key(key)
+    });
+    merged
+}
+
+fn runtime_continuation_binding_should_retain(
+    binding: &ResponseProfileBinding,
+    status: Option<&RuntimeContinuationBindingStatus>,
+    now: i64,
+) -> bool {
+    match status {
+        Some(status) => runtime_continuation_status_should_retain(status, now),
+        None => binding.bound_at <= now,
+    }
 }
 
 fn prune_profile_bindings_for_housekeeping(
@@ -993,6 +1229,137 @@ fn last_good_file_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{file_name}{LAST_GOOD_FILE_SUFFIX}"))
 }
 
+fn runtime_sidecar_generation_from_content(content: &str) -> Result<u64> {
+    let value: serde_json::Value =
+        serde_json::from_str(content).context("failed to parse runtime sidecar json")?;
+    Ok(value
+        .get("generation")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0))
+}
+
+fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Path) -> Result<u64> {
+    match fs::read_to_string(path) {
+        Ok(content) => runtime_sidecar_generation_from_content(&content).or_else(|primary_err| {
+            match fs::read_to_string(backup_path) {
+                Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
+                    .with_context(|| {
+                        format!(
+                            "failed to parse {} after primary load error: {primary_err:#}",
+                            backup_path.display()
+                        )
+                    }),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
+                Err(err) => {
+                    Err(err).with_context(|| format!("failed to read {}", backup_path.display()))
+                }
+            }
+        }),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            match fs::read_to_string(backup_path) {
+                Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
+                    .with_context(|| format!("failed to parse {}", backup_path.display())),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
+                Err(err) => {
+                    Err(err).with_context(|| format!("failed to read {}", backup_path.display()))
+                }
+            }
+        }
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn parse_versioned_json_or_raw<T>(content: &str) -> Result<(T, u64)>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    match serde_json::from_str::<VersionedJson<T>>(content) {
+        Ok(versioned) => Ok((versioned.value, versioned.generation)),
+        Err(_) => Ok((serde_json::from_str::<T>(content)?, 0)),
+    }
+}
+
+fn read_versioned_json_file_with_backup<T>(
+    path: &Path,
+    backup_path: &Path,
+) -> Result<RecoveredVersionedLoad<T>>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let primary =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()));
+    match primary.and_then(|content| {
+        parse_versioned_json_or_raw::<T>(&content)
+            .with_context(|| format!("failed to parse {}", path.display()))
+    }) {
+        Ok((value, generation)) => Ok(RecoveredVersionedLoad {
+            value,
+            generation,
+            recovered_from_backup: false,
+        }),
+        Err(primary_err) => {
+            let backup_content = fs::read_to_string(backup_path)
+                .with_context(|| format!("failed to read {}", backup_path.display()))?;
+            let (value, generation) = parse_versioned_json_or_raw::<T>(&backup_content)
+                .with_context(|| {
+                    format!(
+                        "failed to parse {} after primary load error: {primary_err:#}",
+                        backup_path.display()
+                    )
+                })?;
+            Ok(RecoveredVersionedLoad {
+                value,
+                generation,
+                recovered_from_backup: true,
+            })
+        }
+    }
+}
+
+fn write_versioned_json_file_with_backup<T>(
+    path: &Path,
+    backup_path: &Path,
+    generation: u64,
+    value: &T,
+) -> Result<()>
+where
+    T: Serialize + for<'de> Deserialize<'de>,
+{
+    let json = serde_json::to_string_pretty(&VersionedJson { generation, value })
+        .context("failed to serialize runtime sidecar")?;
+    write_json_file_with_backup(path, backup_path, &json, |content| {
+        let _: VersionedJson<T> =
+            serde_json::from_str(content).context("failed to validate runtime sidecar")?;
+        Ok(())
+    })
+}
+
+fn save_versioned_json_file_with_fence<T>(path: &Path, backup_path: &Path, value: &T) -> Result<()>
+where
+    T: Serialize + for<'de> Deserialize<'de>,
+{
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let _lock = acquire_json_file_lock(path)?;
+    let expected_generation = runtime_sidecar_cached_generation(path)
+        .unwrap_or_else(|| runtime_sidecar_generation_from_disk(path, backup_path).unwrap_or(0));
+    let current_generation = runtime_sidecar_generation_from_disk(path, backup_path)?;
+    if current_generation != expected_generation {
+        bail!(
+            "stale runtime sidecar generation for {} expected={} current={}",
+            path.display(),
+            expected_generation,
+            current_generation
+        );
+    }
+    let next_generation = current_generation.saturating_add(1);
+    write_versioned_json_file_with_backup(path, backup_path, next_generation, value)?;
+    remember_runtime_sidecar_generation(path, next_generation);
+    Ok(())
+}
+
 fn write_json_file_with_backup(
     path: &Path,
     backup_path: &Path,
@@ -1112,6 +1479,10 @@ fn compact_runtime_continuation_store(
     mut continuations: RuntimeContinuationStore,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> RuntimeContinuationStore {
+    let now = Local::now().timestamp();
+    let response_statuses = continuations.statuses.response.clone();
+    let turn_state_statuses = continuations.statuses.turn_state.clone();
+    let session_id_statuses = continuations.statuses.session_id.clone();
     prune_profile_bindings_for_housekeeping_without_retention(
         &mut continuations.response_profile_bindings,
         profiles,
@@ -1128,6 +1499,22 @@ fn compact_runtime_continuation_store(
         &mut continuations.session_id_bindings,
         profiles,
     );
+    continuations
+        .response_profile_bindings
+        .retain(|key, binding| {
+            runtime_continuation_binding_should_retain(binding, response_statuses.get(key), now)
+        });
+    continuations.turn_state_bindings.retain(|key, binding| {
+        runtime_continuation_binding_should_retain(binding, turn_state_statuses.get(key), now)
+    });
+    continuations
+        .session_profile_bindings
+        .retain(|key, binding| {
+            runtime_continuation_binding_should_retain(binding, session_id_statuses.get(key), now)
+        });
+    continuations.session_id_bindings.retain(|key, binding| {
+        runtime_continuation_binding_should_retain(binding, session_id_statuses.get(key), now)
+    });
     prune_profile_bindings(
         &mut continuations.turn_state_bindings,
         TURN_STATE_PROFILE_BINDING_LIMIT,
@@ -1207,10 +1594,11 @@ fn load_runtime_continuations_with_recovery(
             recovered_from_backup: false,
         });
     }
-    let loaded = load_json_file_with_backup::<RuntimeContinuationStore>(
+    let loaded = read_versioned_json_file_with_backup::<RuntimeContinuationStore>(
         &path,
         &runtime_continuations_last_good_file_path(paths),
     )?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
     Ok(RecoveredLoad {
         value: compact_runtime_continuation_store(loaded.value, profiles),
         recovered_from_backup: loaded.recovered_from_backup,
@@ -1227,17 +1615,10 @@ fn save_runtime_continuations_for_profiles(
     }
     let path = runtime_continuations_file_path(paths);
     let compacted = compact_runtime_continuation_store(continuations.clone(), profiles);
-    let json = serde_json::to_string_pretty(&compacted)
-        .context("failed to serialize runtime continuations")?;
-    write_json_file_with_backup(
+    save_versioned_json_file_with_fence(
         &path,
         &runtime_continuations_last_good_file_path(paths),
-        &json,
-        |content| {
-            let _: RuntimeContinuationStore = serde_json::from_str(content)
-                .context("failed to validate runtime continuations")?;
-            Ok(())
-        },
+        &compacted,
     )?;
     Ok(())
 }
@@ -1253,10 +1634,11 @@ fn load_runtime_continuation_journal_with_recovery(
             recovered_from_backup: false,
         });
     }
-    let loaded = load_json_file_with_backup::<RuntimeContinuationJournal>(
+    let loaded = read_versioned_json_file_with_backup::<RuntimeContinuationJournal>(
         &path,
         &runtime_continuation_journal_last_good_file_path(paths),
     )?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
     Ok(RecoveredLoad {
         value: RuntimeContinuationJournal {
             saved_at: loaded.value.saved_at,
@@ -1278,17 +1660,10 @@ fn save_runtime_continuation_journal(
         saved_at,
         continuations: compact_runtime_continuation_store(continuations.clone(), &profiles),
     };
-    let json = serde_json::to_string_pretty(&journal)
-        .context("failed to serialize runtime continuation journal")?;
-    write_json_file_with_backup(
+    save_versioned_json_file_with_fence(
         &runtime_continuation_journal_file_path(paths),
         &runtime_continuation_journal_last_good_file_path(paths),
-        &json,
-        |content| {
-            let _: RuntimeContinuationJournal = serde_json::from_str(content)
-                .context("failed to validate runtime continuation journal")?;
-            Ok(())
-        },
+        &journal,
     )?;
     Ok(())
 }
@@ -1324,11 +1699,12 @@ fn load_runtime_profile_scores(
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
-    let scores = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
+    let loaded = read_versioned_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
         &path,
         &runtime_scores_last_good_file_path(paths),
-    )?
-    .value;
+    )?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
+    let scores = loaded.value;
     Ok(compact_runtime_profile_scores(
         scores,
         profiles,
@@ -1347,10 +1723,11 @@ fn load_runtime_profile_scores_with_recovery(
             recovered_from_backup: false,
         });
     }
-    let loaded = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
+    let loaded = read_versioned_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
         &path,
         &runtime_scores_last_good_file_path(paths),
     )?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
     Ok(RecoveredLoad {
         value: compact_runtime_profile_scores(loaded.value, profiles, Local::now().timestamp()),
         recovered_from_backup: loaded.recovered_from_backup,
@@ -1367,17 +1744,10 @@ fn save_runtime_profile_scores(
         .unwrap_or_default();
     let compacted =
         compact_runtime_profile_scores(scores.clone(), &profiles, Local::now().timestamp());
-    let json =
-        serde_json::to_string_pretty(&compacted).context("failed to serialize runtime scores")?;
-    write_json_file_with_backup(
+    save_versioned_json_file_with_fence(
         &path,
         &runtime_scores_last_good_file_path(paths),
-        &json,
-        |content| {
-            let _: BTreeMap<String, RuntimeProfileHealth> =
-                serde_json::from_str(content).context("failed to validate runtime scores")?;
-            Ok(())
-        },
+        &compacted,
     )?;
     Ok(())
 }
@@ -1407,11 +1777,11 @@ fn load_runtime_usage_snapshots(
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
-    let snapshots = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileUsageSnapshot>>(
-        &path,
-        &runtime_usage_snapshots_last_good_file_path(paths),
-    )?
-    .value;
+    let loaded = read_versioned_json_file_with_backup::<
+        BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    >(&path, &runtime_usage_snapshots_last_good_file_path(paths))?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
+    let snapshots = loaded.value;
     Ok(compact_runtime_usage_snapshots(
         snapshots,
         profiles,
@@ -1430,10 +1800,10 @@ fn load_runtime_usage_snapshots_with_recovery(
             recovered_from_backup: false,
         });
     }
-    let loaded = load_json_file_with_backup::<BTreeMap<String, RuntimeProfileUsageSnapshot>>(
-        &path,
-        &runtime_usage_snapshots_last_good_file_path(paths),
-    )?;
+    let loaded = read_versioned_json_file_with_backup::<
+        BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    >(&path, &runtime_usage_snapshots_last_good_file_path(paths))?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
     Ok(RecoveredLoad {
         value: compact_runtime_usage_snapshots(loaded.value, profiles, Local::now().timestamp()),
         recovered_from_backup: loaded.recovered_from_backup,
@@ -1450,17 +1820,10 @@ fn save_runtime_usage_snapshots(
         .unwrap_or_default();
     let compacted =
         compact_runtime_usage_snapshots(snapshots.clone(), &profiles, Local::now().timestamp());
-    let json = serde_json::to_string_pretty(&compacted)
-        .context("failed to serialize runtime usage snapshots")?;
-    write_json_file_with_backup(
+    save_versioned_json_file_with_fence(
         &path,
         &runtime_usage_snapshots_last_good_file_path(paths),
-        &json,
-        |content| {
-            let _: BTreeMap<String, RuntimeProfileUsageSnapshot> = serde_json::from_str(content)
-                .context("failed to validate runtime usage snapshots")?;
-            Ok(())
-        },
+        &compacted,
     )?;
     Ok(())
 }
@@ -1517,11 +1880,12 @@ fn load_runtime_profile_backoffs(
     if !path.exists() {
         return Ok(RuntimeProfileBackoffs::default());
     }
-    let backoffs = load_json_file_with_backup::<RuntimeProfileBackoffs>(
+    let loaded = read_versioned_json_file_with_backup::<RuntimeProfileBackoffs>(
         &path,
         &runtime_backoffs_last_good_file_path(paths),
-    )?
-    .value;
+    )?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
+    let backoffs = loaded.value;
     Ok(compact_runtime_profile_backoffs(
         backoffs,
         profiles,
@@ -1540,10 +1904,11 @@ fn load_runtime_profile_backoffs_with_recovery(
             recovered_from_backup: false,
         });
     }
-    let loaded = load_json_file_with_backup::<RuntimeProfileBackoffs>(
+    let loaded = read_versioned_json_file_with_backup::<RuntimeProfileBackoffs>(
         &path,
         &runtime_backoffs_last_good_file_path(paths),
     )?;
+    remember_runtime_sidecar_generation(&path, loaded.generation);
     Ok(RecoveredLoad {
         value: compact_runtime_profile_backoffs(loaded.value, profiles, Local::now().timestamp()),
         recovered_from_backup: loaded.recovered_from_backup,
@@ -1560,17 +1925,10 @@ fn save_runtime_profile_backoffs(
         .unwrap_or_default();
     let compacted =
         compact_runtime_profile_backoffs(backoffs.clone(), &profiles, Local::now().timestamp());
-    let json =
-        serde_json::to_string_pretty(&compacted).context("failed to serialize runtime backoffs")?;
-    write_json_file_with_backup(
+    save_versioned_json_file_with_fence(
         &path,
         &runtime_backoffs_last_good_file_path(paths),
-        &json,
-        |content| {
-            let _: RuntimeProfileBackoffs =
-                serde_json::from_str(content).context("failed to validate runtime backoffs")?;
-            Ok(())
-        },
+        &compacted,
     )?;
     Ok(())
 }
@@ -1949,6 +2307,20 @@ struct RecoveredLoad<T> {
 }
 
 #[derive(Debug, Clone)]
+struct RecoveredVersionedLoad<T> {
+    value: T,
+    generation: u64,
+    recovered_from_backup: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VersionedJson<T> {
+    #[serde(default)]
+    generation: u64,
+    value: T,
+}
+
+#[derive(Debug, Clone)]
 struct RuntimeRotationProxyShared {
     async_client: reqwest::Client,
     async_runtime: Arc<TokioRuntime>,
@@ -1986,6 +2358,7 @@ struct RuntimeStateSaveJob {
     latest_revision: Arc<AtomicU64>,
     log_path: PathBuf,
     reason: String,
+    queued_at: Instant,
     ready_at: Instant,
 }
 
@@ -1996,6 +2369,7 @@ struct RuntimeContinuationJournalSaveJob {
     log_path: PathBuf,
     reason: String,
     saved_at: i64,
+    queued_at: Instant,
 }
 
 #[derive(Debug)]
@@ -2010,6 +2384,7 @@ struct RuntimeProbeRefreshJob {
     profile_name: String,
     codex_home: PathBuf,
     upstream_base_url: String,
+    queued_at: Instant,
 }
 
 struct StateFileLock {
@@ -2104,6 +2479,7 @@ enum RuntimeContinuationBindingLifecycle {
     Warm,
     Verified,
     Suspect,
+    Dead,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -2111,11 +2487,17 @@ struct RuntimeContinuationBindingStatus {
     #[serde(default)]
     state: RuntimeContinuationBindingLifecycle,
     #[serde(default)]
+    confidence: u32,
+    #[serde(default)]
     last_touched_at: Option<i64>,
     #[serde(default)]
     last_verified_at: Option<i64>,
     #[serde(default)]
+    last_verified_route: Option<String>,
+    #[serde(default)]
     last_not_found_at: Option<i64>,
+    #[serde(default)]
+    not_found_streak: u32,
     #[serde(default)]
     success_count: u32,
     #[serde(default)]
@@ -2173,12 +2555,20 @@ struct RuntimeDoctorSummary {
     persisted_verified_continuations: usize,
     persisted_warm_continuations: usize,
     persisted_suspect_continuations: usize,
+    persisted_dead_continuations: usize,
     persisted_continuation_journal_response_bindings: usize,
     persisted_continuation_journal_session_bindings: usize,
     persisted_continuation_journal_turn_state_bindings: usize,
     persisted_continuation_journal_session_id_bindings: usize,
+    state_save_queue_backlog: Option<usize>,
+    state_save_lag_ms: Option<u64>,
+    continuation_journal_save_backlog: Option<usize>,
+    continuation_journal_save_lag_ms: Option<u64>,
+    profile_probe_refresh_backlog: Option<usize>,
+    profile_probe_refresh_lag_ms: Option<u64>,
     continuation_journal_saved_at: Option<i64>,
     suspect_continuation_bindings: Vec<String>,
+    failure_class_counts: BTreeMap<String, usize>,
     stale_persisted_usage_snapshots: usize,
     recovered_state_file: bool,
     recovered_scores_file: bool,
@@ -3430,6 +3820,11 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
 fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxyShared) -> bool {
     let now = Local::now().timestamp().max(0) as u64;
     shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
+        || runtime_proxy_queue_pressure_active(
+            runtime_state_save_queue_backlog(),
+            runtime_continuation_journal_queue_backlog(),
+            runtime_probe_refresh_queue_backlog(),
+        )
 }
 
 fn runtime_proxy_should_shed_fresh_compact_request(
@@ -4137,12 +4532,23 @@ fn runtime_continuation_status_touches(
 ) -> bool {
     let previous = status.clone();
     status.last_touched_at = Some(now);
-    if status.state == RuntimeContinuationBindingLifecycle::Suspect
-        && status.last_not_found_at.is_some_and(|last| {
+    if status.state == RuntimeContinuationBindingLifecycle::Suspect {
+        if status.last_not_found_at.is_some_and(|last| {
             now.saturating_sub(last) >= RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
-        })
-    {
-        status.state = RuntimeContinuationBindingLifecycle::Warm;
+        }) {
+            status.state = RuntimeContinuationBindingLifecycle::Warm;
+            status.not_found_streak = 0;
+            status.last_not_found_at = None;
+        }
+        status.confidence = status
+            .confidence
+            .saturating_add(RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS)
+            .min(RUNTIME_CONTINUATION_CONFIDENCE_MAX);
+    } else if status.state != RuntimeContinuationBindingLifecycle::Dead {
+        status.confidence = status
+            .confidence
+            .saturating_add(RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS)
+            .min(RUNTIME_CONTINUATION_CONFIDENCE_MAX);
     }
     *status != previous
 }
@@ -4164,6 +4570,7 @@ fn runtime_mark_continuation_status_verified(
     kind: RuntimeContinuationBindingKind,
     key: &str,
     now: i64,
+    verified_route: Option<RuntimeRouteKind>,
 ) -> bool {
     let status = runtime_continuation_status_map_mut(statuses, kind)
         .entry(key.to_string())
@@ -4172,9 +4579,16 @@ fn runtime_mark_continuation_status_verified(
     status.state = RuntimeContinuationBindingLifecycle::Verified;
     status.last_touched_at = Some(now);
     status.last_verified_at = Some(now);
+    status.last_verified_route =
+        verified_route.map(|route_kind| runtime_route_kind_label(route_kind).to_string());
     status.last_not_found_at = None;
+    status.not_found_streak = 0;
     status.success_count = status.success_count.saturating_add(1);
     status.failure_count = 0;
+    status.confidence = status
+        .confidence
+        .saturating_add(RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS)
+        .min(RUNTIME_CONTINUATION_CONFIDENCE_MAX);
     *status != previous
 }
 
@@ -4188,10 +4602,24 @@ fn runtime_mark_continuation_status_suspect(
         .entry(key.to_string())
         .or_default();
     let previous = status.clone();
-    status.state = RuntimeContinuationBindingLifecycle::Suspect;
+    status.not_found_streak = status.not_found_streak.saturating_add(1);
     status.last_touched_at = Some(now);
     status.last_not_found_at = Some(now);
     status.failure_count = status.failure_count.saturating_add(1);
+    let previous_confidence = status.confidence;
+    status.confidence = status
+        .confidence
+        .saturating_sub(RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY);
+    if previous_confidence == 0 {
+        status.confidence = 1;
+    }
+    status.state = if status.not_found_streak >= RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT
+        || (previous_confidence > 0 && status.confidence == 0)
+    {
+        RuntimeContinuationBindingLifecycle::Dead
+    } else {
+        RuntimeContinuationBindingLifecycle::Suspect
+    };
     *status != previous
 }
 
@@ -4215,6 +4643,7 @@ fn runtime_continuation_status_recently_suspect(
         .get(key)
         .is_some_and(|status| {
             status.state == RuntimeContinuationBindingLifecycle::Suspect
+                && !runtime_continuation_status_is_terminal(status)
                 && status.last_not_found_at.is_some_and(|last| {
                     now.saturating_sub(last) < RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
                 })
@@ -4226,6 +4655,7 @@ fn runtime_continuation_status_label(status: &RuntimeContinuationBindingStatus) 
         RuntimeContinuationBindingLifecycle::Warm => "warm",
         RuntimeContinuationBindingLifecycle::Verified => "verified",
         RuntimeContinuationBindingLifecycle::Suspect => "suspect",
+        RuntimeContinuationBindingLifecycle::Dead => "dead",
     }
 }
 
@@ -4277,7 +4707,24 @@ fn runtime_touch_compact_lineage_binding(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_suspect key={key}",
+                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_recent_suspect key={key}",
+                if session_binding {
+                    "compact_session"
+                } else {
+                    "compact_turn_state"
+                }
+            ),
+        );
+        return None;
+    }
+    if runtime_continuation_status_map(&runtime.continuation_statuses, status_kind)
+        .get(key)
+        .is_some_and(runtime_continuation_status_is_terminal)
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_dead key={key}",
                 if session_binding {
                     "compact_session"
                 } else {
@@ -4465,12 +4912,6 @@ fn note_runtime_previous_response_not_found(
             score: next_failures,
             updated_at: now,
         },
-    );
-    let _ = runtime_mark_continuation_status_suspect(
-        &mut runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::Response,
-        previous_response_id,
-        now,
     );
     let _ = runtime_mark_continuation_status_suspect(
         &mut runtime.continuation_statuses,
@@ -4744,6 +5185,7 @@ fn remember_runtime_turn_state(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state: Option<&str>,
+    verified_route: RuntimeRouteKind,
 ) -> Result<()> {
     let Some(turn_state) = turn_state.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(());
@@ -4774,6 +5216,7 @@ fn remember_runtime_turn_state(
         RuntimeContinuationBindingKind::TurnState,
         turn_state,
         bound_at,
+        Some(verified_route),
     ) || changed;
     if changed {
         prune_profile_bindings(
@@ -4811,6 +5254,7 @@ fn remember_runtime_session_id(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     session_id: Option<&str>,
+    verified_route: RuntimeRouteKind,
 ) -> Result<()> {
     let Some(session_id) = session_id.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(());
@@ -4845,6 +5289,7 @@ fn remember_runtime_session_id(
         RuntimeContinuationBindingKind::SessionId,
         session_id,
         bound_at,
+        Some(verified_route),
     ) || changed;
     if changed {
         prune_profile_bindings(
@@ -4887,6 +5332,7 @@ fn remember_runtime_compact_lineage(
     profile_name: &str,
     session_id: Option<&str>,
     turn_state: Option<&str>,
+    verified_route: RuntimeRouteKind,
 ) -> Result<()> {
     let session_id = session_id.map(str::trim).filter(|value| !value.is_empty());
     let turn_state = turn_state.map(str::trim).filter(|value| !value.is_empty());
@@ -4921,6 +5367,7 @@ fn remember_runtime_compact_lineage(
             RuntimeContinuationBindingKind::SessionId,
             &key,
             bound_at,
+            Some(verified_route),
         ) || changed;
     }
 
@@ -4944,6 +5391,7 @@ fn remember_runtime_compact_lineage(
             RuntimeContinuationBindingKind::TurnState,
             &key,
             bound_at,
+            Some(verified_route),
         ) || changed;
     }
 
@@ -5068,6 +5516,7 @@ fn remember_runtime_response_ids(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     response_ids: &[String],
+    verified_route: RuntimeRouteKind,
 ) -> Result<()> {
     if response_ids.is_empty() {
         return Ok(());
@@ -5103,6 +5552,7 @@ fn remember_runtime_response_ids(
             RuntimeContinuationBindingKind::Response,
             response_id,
             bound_at,
+            Some(verified_route),
         ) || changed;
     }
     if changed {
@@ -7152,7 +7602,12 @@ fn attempt_runtime_websocket_request(
                     .context("failed to restore runtime websocket idle timeout")?;
                 }
                 if let Some(turn_state) = extract_runtime_turn_state_from_payload(text.as_ref()) {
-                    remember_runtime_turn_state(shared, profile_name, Some(turn_state.as_str()))?;
+                    remember_runtime_turn_state(
+                        shared,
+                        profile_name,
+                        Some(turn_state.as_str()),
+                        RuntimeRouteKind::Websocket,
+                    )?;
                     upstream_turn_state = Some(turn_state);
                 }
                 match runtime_proxy_websocket_retry_action(text.as_ref()) {
@@ -7183,11 +7638,13 @@ fn attempt_runtime_websocket_request(
                         shared,
                         profile_name,
                         request_session_id.as_deref(),
+                        RuntimeRouteKind::Websocket,
                     )?;
                     remember_runtime_turn_state(
                         shared,
                         profile_name,
                         upstream_turn_state.as_deref(),
+                        RuntimeRouteKind::Websocket,
                     )?;
                     commit_runtime_proxy_profile_selection_with_notice(
                         shared,
@@ -7203,7 +7660,12 @@ fn attempt_runtime_websocket_request(
                     committed = true;
                 }
                 let response_ids = extract_runtime_response_ids_from_payload(text.as_ref());
-                remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+                remember_runtime_response_ids(
+                    shared,
+                    profile_name,
+                    &response_ids,
+                    RuntimeRouteKind::Websocket,
+                )?;
                 if !response_ids.is_empty() {
                     let _ = release_runtime_compact_lineage(
                         shared,
@@ -7249,11 +7711,13 @@ fn attempt_runtime_websocket_request(
                         shared,
                         profile_name,
                         request_session_id.as_deref(),
+                        RuntimeRouteKind::Websocket,
                     )?;
                     remember_runtime_turn_state(
                         shared,
                         profile_name,
                         upstream_turn_state.as_deref(),
+                        RuntimeRouteKind::Websocket,
                     )?;
                     commit_runtime_proxy_profile_selection_with_notice(
                         shared,
@@ -8081,6 +8545,7 @@ fn proxy_runtime_standard_request_for_profile(
         shared,
         profile_name,
         runtime_request_session_id(request).as_deref(),
+        RuntimeRouteKind::Standard,
     )?;
     if request.path_and_query.ends_with("/backend-api/wham/usage") {
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
@@ -8164,13 +8629,23 @@ fn attempt_runtime_standard_request(
                 );
                 err
             })?;
-        remember_runtime_session_id(shared, profile_name, request_session_id.as_deref())?;
+        remember_runtime_session_id(
+            shared,
+            profile_name,
+            request_session_id.as_deref(),
+            if is_runtime_compact_path(&request.path_and_query) {
+                RuntimeRouteKind::Compact
+            } else {
+                RuntimeRouteKind::Standard
+            },
+        )?;
         if is_runtime_compact_path(&request.path_and_query) {
             remember_runtime_compact_lineage(
                 shared,
                 profile_name,
                 request_session_id.as_deref(),
                 response_turn_state.as_deref(),
+                RuntimeRouteKind::Compact,
             )?;
             runtime_proxy_log(
                 shared,
@@ -11271,8 +11746,18 @@ fn prepare_runtime_proxy_responses_success(
     inflight_guard: RuntimeProfileInFlightGuard,
 ) -> Result<RuntimeResponsesAttempt> {
     let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
-    remember_runtime_session_id(shared, profile_name, request_session_id)?;
-    remember_runtime_turn_state(shared, profile_name, turn_state.as_deref())?;
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        request_session_id,
+        RuntimeRouteKind::Responses,
+    )?;
+    remember_runtime_turn_state(
+        shared,
+        profile_name,
+        turn_state.as_deref(),
+        RuntimeRouteKind::Responses,
+    )?;
     let is_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -11289,7 +11774,12 @@ fn prepare_runtime_proxy_responses_success(
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
         let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
         if !response_ids.is_empty() {
-            remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+            remember_runtime_response_ids(
+                shared,
+                profile_name,
+                &response_ids,
+                RuntimeRouteKind::Responses,
+            )?;
             let _ = release_runtime_compact_lineage(
                 shared,
                 profile_name,
@@ -11386,7 +11876,12 @@ fn prepare_runtime_proxy_responses_success(
             });
         }
     };
-    remember_runtime_response_ids(shared, profile_name, &response_ids)?;
+    remember_runtime_response_ids(
+        shared,
+        profile_name,
+        &response_ids,
+        RuntimeRouteKind::Responses,
+    )?;
     if !response_ids.is_empty() {
         let _ = release_runtime_compact_lineage(
             shared,
@@ -11429,7 +11924,7 @@ impl RuntimeSseTapState {
             let line_text = String::from_utf8_lossy(&self.line);
             let trimmed = line_text.trim_end_matches(['\r', '\n']);
             if trimmed.is_empty() {
-                self.remember_response_ids(shared, profile_name);
+                self.remember_response_ids(shared, profile_name, RuntimeRouteKind::Responses);
                 self.data_lines.clear();
                 self.line.clear();
                 continue;
@@ -11443,10 +11938,15 @@ impl RuntimeSseTapState {
     }
 
     fn finish(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
-        self.remember_response_ids(shared, profile_name);
+        self.remember_response_ids(shared, profile_name, RuntimeRouteKind::Responses);
     }
 
-    fn remember_response_ids(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
+    fn remember_response_ids(
+        &mut self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        verified_route: RuntimeRouteKind,
+    ) {
         let fresh_ids = extract_runtime_response_ids_from_sse(&self.data_lines)
             .into_iter()
             .filter(|response_id| self.remembered_response_ids.insert(response_id.clone()))
@@ -11454,7 +11954,7 @@ impl RuntimeSseTapState {
         if fresh_ids.is_empty() {
             return;
         }
-        let _ = remember_runtime_response_ids(shared, profile_name, &fresh_ids);
+        let _ = remember_runtime_response_ids(shared, profile_name, &fresh_ids, verified_route);
     }
 }
 

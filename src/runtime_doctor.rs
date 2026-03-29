@@ -190,6 +190,10 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
         serde_json::Value::from(summary.persisted_suspect_continuations),
     );
     value.insert(
+        "persisted_dead_continuations".to_string(),
+        serde_json::Value::from(summary.persisted_dead_continuations),
+    );
+    value.insert(
         "persisted_continuation_journal_response_bindings".to_string(),
         serde_json::Value::from(summary.persisted_continuation_journal_response_bindings),
     );
@@ -204,6 +208,30 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
     value.insert(
         "persisted_continuation_journal_session_id_bindings".to_string(),
         serde_json::Value::from(summary.persisted_continuation_journal_session_id_bindings),
+    );
+    value.insert(
+        "state_save_queue_backlog".to_string(),
+        serde_json::Value::from(summary.state_save_queue_backlog),
+    );
+    value.insert(
+        "state_save_lag_ms".to_string(),
+        serde_json::Value::from(summary.state_save_lag_ms),
+    );
+    value.insert(
+        "continuation_journal_save_backlog".to_string(),
+        serde_json::Value::from(summary.continuation_journal_save_backlog),
+    );
+    value.insert(
+        "continuation_journal_save_lag_ms".to_string(),
+        serde_json::Value::from(summary.continuation_journal_save_lag_ms),
+    );
+    value.insert(
+        "profile_probe_refresh_backlog".to_string(),
+        serde_json::Value::from(summary.profile_probe_refresh_backlog),
+    );
+    value.insert(
+        "profile_probe_refresh_lag_ms".to_string(),
+        serde_json::Value::from(summary.profile_probe_refresh_lag_ms),
     );
     value.insert(
         "continuation_journal_saved_at".to_string(),
@@ -253,6 +281,16 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
         "orphan_managed_dirs".to_string(),
         serde_json::Value::from(summary.orphan_managed_dirs.clone()),
     );
+    value.insert(
+        "failure_class_counts".to_string(),
+        serde_json::Value::from(
+            summary
+                .failure_class_counts
+                .iter()
+                .map(|(class, count)| (class.clone(), serde_json::Value::from(*count)))
+                .collect::<serde_json::Map<String, serde_json::Value>>(),
+        ),
+    );
     value.insert("profiles".to_string(), serde_json::Value::from(profiles));
     value.insert(
         "diagnosis".to_string(),
@@ -264,6 +302,13 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
 pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
     let pointer_path = runtime_proxy_latest_log_pointer_path();
     let summary = collect_runtime_doctor_summary();
+    runtime_doctor_fields_for_summary(&summary, &pointer_path)
+}
+
+pub(crate) fn runtime_doctor_fields_for_summary(
+    summary: &RuntimeDoctorSummary,
+    pointer_path: &Path,
+) -> Vec<(String, String)> {
     let latest_log = summary
         .log_path
         .as_ref()
@@ -279,6 +324,25 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
             )
         })
         .unwrap_or_else(|| "-".to_string());
+    let format_usize = |value: Option<usize>| {
+        value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    };
+    let format_u64 = |value: Option<u64>| {
+        value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    };
+    let suspect_continuations = if summary.suspect_continuation_bindings.is_empty() {
+        "-".to_string()
+    } else {
+        format!(
+            "count={} bindings={}",
+            summary.persisted_suspect_continuations,
+            summary.suspect_continuation_bindings.join(", ")
+        )
+    };
 
     vec![
         (
@@ -300,57 +364,57 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
         ),
         (
             "Queue overload".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_queue_overloaded").to_string(),
         ),
         (
             "Active limit".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_active_limit_reached").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_active_limit_reached").to_string(),
         ),
         (
             "Lane limit".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_lane_limit_reached").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_lane_limit_reached").to_string(),
         ),
         (
             "Overload backoff".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_overload_backoff").to_string(),
         ),
         (
             "Connect failures".to_string(),
-            (runtime_doctor_marker_count(&summary, "upstream_connect_timeout")
-                + runtime_doctor_marker_count(&summary, "upstream_connect_error"))
+            (runtime_doctor_marker_count(summary, "upstream_connect_timeout")
+                + runtime_doctor_marker_count(summary, "upstream_connect_error"))
             .to_string(),
         ),
         (
             "Pre-commit budget".to_string(),
-            runtime_doctor_marker_count(&summary, "precommit_budget_exhausted").to_string(),
+            runtime_doctor_marker_count(summary, "precommit_budget_exhausted").to_string(),
         ),
         (
             "Retry backoff".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_retry_backoff").to_string(),
+            runtime_doctor_marker_count(summary, "profile_retry_backoff").to_string(),
         ),
         (
             "Transport backoff".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_transport_backoff").to_string(),
+            runtime_doctor_marker_count(summary, "profile_transport_backoff").to_string(),
         ),
         (
             "Route circuits".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_circuit_open").to_string(),
+            runtime_doctor_marker_count(summary, "profile_circuit_open").to_string(),
         ),
         (
             "Health penalties".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_health").to_string(),
+            runtime_doctor_marker_count(summary, "profile_health").to_string(),
         ),
         (
             "Latency penalties".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_latency").to_string(),
+            runtime_doctor_marker_count(summary, "profile_latency").to_string(),
         ),
         (
             "Bad pairing".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_bad_pairing").to_string(),
+            runtime_doctor_marker_count(summary, "profile_bad_pairing").to_string(),
         ),
         (
             "Prev not found".to_string(),
-            runtime_doctor_marker_count(&summary, "previous_response_not_found").to_string(),
+            runtime_doctor_marker_count(summary, "previous_response_not_found").to_string(),
         ),
         (
             "Prev not found routes".to_string(),
@@ -362,63 +426,87 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
         ),
         (
             "Prev negative cache".to_string(),
-            runtime_doctor_marker_count(&summary, "previous_response_negative_cache").to_string(),
+            runtime_doctor_marker_count(summary, "previous_response_negative_cache").to_string(),
         ),
         (
             "Compact guard".to_string(),
-            runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked").to_string(),
+            runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked").to_string(),
         ),
         (
             "Compact shed".to_string(),
-            runtime_doctor_marker_count(&summary, "compact_pressure_shed").to_string(),
+            runtime_doctor_marker_count(summary, "compact_pressure_shed").to_string(),
         ),
         (
             "Selection picks".to_string(),
-            runtime_doctor_marker_count(&summary, "selection_pick").to_string(),
+            runtime_doctor_marker_count(summary, "selection_pick").to_string(),
         ),
         (
             "Selection skips".to_string(),
-            runtime_doctor_marker_count(&summary, "selection_skip_current").to_string(),
+            runtime_doctor_marker_count(summary, "selection_skip_current").to_string(),
         ),
         (
             "WS reuse watchdog".to_string(),
-            runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog").to_string(),
+            runtime_doctor_marker_count(summary, "websocket_reuse_watchdog").to_string(),
         ),
         (
             "WS first-frame timeouts".to_string(),
-            runtime_doctor_marker_count(&summary, "websocket_precommit_frame_timeout").to_string(),
+            runtime_doctor_marker_count(summary, "websocket_precommit_frame_timeout").to_string(),
         ),
         (
             "Stream read errors".to_string(),
-            runtime_doctor_marker_count(&summary, "stream_read_error").to_string(),
+            runtime_doctor_marker_count(summary, "stream_read_error").to_string(),
         ),
         (
             "Writer errors".to_string(),
-            runtime_doctor_marker_count(&summary, "local_writer_error").to_string(),
+            runtime_doctor_marker_count(summary, "local_writer_error").to_string(),
+        ),
+        (
+            "State save backlog".to_string(),
+            format_usize(summary.state_save_queue_backlog),
+        ),
+        (
+            "State save lag".to_string(),
+            format_u64(summary.state_save_lag_ms),
+        ),
+        (
+            "Cont journal backlog".to_string(),
+            format_usize(summary.continuation_journal_save_backlog),
+        ),
+        (
+            "Cont journal lag".to_string(),
+            format_u64(summary.continuation_journal_save_lag_ms),
+        ),
+        (
+            "Probe backlog".to_string(),
+            format_usize(summary.profile_probe_refresh_backlog),
+        ),
+        (
+            "Probe lag".to_string(),
+            format_u64(summary.profile_probe_refresh_lag_ms),
         ),
         (
             "State save errors".to_string(),
-            runtime_doctor_marker_count(&summary, "state_save_error").to_string(),
+            runtime_doctor_marker_count(summary, "state_save_error").to_string(),
         ),
         (
             "Cont journal err".to_string(),
-            runtime_doctor_marker_count(&summary, "continuation_journal_save_error").to_string(),
+            runtime_doctor_marker_count(summary, "continuation_journal_save_error").to_string(),
         ),
         (
             "State save ok".to_string(),
-            runtime_doctor_marker_count(&summary, "state_save_ok").to_string(),
+            runtime_doctor_marker_count(summary, "state_save_ok").to_string(),
         ),
         (
             "Cont journal ok".to_string(),
-            runtime_doctor_marker_count(&summary, "continuation_journal_save_ok").to_string(),
+            runtime_doctor_marker_count(summary, "continuation_journal_save_ok").to_string(),
         ),
         (
             "State save skipped".to_string(),
-            runtime_doctor_marker_count(&summary, "state_save_skipped").to_string(),
+            runtime_doctor_marker_count(summary, "state_save_skipped").to_string(),
         ),
         (
             "Startup audit".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_startup_audit").to_string(),
         ),
         (
             "Startup pressure".to_string(),
@@ -426,39 +514,39 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
         ),
         (
             "Admission recovered".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_admission_recovered").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_admission_recovered").to_string(),
         ),
         (
             "Queue recovered".to_string(),
-            runtime_doctor_marker_count(&summary, "runtime_proxy_queue_recovered").to_string(),
+            runtime_doctor_marker_count(summary, "runtime_proxy_queue_recovered").to_string(),
         ),
         (
             "Probe refresh".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_probe_refresh_start").to_string(),
+            runtime_doctor_marker_count(summary, "profile_probe_refresh_start").to_string(),
         ),
         (
             "Probe refresh errors".to_string(),
-            runtime_doctor_marker_count(&summary, "profile_probe_refresh_error").to_string(),
+            runtime_doctor_marker_count(summary, "profile_probe_refresh_error").to_string(),
         ),
         (
             "Hot lane".to_string(),
-            runtime_doctor_top_facet(&summary, "lane").unwrap_or_else(|| "-".to_string()),
+            runtime_doctor_top_facet(summary, "lane").unwrap_or_else(|| "-".to_string()),
         ),
         (
             "Hot route".to_string(),
-            runtime_doctor_top_facet(&summary, "route").unwrap_or_else(|| "-".to_string()),
+            runtime_doctor_top_facet(summary, "route").unwrap_or_else(|| "-".to_string()),
         ),
         (
             "Hot profile".to_string(),
-            runtime_doctor_top_facet(&summary, "profile").unwrap_or_else(|| "-".to_string()),
+            runtime_doctor_top_facet(summary, "profile").unwrap_or_else(|| "-".to_string()),
         ),
         (
             "Hot reason".to_string(),
-            runtime_doctor_top_facet(&summary, "reason").unwrap_or_else(|| "-".to_string()),
+            runtime_doctor_top_facet(summary, "reason").unwrap_or_else(|| "-".to_string()),
         ),
         (
             "Quota source".to_string(),
-            runtime_doctor_top_facet(&summary, "quota_source").unwrap_or_else(|| "-".to_string()),
+            runtime_doctor_top_facet(summary, "quota_source").unwrap_or_else(|| "-".to_string()),
         ),
         (
             "Selection pressure".to_string(),
@@ -475,6 +563,10 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
         (
             "Quota freshness".to_string(),
             summary.quota_freshness_pressure.clone(),
+        ),
+        (
+            "Failure classes".to_string(),
+            runtime_doctor_count_breakdown(&summary.failure_class_counts),
         ),
         (
             "Persisted backoffs".to_string(),
@@ -505,10 +597,11 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
         (
             "Continuation states".to_string(),
             format!(
-                "verified={} warm={} suspect={}",
+                "verified={} warm={} suspect={} dead={}",
                 summary.persisted_verified_continuations,
                 summary.persisted_warm_continuations,
-                summary.persisted_suspect_continuations
+                summary.persisted_suspect_continuations,
+                summary.persisted_dead_continuations
             ),
         ),
         (
@@ -554,14 +647,7 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
                 summary.orphan_managed_dirs.join(", ")
             },
         ),
-        (
-            "Suspect continuations".to_string(),
-            if summary.suspect_continuation_bindings.is_empty() {
-                "-".to_string()
-            } else {
-                summary.suspect_continuation_bindings.join(", ")
-            },
-        ),
+        ("Suspect continuations".to_string(), suspect_continuations),
         (
             "Last marker".to_string(),
             summary
@@ -569,7 +655,7 @@ pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
                 .clone()
                 .unwrap_or_else(|| "-".to_string()),
         ),
-        ("Diagnosis".to_string(), summary.diagnosis),
+        ("Diagnosis".to_string(), summary.diagnosis.clone()),
     ]
 }
 
@@ -578,6 +664,38 @@ pub(crate) fn runtime_doctor_marker_count(
     marker: &'static str,
 ) -> usize {
     summary.marker_counts.get(marker).copied().unwrap_or(0)
+}
+
+fn runtime_doctor_marker_last_field<'a>(
+    summary: &'a RuntimeDoctorSummary,
+    marker: &str,
+    field: &str,
+) -> Option<&'a str> {
+    summary
+        .marker_last_fields
+        .get(marker)
+        .and_then(|fields| fields.get(field))
+        .map(String::as_str)
+}
+
+fn runtime_doctor_marker_last_usize_field(
+    summary: &RuntimeDoctorSummary,
+    marker: &str,
+    field: &str,
+) -> Option<usize> {
+    runtime_doctor_marker_last_field(summary, marker, field)?
+        .parse()
+        .ok()
+}
+
+fn runtime_doctor_marker_last_u64_field(
+    summary: &RuntimeDoctorSummary,
+    marker: &str,
+    field: &str,
+) -> Option<u64> {
+    runtime_doctor_marker_last_field(summary, marker, field)?
+        .parse()
+        .ok()
 }
 
 fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -> String {
@@ -589,6 +707,118 @@ fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -> String {
         .map(|(label, count)| format!("{label}={count}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
+    let classes: [(&str, &[&str]); 5] = [
+        (
+            "admission",
+            &[
+                "runtime_proxy_queue_overloaded",
+                "runtime_proxy_active_limit_reached",
+                "runtime_proxy_lane_limit_reached",
+                "runtime_proxy_overload_backoff",
+                "runtime_proxy_admission_wait_started",
+                "runtime_proxy_admission_wait_exhausted",
+                "runtime_proxy_queue_wait_started",
+                "runtime_proxy_queue_wait_exhausted",
+                "profile_inflight_saturated",
+            ],
+        ),
+        (
+            "continuation",
+            &[
+                "previous_response_not_found",
+                "previous_response_negative_cache",
+                "compact_fresh_fallback_blocked",
+                "compact_pressure_shed",
+            ],
+        ),
+        (
+            "persistence",
+            &[
+                "state_save_error",
+                "state_save_skipped",
+                "continuation_journal_save_error",
+            ],
+        ),
+        (
+            "quota",
+            &[
+                "profile_retry_backoff",
+                "profile_transport_backoff",
+                "profile_circuit_open",
+                "profile_circuit_half_open_probe",
+                "profile_health",
+                "profile_latency",
+                "profile_bad_pairing",
+                "profile_probe_refresh_error",
+            ],
+        ),
+        (
+            "transport",
+            &[
+                "upstream_connect_timeout",
+                "upstream_connect_error",
+                "stream_read_error",
+                "local_writer_error",
+                "websocket_precommit_frame_timeout",
+            ],
+        ),
+    ];
+
+    classes
+        .into_iter()
+        .map(|(class, markers)| {
+            (
+                class.to_string(),
+                markers
+                    .iter()
+                    .map(|marker| runtime_doctor_marker_count(summary, *marker))
+                    .sum(),
+            )
+        })
+        .filter(|(_, count)| *count > 0)
+        .collect()
+}
+
+fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
+    summary.state_save_queue_backlog =
+        runtime_doctor_marker_last_usize_field(summary, "state_save_queued", "backlog");
+    summary.state_save_lag_ms =
+        runtime_doctor_marker_last_u64_field(summary, "state_save_ok", "lag_ms")
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(summary, "state_save_skipped", "lag_ms")
+            })
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(summary, "state_save_error", "lag_ms")
+            });
+    summary.continuation_journal_save_backlog = runtime_doctor_marker_last_usize_field(
+        summary,
+        "continuation_journal_save_queued",
+        "backlog",
+    );
+    summary.continuation_journal_save_lag_ms =
+        runtime_doctor_marker_last_u64_field(summary, "continuation_journal_save_ok", "lag_ms")
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(
+                    summary,
+                    "continuation_journal_save_error",
+                    "lag_ms",
+                )
+            });
+    summary.profile_probe_refresh_backlog =
+        runtime_doctor_marker_last_usize_field(summary, "profile_probe_refresh_queued", "backlog");
+    summary.profile_probe_refresh_lag_ms =
+        runtime_doctor_marker_last_u64_field(summary, "profile_probe_refresh_ok", "lag_ms")
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(
+                    summary,
+                    "profile_probe_refresh_error",
+                    "lag_ms",
+                )
+            });
+    summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
 }
 
 pub(crate) fn runtime_doctor_top_facet(
@@ -823,6 +1053,9 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
                         runtime_continuation_status_label(status)
                     ));
                 }
+                RuntimeContinuationBindingLifecycle::Dead => {
+                    summary.persisted_dead_continuations += 1;
+                }
             }
         }
     }
@@ -1008,6 +1241,11 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
                 "Recent previous_response_id continuity failures were observed: {}.",
                 runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
             )
+        } else if summary.persisted_dead_continuations > 0 {
+            format!(
+                "Some persisted continuations are currently dead and will be pruned: {}.",
+                summary.persisted_dead_continuations
+            )
         } else if !summary.suspect_continuation_bindings.is_empty() {
             format!(
                 "Some persisted continuations are currently suspect: {}.",
@@ -1139,6 +1377,7 @@ pub(crate) fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             }
         }
     }
+    runtime_doctor_finalize_log_summary(&mut summary);
     summary
 }
 
@@ -1210,8 +1449,10 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "state_save_ok",
         "state_save_skipped",
         "state_save_error",
+        "state_save_queued",
         "continuation_journal_save_ok",
         "continuation_journal_save_error",
+        "continuation_journal_save_queued",
         "runtime_proxy_restore_counts",
         "runtime_proxy_startup_audit",
         "profile_probe_refresh_queued",
