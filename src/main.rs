@@ -6816,7 +6816,10 @@ fn proxy_runtime_websocket_text_message(
                     && !previous_response_fresh_fallback_used
                     && (bound_profile.as_deref() == Some(profile_name.as_str())
                         || pinned_profile.as_deref() == Some(profile_name.as_str()));
-                let stale_previous_response_reuse = reuse_failed_bound_previous_response
+                let nonreplayable_previous_response_reuse = previous_response_id.is_some()
+                    && !previous_response_fresh_fallback_used
+                    && turn_state_override.is_none();
+                let stale_previous_response_reuse = nonreplayable_previous_response_reuse
                     && turn_state_override.is_none()
                     && reuse_terminal_idle.is_some_and(|elapsed| {
                         elapsed
@@ -6830,19 +6833,31 @@ fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} websocket_reuse_watchdog_timeout profile={profile_name} event={event}"
                     ),
                 );
-                if stale_previous_response_reuse {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} websocket_reuse_stale_previous_response_blocked profile={profile_name} event={event} elapsed_ms={} threshold_ms={}",
-                            reuse_terminal_idle
-                                .map(|elapsed| elapsed.as_millis())
-                                .unwrap_or(0),
-                            runtime_proxy_websocket_previous_response_reuse_stale_ms(),
-                        ),
-                    );
+                if nonreplayable_previous_response_reuse {
+                    if stale_previous_response_reuse {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} websocket_session={session_id} websocket_reuse_stale_previous_response_blocked profile={profile_name} event={event} elapsed_ms={} threshold_ms={}",
+                                reuse_terminal_idle
+                                    .map(|elapsed| elapsed.as_millis())
+                                    .unwrap_or(0),
+                                runtime_proxy_websocket_previous_response_reuse_stale_ms(),
+                            ),
+                        );
+                    } else {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} websocket_session={session_id} websocket_reuse_previous_response_blocked profile={profile_name} event={event} reason=missing_turn_state elapsed_ms={}",
+                                reuse_terminal_idle
+                                    .map(|elapsed| elapsed.as_millis())
+                                    .unwrap_or(0),
+                            ),
+                        );
+                    }
                     return Err(anyhow::anyhow!(
-                        "runtime websocket upstream closed before response.completed after stale previous_response_id reuse watchdog: profile={profile_name} event={event}"
+                        "runtime websocket upstream closed before response.completed for previous_response_id continuation without replayable turn_state: profile={profile_name} event={event}"
                     ));
                 }
                 if retry_same_profile_with_fresh_connect {
