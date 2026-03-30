@@ -45,10 +45,13 @@ Use `--profile` when you want a fixed profile name, or when the login flow is no
 
 ```bash
 prodex profile list
+prodex info
 prodex quota --all
 ```
 
 `prodex profile list` renders a `Profiles` panel. `prodex quota --all` refreshes continuously by default every 5 seconds and renders a `Quota Overview` table with a `REMAINING` column and a wrapped `status:` line for each profile.
+
+`prodex info` renders a compact fleet summary with profile count, whether other `prodex` processes are currently running, aggregated `5h` and `weekly` quota pool remaining, and a no-reset runway estimate derived from active runtime logs when recent quota decay is observable.
 
 The `REMAINING` column shows quota left, not quota used.
 
