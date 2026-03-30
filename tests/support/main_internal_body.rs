@@ -2142,6 +2142,63 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
 }
 
 #[test]
+fn quota_reports_window_supports_scroll_offset_and_hint() {
+    let reports = vec![
+        QuotaReport {
+            name: "blocked".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+        },
+        QuotaReport {
+            name: "ready-late".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+        },
+        QuotaReport {
+            name: "error".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Err("boom".to_string()),
+        },
+        QuotaReport {
+            name: "ready-early".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+        },
+    ];
+
+    let window =
+        render_quota_reports_window_with_layout(&reports, false, Some(13), 100, 1, true);
+
+    assert_eq!(window.start_profile, 1);
+    assert_eq!(window.total_profiles, 4);
+    assert_eq!(window.shown_profiles, 2);
+    assert_eq!(window.hidden_before, 1);
+    assert_eq!(window.hidden_after, 1);
+    assert!(window.output.contains("ready-late"));
+    assert!(window.output.contains("blocked"));
+    assert!(!window.output.contains("ready-early"));
+    assert!(window
+        .output
+        .contains("press Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)"));
+}
+
+#[test]
 fn quota_reports_fit_requested_width_in_narrow_layout() {
     let reports = vec![
         QuotaReport {

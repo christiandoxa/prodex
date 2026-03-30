@@ -203,6 +203,33 @@ struct QuotaPoolAggregate {
     earliest_weekly_reset_at: Option<i64>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct RenderedQuotaReportWindow {
+    pub(crate) output: String,
+    pub(crate) shown_profiles: usize,
+    pub(crate) total_profiles: usize,
+    pub(crate) start_profile: usize,
+    pub(crate) hidden_before: usize,
+    pub(crate) hidden_after: usize,
+}
+
+#[derive(Debug)]
+enum AllQuotaWatchSnapshot {
+    Reports {
+        updated: String,
+        profile_count: usize,
+        reports: Vec<QuotaReport>,
+    },
+    Empty {
+        updated: String,
+    },
+    Error {
+        updated: String,
+        message: String,
+    },
+}
+
 fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
     const MIN_WIDTHS: [usize; 6] = [12, 3, 4, 14, 4, 13];
     const EXTRA_WEIGHTS: [usize; 6] = [12, 1, 3, 13, 4, 18];
@@ -237,6 +264,7 @@ fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn render_quota_reports_with_line_limit(
     reports: &[QuotaReport],
     detail: bool,
@@ -251,6 +279,18 @@ pub(crate) fn render_quota_reports_with_layout(
     max_lines: Option<usize>,
     total_width: usize,
 ) -> String {
+    render_quota_reports_window_with_layout(reports, detail, max_lines, total_width, 0, false)
+        .output
+}
+
+pub(crate) fn render_quota_reports_window_with_layout(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+    total_width: usize,
+    start_profile: usize,
+    interactive_scroll_hint: bool,
+) -> RenderedQuotaReportWindow {
     let column_widths = quota_report_column_widths(total_width);
     let pool_summary =
         render_quota_pool_summary_lines(&collect_quota_pool_aggregate(reports), total_width);
@@ -347,27 +387,40 @@ pub(crate) fn render_quota_reports_with_layout(
     output.extend(pool_summary);
     output.push(header.clone());
     output.push("-".repeat(text_width(&header)));
+    let total_profiles = sections.len();
+    let start_profile = if total_profiles == 0 {
+        0
+    } else {
+        start_profile.min(total_profiles.saturating_sub(1))
+    };
+    let mut shown_profiles = 0_usize;
     if let Some(max_lines) = max_lines {
         let mut remaining = max_lines.saturating_sub(output.len());
-        let total_profiles = sections.len();
-        let mut shown_profiles = 0_usize;
 
-        for (index, section) in sections.into_iter().enumerate() {
-            let more_profiles_remain = index + 1 < total_profiles;
-            let reserve_for_notice = usize::from(more_profiles_remain);
-            if section.len() + reserve_for_notice > remaining {
+        for section in sections.iter().skip(start_profile) {
+            if section.len() > remaining {
                 break;
             }
             remaining = remaining.saturating_sub(section.len());
-            output.extend(section);
+            output.extend(section.iter().cloned());
             shown_profiles += 1;
         }
 
+        let hidden_before = start_profile;
         let hidden_profiles = total_profiles.saturating_sub(shown_profiles);
-        if hidden_profiles > 0 {
-            let notice = format!(
-                "  showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
-            );
+        let hidden_after = hidden_profiles.saturating_sub(hidden_before);
+        if hidden_before > 0 || hidden_after > 0 {
+            let notice = if interactive_scroll_hint {
+                let first_visible = start_profile.saturating_add(1);
+                let last_visible = start_profile.saturating_add(shown_profiles);
+                format!(
+                    "  press Up/Down to scroll profiles ({first_visible}-{last_visible} of {total_profiles}; {hidden_before} above, {hidden_after} below)"
+                )
+            } else {
+                format!(
+                    "  showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
+                )
+            };
             if remaining == 0 && !output.is_empty() {
                 output.pop();
             }
@@ -376,9 +429,19 @@ pub(crate) fn render_quota_reports_with_layout(
     } else {
         for section in sections {
             output.extend(section);
+            shown_profiles += 1;
         }
     }
-    output.join("\n")
+    let hidden_before = start_profile;
+    let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
+    RenderedQuotaReportWindow {
+        output: output.join("\n"),
+        shown_profiles,
+        total_profiles,
+        start_profile,
+        hidden_before,
+        hidden_after,
+    }
 }
 
 fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
@@ -883,29 +946,71 @@ pub(crate) fn render_profile_quota_watch_output(
     format!("{header}\n\n{body}\n")
 }
 
+#[allow(dead_code)]
 pub(crate) fn render_all_quota_watch_output(
     updated: &str,
     state_result: std::result::Result<AppState, String>,
     base_url: Option<&str>,
     detail: bool,
 ) -> String {
+    render_all_quota_watch_snapshot(
+        &collect_all_quota_watch_snapshot(updated, state_result, base_url),
+        detail,
+        0,
+    )
+}
+
+fn collect_all_quota_watch_snapshot(
+    updated: &str,
+    state_result: std::result::Result<AppState, String>,
+    base_url: Option<&str>,
+) -> AllQuotaWatchSnapshot {
     match state_result {
-        Ok(state) if !state.profiles.is_empty() => {
+        Ok(state) if !state.profiles.is_empty() => AllQuotaWatchSnapshot::Reports {
+            updated: updated.to_string(),
+            profile_count: state.profiles.len(),
+            reports: collect_quota_reports(&state, base_url),
+        },
+        Ok(_) => AllQuotaWatchSnapshot::Empty {
+            updated: updated.to_string(),
+        },
+        Err(err) => AllQuotaWatchSnapshot::Error {
+            updated: updated.to_string(),
+            message: err,
+        },
+    }
+}
+
+fn render_all_quota_watch_snapshot(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    scroll_offset: usize,
+) -> String {
+    match snapshot {
+        AllQuotaWatchSnapshot::Reports {
+            updated,
+            profile_count,
+            reports,
+        } => {
             let header = render_panel(
                 "Quota Watch",
                 &[
-                    ("Profiles".to_string(), state.profiles.len().to_string()),
+                    ("Profiles".to_string(), profile_count.to_string()),
                     ("Updated".to_string(), updated.to_string()),
                 ],
             );
-            let reports = collect_quota_reports(&state, base_url);
             let available_report_lines = quota_watch_available_report_lines(&header);
-            format!(
-                "{header}\n\n{}\n",
-                render_quota_reports_with_line_limit(&reports, detail, available_report_lines)
-            )
+            let window = render_quota_reports_window_with_layout(
+                reports,
+                detail,
+                available_report_lines,
+                current_cli_width(),
+                scroll_offset,
+                true,
+            );
+            format!("{header}\n\n{}\n", window.output)
         }
-        Ok(_) => {
+        AllQuotaWatchSnapshot::Empty { updated } => {
             render_panel(
                 "Quota Watch",
                 &[
@@ -914,12 +1019,12 @@ pub(crate) fn render_all_quota_watch_output(
                 ],
             ) + "\n"
         }
-        Err(err) => {
+        AllQuotaWatchSnapshot::Error { updated, message } => {
             render_panel(
                 "Quota Watch",
                 &[
                     ("Updated".to_string(), updated.to_string()),
-                    ("Error".to_string(), first_line_of_error(&err)),
+                    ("Error".to_string(), first_line_of_error(message)),
                 ],
             ) + "\n"
         }
@@ -938,6 +1043,80 @@ fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
     let terminal_height = terminal_height_lines()?;
     let reserved = header.lines().count().saturating_add(1);
     Some(terminal_height.saturating_sub(reserved))
+}
+
+const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
+
+enum QuotaWatchCommand {
+    Up,
+    Down,
+    Quit,
+}
+
+struct QuotaWatchInput {
+    tty: fs::File,
+    saved_stty_state: String,
+}
+
+impl QuotaWatchInput {
+    fn open() -> Option<Self> {
+        let tty = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .ok()?;
+        let saved_stty_state = quota_watch_stty_output(&tty, &["-g"])?.trim().to_string();
+        quota_watch_stty_apply(&tty, &["-icanon", "-echo", "min", "0", "time", "1"])?;
+        Some(Self {
+            tty,
+            saved_stty_state,
+        })
+    }
+
+    fn read_command(&mut self) -> Option<QuotaWatchCommand> {
+        let mut buf = [0_u8; 8];
+        let bytes_read = self.tty.read(&mut buf).ok()?;
+        if bytes_read == 0 {
+            return None;
+        }
+        let bytes = &buf[..bytes_read];
+        match bytes {
+            [b'q' | b'Q', ..] => Some(QuotaWatchCommand::Quit),
+            [b'k' | b'K', ..] => Some(QuotaWatchCommand::Up),
+            [b'j' | b'J', ..] => Some(QuotaWatchCommand::Down),
+            [0x1b, b'[', b'A', ..] => Some(QuotaWatchCommand::Up),
+            [0x1b, b'[', b'B', ..] => Some(QuotaWatchCommand::Down),
+            _ => None,
+        }
+    }
+}
+
+impl Drop for QuotaWatchInput {
+    fn drop(&mut self) {
+        let _ = quota_watch_stty_apply(&self.tty, &[self.saved_stty_state.as_str()]);
+    }
+}
+
+fn quota_watch_stty_output(tty: &fs::File, args: &[&str]) -> Option<String> {
+    let output = Command::new("stty")
+        .args(args)
+        .stdin(tty.try_clone().ok()?)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8(output.stdout).ok())
+        .flatten()
+}
+
+fn quota_watch_stty_apply(tty: &fs::File, args: &[&str]) -> Option<()> {
+    let output = Command::new("stty")
+        .args(args)
+        .stdin(tty.try_clone().ok()?)
+        .output()
+        .ok()?;
+    output.status.success().then_some(())
 }
 
 pub(crate) fn watch_quota(
@@ -962,16 +1141,64 @@ pub(crate) fn watch_all_quotas(
     base_url: Option<&str>,
     detail: bool,
 ) -> Result<()> {
+    let mut input = QuotaWatchInput::open();
+    let mut scroll_offset = 0_usize;
+    let mut snapshot = collect_all_quota_watch_snapshot(
+        &Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string(),
+        AppState::load(paths).map_err(|err| err.to_string()),
+        base_url,
+    );
+    let mut redraw_needed = true;
+    let mut next_refresh_at = Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS);
+
     loop {
-        let updated = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
-        let output = render_all_quota_watch_output(
-            &updated,
-            AppState::load(paths).map_err(|err| err.to_string()),
-            base_url,
-            detail,
-        );
-        redraw_quota_watch(&output)?;
-        thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+        if redraw_needed {
+            let max_scroll_offset = match &snapshot {
+                AllQuotaWatchSnapshot::Reports { reports, .. } => reports.len().saturating_sub(1),
+                _ => 0,
+            };
+            scroll_offset = scroll_offset.min(max_scroll_offset);
+            let output = render_all_quota_watch_snapshot(&snapshot, detail, scroll_offset);
+            redraw_quota_watch(&output)?;
+            redraw_needed = false;
+        }
+
+        if Instant::now() >= next_refresh_at {
+            snapshot = collect_all_quota_watch_snapshot(
+                &Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string(),
+                AppState::load(paths).map_err(|err| err.to_string()),
+                base_url,
+            );
+            redraw_needed = true;
+            next_refresh_at = Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS);
+            continue;
+        }
+
+        if let Some(command) = input.as_mut().and_then(QuotaWatchInput::read_command) {
+            let max_scroll_offset = match &snapshot {
+                AllQuotaWatchSnapshot::Reports { reports, .. } => reports.len().saturating_sub(1),
+                _ => 0,
+            };
+            match command {
+                QuotaWatchCommand::Up => {
+                    let next_offset = scroll_offset.saturating_sub(1);
+                    if next_offset != scroll_offset {
+                        scroll_offset = next_offset;
+                        redraw_needed = true;
+                    }
+                }
+                QuotaWatchCommand::Down => {
+                    let next_offset = scroll_offset.saturating_add(1).min(max_scroll_offset);
+                    if next_offset != scroll_offset {
+                        scroll_offset = next_offset;
+                        redraw_needed = true;
+                    }
+                }
+                QuotaWatchCommand::Quit => return Ok(()),
+            }
+        }
+
+        thread::sleep(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS));
     }
 }
 
