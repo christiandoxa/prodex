@@ -2019,6 +2019,54 @@ fn all_quota_watch_output_preserves_updated_on_load_error() {
 }
 
 #[test]
+fn quota_reports_include_pool_summary_lines() {
+    let alpha = usage_with_main_windows(90, 7_200, 95, 172_800);
+    let beta = usage_with_main_windows(45, 1_800, 40, 86_400);
+    let reports = vec![
+        QuotaReport {
+            name: "alpha".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(alpha.clone()),
+        },
+        QuotaReport {
+            name: "beta".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(beta.clone()),
+        },
+        QuotaReport {
+            name: "api".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "api-key".to_string(),
+                quota_compatible: false,
+            },
+            result: Err("auth mode is not quota-compatible".to_string()),
+        },
+    ];
+
+    let output = render_quota_reports_with_layout(&reports, false, None, 160);
+    let five_hour_reset = required_main_window_snapshot(&beta, "5h")
+        .expect("5h snapshot")
+        .reset_at;
+    let weekly_reset = required_main_window_snapshot(&beta, "weekly")
+        .expect("weekly snapshot")
+        .reset_at;
+
+    assert!(output.contains("5h remaining pool:"));
+    assert!(output.contains("Weekly remaining pool:"));
+    assert!(output.contains(&format_info_pool_remaining(135, 2, Some(five_hour_reset))));
+    assert!(output.contains(&format_info_pool_remaining(135, 2, Some(weekly_reset))));
+}
+
+#[test]
 fn quota_reports_respect_line_budget_while_preserving_sort_order() {
     let reports = vec![
         QuotaReport {
@@ -2059,7 +2107,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         },
     ];
 
-    let output = render_quota_reports_with_line_limit(&reports, false, Some(10));
+    let output = render_quota_reports_with_line_limit(&reports, false, Some(13));
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));

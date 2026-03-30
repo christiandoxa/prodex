@@ -194,6 +194,15 @@ struct QuotaReportColumnWidths {
     remaining: usize,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct QuotaPoolAggregate {
+    profiles_with_data: usize,
+    five_hour_pool_remaining: i64,
+    weekly_pool_remaining: i64,
+    earliest_five_hour_reset_at: Option<i64>,
+    earliest_weekly_reset_at: Option<i64>,
+}
+
 fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
     const MIN_WIDTHS: [usize; 6] = [12, 3, 4, 14, 4, 13];
     const EXTRA_WEIGHTS: [usize; 6] = [12, 1, 3, 13, 4, 18];
@@ -243,6 +252,8 @@ pub(crate) fn render_quota_reports_with_layout(
     total_width: usize,
 ) -> String {
     let column_widths = quota_report_column_widths(total_width);
+    let pool_summary =
+        render_quota_pool_summary_lines(&collect_quota_pool_aggregate(reports), total_width);
 
     let mut sections = Vec::new();
 
@@ -332,11 +343,10 @@ pub(crate) fn render_quota_reports_with_layout(
         plan_w = column_widths.plan,
         main_w = column_widths.remaining,
     );
-    let mut output = vec![
-        section_header_with_width("Quota Overview", total_width),
-        header.clone(),
-        "-".repeat(text_width(&header)),
-    ];
+    let mut output = vec![section_header_with_width("Quota Overview", total_width)];
+    output.extend(pool_summary);
+    output.push(header.clone());
+    output.push("-".repeat(text_width(&header)));
     if let Some(max_lines) = max_lines {
         let mut remaining = max_lines.saturating_sub(output.len());
         let total_profiles = sections.len();
@@ -369,6 +379,87 @@ pub(crate) fn render_quota_reports_with_layout(
         }
     }
     output.join("\n")
+}
+
+fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
+    let mut aggregate = QuotaPoolAggregate::default();
+
+    for report in reports {
+        if !report.auth.quota_compatible {
+            continue;
+        }
+
+        let Ok(usage) = &report.result else {
+            continue;
+        };
+        let Some((five_hour, weekly)) = info_main_window_snapshots(usage) else {
+            continue;
+        };
+
+        aggregate.profiles_with_data += 1;
+        aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
+        aggregate.weekly_pool_remaining += weekly.remaining_percent;
+        if five_hour.reset_at != i64::MAX {
+            aggregate.earliest_five_hour_reset_at = Some(
+                aggregate
+                    .earliest_five_hour_reset_at
+                    .map_or(five_hour.reset_at, |current| {
+                        current.min(five_hour.reset_at)
+                    }),
+            );
+        }
+        if weekly.reset_at != i64::MAX {
+            aggregate.earliest_weekly_reset_at = Some(
+                aggregate
+                    .earliest_weekly_reset_at
+                    .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
+            );
+        }
+    }
+
+    aggregate
+}
+
+fn render_quota_pool_summary_lines(
+    aggregate: &QuotaPoolAggregate,
+    total_width: usize,
+) -> Vec<String> {
+    let fields = vec![
+        (
+            "5h remaining pool".to_string(),
+            format_info_pool_remaining(
+                aggregate.five_hour_pool_remaining,
+                aggregate.profiles_with_data,
+                aggregate.earliest_five_hour_reset_at,
+            ),
+        ),
+        (
+            "Weekly remaining pool".to_string(),
+            format_info_pool_remaining(
+                aggregate.weekly_pool_remaining,
+                aggregate.profiles_with_data,
+                aggregate.earliest_weekly_reset_at,
+            ),
+        ),
+    ];
+    let label_width = fields
+        .iter()
+        .map(|(label, _)| text_width(label) + 1)
+        .max()
+        .unwrap_or(CLI_LABEL_WIDTH)
+        .min(total_width.saturating_sub(2).max(1));
+    let mut lines = Vec::new();
+
+    for (label, value) in fields {
+        lines.extend(format_field_lines_with_layout(
+            &label,
+            &value,
+            total_width,
+            label_width,
+        ));
+    }
+
+    lines
 }
 
 pub(crate) fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
