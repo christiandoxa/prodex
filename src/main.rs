@@ -9091,7 +9091,7 @@ fn proxy_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
     let request_session_id = runtime_request_session_id(request);
-    let session_profile = request_session_id
+    let mut session_profile = request_session_id
         .as_deref()
         .map(|session_id| runtime_session_bound_profile(shared, session_id))
         .transpose()?
@@ -9348,6 +9348,27 @@ fn proxy_runtime_standard_request(
                 response,
                 overload,
             } => {
+                let mut released_affinity = false;
+                let mut released_compact_lineage = false;
+                if !overload {
+                    released_affinity = release_runtime_quota_blocked_affinity(
+                        shared,
+                        &profile_name,
+                        None,
+                        None,
+                        request_session_id.as_deref(),
+                    )?;
+                    released_compact_lineage = release_runtime_compact_lineage(
+                        shared,
+                        &profile_name,
+                        request_session_id.as_deref(),
+                        None,
+                        "quota_blocked",
+                    )?;
+                    if session_profile.as_deref() == Some(profile_name.as_str()) {
+                        session_profile = None;
+                    }
+                }
                 let should_retry_same_profile = overload
                     && !conservative_overload_retried_profiles.contains(&profile_name)
                     && (session_profile.as_deref() == Some(profile_name.as_str())
@@ -9370,6 +9391,22 @@ fn proxy_runtime_standard_request(
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} route=compact"
+                        ),
+                    );
+                }
+                if released_compact_lineage {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http compact_lineage_released profile={profile_name} reason=quota_blocked"
+                        ),
+                    );
+                }
                 if overload {
                     let _ = bump_runtime_profile_health_score(
                         shared,

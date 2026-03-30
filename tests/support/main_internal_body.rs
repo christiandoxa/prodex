@@ -802,6 +802,31 @@ fn handle_runtime_proxy_backend_request(
                 .expect("responses_headers poisoned")
                 .push(captured_headers);
             match (account_id.as_str(), mode) {
+                ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                    "HTTP/1.1 429 Too Many Requests",
+                    "application/json",
+                    serde_json::json!({
+                        "error": {
+                            "message": "You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM."
+                        },
+                        "status": 429
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("second-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "output": []
+                    })
+                    .to_string(),
+                    Some("compact-turn-second".to_string()),
+                    None,
+                    None,
+                ),
                 ("main-account", RuntimeProxyBackendMode::HttpOnlyCompactOverloaded) => (
                     "HTTP/1.1 500 Internal Server Error",
                     "application/json",
@@ -9134,6 +9159,93 @@ fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
         persisted
             .session_profile_bindings
             .get("sess-123")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+}
+
+#[test]
+fn runtime_proxy_releases_quota_blocked_compact_session_affinity_and_rotates() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-compact".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .body("{\"input\":[],\"instructions\":\"compact\"}")
+        .send()
+        .expect("runtime proxy compact request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert!(status.is_success(), "unexpected compact status: {status}");
+    assert_eq!(body, "{\"output\":[]}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state
+            .session_profile_bindings
+            .get("sess-compact")
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-compact")
             .map(|binding| binding.profile_name.as_str()),
         Some("second")
     );
