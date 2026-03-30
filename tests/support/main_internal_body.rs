@@ -2026,6 +2026,7 @@ fn profile_quota_watch_output_contains_header_and_snapshot_body() {
     assert!(output.contains("Updated"));
     assert!(output.contains("2026-03-22 10:00:00 WIB"));
     assert!(output.contains("Quota main"));
+    assert!(!output.ends_with('\n'));
 }
 
 #[test]
@@ -2041,6 +2042,7 @@ fn all_quota_watch_output_preserves_updated_on_load_error() {
     assert!(output.contains("Updated"));
     assert!(output.contains("2026-03-22 10:00:00 WIB"));
     assert!(output.contains("load failed"));
+    assert!(!output.ends_with('\n'));
 }
 
 #[test]

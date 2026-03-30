@@ -943,7 +943,7 @@ pub(crate) fn render_profile_quota_watch_output(
             &[("Error".to_string(), first_line_of_error(&err))],
         ),
     };
-    format!("{header}\n\n{body}\n")
+    format!("{header}\n\n{body}")
 }
 
 #[allow(dead_code)]
@@ -1008,26 +1008,22 @@ fn render_all_quota_watch_snapshot(
                 scroll_offset,
                 true,
             );
-            format!("{header}\n\n{}\n", window.output)
+            format!("{header}\n\n{}", window.output)
         }
-        AllQuotaWatchSnapshot::Empty { updated } => {
-            render_panel(
-                "Quota Watch",
-                &[
-                    ("Updated".to_string(), updated.to_string()),
-                    ("Error".to_string(), "No profiles configured".to_string()),
-                ],
-            ) + "\n"
-        }
-        AllQuotaWatchSnapshot::Error { updated, message } => {
-            render_panel(
-                "Quota Watch",
-                &[
-                    ("Updated".to_string(), updated.to_string()),
-                    ("Error".to_string(), first_line_of_error(message)),
-                ],
-            ) + "\n"
-        }
+        AllQuotaWatchSnapshot::Empty { updated } => render_panel(
+            "Quota Watch",
+            &[
+                ("Updated".to_string(), updated.to_string()),
+                ("Error".to_string(), "No profiles configured".to_string()),
+            ],
+        ),
+        AllQuotaWatchSnapshot::Error { updated, message } => render_panel(
+            "Quota Watch",
+            &[
+                ("Updated".to_string(), updated.to_string()),
+                ("Error".to_string(), first_line_of_error(message)),
+            ],
+        ),
     }
 }
 
