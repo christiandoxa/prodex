@@ -16114,6 +16114,29 @@ fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
 }
 
 #[test]
+fn runtime_broker_lease_drop_removes_file() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let lease = create_runtime_broker_lease(&paths, "drop-test")
+        .expect("lease should be created for drop test");
+    let lease_path = lease.path.clone();
+    assert!(lease_path.exists(), "lease file should exist before drop");
+
+    drop(lease);
+
+    assert!(
+        !lease_path.exists(),
+        "lease file should be removed when the endpoint drops it"
+    );
+}
+
+#[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy_registry_clears() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::new();

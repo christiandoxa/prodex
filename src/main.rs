@@ -4731,6 +4731,9 @@ fn handle_run(args: RunArgs) -> Result<()> {
         .unwrap_or(codex_args);
 
     let status = run_child(&codex_bin(), &runtime_args, &codex_home)?;
+    // `std::process::exit` does not run destructors, so release the broker lease
+    // before mirroring Codex's exit status back to the caller.
+    drop(runtime_proxy);
     exit_with_status(status)
 }
 
