@@ -54,6 +54,7 @@ struct TestDir {
 
 impl TestDir {
     fn new() -> Self {
+        wait_for_runtime_background_queues_idle();
         let unique = format!(
             "prodex-runtime-test-{}-{}",
             std::process::id(),
@@ -65,6 +66,25 @@ impl TestDir {
         let path = std::env::temp_dir().join(unique);
         fs::create_dir_all(&path).expect("failed to create test temp dir");
         Self { path }
+    }
+}
+
+fn wait_for_runtime_background_queues_idle() {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let backlog = runtime_state_save_queue_backlog()
+            + runtime_continuation_journal_queue_backlog()
+            + runtime_probe_refresh_queue_backlog();
+        let active = runtime_state_save_queue_active()
+            + runtime_continuation_journal_queue_active()
+            + runtime_probe_refresh_queue_active();
+        if backlog == 0 && active == 0 {
+            return;
+        }
+        if Instant::now() >= deadline {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -232,6 +252,20 @@ fn write_versioned_runtime_sidecar<T: Serialize>(
         .expect("versioned sidecar should serialize");
     fs::write(path, &json).expect("versioned sidecar primary should write");
     fs::write(backup_path, &json).expect("versioned sidecar backup should write");
+}
+
+fn dead_continuation_status(now: i64) -> RuntimeContinuationBindingStatus {
+    RuntimeContinuationBindingStatus {
+        state: RuntimeContinuationBindingLifecycle::Dead,
+        confidence: 0,
+        last_touched_at: Some(now),
+        last_verified_at: Some(now.saturating_sub(5)),
+        last_verified_route: Some("responses".to_string()),
+        last_not_found_at: Some(now),
+        not_found_streak: RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT,
+        success_count: 1,
+        failure_count: 1,
+    }
 }
 
 fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16, String) {
@@ -7401,6 +7435,117 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
 }
 
 #[test]
+fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let initial_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    initial_state
+        .save(&paths)
+        .expect("initial state save should succeed");
+
+    let initial_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-stale".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 30,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuations_for_profiles(&paths, &initial_store, &profiles)
+        .expect("initial continuation save should succeed");
+
+    let released_store = RuntimeContinuationStore {
+        statuses: RuntimeContinuationStatuses {
+            response: BTreeMap::from([(
+                "resp-stale".to_string(),
+                dead_continuation_status(now),
+            )]),
+            ..RuntimeContinuationStatuses::default()
+        },
+        ..RuntimeContinuationStore::default()
+    };
+    write_versioned_runtime_sidecar(
+        &runtime_continuations_file_path(&paths),
+        &runtime_continuations_last_good_file_path(&paths),
+        2,
+        &released_store,
+    );
+
+    let snapshot = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("main".to_string(), now)]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-stale".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 10,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let revision = AtomicU64::new(1);
+    assert!(
+        save_runtime_state_snapshot_if_latest(
+            &paths,
+            &snapshot,
+            &runtime_continuation_store_from_app_state(&snapshot),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &RuntimeProfileBackoffs::default(),
+            1,
+            &revision,
+        )
+        .expect("state snapshot save should succeed after stale retry")
+    );
+
+    let loaded = load_runtime_continuations_with_recovery(&paths, &profiles)
+        .expect("continuations should reload")
+        .value;
+    assert!(
+        !loaded.response_profile_bindings.contains_key("resp-stale"),
+        "released response binding must not be resurrected"
+    );
+    assert_eq!(
+        loaded
+            .statuses
+            .response
+            .get("resp-stale")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+
+    let state = AppState::load(&paths).expect("state should reload");
+    assert!(
+        !state.response_profile_bindings.contains_key("resp-stale"),
+        "state snapshot must not rewrite the released response binding"
+    );
+}
+
+#[test]
 fn runtime_continuation_journal_save_retries_stale_generation() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -7491,6 +7636,170 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
     )
     .expect("journal primary should remain valid json");
     assert_eq!(wrapped["generation"].as_u64(), Some(3));
+}
+
+#[test]
+fn runtime_continuation_journal_retry_does_not_resurrect_released_response_binding() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/main"),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    let initial = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-stale".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 30,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuation_journal(&paths, &initial, now - 30)
+        .expect("initial journal save should succeed");
+
+    let external = RuntimeContinuationJournal {
+        saved_at: now - 5,
+        continuations: RuntimeContinuationStore {
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-stale".to_string(),
+                    dead_continuation_status(now),
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    };
+    write_versioned_runtime_sidecar(
+        &runtime_continuation_journal_file_path(&paths),
+        &runtime_continuation_journal_last_good_file_path(&paths),
+        2,
+        &external,
+    );
+
+    let incoming = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-stale".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 10,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuation_journal(&paths, &incoming, now)
+        .expect("journal save should retry stale generation");
+
+    let loaded = load_runtime_continuation_journal_with_recovery(&paths, &state.profiles)
+        .expect("journal should reload")
+        .value;
+    assert_eq!(loaded.saved_at, now);
+    assert!(
+        !loaded
+            .continuations
+            .response_profile_bindings
+            .contains_key("resp-stale"),
+        "released response binding must not be resurrected in the journal"
+    );
+    assert_eq!(
+        loaded
+            .continuations
+            .statuses
+            .response
+            .get("resp-stale")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn merge_runtime_continuation_store_keeps_compact_session_release_tombstone() {
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: PathBuf::from("/tmp/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let now = Local::now().timestamp();
+    let key = runtime_compact_session_lineage_key("sess-compact");
+
+    let existing = RuntimeContinuationStore {
+        session_id_bindings: BTreeMap::from([(
+            key.clone(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 30,
+            },
+        )]),
+        statuses: RuntimeContinuationStatuses {
+            session_id: BTreeMap::from([(
+                key.clone(),
+                RuntimeContinuationBindingStatus {
+                    state: RuntimeContinuationBindingLifecycle::Verified,
+                    confidence: 2,
+                    last_touched_at: Some(now - 30),
+                    last_verified_at: Some(now - 30),
+                    last_verified_route: Some("compact".to_string()),
+                    last_not_found_at: None,
+                    not_found_streak: 0,
+                    success_count: 1,
+                    failure_count: 0,
+                },
+            )]),
+            ..RuntimeContinuationStatuses::default()
+        },
+        ..RuntimeContinuationStore::default()
+    };
+    let incoming = RuntimeContinuationStore {
+        statuses: RuntimeContinuationStatuses {
+            session_id: BTreeMap::from([(
+                key.clone(),
+                RuntimeContinuationBindingStatus {
+                    last_verified_route: Some("compact".to_string()),
+                    ..dead_continuation_status(now)
+                },
+            )]),
+            ..RuntimeContinuationStatuses::default()
+        },
+        ..RuntimeContinuationStore::default()
+    };
+
+    let merged = merge_runtime_continuation_store(&existing, &incoming, &profiles);
+    assert!(
+        !merged.session_id_bindings.contains_key(&key),
+        "compact session binding should be removed when a newer release tombstone exists"
+    );
+    assert_eq!(
+        merged
+            .statuses
+            .session_id
+            .get(&key)
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
 }
 
 #[test]
@@ -8086,6 +8395,17 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             .response_profile_bindings
             .contains_key("resp-main")
     );
+    assert_eq!(
+        shared
+            .runtime
+            .lock()
+            .expect("runtime lock")
+            .continuation_statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
 }
 
 #[test]
@@ -8172,7 +8492,126 @@ fn runtime_continuation_status_pruning_uses_evidence_over_age() {
         &profiles,
     );
     assert!(!pruned.response_profile_bindings.contains_key("resp-main"));
-    assert!(!pruned.statuses.response.contains_key("resp-main"));
+    assert_eq!(
+        pruned.statuses.response.get("resp-main").map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn runtime_dead_continuation_tombstone_blocks_stale_binding_resurrection() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let now = Local::now().timestamp();
+    let mut tombstone_statuses = RuntimeContinuationStatuses::default();
+
+    assert!(runtime_mark_continuation_status_verified(
+        &mut tombstone_statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now - 2,
+        Some(RuntimeRouteKind::Responses),
+    ));
+    assert!(runtime_mark_continuation_status_dead(
+        &mut tombstone_statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now,
+    ));
+
+    let merged = merge_runtime_continuation_store(
+        &RuntimeContinuationStore {
+            statuses: tombstone_statuses,
+            ..RuntimeContinuationStore::default()
+        },
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now - 1,
+                },
+            )]),
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+
+    assert!(
+        !merged.response_profile_bindings.contains_key("resp-main"),
+        "dead tombstone should prune stale resurrected binding"
+    );
+    assert_eq!(
+        merged.statuses.response.get("resp-main").map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn runtime_newer_binding_overrides_older_dead_tombstone() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let now = Local::now().timestamp();
+    let mut statuses = RuntimeContinuationStatuses::default();
+
+    assert!(runtime_mark_continuation_status_verified(
+        &mut statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now - 5,
+        Some(RuntimeRouteKind::Responses),
+    ));
+    assert!(runtime_mark_continuation_status_dead(
+        &mut statuses,
+        RuntimeContinuationBindingKind::Response,
+        "resp-main",
+        now - 3,
+    ));
+
+    let compacted = compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses,
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+
+    assert_eq!(
+        compacted
+            .response_profile_bindings
+            .get("resp-main")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+    assert!(
+        !compacted.statuses.response.contains_key("resp-main"),
+        "older dead tombstone should not suppress a newer binding"
+    );
 }
 
 #[test]
@@ -10771,24 +11210,6 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
         ]
     );
 
-    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
-        !continuations
-            .session_id_bindings
-            .contains_key(&runtime_compact_session_lineage_key("sess-compact"))
-            && !continuations
-                .turn_state_bindings
-                .contains_key(&runtime_compact_turn_state_lineage_key("compact-turn-second"))
-    });
-    assert!(
-        !continuations
-            .session_id_bindings
-            .contains_key(&runtime_compact_session_lineage_key("sess-compact"))
-    );
-    assert!(
-        !continuations
-            .turn_state_bindings
-            .contains_key(&runtime_compact_turn_state_lineage_key("compact-turn-second"))
-    );
 }
 
 #[test]

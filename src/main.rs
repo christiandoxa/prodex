@@ -158,6 +158,7 @@ const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
 const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS: i64 = if cfg!(test) { 5 } else { 180 };
 const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD: u32 = 2;
 const RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS: i64 = if cfg!(test) { 5 } else { 120 };
+const RUNTIME_CONTINUATION_DEAD_GRACE_SECONDS: i64 = if cfg!(test) { 5 } else { 900 };
 const RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT: u32 = 2;
 const RUNTIME_CONTINUATION_CONFIDENCE_MAX: u32 = 8;
 const RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS: u32 = 2;
@@ -384,6 +385,53 @@ fn schedule_runtime_state_save(
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
     let queued_at = Instant::now();
     let ready_at = queued_at + runtime_state_save_debounce(reason);
+    if cfg!(test) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "state_save_inline revision={} reason={} ready_in_ms={}",
+                revision,
+                reason,
+                ready_at.saturating_duration_since(queued_at).as_millis()
+            ),
+        );
+        match save_runtime_state_snapshot_if_latest(
+            &paths,
+            &state,
+            &continuations,
+            &profile_scores,
+            &usage_snapshots,
+            &backoffs,
+            revision,
+            &shared.state_save_revision,
+        ) {
+            Ok(true) => runtime_proxy_log(
+                shared,
+                format!(
+                    "state_save_ok revision={} reason={} lag_ms=0",
+                    revision, reason
+                ),
+            ),
+            Ok(false) => runtime_proxy_log(
+                shared,
+                format!(
+                    "state_save_skipped revision={} reason={} lag_ms=0",
+                    revision, reason
+                ),
+            ),
+            Err(err) => runtime_proxy_log(
+                shared,
+                format!(
+                    "state_save_error revision={} reason={} lag_ms=0 stage=write error={err:#}",
+                    revision, reason
+                ),
+            ),
+        }
+        if runtime_state_save_reason_requires_continuation_journal(reason) {
+            schedule_runtime_continuation_journal_save(shared, continuations, paths, reason);
+        }
+        return;
+    }
     let queue = runtime_state_save_queue();
     let mut pending = queue
         .pending
@@ -438,6 +486,7 @@ fn runtime_state_save_queue() -> Arc<RuntimeStateSaveQueue> {
         let queue = Arc::new(RuntimeStateSaveQueue {
             pending: Mutex::new(BTreeMap::new()),
             wake: Condvar::new(),
+            active: Arc::new(AtomicUsize::new(0)),
         });
         let worker_queue = Arc::clone(&queue);
         thread::spawn(move || runtime_state_save_worker_loop(worker_queue));
@@ -450,6 +499,7 @@ fn runtime_continuation_journal_save_queue() -> Arc<RuntimeContinuationJournalSa
         let queue = Arc::new(RuntimeContinuationJournalSaveQueue {
             pending: Mutex::new(BTreeMap::new()),
             wake: Condvar::new(),
+            active: Arc::new(AtomicUsize::new(0)),
         });
         let worker_queue = Arc::clone(&queue);
         thread::spawn(move || runtime_continuation_journal_save_worker_loop(worker_queue));
@@ -462,6 +512,7 @@ fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
         let queue = Arc::new(RuntimeProbeRefreshQueue {
             pending: Mutex::new(BTreeMap::new()),
             wake: Condvar::new(),
+            active: Arc::new(AtomicUsize::new(0)),
         });
         let worker_queue = Arc::clone(&queue);
         thread::spawn(move || runtime_probe_refresh_worker_loop(worker_queue));
@@ -477,6 +528,11 @@ fn runtime_state_save_queue_backlog() -> usize {
         .len()
 }
 
+#[allow(dead_code)]
+fn runtime_state_save_queue_active() -> usize {
+    runtime_state_save_queue().active.load(Ordering::SeqCst)
+}
+
 fn runtime_continuation_journal_queue_backlog() -> usize {
     runtime_continuation_journal_save_queue()
         .pending
@@ -485,12 +541,24 @@ fn runtime_continuation_journal_queue_backlog() -> usize {
         .len()
 }
 
+#[allow(dead_code)]
+fn runtime_continuation_journal_queue_active() -> usize {
+    runtime_continuation_journal_save_queue()
+        .active
+        .load(Ordering::SeqCst)
+}
+
 fn runtime_probe_refresh_queue_backlog() -> usize {
     runtime_probe_refresh_queue()
         .pending
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .len()
+}
+
+#[allow(dead_code)]
+fn runtime_probe_refresh_queue_active() -> usize {
+    runtime_probe_refresh_queue().active.load(Ordering::SeqCst)
 }
 
 fn runtime_proxy_queue_pressure_active(
@@ -509,6 +577,30 @@ fn schedule_runtime_continuation_journal_save(
     paths: AppPaths,
     reason: &str,
 ) {
+    if cfg!(test) {
+        runtime_proxy_log(
+            shared,
+            format!("continuation_journal_save_inline reason={reason} backlog=0"),
+        );
+        let saved_at = Local::now().timestamp();
+        match save_runtime_continuation_journal(&paths, &continuations, saved_at) {
+            Ok(()) => runtime_proxy_log(
+                shared,
+                format!(
+                    "continuation_journal_save_ok saved_at={} reason={} lag_ms=0",
+                    saved_at, reason
+                ),
+            ),
+            Err(err) => runtime_proxy_log(
+                shared,
+                format!(
+                    "continuation_journal_save_error saved_at={} reason={} lag_ms=0 stage=write error={err:#}",
+                    saved_at, reason
+                ),
+            ),
+        }
+        return;
+    }
     let queue = runtime_continuation_journal_save_queue();
     let journal_path = runtime_continuation_journal_file_path(&paths);
     let mut pending = queue
@@ -589,6 +681,7 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
         };
 
         for (_, job) in jobs {
+            queue.active.fetch_add(1, Ordering::SeqCst);
             match save_runtime_state_snapshot_if_latest(
                 &job.paths,
                 &job.state,
@@ -627,6 +720,7 @@ fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
                     ),
                 ),
             }
+            queue.active.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -648,6 +742,7 @@ fn runtime_continuation_journal_save_worker_loop(queue: Arc<RuntimeContinuationJ
         };
 
         for (_, job) in jobs {
+            queue.active.fetch_add(1, Ordering::SeqCst);
             match save_runtime_continuation_journal(&job.paths, &job.continuations, job.saved_at) {
                 Ok(()) => runtime_proxy_log_to_path(
                     &job.log_path,
@@ -668,6 +763,7 @@ fn runtime_continuation_journal_save_worker_loop(queue: Arc<RuntimeContinuationJ
                     ),
                 ),
             }
+            queue.active.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -914,6 +1010,7 @@ fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
         };
 
         for (_, job) in jobs {
+            queue.active.fetch_add(1, Ordering::SeqCst);
             runtime_proxy_log(
                 &job.shared,
                 format!("profile_probe_refresh_start profile={}", job.profile_name),
@@ -957,6 +1054,7 @@ fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
                     ),
                 ),
             }
+            queue.active.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -1014,6 +1112,13 @@ fn remember_runtime_sidecar_generation(path: &Path, generation: u64) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(path.to_path_buf(), generation);
+}
+
+fn forget_runtime_sidecar_generation(path: &Path) {
+    runtime_sidecar_generation_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(path);
 }
 
 #[derive(Debug)]
@@ -1108,6 +1213,38 @@ fn runtime_continuation_status_is_more_evidenced(
         > runtime_continuation_status_evidence_sort_key(current)
 }
 
+fn runtime_continuation_status_should_replace(
+    candidate: &RuntimeContinuationBindingStatus,
+    current: &RuntimeContinuationBindingStatus,
+) -> bool {
+    match (
+        runtime_continuation_status_last_event_at(candidate),
+        runtime_continuation_status_last_event_at(current),
+    ) {
+        (Some(candidate_at), Some(current_at)) if candidate_at != current_at => {
+            return candidate_at > current_at;
+        }
+        (Some(_), None) => return true,
+        (None, Some(_)) => return false,
+        _ => {}
+    }
+
+    runtime_continuation_status_is_more_evidenced(candidate, current)
+}
+
+fn runtime_continuation_status_last_event_at(
+    status: &RuntimeContinuationBindingStatus,
+) -> Option<i64> {
+    [
+        status.last_not_found_at,
+        status.last_verified_at,
+        status.last_touched_at,
+    ]
+    .into_iter()
+    .flatten()
+    .max()
+}
+
 fn runtime_continuation_status_is_terminal(status: &RuntimeContinuationBindingStatus) -> bool {
     status.state == RuntimeContinuationBindingLifecycle::Dead
         || status.not_found_streak >= RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT
@@ -1116,7 +1253,7 @@ fn runtime_continuation_status_is_terminal(status: &RuntimeContinuationBindingSt
             && status.failure_count > 0)
 }
 
-fn runtime_continuation_status_should_retain(
+fn runtime_continuation_status_should_retain_with_binding(
     status: &RuntimeContinuationBindingStatus,
     now: i64,
 ) -> bool {
@@ -1139,21 +1276,51 @@ fn runtime_continuation_status_should_retain(
     }
 }
 
+fn runtime_continuation_status_should_retain_without_binding(
+    status: &RuntimeContinuationBindingStatus,
+    now: i64,
+) -> bool {
+    match status.state {
+        RuntimeContinuationBindingLifecycle::Dead => status
+            .last_not_found_at
+            .or(status.last_touched_at)
+            .is_some_and(|last| now.saturating_sub(last) < RUNTIME_CONTINUATION_DEAD_GRACE_SECONDS),
+        _ => runtime_continuation_status_should_retain_with_binding(status, now),
+    }
+}
+
+fn runtime_continuation_status_dead_at(status: &RuntimeContinuationBindingStatus) -> Option<i64> {
+    (status.state == RuntimeContinuationBindingLifecycle::Dead)
+        .then(|| status.last_not_found_at.or(status.last_touched_at))
+        .flatten()
+}
+
+fn runtime_continuation_dead_status_shadowed_by_binding(
+    binding: &ResponseProfileBinding,
+    status: &RuntimeContinuationBindingStatus,
+) -> bool {
+    runtime_continuation_status_dead_at(status).is_some_and(|dead_at| binding.bound_at > dead_at)
+}
+
 fn merge_runtime_continuation_status_map(
     existing: &BTreeMap<String, RuntimeContinuationBindingStatus>,
     incoming: &BTreeMap<String, RuntimeContinuationBindingStatus>,
     live_bindings: &BTreeMap<String, ResponseProfileBinding>,
 ) -> BTreeMap<String, RuntimeContinuationBindingStatus> {
+    let now = Local::now().timestamp();
     let mut merged = existing.clone();
     for (key, status) in incoming {
         let should_replace = merged
             .get(key)
-            .is_none_or(|current| runtime_continuation_status_is_more_evidenced(status, current));
+            .is_none_or(|current| runtime_continuation_status_should_replace(status, current));
         if should_replace {
             merged.insert(key.clone(), status.clone());
         }
     }
-    merged.retain(|key, _| live_bindings.contains_key(key));
+    merged.retain(|key, status| {
+        live_bindings.contains_key(key)
+            || runtime_continuation_status_should_retain_without_binding(status, now)
+    });
     merged
 }
 
@@ -1196,16 +1363,28 @@ fn compact_runtime_continuation_statuses(
         &continuations.session_id_bindings,
     );
     merged.response.retain(|key, status| {
-        runtime_continuation_status_should_retain(status, now)
-            && continuations.response_profile_bindings.contains_key(key)
+        if let Some(binding) = continuations.response_profile_bindings.get(key) {
+            !runtime_continuation_dead_status_shadowed_by_binding(binding, status)
+                && runtime_continuation_status_should_retain_with_binding(status, now)
+        } else {
+            runtime_continuation_status_should_retain_without_binding(status, now)
+        }
     });
     merged.turn_state.retain(|key, status| {
-        runtime_continuation_status_should_retain(status, now)
-            && continuations.turn_state_bindings.contains_key(key)
+        if let Some(binding) = continuations.turn_state_bindings.get(key) {
+            !runtime_continuation_dead_status_shadowed_by_binding(binding, status)
+                && runtime_continuation_status_should_retain_with_binding(status, now)
+        } else {
+            runtime_continuation_status_should_retain_without_binding(status, now)
+        }
     });
     merged.session_id.retain(|key, status| {
-        runtime_continuation_status_should_retain(status, now)
-            && continuations.session_id_bindings.contains_key(key)
+        if let Some(binding) = continuations.session_id_bindings.get(key) {
+            !runtime_continuation_dead_status_shadowed_by_binding(binding, status)
+                && runtime_continuation_status_should_retain_with_binding(status, now)
+        } else {
+            runtime_continuation_status_should_retain_without_binding(status, now)
+        }
     });
     merged
 }
@@ -1216,7 +1395,11 @@ fn runtime_continuation_binding_should_retain(
     now: i64,
 ) -> bool {
     match status {
-        Some(status) => runtime_continuation_status_should_retain(status, now),
+        Some(status) if runtime_continuation_dead_status_shadowed_by_binding(binding, status) => {
+            true
+        }
+        Some(status) if runtime_continuation_status_is_terminal(status) => false,
+        Some(status) => runtime_continuation_status_should_retain_with_binding(status, now),
         None => binding.bound_at <= now,
     }
 }
@@ -1504,10 +1687,20 @@ where
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     let _lock = acquire_json_file_lock(path)?;
-    let expected_generation = runtime_sidecar_cached_generation(path)
+    let cached_generation = runtime_sidecar_cached_generation(path);
+    let expected_generation = cached_generation
         .unwrap_or_else(|| runtime_sidecar_generation_from_disk(path, backup_path).unwrap_or(0));
     let current_generation = runtime_sidecar_generation_from_disk(path, backup_path)?;
     if current_generation != expected_generation {
+        if current_generation == 0
+            && expected_generation > 0
+            && cached_generation.is_some()
+            && !path.exists()
+            && !backup_path.exists()
+        {
+            forget_runtime_sidecar_generation(path);
+            return save_versioned_json_file_with_fence(path, backup_path, value);
+        }
         bail!(
             "stale runtime sidecar generation for {} expected={} current={}",
             path.display(),
@@ -1827,10 +2020,14 @@ fn save_runtime_continuation_journal(
         .unwrap_or_default();
     let incoming = compact_runtime_continuation_store(continuations.clone(), &profiles);
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
-        let _ = load_runtime_continuation_journal_with_recovery(paths, &profiles)?;
+        let existing = load_runtime_continuation_journal_with_recovery(paths, &profiles)?;
         let journal = RuntimeContinuationJournal {
-            saved_at,
-            continuations: incoming.clone(),
+            saved_at: saved_at.max(existing.value.saved_at),
+            continuations: merge_runtime_continuation_store(
+                &existing.value.continuations,
+                &incoming,
+                &profiles,
+            ),
         };
         match save_versioned_json_file_with_fence(
             &runtime_continuation_journal_file_path(paths),
@@ -2138,9 +2335,13 @@ fn save_runtime_state_snapshot_if_latest(
 
         let existing = AppState::load(paths)?;
         let merged = merge_runtime_state_snapshot(existing, snapshot);
-        let _ = load_runtime_continuations_with_recovery(paths, &merged.profiles)?;
-        let merged_continuations =
-            compact_runtime_continuation_store(continuations.clone(), &merged.profiles);
+        let existing_continuations =
+            load_runtime_continuations_with_recovery(paths, &merged.profiles)?;
+        let merged_continuations = merge_runtime_continuation_store(
+            &existing_continuations.value,
+            continuations,
+            &merged.profiles,
+        );
         let mut merged = merged;
         merged.response_profile_bindings = merged_continuations.response_profile_bindings.clone();
         merged.session_profile_bindings = merged_continuations.session_profile_bindings.clone();
@@ -2616,12 +2817,14 @@ struct RuntimeRotationProxyShared {
 struct RuntimeStateSaveQueue {
     pending: Mutex<BTreeMap<PathBuf, RuntimeStateSaveJob>>,
     wake: Condvar,
+    active: Arc<AtomicUsize>,
 }
 
 #[derive(Debug)]
 struct RuntimeContinuationJournalSaveQueue {
     pending: Mutex<BTreeMap<PathBuf, RuntimeContinuationJournalSaveJob>>,
     wake: Condvar,
+    active: Arc<AtomicUsize>,
 }
 
 #[derive(Debug)]
@@ -2654,6 +2857,7 @@ struct RuntimeContinuationJournalSaveJob {
 struct RuntimeProbeRefreshQueue {
     pending: Mutex<BTreeMap<(PathBuf, String), RuntimeProbeRefreshJob>>,
     wake: Condvar,
+    active: Arc<AtomicUsize>,
 }
 
 #[derive(Debug, Clone)]
@@ -5724,14 +5928,25 @@ fn runtime_mark_continuation_status_suspect(
     *status != previous
 }
 
-fn runtime_remove_continuation_status(
+fn runtime_mark_continuation_status_dead(
     statuses: &mut RuntimeContinuationStatuses,
     kind: RuntimeContinuationBindingKind,
     key: &str,
+    now: i64,
 ) -> bool {
-    runtime_continuation_status_map_mut(statuses, kind)
-        .remove(key)
-        .is_some()
+    let status = runtime_continuation_status_map_mut(statuses, kind)
+        .entry(key.to_string())
+        .or_default();
+    let previous = status.clone();
+    status.state = RuntimeContinuationBindingLifecycle::Dead;
+    status.confidence = 0;
+    status.last_touched_at = Some(now);
+    status.last_not_found_at = Some(now);
+    status.not_found_streak = status
+        .not_found_streak
+        .max(RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT);
+    status.failure_count = status.failure_count.saturating_add(1);
+    *status != previous
 }
 
 fn runtime_continuation_status_recently_suspect(
@@ -6592,6 +6807,7 @@ fn release_runtime_compact_lineage(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let mut changed = false;
+    let now = Local::now().timestamp();
 
     if let Some(session_id) = session_id {
         let key = runtime_compact_session_lineage_key(session_id);
@@ -6601,10 +6817,11 @@ fn release_runtime_compact_lineage(
             .is_some_and(|binding| binding.profile_name == profile_name)
         {
             runtime.session_id_bindings.remove(&key);
-            let _ = runtime_remove_continuation_status(
+            let _ = runtime_mark_continuation_status_dead(
                 &mut runtime.continuation_statuses,
                 RuntimeContinuationBindingKind::SessionId,
                 &key,
+                now,
             );
             changed = true;
         }
@@ -6618,10 +6835,11 @@ fn release_runtime_compact_lineage(
             .is_some_and(|binding| binding.profile_name == profile_name)
         {
             runtime.turn_state_bindings.remove(&key);
-            let _ = runtime_remove_continuation_status(
+            let _ = runtime_mark_continuation_status_dead(
                 &mut runtime.continuation_statuses,
                 RuntimeContinuationBindingKind::TurnState,
                 &key,
+                now,
             );
             changed = true;
         }
@@ -6738,6 +6956,85 @@ fn remember_runtime_response_ids(
     Ok(())
 }
 
+fn remember_runtime_successful_previous_response_owner(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    verified_route: RuntimeRouteKind,
+) -> Result<()> {
+    let Some(previous_response_id) = previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let bound_at = Local::now().timestamp();
+    let mut changed = clear_runtime_previous_response_negative_cache(
+        &mut runtime,
+        previous_response_id,
+        profile_name,
+    );
+    let should_update = runtime
+        .state
+        .response_profile_bindings
+        .get(previous_response_id)
+        .is_none_or(|binding| binding.profile_name != profile_name || binding.bound_at < bound_at);
+    if should_update {
+        runtime.state.response_profile_bindings.insert(
+            previous_response_id.to_string(),
+            ResponseProfileBinding {
+                profile_name: profile_name.to_string(),
+                bound_at,
+            },
+        );
+        changed = true;
+    }
+    changed = runtime_mark_continuation_status_verified(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::Response,
+        previous_response_id,
+        bound_at,
+        Some(verified_route),
+    ) || changed;
+    if changed {
+        prune_profile_bindings(
+            &mut runtime.state.response_profile_bindings,
+            RESPONSE_PROFILE_BINDING_LIMIT,
+        );
+        let state_snapshot = runtime.state.clone();
+        let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+        let profile_scores_snapshot = runtime.profile_health.clone();
+        let usage_snapshots = runtime.profile_usage_snapshots.clone();
+        let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+        let paths_snapshot = runtime.paths.clone();
+        drop(runtime);
+        schedule_runtime_state_save(
+            shared,
+            state_snapshot,
+            continuations_snapshot,
+            profile_scores_snapshot,
+            usage_snapshots,
+            backoffs_snapshot,
+            paths_snapshot,
+            &format!("previous_response_owner:{profile_name}"),
+        );
+        runtime_proxy_log(
+            shared,
+            format!(
+                "binding previous_response_owner profile={profile_name} response_id={previous_response_id}"
+            ),
+        );
+    } else {
+        drop(runtime);
+    }
+    Ok(())
+}
+
 fn release_runtime_quota_blocked_affinity(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -6750,6 +7047,7 @@ fn release_runtime_quota_blocked_affinity(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let mut changed = false;
+    let now = Local::now().timestamp();
 
     if let Some(previous_response_id) = previous_response_id
         && runtime
@@ -6762,10 +7060,11 @@ fn release_runtime_quota_blocked_affinity(
             .state
             .response_profile_bindings
             .remove(previous_response_id);
-        let _ = runtime_remove_continuation_status(
+        let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
             previous_response_id,
+            now,
         );
         changed = true;
     }
@@ -6777,10 +7076,11 @@ fn release_runtime_quota_blocked_affinity(
             .is_some_and(|binding| binding.profile_name == profile_name)
     {
         runtime.turn_state_bindings.remove(turn_state);
-        let _ = runtime_remove_continuation_status(
+        let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::TurnState,
             turn_state,
+            now,
         );
         changed = true;
     }
@@ -6793,10 +7093,11 @@ fn release_runtime_quota_blocked_affinity(
     {
         runtime.session_id_bindings.remove(session_id);
         runtime.state.session_profile_bindings.remove(session_id);
-        let _ = runtime_remove_continuation_status(
+        let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::SessionId,
             session_id,
+            now,
         );
         changed = true;
     }
@@ -6863,6 +7164,7 @@ fn release_runtime_previous_response_affinity(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let mut changed = false;
+    let now = Local::now().timestamp();
 
     if let Some(previous_response_id) = previous_response_id
         && runtime
@@ -6875,10 +7177,11 @@ fn release_runtime_previous_response_affinity(
             .state
             .response_profile_bindings
             .remove(previous_response_id);
-        let _ = runtime_remove_continuation_status(
+        let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
             previous_response_id,
+            now,
         );
         changed = true;
     }
@@ -6890,10 +7193,11 @@ fn release_runtime_previous_response_affinity(
             .is_some_and(|binding| binding.profile_name == profile_name)
     {
         runtime.turn_state_bindings.remove(turn_state);
-        let _ = runtime_remove_continuation_status(
+        let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::TurnState,
             turn_state,
+            now,
         );
         changed = true;
     }
@@ -6906,10 +7210,11 @@ fn release_runtime_previous_response_affinity(
     {
         runtime.session_id_bindings.remove(session_id);
         runtime.state.session_profile_bindings.remove(session_id);
-        let _ = runtime_remove_continuation_status(
+        let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::SessionId,
             session_id,
+            now,
         );
         changed = true;
     }
@@ -8674,6 +8979,7 @@ fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
+    let request_previous_response_id = runtime_request_previous_response_id(handshake_request);
     let request_session_id = runtime_request_session_id(handshake_request);
     let request_turn_state = runtime_request_turn_state(handshake_request);
     let (quota_summary, quota_source) =
@@ -8880,6 +9186,7 @@ fn attempt_runtime_websocket_request(
                         &mut buffered_precommit_text_frames,
                         shared,
                         profile_name,
+                        request_previous_response_id.as_deref(),
                         request_session_id.as_deref(),
                         request_turn_state.as_deref(),
                     )?;
@@ -8887,6 +9194,7 @@ fn attempt_runtime_websocket_request(
                 remember_runtime_websocket_response_ids(
                     shared,
                     profile_name,
+                    request_previous_response_id.as_deref(),
                     request_session_id.as_deref(),
                     request_turn_state.as_deref(),
                     text.as_str(),
@@ -8952,6 +9260,7 @@ fn attempt_runtime_websocket_request(
                         &mut buffered_precommit_text_frames,
                         shared,
                         profile_name,
+                        request_previous_response_id.as_deref(),
                         request_session_id.as_deref(),
                         request_turn_state.as_deref(),
                     )?;
@@ -9380,11 +9689,18 @@ fn forward_runtime_proxy_websocket_error(
 fn remember_runtime_websocket_response_ids(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
     payload: &str,
 ) -> Result<()> {
     let response_ids = extract_runtime_response_ids_from_payload(payload);
+    remember_runtime_successful_previous_response_owner(
+        shared,
+        profile_name,
+        request_previous_response_id,
+        RuntimeRouteKind::Websocket,
+    )?;
     remember_runtime_response_ids(
         shared,
         profile_name,
@@ -9408,6 +9724,7 @@ fn forward_runtime_proxy_buffered_websocket_text_frames(
     buffered_frames: &mut Vec<String>,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
 ) -> Result<()> {
@@ -9415,6 +9732,7 @@ fn forward_runtime_proxy_buffered_websocket_text_frames(
         remember_runtime_websocket_response_ids(
             shared,
             profile_name,
+            request_previous_response_id,
             request_session_id,
             request_turn_state,
             frame.as_str(),
@@ -10222,11 +10540,26 @@ fn proxy_runtime_responses_request(
                             profile_name,
                             response,
                         } => {
+                            if saw_previous_response_not_found {
+                                remember_runtime_successful_previous_response_owner(
+                                    shared,
+                                    &profile_name,
+                                    previous_response_id.as_deref(),
+                                    RuntimeRouteKind::Responses,
+                                )?;
+                            }
                             commit_runtime_proxy_profile_selection_with_notice(
                                 shared,
                                 &profile_name,
                                 RuntimeRouteKind::Responses,
                             )?;
+                            let _ = release_runtime_compact_lineage(
+                                shared,
+                                &profile_name,
+                                request_session_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                "response_committed_post_commit",
+                            );
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -10471,11 +10804,26 @@ fn proxy_runtime_responses_request(
                             profile_name,
                             response,
                         } => {
+                            if saw_previous_response_not_found {
+                                remember_runtime_successful_previous_response_owner(
+                                    shared,
+                                    &profile_name,
+                                    previous_response_id.as_deref(),
+                                    RuntimeRouteKind::Responses,
+                                )?;
+                            }
                             commit_runtime_proxy_profile_selection_with_notice(
                                 shared,
                                 &profile_name,
                                 RuntimeRouteKind::Responses,
                             )?;
+                            let _ = release_runtime_compact_lineage(
+                                shared,
+                                &profile_name,
+                                request_session_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                "response_committed_post_commit",
+                            );
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -10657,11 +11005,26 @@ fn proxy_runtime_responses_request(
                 profile_name,
                 response,
             } => {
+                if saw_previous_response_not_found {
+                    remember_runtime_successful_previous_response_owner(
+                        shared,
+                        &profile_name,
+                        previous_response_id.as_deref(),
+                        RuntimeRouteKind::Responses,
+                    )?;
+                }
                 commit_runtime_proxy_profile_selection_with_notice(
                     shared,
                     &profile_name,
                     RuntimeRouteKind::Responses,
                 )?;
+                let _ = release_runtime_compact_lineage(
+                    shared,
+                    &profile_name,
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    "response_committed_post_commit",
+                );
                 runtime_proxy_log(
                     shared,
                     format!("request={request_id} transport=http committed profile={profile_name}"),
@@ -10918,6 +11281,7 @@ fn attempt_runtime_responses_request(
     }
     prepare_runtime_proxy_responses_success(
         request_id,
+        runtime_request_previous_response_id(request).as_deref(),
         request_session_id.as_deref(),
         runtime_request_turn_state(request).as_deref(),
         response,
@@ -13036,6 +13400,7 @@ fn forward_runtime_proxy_response(
 
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
+    request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
     response: reqwest::Response,
@@ -13044,6 +13409,12 @@ fn prepare_runtime_proxy_responses_success(
     inflight_guard: RuntimeProfileInFlightGuard,
 ) -> Result<RuntimeResponsesAttempt> {
     let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
+    remember_runtime_successful_previous_response_owner(
+        shared,
+        profile_name,
+        request_previous_response_id,
+        RuntimeRouteKind::Responses,
+    )?;
     remember_runtime_session_id(
         shared,
         profile_name,
