@@ -165,9 +165,9 @@ const RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS: u32 = 2;
 const RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS: u32 = 1;
 const RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY: u32 = 1;
 const RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT: usize = if cfg!(test) { 3 } else { 6 };
-const RUNTIME_BROKER_READY_TIMEOUT_MS: u64 = if cfg!(test) { 1_500 } else { 5_000 };
-const RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 100 } else { 300 };
-const RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS: u64 = if cfg!(test) { 150 } else { 500 };
+const RUNTIME_BROKER_READY_TIMEOUT_MS: u64 = if cfg!(test) { 3_000 } else { 15_000 };
+const RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 750 };
+const RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1_500 };
 const RUNTIME_BROKER_POLL_INTERVAL_MS: u64 = if cfg!(test) { 25 } else { 100 };
 const RUNTIME_BROKER_IDLE_GRACE_SECONDS: i64 = if cfg!(test) { 1 } else { 5 };
 const CLI_WIDTH: usize = 110;
@@ -15550,9 +15550,11 @@ fn remove_runtime_broker_registry_if_token_matches(
 fn runtime_broker_client() -> Result<Client> {
     Client::builder()
         .connect_timeout(Duration::from_millis(
-            RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
+            runtime_broker_health_connect_timeout_ms(),
         ))
-        .timeout(Duration::from_millis(RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS))
+        .timeout(Duration::from_millis(
+            runtime_broker_health_read_timeout_ms(),
+        ))
         .build()
         .context("failed to build runtime broker control client")
 }
@@ -15658,7 +15660,7 @@ fn wait_for_runtime_broker_ready(
 ) -> Result<RuntimeBrokerRegistry> {
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
-    while started_at.elapsed() < Duration::from_millis(RUNTIME_BROKER_READY_TIMEOUT_MS) {
+    while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
         if let Some(registry) = load_runtime_broker_registry(paths, broker_key)? {
             if registry.instance_token == expected_instance_token
                 && let Some(health) = probe_runtime_broker_health(&registry)?

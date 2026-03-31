@@ -92,6 +92,27 @@ pub(super) fn runtime_proxy_websocket_precommit_progress_timeout_ms() -> u64 {
     )
 }
 
+pub(super) fn runtime_broker_ready_timeout_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS",
+        RUNTIME_BROKER_READY_TIMEOUT_MS,
+    )
+}
+
+pub(super) fn runtime_broker_health_connect_timeout_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS",
+        RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
+    )
+}
+
+pub(super) fn runtime_broker_health_read_timeout_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS",
+        RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS,
+    )
+}
+
 pub(super) fn runtime_proxy_websocket_previous_response_reuse_stale_ms() -> u64 {
     env::var("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS")
         .ok()
