@@ -3550,6 +3550,7 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let now = Local::now().timestamp();
+    let version_summary = format_info_prodex_version(&paths)?;
     let quota = collect_info_quota_aggregate(&paths, &state, now);
     let processes = collect_prodex_processes();
     let runtime_logs = collect_active_runtime_log_paths(&processes);
@@ -3574,6 +3575,7 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
             "Active profile".to_string(),
             state.active_profile.as_deref().unwrap_or("-").to_string(),
         ),
+        ("Prodex version".to_string(), version_summary),
         (
             "Prodex processes".to_string(),
             format_info_process_summary(&processes),

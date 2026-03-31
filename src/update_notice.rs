@@ -17,19 +17,24 @@ struct CratesIoCrateInfo {
     max_version: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProdexVersionStatus {
+    UpToDate,
+    UpdateAvailable(String),
+    Unknown,
+}
+
 pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> {
     if !should_emit_update_notice(command) {
         return Ok(());
     }
 
     let paths = AppPaths::discover()?;
-    if let Some(latest_version) = latest_prodex_version(&paths)?
-        && version_is_newer(&latest_version, env!("CARGO_PKG_VERSION"))
-    {
+    if let ProdexVersionStatus::UpdateAvailable(latest_version) = prodex_version_status(&paths)? {
         print_wrapped_stderr(&section_header("Update Available"));
         print_wrapped_stderr(&format!(
             "A newer prodex release is available: {} -> {}",
-            env!("CARGO_PKG_VERSION"),
+            current_prodex_version(),
             latest_version
         ));
         print_wrapped_stderr("Update with: cargo install prodex --force");
@@ -40,16 +45,42 @@ pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> 
 
 pub(crate) fn should_emit_update_notice(command: &Commands) -> bool {
     match command {
+        Commands::Info(_) => false,
         Commands::Doctor(args) => !args.json,
         Commands::Quota(args) => !args.raw,
         _ => true,
     }
 }
 
+pub(crate) fn current_prodex_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+pub(crate) fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {
+    Ok(match latest_prodex_version(paths)? {
+        Some(latest_version) if version_is_newer(&latest_version, current_prodex_version()) => {
+            ProdexVersionStatus::UpdateAvailable(latest_version)
+        }
+        Some(_) => ProdexVersionStatus::UpToDate,
+        None => ProdexVersionStatus::Unknown,
+    })
+}
+
+pub(crate) fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
+    let current_version = current_prodex_version();
+    Ok(match prodex_version_status(paths)? {
+        ProdexVersionStatus::UpToDate => format!("{current_version} (up to date)"),
+        ProdexVersionStatus::UpdateAvailable(latest_version) => {
+            format!("{current_version} (update available: {latest_version})")
+        }
+        ProdexVersionStatus::Unknown => format!("{current_version} (update check unavailable)"),
+    })
+}
+
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
     if let Some(cached) = load_update_check_cache(paths)?
         && Local::now().timestamp().saturating_sub(cached.checked_at)
-            < update_check_cache_ttl_seconds(&cached.latest_version, env!("CARGO_PKG_VERSION"))
+            < update_check_cache_ttl_seconds(&cached.latest_version, current_prodex_version())
     {
         return Ok(Some(cached.latest_version));
     }

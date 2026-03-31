@@ -77,7 +77,7 @@ prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 - one `prodex` profile = one isolated `CODEX_HOME`
 - `prodex login` still uses the real `codex login` flow
 - `prodex run <session-id>` forwards to `codex resume <session-id>`
-- `prodex info` summarizes profile count, running Prodex processes, aggregated quota pool, and a no-reset runway estimate from active runtime logs
+- `prodex info` summarizes profile count, the installed prodex version and update status, running Prodex processes, aggregated quota pool, and a no-reset runway estimate from active runtime logs
 - `prodex quota` live-refreshes every 5 seconds by default, and `prodex quota --all` also shows aggregated `5h` and `weekly` pool remaining before the per-profile table
 - Prodex-owned screens adapt to terminal width, and live views can also adapt to terminal height
 

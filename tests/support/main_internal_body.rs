@@ -15786,6 +15786,7 @@ fn version_is_newer_compares_semver_like_versions() {
 
 #[test]
 fn update_notice_is_suppressed_for_machine_output_modes() {
+    assert!(!should_emit_update_notice(&Commands::Info(InfoArgs {})));
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
         quota: false,
         runtime: true,
@@ -15816,6 +15817,60 @@ fn update_check_cache_ttl_is_short_when_cached_version_matches_current() {
     assert_eq!(
         update_check_cache_ttl_seconds("0.2.48", "0.2.47"),
         UPDATE_CHECK_CACHE_TTL_SECONDS
+    );
+}
+
+#[test]
+fn format_info_prodex_version_reports_up_to_date_from_cache() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should be created");
+    fs::write(
+        update_check_cache_file_path(&paths),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "latest_version": current_prodex_version(),
+            "checked_at": Local::now().timestamp(),
+        }))
+        .expect("update cache json should serialize"),
+    )
+    .expect("update cache should save");
+
+    assert_eq!(
+        format_info_prodex_version(&paths).expect("version summary should render"),
+        format!("{} (up to date)", current_prodex_version())
+    );
+}
+
+#[test]
+fn format_info_prodex_version_reports_available_update_from_cache() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should be created");
+    fs::write(
+        update_check_cache_file_path(&paths),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "latest_version": "99.0.0",
+            "checked_at": Local::now().timestamp(),
+        }))
+        .expect("update cache json should serialize"),
+    )
+    .expect("update cache should save");
+
+    assert_eq!(
+        format_info_prodex_version(&paths).expect("version summary should render"),
+        format!("{} (update available: 99.0.0)", current_prodex_version())
     );
 }
 

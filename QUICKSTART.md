@@ -51,7 +51,7 @@ prodex quota --all
 
 `prodex profile list` renders a `Profiles` panel. `prodex quota --all` refreshes continuously by default every 5 seconds and renders a `Quota Overview` section with aggregated `5h` and `weekly` pool remaining above the `REMAINING` table and wrapped `status:` line for each profile.
 
-`prodex info` renders a compact fleet summary with profile count, whether other `prodex` processes are currently running, aggregated `5h` and `weekly` quota pool remaining, and a no-reset runway estimate derived from active runtime logs when recent quota decay is observable.
+`prodex info` renders a compact fleet summary with profile count, the installed prodex version and whether it is up to date, whether other `prodex` processes are currently running, aggregated `5h` and `weekly` quota pool remaining, and a no-reset runway estimate derived from active runtime logs when recent quota decay is observable.
 
 The `REMAINING` column shows quota left, not quota used.
 
