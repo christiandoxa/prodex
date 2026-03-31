@@ -6818,6 +6818,44 @@ fn runtime_proxy_local_selection_failure_message() -> &'static str {
     "Runtime proxy could not secure a healthy upstream profile before the pre-commit retry budget was exhausted. Retry the request."
 }
 
+fn runtime_quota_window_usable_for_auto_rotate(status: RuntimeQuotaWindowStatus) -> bool {
+    matches!(
+        status,
+        RuntimeQuotaWindowStatus::Ready
+            | RuntimeQuotaWindowStatus::Thin
+            | RuntimeQuotaWindowStatus::Critical
+    )
+}
+
+fn runtime_quota_summary_allows_soft_affinity(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+) -> bool {
+    source.is_some()
+        && runtime_quota_window_usable_for_auto_rotate(summary.five_hour.status)
+        && runtime_quota_window_usable_for_auto_rotate(summary.weekly.status)
+}
+
+fn runtime_quota_soft_affinity_rejection_reason(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+) -> &'static str {
+    if source.is_none()
+        || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
+        || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown)
+    {
+        "quota_windows_unavailable"
+    } else if matches!(
+        summary.five_hour.status,
+        RuntimeQuotaWindowStatus::Exhausted
+    ) || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted)
+    {
+        "quota_exhausted"
+    } else {
+        runtime_quota_pressure_band_reason(summary.route_band)
+    }
+}
+
 fn runtime_profile_quota_summary_for_route(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -6886,7 +6924,7 @@ fn select_runtime_response_candidate_for_route(
         }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source) {
             return Ok(Some(profile_name.to_string()));
         }
         runtime_proxy_log(
@@ -6895,7 +6933,7 @@ fn select_runtime_response_candidate_for_route(
                 "selection_skip_affinity route={} affinity=compact_followup profile={} reason={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 profile_name,
-                runtime_quota_pressure_band_reason(quota_summary.route_band),
+                runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source),
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -6960,7 +6998,12 @@ fn select_runtime_response_candidate_for_route(
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+        let websocket_reuse_current_profile = route_kind == RuntimeRouteKind::Websocket
+            && quota_source.is_none()
+            && runtime_proxy_current_profile(shared)? == profile_name;
+        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+            || websocket_reuse_current_profile
+        {
             return Ok(Some(profile_name.to_string()));
         }
         runtime_proxy_log(
@@ -6969,7 +7012,7 @@ fn select_runtime_response_candidate_for_route(
                 "selection_skip_affinity route={} affinity=session profile={} reason={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 profile_name,
-                runtime_quota_pressure_band_reason(quota_summary.route_band),
+                runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source),
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -7499,12 +7542,9 @@ fn proxy_runtime_websocket_text_message(
     } else {
         None
     };
-    let mut pinned_profile = bound_profile
-        .clone()
-        .or(compact_followup_profile
-            .as_ref()
-            .map(|(profile_name, _)| profile_name.clone()))
-        .or(session_profile.clone());
+    let mut pinned_profile = bound_profile.clone().or(compact_followup_profile
+        .as_ref()
+        .map(|(profile_name, _)| profile_name.clone()));
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -8047,9 +8087,12 @@ fn proxy_runtime_websocket_text_message(
                 excluded_profiles.len()
             ),
         );
+        let session_affinity_candidate =
+            session_profile.as_deref() == Some(candidate_name.as_str());
         if previous_response_id.is_none()
             && pinned_profile.is_none()
             && turn_state_profile.is_none()
+            && !session_affinity_candidate
             && runtime_profile_inflight_hard_limited_for_context(
                 shared,
                 &candidate_name,
@@ -9192,7 +9235,13 @@ fn proxy_runtime_standard_request(
             &preferred_profile,
             RuntimeRouteKind::Standard,
         )?;
-        if quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
+        let preferred_is_session = session_profile.as_deref() == Some(preferred_profile.as_str());
+        let preferred_profile_usable = if preferred_is_session {
+            runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+        } else {
+            quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted
+        };
+        if preferred_profile_usable {
             return proxy_runtime_standard_request_for_profile(
                 request_id,
                 request,
@@ -9203,8 +9252,8 @@ fn proxy_runtime_standard_request(
         runtime_proxy_log(
             shared,
             format!(
-                "request={request_id} transport=http {} profile={} reason=quota_exhausted quota_source={} {}",
-                if session_profile.as_deref() == Some(preferred_profile.as_str()) {
+                "request={request_id} transport=http {} profile={} reason={} quota_source={} {}",
+                if preferred_is_session {
                     format!(
                         "selection_skip_affinity route={} affinity=session",
                         runtime_route_kind_label(RuntimeRouteKind::Standard)
@@ -9216,6 +9265,11 @@ fn proxy_runtime_standard_request(
                     )
                 },
                 preferred_profile,
+                if preferred_is_session {
+                    runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source)
+                } else {
+                    runtime_quota_pressure_band_reason(quota_summary.route_band)
+                },
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -9294,6 +9348,11 @@ fn proxy_runtime_standard_request(
                     "service_unavailable",
                     "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                 )),
+                None if session_profile.is_some() => Ok(build_runtime_proxy_json_error_response(
+                    503,
+                    "service_unavailable",
+                    runtime_proxy_local_selection_failure_message(),
+                )),
                 None => match attempt_runtime_standard_request(
                     request_id,
                     request,
@@ -9353,6 +9412,11 @@ fn proxy_runtime_standard_request(
                     503,
                     "service_unavailable",
                     "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                )),
+                None if session_profile.is_some() => Ok(build_runtime_proxy_json_error_response(
+                    503,
+                    "service_unavailable",
+                    runtime_proxy_local_selection_failure_message(),
                 )),
                 None => match attempt_runtime_standard_request(
                     request_id,
@@ -13757,9 +13821,11 @@ fn extract_runtime_proxy_quota_message_candidate(value: &serde_json::Value) -> O
                 .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
                 .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
             let code = map.get("code").and_then(serde_json::Value::as_str);
+            let error_type = map.get("type").and_then(serde_json::Value::as_str);
             let code_matches = matches!(code, Some("insufficient_quota" | "rate_limit_exceeded"));
+            let type_matches = matches!(error_type, Some("usage_limit_reached"));
             let message_matches = message.is_some_and(runtime_proxy_usage_limit_message);
-            if !(code_matches || message_matches) {
+            if !(code_matches || type_matches || message_matches) {
                 return None;
             }
 
@@ -13781,6 +13847,7 @@ fn extract_runtime_proxy_quota_message_from_text(text: &str) -> Option<String> {
 
     let lower = trimmed.to_ascii_lowercase();
     if runtime_proxy_usage_limit_message(trimmed)
+        || lower.contains("usage_limit_reached")
         || lower.contains("insufficient_quota")
         || lower.contains("rate_limit_exceeded")
     {
@@ -13794,6 +13861,8 @@ fn runtime_proxy_usage_limit_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("you've hit your usage limit")
         || lower.contains("you have hit your usage limit")
+        || lower.contains("the usage limit has been reached")
+        || lower.contains("usage limit has been reached")
         || lower.contains("usage limit")
             && (lower.contains("try again at")
                 || lower.contains("request to your admin")
