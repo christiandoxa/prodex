@@ -10757,6 +10757,37 @@ fn runtime_proxy_passes_through_plain_429_without_rotating_profiles() {
 }
 
 #[test]
+fn quota_message_extraction_recurses_into_nested_json_values() {
+    let body = serde_json::json!({
+        "status": 429,
+        "errors": [
+            {
+                "meta": {
+                    "detail": "You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM."
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let message = extract_runtime_proxy_quota_message(body.as_bytes())
+        .expect("nested quota message should be detected");
+
+    assert!(message.contains("You've hit your usage limit"));
+}
+
+#[test]
+fn quota_message_extraction_falls_back_to_text_body() {
+    let body =
+        b"You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM.";
+
+    let message = extract_runtime_proxy_quota_message(body)
+        .expect("text quota message should be detected");
+
+    assert!(message.contains("You've hit your usage limit"));
+}
+
+#[test]
 fn runtime_proxy_returns_503_for_local_candidate_exhaustion_without_upstream_429() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();

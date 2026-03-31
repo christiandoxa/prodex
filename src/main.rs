@@ -9699,6 +9699,15 @@ fn attempt_runtime_standard_request(
     let retryable_quota =
         matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
     let retryable_overload = extract_runtime_proxy_overload_message(status, &parts.body).is_some();
+    if matches!(status, 403 | 429) && !retryable_quota {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_quota_unclassified profile={profile_name} status={status} body_snippet={}",
+                runtime_proxy_body_snippet(&parts.body, 240),
+            ),
+        );
+    }
     let response = build_runtime_proxy_response_from_parts(parts);
 
     if retryable_quota || retryable_overload {
@@ -13677,9 +13686,13 @@ fn extract_runtime_response_ids_from_sse(data_lines: &[String]) -> Vec<String> {
 }
 
 fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| extract_runtime_proxy_quota_message_from_value(&value))
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
+        && let Some(message) = extract_runtime_proxy_quota_message_from_value(&value)
+    {
+        return Some(message);
+    }
+
+    extract_runtime_proxy_quota_message_from_text(&String::from_utf8_lossy(body))
 }
 
 fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<String> {
@@ -13717,16 +13730,19 @@ fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<St
 }
 
 fn extract_runtime_proxy_quota_message_from_value(value: &serde_json::Value) -> Option<String> {
-    let direct_error = value.get("error");
-    let response_error = value
-        .get("response")
-        .and_then(|response| response.get("error"));
-    for error in [direct_error, response_error].into_iter().flatten() {
-        if let Some(message) = extract_runtime_proxy_quota_message_candidate(error) {
-            return Some(message);
-        }
+    if let Some(message) = extract_runtime_proxy_quota_message_candidate(value) {
+        return Some(message);
     }
-    extract_runtime_proxy_quota_message_candidate(value)
+
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(extract_runtime_proxy_quota_message_from_value),
+        serde_json::Value::Object(map) => map
+            .values()
+            .find_map(extract_runtime_proxy_quota_message_from_value),
+        _ => None,
+    }
 }
 
 fn extract_runtime_proxy_quota_message_candidate(value: &serde_json::Value) -> Option<String> {
@@ -13757,6 +13773,23 @@ fn extract_runtime_proxy_quota_message_candidate(value: &serde_json::Value) -> O
     }
 }
 
+fn extract_runtime_proxy_quota_message_from_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if runtime_proxy_usage_limit_message(trimmed)
+        || lower.contains("insufficient_quota")
+        || lower.contains("rate_limit_exceeded")
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
 fn runtime_proxy_usage_limit_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("you've hit your usage limit")
@@ -13765,6 +13798,23 @@ fn runtime_proxy_usage_limit_message(message: &str) -> bool {
             && (lower.contains("try again at")
                 || lower.contains("request to your admin")
                 || lower.contains("more access now"))
+}
+
+fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
+    let normalized = String::from_utf8_lossy(body)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        return "-".to_string();
+    }
+
+    let snippet = normalized.chars().take(max_chars).collect::<String>();
+    if normalized.chars().count() > max_chars {
+        format!("{snippet}...")
+    } else {
+        snippet
+    }
 }
 
 fn extract_runtime_proxy_previous_response_message_from_value(
