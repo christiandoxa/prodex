@@ -15437,6 +15437,174 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
 }
 
 #[test]
+fn runtime_proxy_allows_only_one_persistence_owner_per_state_root() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let owner = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("first runtime proxy should start");
+    let follower = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("second runtime proxy should start");
+
+    assert!(runtime_proxy_persistence_enabled_for_log_path(&owner.log_path));
+    assert!(!runtime_proxy_persistence_enabled_for_log_path(&follower.log_path));
+
+    drop(owner);
+
+    let promoted = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("replacement runtime proxy should start");
+    assert!(runtime_proxy_persistence_enabled_for_log_path(
+        &promoted.log_path
+    ));
+}
+
+#[test]
+fn runtime_proxy_follower_keeps_persistence_side_effects_in_memory_only() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let _owner = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("owner runtime proxy should start");
+    let follower =
+        start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("follower runtime proxy should start");
+    assert!(!runtime_proxy_persistence_enabled_for_log_path(
+        &follower.log_path
+    ));
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            follower.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("follower runtime proxy request should succeed");
+    assert!(response.status().is_success());
+
+    let state_after = AppState::load(&paths).expect("state should reload");
+    assert!(state_after.response_profile_bindings.is_empty());
+
+    let continuations = load_runtime_continuations_with_recovery(&paths, &state_after.profiles)
+        .expect("continuations should reload")
+        .value;
+    assert!(continuations.response_profile_bindings.is_empty());
+}
+
+#[test]
+fn runtime_proxy_owner_still_persists_bindings_when_follower_exists() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let owner = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("owner runtime proxy should start");
+    let _follower = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("follower runtime proxy should start");
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            owner.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("owner runtime proxy request should succeed");
+    assert!(response.status().is_success());
+
+    let state_after = wait_for_state(&paths, |state| {
+        state.response_profile_bindings.contains_key("resp-second")
+    });
+    assert_eq!(
+        state_after
+            .response_profile_bindings
+            .get("resp-second")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+}
+
+#[test]
 fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
@@ -15795,4 +15963,152 @@ fn estimate_info_runway_uses_latest_monotonic_segment_after_reset() {
 fn normalize_run_codex_args_keeps_regular_prompt_intact() {
     let args = vec![OsString::from("fix this bug")];
     assert_eq!(normalize_run_codex_args(&args), args);
+}
+
+#[test]
+fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    register_runtime_broker_metadata(
+        &proxy.log_path,
+        RuntimeBrokerMetadata {
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            instance_token: "instance".to_string(),
+            admin_token: "secret".to_string(),
+        },
+    );
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .get(format!("http://{}/__prodex/runtime/health", proxy.listen_addr))
+        .header("X-Prodex-Admin-Token", "secret")
+        .send()
+        .expect("runtime broker health request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let health = response
+        .json::<RuntimeBrokerHealth>()
+        .expect("runtime broker health should decode");
+    assert_eq!(health.current_profile, "main");
+    assert_eq!(health.instance_token, "instance");
+    assert_eq!(health.persistence_role, "owner");
+}
+
+#[test]
+fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    register_runtime_broker_metadata(
+        &proxy.log_path,
+        RuntimeBrokerMetadata {
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            instance_token: "instance".to_string(),
+            admin_token: "secret".to_string(),
+        },
+    );
+
+    let client = Client::builder().build().expect("client");
+    let activate = client
+        .post(format!(
+            "http://{}/__prodex/runtime/activate",
+            proxy.listen_addr
+        ))
+        .header("X-Prodex-Admin-Token", "secret")
+        .json(&serde_json::json!({
+            "current_profile": "second",
+        }))
+        .send()
+        .expect("runtime broker activate request should succeed");
+    assert_eq!(activate.status().as_u16(), 200);
+
+    let health = client
+        .get(format!("http://{}/__prodex/runtime/health", proxy.listen_addr))
+        .header("X-Prodex-Admin-Token", "secret")
+        .send()
+        .expect("runtime broker health request should succeed")
+        .json::<RuntimeBrokerHealth>()
+        .expect("runtime broker health should decode");
+    assert_eq!(health.current_profile, "second");
+}
+
+#[test]
+fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "lease-test";
+    let lease_dir = runtime_broker_lease_dir(&paths, broker_key);
+    fs::create_dir_all(&lease_dir).expect("lease dir should exist");
+    let stale_path = lease_dir.join("999999999-stale.lease");
+    let live_path = lease_dir.join(format!("{}-live.lease", std::process::id()));
+    fs::write(&stale_path, "stale").expect("stale lease should write");
+    fs::write(&live_path, "live").expect("live lease should write");
+
+    let live_count = cleanup_runtime_broker_stale_leases(&paths, broker_key);
+
+    assert_eq!(live_count, 1);
+    assert!(!stale_path.exists(), "dead-pid lease should be removed");
+    assert!(live_path.exists(), "current-pid lease should remain");
 }

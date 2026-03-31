@@ -16,7 +16,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, Cursor, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -165,6 +165,11 @@ const RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS: u32 = 2;
 const RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS: u32 = 1;
 const RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY: u32 = 1;
 const RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT: usize = if cfg!(test) { 3 } else { 6 };
+const RUNTIME_BROKER_READY_TIMEOUT_MS: u64 = if cfg!(test) { 1_500 } else { 5_000 };
+const RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 100 } else { 300 };
+const RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS: u64 = if cfg!(test) { 150 } else { 500 };
+const RUNTIME_BROKER_POLL_INTERVAL_MS: u64 = if cfg!(test) { 25 } else { 100 };
+const RUNTIME_BROKER_IDLE_GRACE_SECONDS: i64 = if cfg!(test) { 1 } else { 5 };
 const CLI_WIDTH: usize = 110;
 const CLI_MIN_WIDTH: usize = 60;
 const CLI_LABEL_WIDTH: usize = 16;
@@ -188,6 +193,11 @@ static RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE: OnceLock<Arc<RuntimeContinuation
     OnceLock::new();
 static RUNTIME_PROBE_REFRESH_QUEUE: OnceLock<Arc<RuntimeProbeRefreshQueue>> = OnceLock::new();
 static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
+static RUNTIME_PERSISTENCE_MODE_BY_LOG_PATH: OnceLock<Mutex<BTreeMap<PathBuf, bool>>> =
+    OnceLock::new();
+static RUNTIME_BROKER_METADATA_BY_LOG_PATH: OnceLock<
+    Mutex<BTreeMap<PathBuf, RuntimeBrokerMetadata>>,
+> = OnceLock::new();
 
 fn runtime_proxy_log_dir() -> PathBuf {
     env::var_os("PRODEX_RUNTIME_LOG_DIR")
@@ -372,6 +382,65 @@ fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     }
 }
 
+fn runtime_persistence_mode_by_log_path() -> &'static Mutex<BTreeMap<PathBuf, bool>> {
+    RUNTIME_PERSISTENCE_MODE_BY_LOG_PATH.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn register_runtime_proxy_persistence_mode(log_path: &Path, enabled: bool) {
+    let mut modes = runtime_persistence_mode_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    modes.insert(log_path.to_path_buf(), enabled);
+}
+
+fn unregister_runtime_proxy_persistence_mode(log_path: &Path) {
+    let mut modes = runtime_persistence_mode_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    modes.remove(log_path);
+}
+
+fn runtime_proxy_persistence_enabled_for_log_path(log_path: &Path) -> bool {
+    runtime_persistence_mode_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(log_path)
+        .copied()
+        .unwrap_or(true)
+}
+
+fn runtime_proxy_persistence_enabled(shared: &RuntimeRotationProxyShared) -> bool {
+    runtime_proxy_persistence_enabled_for_log_path(&shared.log_path)
+}
+
+fn runtime_broker_metadata_by_log_path() -> &'static Mutex<BTreeMap<PathBuf, RuntimeBrokerMetadata>>
+{
+    RUNTIME_BROKER_METADATA_BY_LOG_PATH.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn register_runtime_broker_metadata(log_path: &Path, metadata: RuntimeBrokerMetadata) {
+    let mut metadata_by_path = runtime_broker_metadata_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    metadata_by_path.insert(log_path.to_path_buf(), metadata);
+}
+
+fn unregister_runtime_broker_metadata(log_path: &Path) {
+    let mut metadata_by_path = runtime_broker_metadata_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    metadata_by_path.remove(log_path);
+}
+
+#[allow(dead_code)]
+fn runtime_broker_metadata_for_log_path(log_path: &Path) -> Option<RuntimeBrokerMetadata> {
+    runtime_broker_metadata_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(log_path)
+        .cloned()
+}
+
 fn schedule_runtime_state_save(
     shared: &RuntimeRotationProxyShared,
     state: AppState,
@@ -382,6 +451,16 @@ fn schedule_runtime_state_save(
     paths: AppPaths,
     reason: &str,
 ) {
+    if !runtime_proxy_persistence_enabled(shared) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "state_save_suppressed role=follower reason={reason} path={}",
+                paths.state_file.display()
+            ),
+        );
+        return;
+    }
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
     let queued_at = Instant::now();
     let ready_at = queued_at + runtime_state_save_debounce(reason);
@@ -577,6 +656,16 @@ fn schedule_runtime_continuation_journal_save(
     paths: AppPaths,
     reason: &str,
 ) {
+    if !runtime_proxy_persistence_enabled(shared) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "continuation_journal_save_suppressed role=follower reason={reason} path={}",
+                runtime_continuation_journal_file_path(&paths).display()
+            ),
+        );
+        return;
+    }
     if cfg!(test) {
         runtime_proxy_log(
             shared,
@@ -1074,8 +1163,29 @@ fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
     Ok(StateFileLock { file })
 }
 
+fn try_acquire_runtime_owner_lock(paths: &AppPaths) -> Result<Option<StateFileLock>> {
+    fs::create_dir_all(&paths.root)
+        .with_context(|| format!("failed to create {}", paths.root.display()))?;
+    let lock_path = runtime_owner_lock_file_path(paths);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open {}", lock_path.display()))?;
+    match file.try_lock_exclusive() {
+        Ok(()) => Ok(Some(StateFileLock { file })),
+        Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to lock {}", lock_path.display())),
+    }
+}
+
 fn state_lock_file_path(state_file: &Path) -> PathBuf {
     json_lock_file_path(state_file)
+}
+
+fn runtime_owner_lock_file_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join("runtime-owner.lock")
 }
 
 fn json_lock_file_path(path: &Path) -> PathBuf {
@@ -1563,6 +1673,26 @@ fn runtime_continuation_journal_file_path(paths: &AppPaths) -> PathBuf {
 
 fn runtime_continuation_journal_last_good_file_path(paths: &AppPaths) -> PathBuf {
     last_good_file_path(&runtime_continuation_journal_file_path(paths))
+}
+
+fn runtime_broker_registry_file_path(paths: &AppPaths, broker_key: &str) -> PathBuf {
+    paths.root.join(format!("runtime-broker-{broker_key}.json"))
+}
+
+fn runtime_broker_registry_last_good_file_path(paths: &AppPaths, broker_key: &str) -> PathBuf {
+    last_good_file_path(&runtime_broker_registry_file_path(paths, broker_key))
+}
+
+fn runtime_broker_lease_dir(paths: &AppPaths, broker_key: &str) -> PathBuf {
+    paths
+        .root
+        .join(format!("runtime-broker-{broker_key}-leases"))
+}
+
+fn runtime_broker_ensure_lock_path(paths: &AppPaths, broker_key: &str) -> PathBuf {
+    paths
+        .root
+        .join(format!("runtime-broker-{broker_key}-ensure"))
 }
 
 fn last_good_file_path(path: &Path) -> PathBuf {
@@ -2424,6 +2554,8 @@ enum Commands {
     Quota(QuotaArgs),
     #[command(trailing_var_arg = true)]
     Run(RunArgs),
+    #[command(name = "__runtime-broker", hide = true)]
+    RuntimeBroker(RuntimeBrokerArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -2520,6 +2652,22 @@ struct RunArgs {
     base_url: Option<String>,
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+struct RuntimeBrokerArgs {
+    #[arg(long)]
+    current_profile: String,
+    #[arg(long)]
+    upstream_base_url: String,
+    #[arg(long, default_value_t = false)]
+    include_code_review: bool,
+    #[arg(long)]
+    broker_key: String,
+    #[arg(long)]
+    instance_token: String,
+    #[arg(long)]
+    admin_token: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3097,6 +3245,53 @@ struct RuntimeRotationProxy {
     worker_threads: Vec<thread::JoinHandle<()>>,
     accept_worker_count: usize,
     listen_addr: std::net::SocketAddr,
+    log_path: PathBuf,
+    active_request_count: Arc<AtomicUsize>,
+    owner_lock: Option<StateFileLock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeBrokerRegistry {
+    pid: u32,
+    listen_addr: String,
+    started_at: i64,
+    upstream_base_url: String,
+    include_code_review: bool,
+    current_profile: String,
+    instance_token: String,
+    admin_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeBrokerHealth {
+    pid: u32,
+    started_at: i64,
+    current_profile: String,
+    include_code_review: bool,
+    active_requests: usize,
+    instance_token: String,
+    persistence_role: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct RuntimeBrokerMetadata {
+    started_at: i64,
+    current_profile: String,
+    include_code_review: bool,
+    instance_token: String,
+    admin_token: String,
+}
+
+#[derive(Debug)]
+struct RuntimeBrokerLease {
+    path: PathBuf,
+}
+
+#[derive(Debug)]
+struct RuntimeProxyEndpoint {
+    listen_addr: std::net::SocketAddr,
+    _lease: Option<RuntimeBrokerLease>,
 }
 
 type RuntimeLocalWebSocket = WsSocket<Box<dyn TinyReadWrite + Send>>;
@@ -3320,7 +3515,9 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let _ = show_update_notice_if_available(&cli.command);
+    if !matches!(cli.command, Commands::RuntimeBroker(_)) {
+        let _ = show_update_notice_if_available(&cli.command);
+    }
     match cli.command {
         Commands::Profile(command) => handle_profile_command(command),
         Commands::UseProfile(selector) => handle_set_active_profile(selector),
@@ -3331,6 +3528,7 @@ fn run() -> Result<()> {
         Commands::Logout(selector) => handle_codex_logout(selector),
         Commands::Quota(args) => handle_quota(args),
         Commands::Run(args) => handle_run(args),
+        Commands::RuntimeBroker(args) => handle_runtime_broker(args),
     }
 }
 
@@ -3651,7 +3849,7 @@ fn is_prodex_process_row(row: &ProcessRow, current_basename: Option<&str>) -> bo
 fn prodex_process_row_is_runtime(row: &ProcessRow, current_basename: Option<&str>) -> bool {
     prodex_process_row_argv_span(row, current_basename)
         .and_then(|args| args.get(1))
-        .is_some_and(|arg| arg == "run")
+        .is_some_and(|arg| arg == "run" || arg == "__runtime-broker")
 }
 
 fn prodex_process_row_argv_span<'a>(
@@ -4511,16 +4709,16 @@ fn handle_run(args: RunArgs) -> Result<()> {
         prepare_managed_codex_home(&paths, &codex_home)?;
     }
 
+    let runtime_upstream_base_url = quota_base_url(args.base_url.as_deref());
     let runtime_proxy = if should_enable_runtime_rotation_proxy(
         &state,
         &selected_profile_name,
         allow_auto_rotate,
     ) {
-        let proxy = start_runtime_rotation_proxy(
+        let proxy = ensure_runtime_rotation_proxy_endpoint(
             &paths,
-            &state,
             &selected_profile_name,
-            quota_base_url(args.base_url.as_deref()),
+            runtime_upstream_base_url.as_str(),
             include_code_review,
         )?;
         Some(proxy)
@@ -4534,6 +4732,76 @@ fn handle_run(args: RunArgs) -> Result<()> {
 
     let status = run_child(&codex_bin(), &runtime_args, &codex_home)?;
     exit_with_status(status)
+}
+
+fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let proxy = start_runtime_rotation_proxy(
+        &paths,
+        &state,
+        &args.current_profile,
+        args.upstream_base_url.clone(),
+        args.include_code_review,
+    )?;
+    if proxy.owner_lock.is_none() {
+        return Ok(());
+    }
+
+    let metadata = RuntimeBrokerMetadata {
+        started_at: Local::now().timestamp(),
+        current_profile: args.current_profile.clone(),
+        include_code_review: args.include_code_review,
+        instance_token: args.instance_token.clone(),
+        admin_token: args.admin_token.clone(),
+    };
+    register_runtime_broker_metadata(&proxy.log_path, metadata.clone());
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        listen_addr: proxy.listen_addr.to_string(),
+        started_at: metadata.started_at,
+        upstream_base_url: args.upstream_base_url.clone(),
+        include_code_review: args.include_code_review,
+        current_profile: args.current_profile.clone(),
+        instance_token: args.instance_token.clone(),
+        admin_token: args.admin_token.clone(),
+    };
+    save_runtime_broker_registry(&paths, &args.broker_key, &registry)?;
+    runtime_proxy_log_to_path(
+        &proxy.log_path,
+        &format!(
+            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={}",
+            proxy.listen_addr, args.broker_key, args.current_profile, args.include_code_review
+        ),
+    );
+
+    let mut idle_started_at = None::<i64>;
+    loop {
+        let live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
+        let active_requests = proxy.active_request_count.load(Ordering::SeqCst);
+        if live_leases > 0 || active_requests > 0 {
+            idle_started_at = None;
+        } else {
+            let now = Local::now().timestamp();
+            let idle_since = idle_started_at.get_or_insert(now);
+            if now.saturating_sub(*idle_since) >= RUNTIME_BROKER_IDLE_GRACE_SECONDS {
+                runtime_proxy_log_to_path(
+                    &proxy.log_path,
+                    &format!(
+                        "runtime_broker_idle_shutdown broker_key={} idle_seconds={}",
+                        args.broker_key,
+                        now.saturating_sub(*idle_since)
+                    ),
+                );
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS));
+    }
+
+    drop(proxy);
+    remove_runtime_broker_registry_if_token_matches(&paths, &args.broker_key, &args.instance_token);
+    Ok(())
 }
 
 fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
@@ -4700,6 +4968,8 @@ fn start_runtime_rotation_proxy(
         .to_ip()
         .context("runtime auto-rotate proxy did not expose a TCP listen address")?;
     let log_path = initialize_runtime_proxy_log_path();
+    let owner_lock = try_acquire_runtime_owner_lock(paths)?;
+    let persistence_enabled = owner_lock.is_some();
     let async_runtime = Arc::new(
         TokioRuntimeBuilder::new_multi_thread()
             .worker_threads(2)
@@ -4848,10 +5118,16 @@ fn start_runtime_rotation_proxy(
             profile_health: persisted_profile_scores.value,
         })),
     };
+    register_runtime_proxy_persistence_mode(&log_path, persistence_enabled);
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} upstream_base_url={upstream_base_url}"
+            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} upstream_base_url={upstream_base_url} persistence_mode={}",
+            if persistence_enabled {
+                "owner"
+            } else {
+                "follower"
+            }
         ),
     );
     runtime_proxy_log_to_path(
@@ -4991,11 +5267,16 @@ fn start_runtime_rotation_proxy(
         worker_threads,
         accept_worker_count: worker_count,
         listen_addr,
+        log_path,
+        active_request_count: Arc::clone(&shared.active_request_count),
+        owner_lock,
     })
 }
 
 impl Drop for RuntimeRotationProxy {
     fn drop(&mut self) {
+        unregister_runtime_proxy_persistence_mode(&self.log_path);
+        unregister_runtime_broker_metadata(&self.log_path);
         self.shutdown.store(true, Ordering::SeqCst);
         for _ in 0..self.accept_worker_count {
             self.server.unblock();
@@ -5003,6 +5284,7 @@ impl Drop for RuntimeRotationProxy {
         for worker in self.worker_threads.drain(..) {
             let _ = worker.join();
         }
+        let _ = self.owner_lock.take();
     }
 }
 
@@ -5039,6 +5321,142 @@ fn reject_runtime_proxy_overloaded_request(
         )
     };
     let _ = request.respond(response);
+}
+
+fn runtime_proxy_admin_token(request: &tiny_http::Request) -> Option<String> {
+    request
+        .headers()
+        .iter()
+        .find(|header| header.field.equiv("X-Prodex-Admin-Token"))
+        .map(|header| header.value.as_str().trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn build_runtime_proxy_json_response(status: u16, body: String) -> tiny_http::ResponseBox {
+    let mut response = TinyResponse::from_string(body).with_status_code(status);
+    if let Ok(header) = TinyHeader::from_bytes("Content-Type", "application/json") {
+        response = response.with_header(header);
+    }
+    response.boxed()
+}
+
+fn update_runtime_broker_current_profile(log_path: &Path, current_profile: &str) {
+    let mut metadata_by_path = runtime_broker_metadata_by_log_path()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(metadata) = metadata_by_path.get_mut(log_path) {
+        metadata.current_profile = current_profile.to_string();
+    }
+}
+
+fn handle_runtime_proxy_admin_request(
+    request: &mut tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Option<tiny_http::ResponseBox> {
+    let path = path_without_query(request.url());
+    if path != "/__prodex/runtime/health" && path != "/__prodex/runtime/activate" {
+        return None;
+    }
+
+    let Some(metadata) = runtime_broker_metadata_for_log_path(&shared.log_path) else {
+        return Some(build_runtime_proxy_json_error_response(
+            404,
+            "not_found",
+            "runtime broker admin endpoint is not enabled for this proxy",
+        ));
+    };
+    if runtime_proxy_admin_token(request).as_deref() != Some(metadata.admin_token.as_str()) {
+        return Some(build_runtime_proxy_json_error_response(
+            403,
+            "forbidden",
+            "missing or invalid runtime broker admin token",
+        ));
+    }
+
+    if path == "/__prodex/runtime/health" {
+        let health = RuntimeBrokerHealth {
+            pid: std::process::id(),
+            started_at: metadata.started_at,
+            current_profile: metadata.current_profile,
+            include_code_review: metadata.include_code_review,
+            active_requests: shared.active_request_count.load(Ordering::SeqCst),
+            instance_token: metadata.instance_token,
+            persistence_role: if runtime_proxy_persistence_enabled(shared) {
+                "owner".to_string()
+            } else {
+                "follower".to_string()
+            },
+        };
+        let body = serde_json::to_string(&health).ok()?;
+        return Some(build_runtime_proxy_json_response(200, body));
+    }
+
+    if request.method().as_str() != "POST" {
+        return Some(build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "runtime broker activation requires POST",
+        ));
+    }
+
+    let mut body = Vec::new();
+    if let Err(err) = request.as_reader().read_to_end(&mut body) {
+        return Some(build_runtime_proxy_json_error_response(
+            400,
+            "invalid_request",
+            &format!("failed to read runtime broker activation body: {err}"),
+        ));
+    }
+    let current_profile = match serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("current_profile")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .map(str::to_string)
+        })
+        .filter(|value| !value.is_empty())
+    {
+        Some(current_profile) => current_profile,
+        None => {
+            return Some(build_runtime_proxy_json_error_response(
+                400,
+                "invalid_request",
+                "runtime broker activation requires a non-empty current_profile",
+            ));
+        }
+    };
+
+    let update_result = (|| -> Result<()> {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        runtime.current_profile = current_profile.clone();
+        runtime.state.active_profile = Some(current_profile.clone());
+        Ok(())
+    })();
+    if let Err(err) = update_result {
+        return Some(build_runtime_proxy_json_error_response(
+            500,
+            "internal_error",
+            &err.to_string(),
+        ));
+    }
+    update_runtime_broker_current_profile(&shared.log_path, &current_profile);
+    runtime_proxy_log(
+        shared,
+        format!("runtime_broker_activate current_profile={current_profile}"),
+    );
+    Some(build_runtime_proxy_json_response(
+        200,
+        serde_json::json!({
+            "ok": true,
+            "current_profile": current_profile,
+        })
+        .to_string(),
+    ))
 }
 
 fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason: &str) {
@@ -5469,6 +5887,10 @@ fn handle_runtime_rotation_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) {
+    if let Some(response) = handle_runtime_proxy_admin_request(&mut request, shared) {
+        let _ = request.respond(response);
+        return;
+    }
     let request_path = request.url().to_string();
     let request_transport = if is_tiny_http_websocket_upgrade(&request) {
         "websocket"
@@ -13052,6 +13474,9 @@ fn commit_runtime_proxy_profile_selection(
     let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
     let paths_snapshot = runtime.paths.clone();
     drop(runtime);
+    if switch_runtime_profile {
+        update_runtime_broker_current_profile(&shared.log_path, profile_name);
+    }
     let should_persist = switched
         || state_changed
         || cleared_retry_backoff
@@ -15034,4 +15459,312 @@ fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
 
 fn codex_bin() -> OsString {
     env::var_os("PRODEX_CODEX_BIN").unwrap_or_else(|| OsString::from("codex"))
+}
+
+impl Drop for RuntimeBrokerLease {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
+    let mut hasher = DefaultHasher::new();
+    upstream_base_url.hash(&mut hasher);
+    include_code_review.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn runtime_process_pid_alive(pid: u32) -> bool {
+    let proc_dir = PathBuf::from(format!("/proc/{pid}"));
+    if proc_dir.exists() {
+        return true;
+    }
+    collect_process_rows().into_iter().any(|row| row.pid == pid)
+}
+
+fn runtime_random_token(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = STATE_SAVE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{}-{nanos:x}-{sequence:x}", std::process::id())
+}
+
+fn load_runtime_broker_registry(
+    paths: &AppPaths,
+    broker_key: &str,
+) -> Result<Option<RuntimeBrokerRegistry>> {
+    let path = runtime_broker_registry_file_path(paths, broker_key);
+    let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
+    if !path.exists() && !backup_path.exists() {
+        return Ok(None);
+    }
+    let loaded = load_json_file_with_backup::<RuntimeBrokerRegistry>(&path, &backup_path)?;
+    Ok(Some(loaded.value))
+}
+
+fn save_runtime_broker_registry(
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+) -> Result<()> {
+    let path = runtime_broker_registry_file_path(paths, broker_key);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(registry)
+        .context("failed to serialize runtime broker registry")?;
+    write_json_file_with_backup(
+        &path,
+        &runtime_broker_registry_last_good_file_path(paths, broker_key),
+        &json,
+        |content| {
+            let _: RuntimeBrokerRegistry = serde_json::from_str(content)
+                .context("failed to validate runtime broker registry")?;
+            Ok(())
+        },
+    )
+}
+
+fn remove_runtime_broker_registry_if_token_matches(
+    paths: &AppPaths,
+    broker_key: &str,
+    instance_token: &str,
+) {
+    let Ok(Some(existing)) = load_runtime_broker_registry(paths, broker_key) else {
+        return;
+    };
+    if existing.instance_token != instance_token {
+        return;
+    }
+    for path in [
+        runtime_broker_registry_file_path(paths, broker_key),
+        runtime_broker_registry_last_good_file_path(paths, broker_key),
+    ] {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn runtime_broker_client() -> Result<Client> {
+    Client::builder()
+        .connect_timeout(Duration::from_millis(
+            RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
+        ))
+        .timeout(Duration::from_millis(RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS))
+        .build()
+        .context("failed to build runtime broker control client")
+}
+
+fn runtime_broker_health_url(registry: &RuntimeBrokerRegistry) -> String {
+    format!("http://{}/__prodex/runtime/health", registry.listen_addr)
+}
+
+fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
+    format!("http://{}/__prodex/runtime/activate", registry.listen_addr)
+}
+
+fn probe_runtime_broker_health(
+    registry: &RuntimeBrokerRegistry,
+) -> Result<Option<RuntimeBrokerHealth>> {
+    let response = match runtime_broker_client()?
+        .get(runtime_broker_health_url(registry))
+        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .send()
+    {
+        Ok(response) => response,
+        Err(_) => return Ok(None),
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let health = response
+        .json::<RuntimeBrokerHealth>()
+        .context("failed to decode runtime broker health response")?;
+    Ok(Some(health))
+}
+
+fn activate_runtime_broker_profile(
+    registry: &RuntimeBrokerRegistry,
+    current_profile: &str,
+) -> Result<()> {
+    let response = runtime_broker_client()?
+        .post(runtime_broker_activate_url(registry))
+        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .json(&serde_json::json!({
+            "current_profile": current_profile,
+        }))
+        .send()
+        .context("failed to send runtime broker activation request")?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        bail!(
+            "runtime broker activation failed with HTTP {}{}",
+            status,
+            if body.is_empty() {
+                String::new()
+            } else {
+                format!(": {body}")
+            }
+        );
+    }
+    Ok(())
+}
+
+fn create_runtime_broker_lease(paths: &AppPaths, broker_key: &str) -> Result<RuntimeBrokerLease> {
+    let lease_dir = runtime_broker_lease_dir(paths, broker_key);
+    fs::create_dir_all(&lease_dir)
+        .with_context(|| format!("failed to create {}", lease_dir.display()))?;
+    let path = lease_dir.join(format!(
+        "{}-{}.lease",
+        std::process::id(),
+        runtime_random_token("lease")
+    ));
+    fs::write(&path, format!("pid={}\n", std::process::id()))
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(RuntimeBrokerLease { path })
+}
+
+fn cleanup_runtime_broker_stale_leases(paths: &AppPaths, broker_key: &str) -> usize {
+    let lease_dir = runtime_broker_lease_dir(paths, broker_key);
+    let Ok(entries) = fs::read_dir(&lease_dir) else {
+        return 0;
+    };
+    let mut live = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let pid = file_name
+            .split('-')
+            .next()
+            .and_then(|value| value.parse::<u32>().ok());
+        if pid.is_some_and(runtime_process_pid_alive) {
+            live += 1;
+        } else {
+            let _ = fs::remove_file(path);
+        }
+    }
+    live
+}
+
+fn wait_for_runtime_broker_ready(
+    paths: &AppPaths,
+    broker_key: &str,
+    expected_instance_token: &str,
+) -> Result<RuntimeBrokerRegistry> {
+    let started_at = Instant::now();
+    let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
+    while started_at.elapsed() < Duration::from_millis(RUNTIME_BROKER_READY_TIMEOUT_MS) {
+        if let Some(registry) = load_runtime_broker_registry(paths, broker_key)? {
+            if registry.instance_token == expected_instance_token
+                && let Some(health) = probe_runtime_broker_health(&registry)?
+                && health.instance_token == expected_instance_token
+            {
+                return Ok(registry);
+            }
+        }
+        thread::sleep(poll_interval);
+    }
+    bail!("timed out waiting for runtime broker readiness");
+}
+
+fn spawn_runtime_broker_process(
+    paths: &AppPaths,
+    current_profile: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+    broker_key: &str,
+    instance_token: &str,
+    admin_token: &str,
+) -> Result<()> {
+    let current_exe = env::current_exe().context("failed to locate current prodex binary")?;
+    Command::new(current_exe)
+        .arg("__runtime-broker")
+        .arg("--current-profile")
+        .arg(current_profile)
+        .arg("--upstream-base-url")
+        .arg(upstream_base_url)
+        .arg("--include-code-review")
+        .arg(include_code_review.to_string())
+        .arg("--broker-key")
+        .arg(broker_key)
+        .arg("--instance-token")
+        .arg(instance_token)
+        .arg("--admin-token")
+        .arg(admin_token)
+        .env("PRODEX_HOME", &paths.root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("failed to spawn runtime broker process")?;
+    Ok(())
+}
+
+fn ensure_runtime_rotation_proxy_endpoint(
+    paths: &AppPaths,
+    current_profile: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+) -> Result<RuntimeProxyEndpoint> {
+    let broker_key = runtime_broker_key(upstream_base_url, include_code_review);
+    let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
+    let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
+
+    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
+        if existing.upstream_base_url == upstream_base_url
+            && existing.include_code_review == include_code_review
+            && let Some(health) = probe_runtime_broker_health(&existing)?
+            && health.instance_token == existing.instance_token
+        {
+            activate_runtime_broker_profile(&existing, current_profile)?;
+            let lease = create_runtime_broker_lease(paths, &broker_key)?;
+            let listen_addr = existing.listen_addr.parse().with_context(|| {
+                format!(
+                    "invalid runtime broker listen address {}",
+                    existing.listen_addr
+                )
+            })?;
+            return Ok(RuntimeProxyEndpoint {
+                listen_addr,
+                _lease: Some(lease),
+            });
+        }
+        if !runtime_process_pid_alive(existing.pid) {
+            remove_runtime_broker_registry_if_token_matches(
+                paths,
+                &broker_key,
+                &existing.instance_token,
+            );
+        }
+    }
+
+    let instance_token = runtime_random_token("broker");
+    let admin_token = runtime_random_token("admin");
+    spawn_runtime_broker_process(
+        paths,
+        current_profile,
+        upstream_base_url,
+        include_code_review,
+        &broker_key,
+        &instance_token,
+        &admin_token,
+    )?;
+    let registry = wait_for_runtime_broker_ready(paths, &broker_key, &instance_token)?;
+    activate_runtime_broker_profile(&registry, current_profile)?;
+    let lease = create_runtime_broker_lease(paths, &broker_key)?;
+    let listen_addr = registry.listen_addr.parse().with_context(|| {
+        format!(
+            "invalid runtime broker listen address {}",
+            registry.listen_addr
+        )
+    })?;
+    Ok(RuntimeProxyEndpoint {
+        listen_addr,
+        _lease: Some(lease),
+    })
 }
