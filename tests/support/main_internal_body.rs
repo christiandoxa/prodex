@@ -272,6 +272,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyUsageLimitMessage,
     HttpOnlyPlain429,
     Websocket,
+    WebsocketDelayedQuotaAfterPrelude,
     WebsocketReuseSilentHang,
     WebsocketReusePreviousResponseNeedsTurnState,
     WebsocketCloseMidTurn,
@@ -328,6 +329,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::Websocket)
     }
 
+    fn start_websocket_delayed_quota_after_prelude() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude)
+    }
+
     fn start_websocket_reuse_silent_hang() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReuseSilentHang)
     }
@@ -379,6 +384,7 @@ impl RuntimeProxyBackend {
                         let websocket_enabled = matches!(
                             mode,
                             RuntimeProxyBackendMode::Websocket
+                                | RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude
                                 | RuntimeProxyBackendMode::WebsocketReuseSilentHang
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
@@ -1070,6 +1076,62 @@ fn handle_runtime_proxy_backend_websocket(
 
         match account_id.as_str() {
             "main-account" => {
+                if matches!(mode, RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude)
+                    && request_count == 1
+                {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.created",
+                                "response": {
+                                    "id": "resp-main"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.created should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.completed",
+                                "response": {
+                                    "id": "resp-main"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.completed should be sent");
+                    continue;
+                }
+                if matches!(mode, RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude)
+                    && request_count >= 2
+                {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.in_progress"
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.in_progress should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.failed",
+                                "status": 429,
+                                "error": {
+                                    "message": "You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM."
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("delayed quota error should be sent");
+                    continue;
+                }
                 websocket
                     .send(WsMessage::Text(
                         serde_json::json!({
@@ -11193,6 +11255,144 @@ fn runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error() {
     assert_eq!(
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit() {
+    let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-main\""))
+    );
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("second runtime proxy websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("You've hit your usage limit")),
+        "delayed quota error should not be surfaced after pre-commit rotate: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "expected initial request, delayed quota retry on reused session, and rotated retry"
     );
 
     let persisted = wait_for_state(&paths, |state| {

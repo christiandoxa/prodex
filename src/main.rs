@@ -8489,9 +8489,11 @@ fn attempt_runtime_websocket_request(
 
     let mut committed = false;
     let mut first_upstream_frame_seen = false;
+    let mut buffered_precommit_text_frames = Vec::new();
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
                 if !first_upstream_frame_seen {
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
@@ -8500,7 +8502,7 @@ fn attempt_runtime_websocket_request(
                     )
                     .context("failed to restore runtime websocket idle timeout")?;
                 }
-                if let Some(turn_state) = extract_runtime_turn_state_from_payload(text.as_ref()) {
+                if let Some(turn_state) = extract_runtime_turn_state_from_payload(text.as_str()) {
                     remember_runtime_turn_state(
                         shared,
                         profile_name,
@@ -8509,13 +8511,13 @@ fn attempt_runtime_websocket_request(
                     )?;
                     upstream_turn_state = Some(turn_state);
                 }
-                match runtime_proxy_websocket_retry_action(text.as_ref()) {
+                match runtime_proxy_websocket_retry_action(text.as_str()) {
                     Some(RuntimeWebsocketAttempt::QuotaBlocked { .. }) if !committed => {
                         let _ = upstream_socket.close(None);
                         websocket_session.reset();
                         return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
                             profile_name: profile_name.to_string(),
-                            payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
+                            payload: RuntimeWebsocketErrorPayload::Text(text),
                         });
                     }
                     Some(RuntimeWebsocketAttempt::PreviousResponseNotFound { .. })
@@ -8525,11 +8527,26 @@ fn attempt_runtime_websocket_request(
                         websocket_session.reset();
                         return Ok(RuntimeWebsocketAttempt::PreviousResponseNotFound {
                             profile_name: profile_name.to_string(),
-                            payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
+                            payload: RuntimeWebsocketErrorPayload::Text(text),
                             turn_state: upstream_turn_state.clone(),
                         });
                     }
                     _ => {}
+                }
+                if reuse_existing_session
+                    && !committed
+                    && runtime_websocket_precommit_hold_frame(text.as_str())
+                {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=websocket precommit_hold profile={profile_name} event_type={}",
+                            runtime_response_event_type(text.as_str())
+                                .unwrap_or_else(|| "-".to_string())
+                        ),
+                    );
+                    buffered_precommit_text_frames.push(text);
+                    continue;
                 }
 
                 if !committed {
@@ -8557,30 +8574,29 @@ fn attempt_runtime_websocket_request(
                         ),
                     );
                     committed = true;
-                }
-                let response_ids = extract_runtime_response_ids_from_payload(text.as_ref());
-                remember_runtime_response_ids(
-                    shared,
-                    profile_name,
-                    &response_ids,
-                    RuntimeRouteKind::Websocket,
-                )?;
-                if !response_ids.is_empty() {
-                    let _ = release_runtime_compact_lineage(
+                    forward_runtime_proxy_buffered_websocket_text_frames(
+                        local_socket,
+                        &mut buffered_precommit_text_frames,
                         shared,
                         profile_name,
                         request_session_id.as_deref(),
                         request_turn_state.as_deref(),
-                        "response_committed",
-                    );
+                    )?;
                 }
+                remember_runtime_websocket_response_ids(
+                    shared,
+                    profile_name,
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    text.as_str(),
+                )?;
                 local_socket
-                    .send(WsMessage::Text(text.clone()))
+                    .send(WsMessage::Text(text.clone().into()))
                     .with_context(|| {
                         websocket_session.reset();
                         "failed to forward runtime websocket text frame"
                     })?;
-                if is_runtime_terminal_event(text.as_ref()) {
+                if is_runtime_terminal_event(text.as_str()) {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -8630,6 +8646,14 @@ fn attempt_runtime_websocket_request(
                         ),
                     );
                     committed = true;
+                    forward_runtime_proxy_buffered_websocket_text_frames(
+                        local_socket,
+                        &mut buffered_precommit_text_frames,
+                        shared,
+                        profile_name,
+                        request_session_id.as_deref(),
+                        request_turn_state.as_deref(),
+                    )?;
                 }
                 local_socket
                     .send(WsMessage::Binary(payload))
@@ -9052,6 +9076,55 @@ fn forward_runtime_proxy_websocket_error(
     }
 }
 
+fn remember_runtime_websocket_response_ids(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    request_turn_state: Option<&str>,
+    payload: &str,
+) -> Result<()> {
+    let response_ids = extract_runtime_response_ids_from_payload(payload);
+    remember_runtime_response_ids(
+        shared,
+        profile_name,
+        &response_ids,
+        RuntimeRouteKind::Websocket,
+    )?;
+    if !response_ids.is_empty() {
+        let _ = release_runtime_compact_lineage(
+            shared,
+            profile_name,
+            request_session_id,
+            request_turn_state,
+            "response_committed",
+        );
+    }
+    Ok(())
+}
+
+fn forward_runtime_proxy_buffered_websocket_text_frames(
+    local_socket: &mut RuntimeLocalWebSocket,
+    buffered_frames: &mut Vec<String>,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    request_turn_state: Option<&str>,
+) -> Result<()> {
+    for frame in buffered_frames.drain(..) {
+        remember_runtime_websocket_response_ids(
+            shared,
+            profile_name,
+            request_session_id,
+            request_turn_state,
+            frame.as_str(),
+        )?;
+        local_socket
+            .send(WsMessage::Text(frame.into()))
+            .context("failed to forward buffered runtime websocket text frame")?;
+    }
+    Ok(())
+}
+
 fn runtime_proxy_websocket_retry_action(payload: &str) -> Option<RuntimeWebsocketAttempt> {
     let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
     if let Some(message) = extract_runtime_proxy_previous_response_message_from_value(&value) {
@@ -9073,7 +9146,7 @@ fn runtime_proxy_websocket_retry_action(payload: &str) -> Option<RuntimeWebsocke
     None
 }
 
-fn is_runtime_terminal_event(payload: &str) -> bool {
+fn runtime_response_event_type(payload: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()
         .and_then(|value| {
@@ -9082,6 +9155,19 @@ fn is_runtime_terminal_event(payload: &str) -> bool {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string)
         })
+}
+
+fn runtime_websocket_precommit_hold_frame(payload: &str) -> bool {
+    runtime_response_event_type(payload).is_some_and(|kind| {
+        matches!(
+            kind.as_str(),
+            "response.created" | "response.in_progress" | "response.queued"
+        )
+    })
+}
+
+fn is_runtime_terminal_event(payload: &str) -> bool {
+    runtime_response_event_type(payload)
         .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))
 }
 
