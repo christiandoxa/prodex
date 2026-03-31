@@ -5896,7 +5896,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
 }
 
 #[test]
-fn session_affinity_skips_profiles_without_usable_quota_data() {
+fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -6004,7 +6004,7 @@ fn session_affinity_skips_profiles_without_usable_quota_data() {
             Some("main"),
             false,
             None,
-            RuntimeRouteKind::Compact,
+            RuntimeRouteKind::Responses,
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())

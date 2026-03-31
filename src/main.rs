@@ -7155,10 +7155,13 @@ fn select_runtime_response_candidate_for_route(
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        let compact_session_owner_without_probe =
+            route_kind == RuntimeRouteKind::Compact && quota_source.is_none();
         let websocket_reuse_current_profile = route_kind == RuntimeRouteKind::Websocket
             && quota_source.is_none()
             && runtime_proxy_current_profile(shared)? == profile_name;
         if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+            || compact_session_owner_without_probe
             || websocket_reuse_current_profile
         {
             return Ok(Some(profile_name.to_string()));
