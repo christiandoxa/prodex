@@ -6,6 +6,7 @@ use dirs::home_dir;
 use fs2::FileExt;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -63,6 +64,9 @@ use update_notice::*;
 const DEFAULT_PRODEX_DIR: &str = ".prodex";
 const DEFAULT_CODEX_DIR: &str = ".codex";
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
+const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
+const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str =
+    concat!("/backend-api/prodex/v", env!("CARGO_PKG_VERSION"));
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
@@ -4942,7 +4946,7 @@ fn runtime_proxy_codex_args(
     user_args: &[OsString],
 ) -> Vec<OsString> {
     let proxy_chatgpt_base = format!("http://{listen_addr}/backend-api");
-    let proxy_openai_base = format!("http://{listen_addr}/backend-api/codex");
+    let proxy_openai_base = format!("http://{listen_addr}{RUNTIME_PROXY_OPENAI_MOUNT_PATH}");
     let overrides = [
         format!(
             "chatgpt_base_url={}",
@@ -13756,15 +13760,18 @@ fn send_runtime_proxy_upstream_responses_request(
 
 fn runtime_proxy_upstream_url(base_url: &str, path_and_query: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
+    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
     if base_url.contains("/backend-api")
-        && let Some(suffix) = path_and_query.strip_prefix("/backend-api")
+        && let Some(suffix) = normalized_path_and_query
+            .as_ref()
+            .strip_prefix("/backend-api")
     {
         return format!("{base_url}{suffix}");
     }
-    if path_and_query.starts_with('/') {
-        return format!("{base_url}{path_and_query}");
+    if normalized_path_and_query.starts_with('/') {
+        return format!("{base_url}{normalized_path_and_query}");
     }
-    format!("{base_url}/{path_and_query}")
+    format!("{base_url}/{normalized_path_and_query}")
 }
 
 fn runtime_proxy_upstream_websocket_url(base_url: &str, path_and_query: &str) -> Result<String> {
@@ -14420,11 +14427,13 @@ struct RuntimeBufferedResponseParts {
 }
 
 fn is_runtime_responses_path(path_and_query: &str) -> bool {
-    path_without_query(path_and_query).ends_with("/codex/responses")
+    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
+    path_without_query(normalized_path_and_query.as_ref()).ends_with("/codex/responses")
 }
 
 fn is_runtime_compact_path(path_and_query: &str) -> bool {
-    path_without_query(path_and_query).ends_with("/responses/compact")
+    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
+    path_without_query(normalized_path_and_query.as_ref()).ends_with("/responses/compact")
 }
 
 fn path_without_query(path_and_query: &str) -> &str {
@@ -14432,6 +14441,26 @@ fn path_without_query(path_and_query: &str) -> &str {
         .split_once('?')
         .map(|(path, _)| path)
         .unwrap_or(path_and_query)
+}
+
+fn runtime_proxy_normalize_openai_path(path_and_query: &str) -> Cow<'_, str> {
+    let (path, query) = match path_and_query.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (path_and_query, None),
+    };
+    let Some(suffix) = path.strip_prefix(RUNTIME_PROXY_OPENAI_MOUNT_PATH) else {
+        return Cow::Borrowed(path_and_query);
+    };
+
+    let mut normalized =
+        String::with_capacity(path_and_query.len() + RUNTIME_PROXY_OPENAI_UPSTREAM_PATH.len());
+    normalized.push_str(RUNTIME_PROXY_OPENAI_UPSTREAM_PATH);
+    normalized.push_str(suffix);
+    if let Some(query) = query {
+        normalized.push('?');
+        normalized.push_str(query);
+    }
+    Cow::Owned(normalized)
 }
 
 impl RuntimePrefetchStream {
@@ -15482,6 +15511,7 @@ fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> Str
     let mut hasher = DefaultHasher::new();
     upstream_base_url.hash(&mut hasher);
     include_code_review.hash(&mut hasher);
+    RUNTIME_PROXY_OPENAI_MOUNT_PATH.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 

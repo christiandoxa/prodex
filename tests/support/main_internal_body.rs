@@ -8977,7 +8977,10 @@ fn runtime_proxy_injects_codex_backend_overrides() {
     assert_eq!(rendered[2], "-c");
     assert_eq!(
         rendered[3],
-        "openai_base_url=\"http://127.0.0.1:4455/backend-api/codex\""
+        format!(
+            "openai_base_url=\"http://127.0.0.1:4455{}\"",
+            RUNTIME_PROXY_OPENAI_MOUNT_PATH
+        )
     );
     assert_eq!(&rendered[4..], ["exec", "hello"]);
 }
@@ -8987,10 +8990,37 @@ fn runtime_proxy_maps_openai_prefix_to_upstream_backend_api() {
     assert_eq!(
         runtime_proxy_upstream_url(
             "https://chatgpt.com/backend-api",
+            &format!("{}/responses", RUNTIME_PROXY_OPENAI_MOUNT_PATH)
+        ),
+        "https://chatgpt.com/backend-api/codex/responses"
+    );
+}
+
+#[test]
+fn runtime_proxy_accepts_legacy_openai_prefix() {
+    assert!(is_runtime_responses_path("/backend-api/codex/responses"));
+    assert!(is_runtime_compact_path("/backend-api/codex/responses/compact"));
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
             "/backend-api/codex/responses"
         ),
         "https://chatgpt.com/backend-api/codex/responses"
     );
+}
+
+#[test]
+fn runtime_proxy_broker_key_changes_with_versioned_mount_path() {
+    let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false);
+
+    let legacy_key = {
+        let mut hasher = DefaultHasher::new();
+        "https://chatgpt.com/backend-api".hash(&mut hasher);
+        false.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+
+    assert_ne!(current_key, legacy_key);
 }
 
 #[test]
