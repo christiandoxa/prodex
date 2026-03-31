@@ -15668,6 +15668,42 @@ fn cleanup_runtime_broker_stale_leases(paths: &AppPaths, broker_key: &str) -> us
     live
 }
 
+fn wait_for_existing_runtime_broker_recovery_or_exit(
+    paths: &AppPaths,
+    broker_key: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+) -> Result<Option<RuntimeBrokerRegistry>> {
+    let started_at = Instant::now();
+    let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
+    while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
+        let Some(existing) = load_runtime_broker_registry(paths, broker_key)? else {
+            return Ok(None);
+        };
+
+        if existing.upstream_base_url == upstream_base_url
+            && existing.include_code_review == include_code_review
+            && let Some(health) = probe_runtime_broker_health(&existing)?
+            && health.instance_token == existing.instance_token
+        {
+            return Ok(Some(existing));
+        }
+
+        if !runtime_process_pid_alive(existing.pid) {
+            remove_runtime_broker_registry_if_token_matches(
+                paths,
+                broker_key,
+                &existing.instance_token,
+            );
+            return Ok(None);
+        }
+
+        thread::sleep(poll_interval);
+    }
+
+    Ok(None)
+}
+
 fn wait_for_runtime_broker_ready(
     paths: &AppPaths,
     broker_key: &str,
@@ -15732,8 +15768,34 @@ fn ensure_runtime_rotation_proxy_endpoint(
     let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
     let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
 
+    if let Some(existing) = wait_for_existing_runtime_broker_recovery_or_exit(
+        paths,
+        &broker_key,
+        upstream_base_url,
+        include_code_review,
+    )? {
+        activate_runtime_broker_profile(&existing, current_profile)?;
+        let lease = create_runtime_broker_lease(paths, &broker_key)?;
+        let listen_addr = existing.listen_addr.parse().with_context(|| {
+            format!(
+                "invalid runtime broker listen address {}",
+                existing.listen_addr
+            )
+        })?;
+        return Ok(RuntimeProxyEndpoint {
+            listen_addr,
+            _lease: Some(lease),
+        });
+    }
+
     if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
-        if existing.upstream_base_url == upstream_base_url
+        if !runtime_process_pid_alive(existing.pid) {
+            remove_runtime_broker_registry_if_token_matches(
+                paths,
+                &broker_key,
+                &existing.instance_token,
+            );
+        } else if existing.upstream_base_url == upstream_base_url
             && existing.include_code_review == include_code_review
             && let Some(health) = probe_runtime_broker_health(&existing)?
             && health.instance_token == existing.instance_token
@@ -15750,13 +15812,6 @@ fn ensure_runtime_rotation_proxy_endpoint(
                 listen_addr,
                 _lease: Some(lease),
             });
-        }
-        if !runtime_process_pid_alive(existing.pid) {
-            remove_runtime_broker_registry_if_token_matches(
-                paths,
-                &broker_key,
-                &existing.instance_token,
-            );
         }
     }
 

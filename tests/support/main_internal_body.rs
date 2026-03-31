@@ -16114,6 +16114,61 @@ fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
 }
 
 #[test]
+fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy_registry_clears() {
+    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "wait-test";
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        listen_addr: "127.0.0.1:9".to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "instance".to_string(),
+        admin_token: "secret".to_string(),
+    };
+    save_runtime_broker_registry(&paths, broker_key, &registry)
+        .expect("registry should save for wait test");
+
+    let paths_for_clear = paths.clone();
+    let instance_token = registry.instance_token.clone();
+    let upstream_base_url = registry.upstream_base_url.clone();
+    let include_code_review = registry.include_code_review;
+    let clear_thread = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(75));
+        remove_runtime_broker_registry_if_token_matches(
+            &paths_for_clear,
+            broker_key,
+            &instance_token,
+        );
+    });
+
+    let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
+        &paths,
+        broker_key,
+        &upstream_base_url,
+        include_code_review,
+    )
+    .expect("wait should not fail");
+
+    clear_thread
+        .join()
+        .expect("registry clear thread should join");
+    assert!(
+        recovered.is_none(),
+        "wait should yield once the live unhealthy registry clears"
+    );
+}
+
+#[test]
 fn runtime_broker_startup_grace_covers_ready_timeout() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "15000");
     assert!(runtime_broker_startup_grace_seconds() >= 16);
