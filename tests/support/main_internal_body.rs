@@ -16114,6 +16114,51 @@ fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
 }
 
 #[test]
+fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
+    let without_review = runtime_broker_process_args(
+        "main",
+        "https://chatgpt.com/backend-api",
+        false,
+        "broker-key",
+        "instance",
+        "admin",
+    );
+    let without_review: Vec<String> = without_review
+        .into_iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        !without_review
+            .iter()
+            .any(|value| value == "--include-code-review"),
+        "false should not emit a stray boolean value for the review flag"
+    );
+
+    let with_review = runtime_broker_process_args(
+        "main",
+        "https://chatgpt.com/backend-api",
+        true,
+        "broker-key",
+        "instance",
+        "admin",
+    );
+    let with_review: Vec<String> = with_review
+        .into_iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        with_review
+            .iter()
+            .any(|value| value == "--include-code-review"),
+        "true should emit the review flag"
+    );
+    assert!(
+        !with_review.iter().any(|value| value == "true" || value == "false"),
+        "review flag must be encoded as a clap boolean switch"
+    );
+}
+
+#[test]
 fn runtime_broker_lease_drop_removes_file() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {

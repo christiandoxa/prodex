@@ -15585,6 +15585,35 @@ fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     format!("http://{}/__prodex/runtime/activate", registry.listen_addr)
 }
 
+fn runtime_broker_process_args(
+    current_profile: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+    broker_key: &str,
+    instance_token: &str,
+    admin_token: &str,
+) -> Vec<OsString> {
+    let mut args = vec![
+        OsString::from("__runtime-broker"),
+        OsString::from("--current-profile"),
+        OsString::from(current_profile),
+        OsString::from("--upstream-base-url"),
+        OsString::from(upstream_base_url),
+    ];
+    if include_code_review {
+        args.push(OsString::from("--include-code-review"));
+    }
+    args.extend([
+        OsString::from("--broker-key"),
+        OsString::from(broker_key),
+        OsString::from("--instance-token"),
+        OsString::from(instance_token),
+        OsString::from("--admin-token"),
+        OsString::from(admin_token),
+    ]);
+    args
+}
+
 fn probe_runtime_broker_health(
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerHealth>> {
@@ -15739,19 +15768,14 @@ fn spawn_runtime_broker_process(
 ) -> Result<()> {
     let current_exe = env::current_exe().context("failed to locate current prodex binary")?;
     Command::new(current_exe)
-        .arg("__runtime-broker")
-        .arg("--current-profile")
-        .arg(current_profile)
-        .arg("--upstream-base-url")
-        .arg(upstream_base_url)
-        .arg("--include-code-review")
-        .arg(include_code_review.to_string())
-        .arg("--broker-key")
-        .arg(broker_key)
-        .arg("--instance-token")
-        .arg(instance_token)
-        .arg("--admin-token")
-        .arg(admin_token)
+        .args(runtime_broker_process_args(
+            current_profile,
+            upstream_base_url,
+            include_code_review,
+            broker_key,
+            instance_token,
+            admin_token,
+        ))
         .env("PRODEX_HOME", &paths.root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
