@@ -13636,19 +13636,39 @@ fn extract_runtime_proxy_quota_message_from_value(value: &serde_json::Value) -> 
         .get("response")
         .and_then(|response| response.get("error"));
     for error in [direct_error, response_error].into_iter().flatten() {
-        let message = error
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("Upstream Codex account quota was exhausted.");
-        let code = error.get("code").and_then(serde_json::Value::as_str);
-        let code_matches = matches!(code, Some("insufficient_quota" | "rate_limit_exceeded"));
-        let message_matches = runtime_proxy_usage_limit_message(message);
-        if !(code_matches || message_matches) {
-            continue;
+        if let Some(message) = extract_runtime_proxy_quota_message_candidate(error) {
+            return Some(message);
         }
-        return Some(message.to_string());
     }
-    None
+    extract_runtime_proxy_quota_message_candidate(value)
+}
+
+fn extract_runtime_proxy_quota_message_candidate(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(message) => {
+            runtime_proxy_usage_limit_message(message).then(|| message.to_string())
+        }
+        serde_json::Value::Object(map) => {
+            let message = map
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
+                .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
+            let code = map.get("code").and_then(serde_json::Value::as_str);
+            let code_matches = matches!(code, Some("insufficient_quota" | "rate_limit_exceeded"));
+            let message_matches = message.is_some_and(runtime_proxy_usage_limit_message);
+            if !(code_matches || message_matches) {
+                return None;
+            }
+
+            Some(
+                message
+                    .unwrap_or("Upstream Codex account quota was exhausted.")
+                    .to_string(),
+            )
+        }
+        _ => None,
+    }
 }
 
 fn runtime_proxy_usage_limit_message(message: &str) -> bool {

@@ -806,9 +806,7 @@ fn handle_runtime_proxy_backend_request(
                     "HTTP/1.1 429 Too Many Requests",
                     "application/json",
                     serde_json::json!({
-                        "error": {
-                            "message": "You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM."
-                        },
+                        "message": "You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM.",
                         "status": 429
                     })
                     .to_string(),
