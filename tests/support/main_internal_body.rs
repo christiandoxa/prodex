@@ -6012,6 +6012,98 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
 }
 
 #[test]
+fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        select_runtime_response_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            Some("second"),
+            None,
+            None,
+            None,
+            false,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("candidate lookup should succeed"),
+        Some("second".to_string())
+    );
+}
+
+#[test]
 fn previous_response_discovery_skips_exhausted_current_profile() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -7203,6 +7295,205 @@ fn runtime_continuations_reject_stale_generation_overwrite() {
 }
 
 #[test]
+fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let initial_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    initial_state
+        .save(&paths)
+        .expect("initial state save should succeed");
+
+    let initial_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-initial".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 30,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuations_for_profiles(&paths, &initial_store, &profiles)
+        .expect("initial continuation save should succeed");
+
+    let external_store = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-external".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 10,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    write_versioned_runtime_sidecar(
+        &runtime_continuations_file_path(&paths),
+        &runtime_continuations_last_good_file_path(&paths),
+        2,
+        &external_store,
+    );
+
+    let snapshot = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("main".to_string(), now)]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-local".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let revision = AtomicU64::new(1);
+    assert!(
+        save_runtime_state_snapshot_if_latest(
+            &paths,
+            &snapshot,
+            &runtime_continuation_store_from_app_state(&snapshot),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &RuntimeProfileBackoffs::default(),
+            1,
+            &revision,
+        )
+        .expect("state snapshot save should succeed after stale retry")
+    );
+
+    let loaded = load_runtime_continuations_with_recovery(&paths, &profiles)
+        .expect("continuations should reload")
+        .value;
+    assert_eq!(
+        loaded
+            .response_profile_bindings
+            .get("resp-local")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+    let wrapped: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(runtime_continuations_file_path(&paths))
+            .expect("continuation primary should be readable"),
+    )
+    .expect("continuation primary should remain valid json");
+    assert_eq!(wrapped["generation"].as_u64(), Some(3));
+}
+
+#[test]
+fn runtime_continuation_journal_save_retries_stale_generation() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/main"),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    let initial = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-initial".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 30,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuation_journal(&paths, &initial, now - 30)
+        .expect("initial journal save should succeed");
+
+    let external = RuntimeContinuationJournal {
+        saved_at: now - 10,
+        continuations: RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-external".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now - 10,
+                },
+            )]),
+            ..RuntimeContinuationStore::default()
+        },
+    };
+    write_versioned_runtime_sidecar(
+        &runtime_continuation_journal_file_path(&paths),
+        &runtime_continuation_journal_last_good_file_path(&paths),
+        2,
+        &external,
+    );
+
+    let incoming = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-local".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+    save_runtime_continuation_journal(&paths, &incoming, now)
+        .expect("journal save should retry stale generation");
+
+    let loaded = load_runtime_continuation_journal_with_recovery(&paths, &state.profiles)
+        .expect("journal should reload")
+        .value;
+    assert_eq!(loaded.saved_at, now);
+    assert_eq!(
+        loaded
+            .continuations
+            .response_profile_bindings
+            .get("resp-local")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+    let wrapped: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(runtime_continuation_journal_file_path(&paths))
+            .expect("journal primary should be readable"),
+    )
+    .expect("journal primary should remain valid json");
+    assert_eq!(wrapped["generation"].as_u64(), Some(3));
+}
+
+#[test]
 fn runtime_proxy_pressure_mode_shrinks_precommit_budget() {
     let started_at = Instant::now()
         .checked_sub(Duration::from_millis(
@@ -7587,6 +7878,96 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
                     updated_at: now,
                 },
             )]),
+        })),
+    };
+
+    let owner = runtime_response_bound_profile(&shared, "resp-main", RuntimeRouteKind::Responses)
+        .expect("response binding lookup should succeed");
+    assert_eq!(owner, None);
+}
+
+#[test]
+fn response_affinity_skips_dead_continuation_status() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths,
+            state,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-main".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Dead,
+                        confidence: 0,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now - 30),
+                        last_verified_route: Some("responses".to_string()),
+                        last_not_found_at: Some(now - 5),
+                        not_found_streak: 2,
+                        success_count: 1,
+                        failure_count: 2,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
         })),
     };
 

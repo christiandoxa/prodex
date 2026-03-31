@@ -163,6 +163,7 @@ const RUNTIME_CONTINUATION_CONFIDENCE_MAX: u32 = 8;
 const RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS: u32 = 2;
 const RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS: u32 = 1;
 const RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY: u32 = 1;
+const RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT: usize = if cfg!(test) { 3 } else { 6 };
 const CLI_WIDTH: usize = 110;
 const CLI_MIN_WIDTH: usize = 60;
 const CLI_LABEL_WIDTH: usize = 16;
@@ -1520,6 +1521,14 @@ where
     Ok(())
 }
 
+fn runtime_sidecar_generation_error_is_stale(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .to_string()
+            .contains("stale runtime sidecar generation")
+    })
+}
+
 fn write_json_file_with_backup(
     path: &Path,
     backup_path: &Path,
@@ -1816,15 +1825,28 @@ fn save_runtime_continuation_journal(
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
-    let journal = RuntimeContinuationJournal {
-        saved_at,
-        continuations: compact_runtime_continuation_store(continuations.clone(), &profiles),
-    };
-    save_versioned_json_file_with_fence(
-        &runtime_continuation_journal_file_path(paths),
-        &runtime_continuation_journal_last_good_file_path(paths),
-        &journal,
-    )?;
+    let incoming = compact_runtime_continuation_store(continuations.clone(), &profiles);
+    for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
+        let _ = load_runtime_continuation_journal_with_recovery(paths, &profiles)?;
+        let journal = RuntimeContinuationJournal {
+            saved_at,
+            continuations: incoming.clone(),
+        };
+        match save_versioned_json_file_with_fence(
+            &runtime_continuation_journal_file_path(paths),
+            &runtime_continuation_journal_last_good_file_path(paths),
+            &journal,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(err)
+                if runtime_sidecar_generation_error_is_stale(&err)
+                    && attempt < RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT =>
+            {
+                continue;
+            }
+            Err(err) => return Err(err),
+        }
+    }
     Ok(())
 }
 
@@ -2103,51 +2125,75 @@ fn save_runtime_state_snapshot_if_latest(
     revision: u64,
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
-    if latest_revision.load(Ordering::SeqCst) != revision {
-        return Ok(false);
+    for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
+        if latest_revision.load(Ordering::SeqCst) != revision {
+            return Ok(false);
+        }
+
+        let _lock = acquire_state_file_lock(paths)?;
+
+        if latest_revision.load(Ordering::SeqCst) != revision {
+            return Ok(false);
+        }
+
+        let existing = AppState::load(paths)?;
+        let merged = merge_runtime_state_snapshot(existing, snapshot);
+        let _ = load_runtime_continuations_with_recovery(paths, &merged.profiles)?;
+        let merged_continuations =
+            compact_runtime_continuation_store(continuations.clone(), &merged.profiles);
+        let mut merged = merged;
+        merged.response_profile_bindings = merged_continuations.response_profile_bindings.clone();
+        merged.session_profile_bindings = merged_continuations.session_profile_bindings.clone();
+        let json =
+            serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
+        let existing_scores = load_runtime_profile_scores(paths, &merged.profiles)?;
+        let merged_scores =
+            merge_runtime_profile_scores(&existing_scores, profile_scores, &merged.profiles);
+        let existing_usage_snapshots = load_runtime_usage_snapshots(paths, &merged.profiles)?;
+        let merged_usage_snapshots = merge_runtime_usage_snapshots(
+            &existing_usage_snapshots,
+            usage_snapshots,
+            &merged.profiles,
+        );
+        let existing_backoffs = load_runtime_profile_backoffs(paths, &merged.profiles)?;
+        let merged_backoffs = merge_runtime_profile_backoffs(
+            &existing_backoffs,
+            backoffs,
+            &merged.profiles,
+            Local::now().timestamp(),
+        );
+
+        if latest_revision.load(Ordering::SeqCst) != revision {
+            return Ok(false);
+        }
+
+        let save_result = (|| -> Result<()> {
+            // Continuations are restored as the stronger source of truth on startup,
+            // so persist them before the state snapshot to reduce crash windows where
+            // a newer state file could be overwritten by an older continuation sidecar.
+            save_runtime_continuations_for_profiles(
+                paths,
+                &merged_continuations,
+                &merged.profiles,
+            )?;
+            write_state_json_atomic(paths, &json)?;
+            save_runtime_profile_scores(paths, &merged_scores)?;
+            save_runtime_usage_snapshots(paths, &merged_usage_snapshots)?;
+            save_runtime_profile_backoffs(paths, &merged_backoffs)?;
+            Ok(())
+        })();
+        match save_result {
+            Ok(()) => return Ok(true),
+            Err(err)
+                if runtime_sidecar_generation_error_is_stale(&err)
+                    && attempt < RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT =>
+            {
+                continue;
+            }
+            Err(err) => return Err(err),
+        }
     }
-
-    let _lock = acquire_state_file_lock(paths)?;
-
-    if latest_revision.load(Ordering::SeqCst) != revision {
-        return Ok(false);
-    }
-
-    let existing = AppState::load(paths)?;
-    let merged = merge_runtime_state_snapshot(existing, snapshot);
-    let merged_continuations =
-        compact_runtime_continuation_store(continuations.clone(), &merged.profiles);
-    let mut merged = merged;
-    merged.response_profile_bindings = merged_continuations.response_profile_bindings.clone();
-    merged.session_profile_bindings = merged_continuations.session_profile_bindings.clone();
-    let json = serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
-    let existing_scores = load_runtime_profile_scores(paths, &merged.profiles)?;
-    let merged_scores =
-        merge_runtime_profile_scores(&existing_scores, profile_scores, &merged.profiles);
-    let existing_usage_snapshots = load_runtime_usage_snapshots(paths, &merged.profiles)?;
-    let merged_usage_snapshots =
-        merge_runtime_usage_snapshots(&existing_usage_snapshots, usage_snapshots, &merged.profiles);
-    let existing_backoffs = load_runtime_profile_backoffs(paths, &merged.profiles)?;
-    let merged_backoffs = merge_runtime_profile_backoffs(
-        &existing_backoffs,
-        backoffs,
-        &merged.profiles,
-        Local::now().timestamp(),
-    );
-
-    if latest_revision.load(Ordering::SeqCst) != revision {
-        return Ok(false);
-    }
-
-    // Continuations are restored as the stronger source of truth on startup,
-    // so persist them before the state snapshot to reduce crash windows where
-    // a newer state file could be overwritten by an older continuation sidecar.
-    save_runtime_continuations_for_profiles(paths, &merged_continuations, &merged.profiles)?;
-    write_state_json_atomic(paths, &json)?;
-    save_runtime_profile_scores(paths, &merged_scores)?;
-    save_runtime_usage_snapshots(paths, &merged_usage_snapshots)?;
-    save_runtime_profile_backoffs(paths, &merged_backoffs)?;
-    Ok(true)
+    Ok(false)
 }
 
 #[derive(Parser, Debug)]
@@ -6047,6 +6093,22 @@ fn runtime_response_bound_profile(
         .get(previous_response_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if runtime_continuation_status_map(
+        &runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::Response,
+    )
+    .get(previous_response_id)
+    .is_some_and(runtime_continuation_status_is_terminal)
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=previous_response profile=- reason=continuation_dead response_id={previous_response_id}",
+                runtime_route_kind_label(route_kind),
+            ),
+        );
+        return Ok(None);
+    }
     if runtime_continuation_status_recently_suspect(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::Response,
@@ -6122,6 +6184,21 @@ fn runtime_turn_state_bound_profile(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
+    if runtime_continuation_status_map(
+        &runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::TurnState,
+    )
+    .get(turn_state)
+    .is_some_and(runtime_continuation_status_is_terminal)
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=responses affinity=turn_state profile=- reason=continuation_dead turn_state={turn_state}",
+            ),
+        );
+        return Ok(None);
+    }
     if runtime_continuation_status_recently_suspect(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::TurnState,
@@ -6178,6 +6255,21 @@ fn runtime_session_bound_profile(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
+    if runtime_continuation_status_map(
+        &runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::SessionId,
+    )
+    .get(session_id)
+    .is_some_and(runtime_continuation_status_is_terminal)
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity=session_id profile=- reason=continuation_dead session_id={session_id}",
+            ),
+        );
+        return Ok(None);
+    }
     if runtime_continuation_status_recently_suspect(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::SessionId,
@@ -7081,7 +7173,13 @@ fn select_runtime_response_candidate_for_route(
         }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source) {
+        let compact_followup_owner_without_probe = matches!(
+            route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+        ) && quota_source.is_none();
+        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+            || compact_followup_owner_without_probe
+        {
             return Ok(Some(profile_name.to_string()));
         }
         runtime_proxy_log(
