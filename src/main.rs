@@ -117,6 +117,7 @@ const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 8
 const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
 const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
+const RUNTIME_STARTUP_PROBE_WARM_LIMIT: usize = 3;
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD: usize = 8;
 const RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD: usize = 8;
@@ -743,6 +744,158 @@ fn schedule_runtime_probe_refresh(
     }
 }
 
+fn runtime_profiles_needing_startup_probe_refresh(
+    state: &AppState,
+    current_profile: &str,
+    profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
+    profile_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    now: i64,
+) -> Vec<String> {
+    if profile_usage_snapshots.is_empty() {
+        return Vec::new();
+    }
+
+    active_profile_selection_order(state, current_profile)
+        .into_iter()
+        .filter(|profile_name| {
+            let probe_fresh = profile_probe_cache.get(profile_name).is_some_and(|entry| {
+                runtime_profile_probe_cache_freshness(entry, now)
+                    == RuntimeProbeCacheFreshness::Fresh
+            });
+            let snapshot_usable = profile_usage_snapshots
+                .get(profile_name)
+                .is_some_and(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now));
+            !probe_fresh && !snapshot_usable
+        })
+        .take(RUNTIME_STARTUP_PROBE_WARM_LIMIT)
+        .collect()
+}
+
+fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProxyShared) {
+    let (state, current_profile, profile_probe_cache, profile_usage_snapshots) =
+        match shared.runtime.lock() {
+            Ok(runtime) => (
+                runtime.state.clone(),
+                runtime.current_profile.clone(),
+                runtime.profile_probe_cache.clone(),
+                runtime.profile_usage_snapshots.clone(),
+            ),
+            Err(_) => return,
+        };
+    let refresh_profiles = runtime_profiles_needing_startup_probe_refresh(
+        &state,
+        &current_profile,
+        &profile_probe_cache,
+        &profile_usage_snapshots,
+        Local::now().timestamp(),
+    );
+    if refresh_profiles.is_empty() {
+        return;
+    }
+
+    let refresh_jobs = refresh_profiles
+        .into_iter()
+        .filter_map(|profile_name| {
+            let profile = state.profiles.get(&profile_name)?;
+            read_auth_summary(&profile.codex_home)
+                .quota_compatible
+                .then(|| (profile_name, profile.codex_home.clone()))
+        })
+        .collect::<Vec<_>>();
+    if refresh_jobs.is_empty() {
+        return;
+    }
+
+    runtime_proxy_log(
+        shared,
+        format!(
+            "startup_probe_warmup queued={} profiles={}",
+            refresh_jobs.len(),
+            refresh_jobs
+                .iter()
+                .map(|(profile_name, _)| profile_name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    );
+    for (profile_name, codex_home) in refresh_jobs {
+        schedule_runtime_probe_refresh(shared, &profile_name, &codex_home);
+    }
+}
+
+fn apply_runtime_profile_probe_result(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    runtime.profile_probe_cache.insert(
+        profile_name.to_string(),
+        RuntimeProfileProbeCacheEntry {
+            checked_at: now,
+            auth,
+            result: result.clone(),
+        },
+    );
+
+    let Ok(usage) = result else {
+        return Ok(());
+    };
+
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let quota_summary =
+        runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
+    runtime
+        .profile_usage_snapshots
+        .insert(profile_name.to_string(), snapshot);
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime
+            .state
+            .response_profile_bindings
+            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime
+            .state
+            .session_profile_bindings
+            .retain(|_, binding| binding.profile_name != profile_name);
+        runtime.turn_state_bindings.retain(|key, binding| {
+            binding.profile_name != profile_name || runtime_is_compact_turn_state_lineage_key(key)
+        });
+        runtime.session_id_bindings.retain(|key, binding| {
+            binding.profile_name != profile_name || runtime_is_compact_session_lineage_key(key)
+        });
+        runtime_proxy_log(
+            shared,
+            format!(
+                "quota_release_profile_affinity profile={profile_name} reason=usage_snapshot_exhausted {}",
+                runtime_quota_summary_log_fields(quota_summary)
+            ),
+        );
+    }
+    let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        continuations_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!("usage_snapshot:{profile_name}"),
+    );
+    Ok(())
+}
+
 fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
     loop {
         let jobs = {
@@ -771,25 +924,28 @@ fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
             } else {
                 Err("auth mode is not quota-compatible".to_string())
             };
-            let now = Local::now().timestamp();
-            if let Ok(mut runtime) = job.shared.runtime.lock() {
-                runtime.profile_probe_cache.insert(
-                    job.profile_name.clone(),
-                    RuntimeProfileProbeCacheEntry {
-                        checked_at: now,
-                        auth: auth.clone(),
-                        result: result.clone(),
-                    },
-                );
-            }
+            let apply_result = apply_runtime_profile_probe_result(
+                &job.shared,
+                &job.profile_name,
+                auth,
+                result.clone(),
+            );
             match result {
                 Ok(_) => runtime_proxy_log(
                     &job.shared,
-                    format!(
-                        "profile_probe_refresh_ok profile={} lag_ms={}",
-                        job.profile_name,
-                        job.queued_at.elapsed().as_millis()
-                    ),
+                    if let Err(err) = apply_result {
+                        format!(
+                            "profile_probe_refresh_error profile={} lag_ms={} error=state_update:{err:#}",
+                            job.profile_name,
+                            job.queued_at.elapsed().as_millis()
+                        )
+                    } else {
+                        format!(
+                            "profile_probe_refresh_ok profile={} lag_ms={}",
+                            job.profile_name,
+                            job.queued_at.elapsed().as_millis()
+                        )
+                    },
                 ),
                 Err(err) => runtime_proxy_log(
                     &job.shared,
@@ -4475,6 +4631,7 @@ fn start_runtime_rotation_proxy(
         ),
     );
     audit_runtime_proxy_startup_state(&shared);
+    schedule_runtime_startup_probe_warmup(&shared);
     if continuation_migration_needed && let Ok(runtime) = shared.runtime.lock() {
         schedule_runtime_state_save(
             &shared,
@@ -11073,11 +11230,10 @@ fn update_runtime_profile_probe_cache_with_usage(
     profile_name: &str,
     usage: UsageResponse,
 ) -> Result<()> {
-    let mut runtime = shared
+    let auth = shared
         .runtime
         .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let auth = runtime
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
         .state
         .profiles
         .get(profile_name)
@@ -11086,61 +11242,7 @@ fn update_runtime_profile_probe_cache_with_usage(
             label: "chatgpt".to_string(),
             quota_compatible: true,
         });
-    runtime.profile_probe_cache.insert(
-        profile_name.to_string(),
-        RuntimeProfileProbeCacheEntry {
-            checked_at: Local::now().timestamp(),
-            auth,
-            result: Ok(usage.clone()),
-        },
-    );
-    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
-    let quota_summary =
-        runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
-    runtime
-        .profile_usage_snapshots
-        .insert(profile_name.to_string(), snapshot);
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
-        runtime
-            .state
-            .response_profile_bindings
-            .retain(|_, binding| binding.profile_name != profile_name);
-        runtime
-            .state
-            .session_profile_bindings
-            .retain(|_, binding| binding.profile_name != profile_name);
-        runtime.turn_state_bindings.retain(|key, binding| {
-            binding.profile_name != profile_name || runtime_is_compact_turn_state_lineage_key(key)
-        });
-        runtime.session_id_bindings.retain(|key, binding| {
-            binding.profile_name != profile_name || runtime_is_compact_session_lineage_key(key)
-        });
-        runtime_proxy_log(
-            shared,
-            format!(
-                "quota_release_profile_affinity profile={profile_name} reason=usage_snapshot_exhausted {}",
-                runtime_quota_summary_log_fields(quota_summary)
-            ),
-        );
-    }
-    let state_snapshot = runtime.state.clone();
-    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
-    let profile_scores_snapshot = runtime.profile_health.clone();
-    let usage_snapshots = runtime.profile_usage_snapshots.clone();
-    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
-    let paths_snapshot = runtime.paths.clone();
-    drop(runtime);
-    schedule_runtime_state_save(
-        shared,
-        state_snapshot,
-        continuations_snapshot,
-        profile_scores_snapshot,
-        usage_snapshots,
-        backoffs_snapshot,
-        paths_snapshot,
-        &format!("usage_snapshot:{profile_name}"),
-    );
-    Ok(())
+    apply_runtime_profile_probe_result(shared, profile_name, auth, Ok(usage))
 }
 
 fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {

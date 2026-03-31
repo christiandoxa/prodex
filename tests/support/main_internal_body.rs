@@ -1710,6 +1710,95 @@ fn runtime_probe_cache_freshness_distinguishes_fresh_stale_and_expired() {
 }
 
 #[test]
+fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    let fourth_home = temp_dir.path.join("homes/fourth");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+    write_auth_json(&fourth_home.join("auth.json"), "fourth-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "fourth".to_string(),
+                ProfileEntry {
+                    codex_home: fourth_home,
+                    managed: true,
+                    email: Some("fourth@example.com".to_string()),
+                },
+            ),
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let probe_cache = BTreeMap::from([(
+        "fourth".to_string(),
+        RuntimeProfileProbeCacheEntry {
+            checked_at: now,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(90, 18_000, 90, 604_800)),
+        },
+    )]);
+    let usage_snapshots = BTreeMap::from([(
+        "second".to_string(),
+        RuntimeProfileUsageSnapshot {
+            checked_at: now,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 85,
+            five_hour_reset_at: now + 18_000,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 92,
+            weekly_reset_at: now + 604_800,
+        },
+    )]);
+
+    assert_eq!(
+        runtime_profiles_needing_startup_probe_refresh(
+            &state,
+            "third",
+            &probe_cache,
+            &usage_snapshots,
+            now,
+        ),
+        vec!["third".to_string(), "main".to_string()]
+    );
+}
+
+#[test]
 fn runtime_state_save_debounce_only_applies_to_binding_updates() {
     assert_eq!(
         runtime_state_save_debounce("profile_commit:main"),
@@ -9578,6 +9667,24 @@ fn exhausted_usage_snapshot_releases_persisted_affinity_bindings() {
         .runtime
         .lock()
         .expect("runtime lock should succeed");
+    let refreshed_probe = runtime
+        .profile_probe_cache
+        .get("main")
+        .expect("probe cache should be refreshed");
+    assert_eq!(
+        runtime_profile_probe_cache_freshness(refreshed_probe, Local::now().timestamp()),
+        RuntimeProbeCacheFreshness::Fresh
+    );
+    assert_eq!(
+        runtime
+            .profile_usage_snapshots
+            .get("main")
+            .map(|snapshot| (snapshot.five_hour_status, snapshot.weekly_status)),
+        Some((
+            RuntimeQuotaWindowStatus::Ready,
+            RuntimeQuotaWindowStatus::Exhausted
+        ))
+    );
     assert!(!runtime.state.response_profile_bindings.contains_key("resp-1"));
     assert!(!runtime.state.session_profile_bindings.contains_key("sess-123"));
     assert!(!runtime.turn_state_bindings.values().any(|binding| binding.profile_name == "main"));
