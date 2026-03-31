@@ -16112,3 +16112,9 @@ fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
     assert!(!stale_path.exists(), "dead-pid lease should be removed");
     assert!(live_path.exists(), "current-pid lease should remain");
 }
+
+#[test]
+fn runtime_broker_startup_grace_covers_ready_timeout() {
+    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "15000");
+    assert!(runtime_broker_startup_grace_seconds() >= 16);
+}

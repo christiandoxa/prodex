@@ -4775,6 +4775,9 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         ),
     );
 
+    let startup_grace_until = metadata
+        .started_at
+        .saturating_add(runtime_broker_startup_grace_seconds());
     let mut idle_started_at = None::<i64>;
     loop {
         let live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
@@ -4783,6 +4786,11 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             idle_started_at = None;
         } else {
             let now = Local::now().timestamp();
+            if now < startup_grace_until {
+                idle_started_at = None;
+                thread::sleep(Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS));
+                continue;
+            }
             let idle_since = idle_started_at.get_or_insert(now);
             if now.saturating_sub(*idle_since) >= RUNTIME_BROKER_IDLE_GRACE_SECONDS {
                 runtime_proxy_log_to_path(
@@ -15489,6 +15497,13 @@ fn runtime_random_token(prefix: &str) -> String {
         .as_nanos();
     let sequence = STATE_SAVE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}-{}-{nanos:x}-{sequence:x}", std::process::id())
+}
+
+fn runtime_broker_startup_grace_seconds() -> i64 {
+    let ready_timeout_seconds = runtime_broker_ready_timeout_ms().div_ceil(1_000) as i64;
+    ready_timeout_seconds
+        .saturating_add(1)
+        .max(RUNTIME_BROKER_IDLE_GRACE_SECONDS)
 }
 
 fn load_runtime_broker_registry(
