@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex-win32-x64",
-  "version": "0.2.98",
+  "version": "0.2.99",
   "description": "Native prodex binary for x86_64-pc-windows-msvc",
   "license": "MIT",
   "os": [
