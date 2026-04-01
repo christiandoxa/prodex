@@ -13,3 +13,6 @@ Thumbs.db
 *~
 *.swp
 *.swo
+
+# Local Codex workspace markers/state
+/.codex
