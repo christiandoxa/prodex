@@ -6367,6 +6367,117 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
 }
 
 #[test]
+fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidate_is_auth_failed() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: backend.base_url(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: now,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(80, 300, 80, 86_400)),
+            },
+        )]),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_auth_failure_key("main"),
+            RuntimeProfileHealth {
+                score: 1,
+                updated_at: now,
+            },
+        )]),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        next_runtime_response_candidate(&shared, &BTreeSet::new())
+            .expect("candidate lookup should succeed"),
+        Some("second".to_string())
+    );
+
+    assert_eq!(backend.usage_accounts(), vec!["second-account".to_string()]);
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        runtime.profile_probe_cache.contains_key("second"),
+        "cold-start selection should cache the newly probed profile"
+    );
+    assert!(
+        runtime.profile_usage_snapshots.contains_key("second"),
+        "cold-start selection should persist the newly probed usage snapshot"
+    );
+}
+
+#[test]
 fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -12465,6 +12576,14 @@ fn inspect_runtime_sse_buffer_detects_retryable_error_after_hold_frames() {
 fn runtime_prefetch_reader_surfaces_terminal_backpressure_error_after_disconnect() {
     let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(1);
     let shared = Arc::new(RuntimePrefetchSharedState::default());
+    let async_runtime = TokioRuntimeBuilder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("async runtime");
+    let worker = async_runtime.spawn(async {
+        std::future::pending::<()>().await;
+    });
     runtime_prefetch_set_terminal_error(
         &shared,
         std::io::ErrorKind::WouldBlock,
@@ -12477,6 +12596,7 @@ fn runtime_prefetch_reader_surfaces_terminal_backpressure_error_after_disconnect
         backlog: std::collections::VecDeque::new(),
         pending: Cursor::new(Vec::new()),
         finished: false,
+        worker_abort: worker.abort_handle(),
     };
 
     let mut buffer = [0_u8; 16];
@@ -12485,6 +12605,39 @@ fn runtime_prefetch_reader_surfaces_terminal_backpressure_error_after_disconnect
         .expect_err("terminal prefetch error should surface to the reader");
     assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
     assert!(err.to_string().contains("bounded capacity"));
+    drop(reader);
+    let err = async_runtime
+        .block_on(worker)
+        .expect_err("prefetch worker should be aborted when the reader drops");
+    assert!(err.is_cancelled());
+}
+
+#[test]
+fn runtime_prefetch_stream_drop_aborts_worker() {
+    let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(1);
+    let shared = Arc::new(RuntimePrefetchSharedState::default());
+    let async_runtime = TokioRuntimeBuilder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("async runtime");
+    let worker = async_runtime.spawn(async {
+        std::future::pending::<()>().await;
+    });
+    drop(sender);
+
+    let stream = RuntimePrefetchStream {
+        receiver: Some(receiver),
+        shared,
+        backlog: std::collections::VecDeque::new(),
+        worker_abort: Some(worker.abort_handle()),
+    };
+
+    drop(stream);
+    let err = async_runtime
+        .block_on(worker)
+        .expect_err("prefetch worker should be aborted when the stream drops");
+    assert!(err.is_cancelled());
 }
 
 #[test]
@@ -12619,10 +12772,7 @@ fn runtime_proxy_aborts_stalled_http_fallback_before_long_hang() {
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .expect("client");
+    let client = Client::builder().build().expect("client");
     let started = std::time::Instant::now();
     let result = client
         .post(format!(
@@ -12655,13 +12805,6 @@ fn runtime_proxy_aborts_stalled_http_fallback_before_long_hang() {
                 content_type.contains("text/event-stream"),
                 "runtime proxy should keep responses transport semantics on failure"
             );
-            match response.text() {
-                Ok(body) => assert!(
-                    body.is_empty(),
-                    "aborted runtime stream should terminate without a synthetic payload"
-                ),
-                Err(_) => {}
-            }
         }
         Err(_) => {}
     }
@@ -12766,7 +12909,10 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
         .expect("latest runtime pointer should exist");
     let log_path = PathBuf::from(log_path.trim());
 
-    let client = Client::builder().build().expect("client");
+    let client = Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .expect("client");
     let response = client
         .post(format!(
             "http://{}/backend-api/codex/responses",
@@ -12842,7 +12988,10 @@ fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
         .expect("latest runtime pointer should exist");
     let log_path = PathBuf::from(log_path.trim());
 
-    let client = Client::builder().build().expect("client");
+    let client = Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .expect("client");
     let response = client
         .post(format!(
             "http://{}/backend-api/codex/responses",

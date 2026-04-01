@@ -3787,9 +3787,10 @@ struct RuntimePrefetchSharedState {
 }
 
 struct RuntimePrefetchStream {
-    receiver: Receiver<RuntimePrefetchChunk>,
+    receiver: Option<Receiver<RuntimePrefetchChunk>>,
     shared: Arc<RuntimePrefetchSharedState>,
     backlog: VecDeque<RuntimePrefetchChunk>,
+    worker_abort: Option<tokio::task::AbortHandle>,
 }
 
 struct RuntimePrefetchReader {
@@ -3798,6 +3799,7 @@ struct RuntimePrefetchReader {
     backlog: VecDeque<RuntimePrefetchChunk>,
     pending: Cursor<Vec<u8>>,
     finished: bool,
+    worker_abort: tokio::task::AbortHandle,
 }
 
 #[derive(Debug)]
@@ -12332,10 +12334,43 @@ fn next_runtime_response_candidate_for_route(
         Some(&cached_usage_snapshots),
     );
 
-    if candidates.is_empty() && !cold_start_probe_jobs.is_empty() {
+    let best_candidate_order_index = candidates
+        .iter()
+        .filter(|candidate| !excluded_profiles.contains(&candidate.name))
+        .filter(|candidate| {
+            !runtime_profile_name_in_selection_backoff(
+                &candidate.name,
+                &retry_backoff_until,
+                &transport_backoff_until,
+                &route_circuit_open_until,
+                route_kind,
+                now,
+            )
+        })
+        .filter(|candidate| {
+            !runtime_profile_auth_failure_active_from_map(&profile_health, &candidate.name, now)
+        })
+        .map(|candidate| candidate.order_index)
+        .min();
+    let should_sync_probe_cold_start = !cold_start_probe_jobs.is_empty()
+        && (candidates.is_empty()
+            || best_candidate_order_index.is_none()
+            || best_candidate_order_index.is_some_and(|best_order_index| {
+                cold_start_probe_jobs
+                    .iter()
+                    .any(|job| job.order_index < best_order_index)
+            }));
+
+    if should_sync_probe_cold_start {
         let base_url = Some(upstream_base_url.clone());
         let sync_jobs = cold_start_probe_jobs
             .iter()
+            .filter(|job| {
+                candidates.is_empty()
+                    || best_candidate_order_index.is_none()
+                    || best_candidate_order_index
+                        .is_some_and(|best_order_index| job.order_index < best_order_index)
+            })
             .take(RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT)
             .map(|job| RunProfileProbeJob {
                 name: job.name.clone(),
@@ -14672,6 +14707,12 @@ impl Read for RuntimePrefetchReader {
     }
 }
 
+impl Drop for RuntimePrefetchReader {
+    fn drop(&mut self) {
+        self.worker_abort.abort();
+    }
+}
+
 impl RuntimeSseTapReader {
     fn new(
         inner: impl Read + Send + 'static,
@@ -15041,14 +15082,16 @@ impl RuntimePrefetchStream {
             mpsc::sync_channel::<RuntimePrefetchChunk>(RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY);
         let shared = Arc::new(RuntimePrefetchSharedState::default());
         let worker_shared = Arc::clone(&shared);
-        async_runtime.spawn(async move {
+        let worker = async_runtime.spawn(async move {
             runtime_prefetch_response_chunks(response, sender, worker_shared, log_path, request_id)
                 .await;
         });
+        let worker_abort = worker.abort_handle();
         Self {
-            receiver,
+            receiver: Some(receiver),
             shared,
             backlog: VecDeque::new(),
+            worker_abort: Some(worker_abort),
         }
     }
 
@@ -15059,20 +15102,38 @@ impl RuntimePrefetchStream {
         if let Some(chunk) = self.backlog.pop_front() {
             return Ok(chunk);
         }
-        self.receiver.recv_timeout(timeout)
+        self.receiver
+            .as_ref()
+            .expect("runtime prefetch receiver should remain available")
+            .recv_timeout(timeout)
     }
 
     fn push_backlog(&mut self, chunk: RuntimePrefetchChunk) {
         self.backlog.push_back(chunk);
     }
 
-    fn into_reader(self, prelude: Vec<u8>) -> RuntimePrefetchReader {
+    fn into_reader(mut self, prelude: Vec<u8>) -> RuntimePrefetchReader {
         RuntimePrefetchReader {
-            receiver: self.receiver,
-            shared: self.shared,
-            backlog: self.backlog,
+            receiver: self
+                .receiver
+                .take()
+                .expect("runtime prefetch receiver should remain available"),
+            shared: Arc::clone(&self.shared),
+            backlog: std::mem::take(&mut self.backlog),
             pending: Cursor::new(prelude),
             finished: false,
+            worker_abort: self
+                .worker_abort
+                .take()
+                .expect("runtime prefetch abort handle should remain available"),
+        }
+    }
+}
+
+impl Drop for RuntimePrefetchStream {
+    fn drop(&mut self) {
+        if let Some(worker_abort) = self.worker_abort.take() {
+            worker_abort.abort();
         }
     }
 }
