@@ -182,10 +182,13 @@ const CLI_MAX_LABEL_WIDTH: usize = 24;
 const CLI_TABLE_GAP: &str = "  ";
 const CLI_TOP_LEVEL_AFTER_HELP: &str = "\
 Tips:
+  Bare `prodex` invocation defaults to `prodex run`.
   Use `prodex quota --all --detail` for the clearest quota view across profiles.
   Use `prodex <command> -h` to see every parameter for that command.
 
 Examples:
+  prodex
+  prodex exec \"review this repo\"
   prodex profile list
   prodex quota --all --detail
   prodex run --profile main";
@@ -212,13 +215,16 @@ Examples:
   prodex quota --raw --profile main";
 const CLI_RUN_AFTER_HELP: &str = "\
 Examples:
+  prodex
   prodex run
+  prodex exec \"review this repo\"
   prodex run --profile main
   prodex run exec \"review this repo\"
   prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 Notes:
   Auto-rotate is enabled by default.
+  Bare `prodex <args>` is treated as `prodex run <args>`.
   A lone session id is forwarded as `codex resume <session-id>`.";
 const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
@@ -3624,11 +3630,11 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
-    if !matches!(cli.command, Commands::RuntimeBroker(_)) {
-        let _ = show_update_notice_if_available(&cli.command);
+    let command = parse_cli_command_or_exit();
+    if !matches!(command, Commands::RuntimeBroker(_)) {
+        let _ = show_update_notice_if_available(&command);
     }
-    match cli.command {
+    match command {
         Commands::Profile(command) => handle_profile_command(command),
         Commands::UseProfile(selector) => handle_set_active_profile(selector),
         Commands::Current => handle_current_profile(),
@@ -3640,6 +3646,63 @@ fn run() -> Result<()> {
         Commands::Run(args) => handle_run(args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
     }
+}
+
+fn parse_cli_command_or_exit() -> Commands {
+    match parse_cli_command_from(env::args_os()) {
+        Ok(command) => command,
+        Err(err) => err.exit(),
+    }
+}
+
+fn parse_cli_command_from<I, T>(args: I) -> std::result::Result<Commands, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
+        rewrite_cli_args_as_run(&raw_args)
+    } else {
+        raw_args
+    };
+    Ok(Cli::try_parse_from(parse_args)?.command)
+}
+
+fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
+    let Some(first_arg) = args.get(1).and_then(|arg| arg.to_str()) else {
+        return true;
+    };
+
+    !matches!(
+        first_arg,
+        "-h" | "--help"
+            | "-V"
+            | "--version"
+            | "profile"
+            | "use"
+            | "current"
+            | "info"
+            | "doctor"
+            | "login"
+            | "logout"
+            | "quota"
+            | "run"
+            | "help"
+            | "__runtime-broker"
+    )
+}
+
+fn rewrite_cli_args_as_run(args: &[OsString]) -> Vec<OsString> {
+    let mut rewritten = Vec::with_capacity(args.len() + 1);
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| OsString::from("prodex")),
+    );
+    rewritten.push(OsString::from("run"));
+    rewritten.extend(args.iter().skip(1).cloned());
+    rewritten
 }
 
 fn handle_profile_command(command: ProfileCommands) -> Result<()> {

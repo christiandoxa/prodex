@@ -2194,12 +2194,54 @@ fn quota_watch_respects_once_and_raw_modes() {
 
 #[test]
 fn quota_command_accepts_once_flag() {
-    let cli = Cli::try_parse_from(["prodex", "quota", "--once"]).expect("quota command");
-    let Commands::Quota(args) = cli.command else {
+    let command = parse_cli_command_from(["prodex", "quota", "--once"]).expect("quota command");
+    let Commands::Quota(args) = command else {
         panic!("expected quota command");
     };
     assert!(args.once);
     assert!(!quota_watch_enabled(&args));
+}
+
+#[test]
+fn bare_prodex_defaults_to_run_command() {
+    let command = parse_cli_command_from(["prodex"]).expect("bare prodex should parse");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+    assert!(args.profile.is_none());
+    assert!(!args.auto_rotate);
+    assert!(!args.no_auto_rotate);
+    assert!(!args.skip_quota_check);
+    assert!(args.base_url.is_none());
+    assert!(args.codex_args.is_empty());
+}
+
+#[test]
+fn bare_prodex_with_codex_args_defaults_to_run_command() {
+    let command = parse_cli_command_from(["prodex", "exec", "review this repo"])
+        .expect("bare prodex codex args should parse");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+    assert_eq!(
+        args.codex_args,
+        vec![OsString::from("exec"), OsString::from("review this repo")]
+    );
+}
+
+#[test]
+fn bare_prodex_accepts_run_options_before_codex_args() {
+    let command =
+        parse_cli_command_from(["prodex", "--profile", "second", "exec", "review this repo"])
+            .expect("bare prodex should accept run options");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("second"));
+    assert_eq!(
+        args.codex_args,
+        vec![OsString::from("exec"), OsString::from("review this repo")]
+    );
 }
 
 #[test]

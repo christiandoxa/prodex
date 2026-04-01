@@ -83,8 +83,11 @@ prodex info
 Run `codex` with safe auto-rotate:
 
 ```bash
+prodex
 prodex run
 ```
+
+Running `prodex` without a subcommand is shorthand for `prodex run`.
 
 Resume a saved Codex session directly:
 
@@ -107,6 +110,8 @@ printf 'context from stdin' | prodex run exec "summarize this"
 ## Core Commands
 
 ```bash
+prodex
+prodex exec "review this repo"
 prodex profile list
 prodex use --profile main
 prodex info
@@ -123,6 +128,7 @@ prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 - one `prodex` profile = one isolated `CODEX_HOME`
 - `prodex login` still uses the real `codex login` flow, including `--device-auth`
 - `prodex login` without `--profile` first tries to read the ChatGPT account email from `tokens.id_token` in `auth.json`, then falls back to the usage endpoint email when needed
+- `prodex` without a subcommand behaves like `prodex run`
 - `prodex run <session-id>` forwards to `codex resume <session-id>`
 - `prodex info` summarizes profile count, the installed prodex version and update status, running Prodex processes, aggregated quota pool, and a no-reset runway estimate from active runtime logs
 - `prodex quota` live-refreshes every 5 seconds by default, and `prodex quota --all` also shows aggregated `5h` and `weekly` pool remaining before the per-profile table

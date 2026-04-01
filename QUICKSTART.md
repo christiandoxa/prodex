@@ -113,12 +113,16 @@ prodex current
 ## Run `codex` through `prodex`
 
 ```bash
+prodex
 prodex run
 ```
+
+Running `prodex` without a subcommand is shorthand for `prodex run`.
 
 Examples:
 
 ```bash
+prodex exec "review this repo"
 prodex run -- --version
 prodex run exec "review this repo"
 printf 'context from stdin' | prodex run exec "summarize this"
@@ -190,6 +194,7 @@ If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whe
 ## Notes
 
 - `prodex` is only a wrapper; login is still handled by `codex`
+- `prodex` without a subcommand behaves like `prodex run`
 - `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
 - that auto-create flow first tries to read the ChatGPT account email from `tokens.id_token` in `auth.json`, then falls back to the usage endpoint email when needed
 - built-in quota checks only work for profiles using ChatGPT auth
