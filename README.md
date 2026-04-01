@@ -13,19 +13,45 @@ Safe multi-account auto-rotate for `codex`.
 
 ## Install
 
-Install from [crates.io](https://crates.io/crates/prodex):
-
-```bash
-cargo install prodex
-```
-
-Or, once the npm package is published, install the native wrapper from npm:
+Install from npm:
 
 ```bash
 npm install -g @christiandoxa/prodex
 ```
 
+This is usually the lightest option because it does not need a local Rust build.
+
+Or install from [crates.io](https://crates.io/crates/prodex):
+
+```bash
+cargo install prodex
+```
+
 The npm package version is kept in lockstep with the published crate version.
+
+## Update Tips
+
+Check your installed version first:
+
+```bash
+prodex --version
+```
+
+The current local binary version in this repo is `0.2.96`, so matching update commands look like this:
+
+```bash
+npm install -g @christiandoxa/prodex@0.2.96
+cargo install prodex --force --version 0.2.96
+```
+
+If you just want the lighter install path, prefer npm over `cargo install` because npm does not need to compile `prodex` locally.
+
+If you want to move from a Cargo-installed binary to npm, uninstall the Cargo binary first and then install the npm package:
+
+```bash
+cargo uninstall prodex
+npm install -g @christiandoxa/prodex
+```
 
 ## Quick Start
 
@@ -82,7 +108,7 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 ```bash
 prodex profile list
-prodex use main
+prodex use --profile main
 prodex info
 prodex quota --all
 prodex quota --all --once

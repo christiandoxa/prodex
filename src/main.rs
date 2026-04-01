@@ -180,6 +180,52 @@ const CLI_LABEL_WIDTH: usize = 16;
 const CLI_MIN_LABEL_WIDTH: usize = 10;
 const CLI_MAX_LABEL_WIDTH: usize = 24;
 const CLI_TABLE_GAP: &str = "  ";
+const CLI_TOP_LEVEL_AFTER_HELP: &str = "\
+Tips:
+  Use `prodex quota --all --detail` for the clearest quota view across profiles.
+  Use `prodex <command> -h` to see every parameter for that command.
+
+Examples:
+  prodex profile list
+  prodex quota --all --detail
+  prodex run --profile main";
+const CLI_PROFILE_AFTER_HELP: &str = "\
+Examples:
+  prodex profile list
+  prodex profile add main --activate
+  prodex profile import-current main
+  prodex profile remove main";
+const CLI_LOGIN_AFTER_HELP: &str = "\
+Examples:
+  prodex login
+  prodex login --profile main
+  prodex login --device-auth";
+const CLI_QUOTA_AFTER_HELP: &str = "\
+Best practice:
+  Use `prodex quota --all --detail` for the clearest live quota view across profiles.
+
+Examples:
+  prodex quota
+  prodex quota --profile main --detail
+  prodex quota --all --detail
+  prodex quota --all --once
+  prodex quota --raw --profile main";
+const CLI_RUN_AFTER_HELP: &str = "\
+Examples:
+  prodex run
+  prodex run --profile main
+  prodex run exec \"review this repo\"
+  prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+
+Notes:
+  Auto-rotate is enabled by default.
+  A lone session id is forwarded as `codex resume <session-id>`.";
+const CLI_DOCTOR_AFTER_HELP: &str = "\
+Examples:
+  prodex doctor
+  prodex doctor --quota
+  prodex doctor --runtime
+  prodex doctor --runtime --json";
 const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "sessions",
     "archived_sessions",
@@ -2535,7 +2581,8 @@ fn save_runtime_state_snapshot_if_latest(
 #[command(
     name = "prodex",
     version,
-    about = "Manage multiple Codex profiles backed by isolated CODEX_HOME directories."
+    about = "Manage multiple Codex profiles backed by isolated CODEX_HOME directories.",
+    after_help = CLI_TOP_LEVEL_AFTER_HELP
 )]
 struct Cli {
     #[command(subcommand)]
@@ -2544,19 +2591,47 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    #[command(subcommand)]
+    #[command(
+        subcommand,
+        about = "Add, inspect, remove, and activate managed profiles.",
+        after_help = CLI_PROFILE_AFTER_HELP
+    )]
     Profile(ProfileCommands),
-    #[command(name = "use")]
+    #[command(
+        name = "use",
+        about = "Set the active profile used by commands that omit --profile."
+    )]
     UseProfile(ProfileSelector),
+    #[command(about = "Show the active profile and its CODEX_HOME details.")]
     Current,
-    #[command(name = "info")]
+    #[command(
+        name = "info",
+        about = "Summarize version status, running processes, quota pool, and runway."
+    )]
     Info(InfoArgs),
+    #[command(
+        about = "Inspect local state, Codex resolution, quota readiness, and runtime logs.",
+        after_help = CLI_DOCTOR_AFTER_HELP
+    )]
     Doctor(DoctorArgs),
-    #[command(trailing_var_arg = true)]
+    #[command(
+        trailing_var_arg = true,
+        about = "Run codex login inside a selected or auto-created profile.",
+        after_help = CLI_LOGIN_AFTER_HELP
+    )]
     Login(CodexPassthroughArgs),
+    #[command(about = "Run codex logout for the selected or active profile.")]
     Logout(ProfileSelector),
+    #[command(
+        about = "Inspect live quota for one profile or the whole profile pool.",
+        after_help = CLI_QUOTA_AFTER_HELP
+    )]
     Quota(QuotaArgs),
-    #[command(trailing_var_arg = true)]
+    #[command(
+        trailing_var_arg = true,
+        about = "Run codex through prodex with quota preflight and safe auto-rotate.",
+        after_help = CLI_RUN_AFTER_HELP
+    )]
     Run(RunArgs),
     #[command(name = "__runtime-broker", hide = true)]
     RuntimeBroker(RuntimeBrokerArgs),
@@ -2564,68 +2639,90 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ProfileCommands {
+    /// Add a profile entry and optionally seed it from another CODEX_HOME.
     Add(AddProfileArgs),
+    /// Copy the current ~/.codex state into a new managed profile and activate it.
     ImportCurrent(ImportCurrentArgs),
+    /// List configured profiles and show which one is active.
     List,
+    /// Remove a profile entry and optionally delete its managed home.
     Remove(RemoveProfileArgs),
+    /// Set the active profile used by commands that omit --profile.
     Use(ProfileSelector),
 }
 
 #[derive(Args, Debug)]
 struct AddProfileArgs {
+    /// Name of the profile to create.
     name: String,
-    #[arg(long)]
+    /// Register an existing CODEX_HOME path instead of creating a managed profile home.
+    #[arg(long, value_name = "PATH")]
     codex_home: Option<PathBuf>,
-    #[arg(long)]
+    /// Copy initial state from another CODEX_HOME path into the new managed profile.
+    #[arg(long, value_name = "PATH")]
     copy_from: Option<PathBuf>,
+    /// Seed the new managed profile from the default ~/.codex directory.
     #[arg(long)]
     copy_current: bool,
+    /// Make the new profile active after creation.
     #[arg(long)]
     activate: bool,
 }
 
 #[derive(Args, Debug)]
 struct ImportCurrentArgs {
+    /// Name of the managed profile to create from the current ~/.codex state.
     #[arg(default_value = "default")]
     name: String,
 }
 
 #[derive(Args, Debug)]
 struct RemoveProfileArgs {
+    /// Name of the profile to remove.
     name: String,
+    /// Also delete the managed CODEX_HOME directory from disk.
     #[arg(long)]
     delete_home: bool,
 }
 
 #[derive(Args, Debug, Clone)]
 struct ProfileSelector {
-    #[arg(short, long)]
+    /// Profile name. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
     profile: Option<String>,
 }
 
 #[derive(Args, Debug)]
 struct CodexPassthroughArgs {
-    #[arg(short, long)]
+    /// Existing profile to log into. If omitted, prodex creates or reuses a profile by account email.
+    #[arg(short, long, value_name = "NAME")]
     profile: Option<String>,
+    /// Extra arguments passed through to `codex login` unchanged.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     codex_args: Vec<OsString>,
 }
 
 #[derive(Args, Debug)]
 struct QuotaArgs {
-    #[arg(short, long)]
+    /// Inspect a single profile. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
     profile: Option<String>,
+    /// Show every configured profile in one aggregated view.
     #[arg(long)]
     all: bool,
+    /// Include exact reset timestamps and expanded window details.
     #[arg(long)]
     detail: bool,
+    /// Print raw usage JSON for a single profile and disable the live refresh view.
     #[arg(long)]
     raw: bool,
     #[arg(long, hide = true)]
     watch: bool,
+    /// Render one human-readable snapshot instead of refreshing every 5 seconds.
     #[arg(long, conflicts_with = "watch")]
     once: bool,
-    #[arg(long)]
+    /// Override the ChatGPT backend base URL used for quota requests.
+    #[arg(long, value_name = "URL")]
     base_url: Option<String>,
 }
 
@@ -2634,26 +2731,35 @@ struct InfoArgs {}
 
 #[derive(Args, Debug)]
 struct DoctorArgs {
+    /// Also probe each profile's quota endpoint.
     #[arg(long)]
     quota: bool,
+    /// Also summarize runtime proxy state and recent logs from /tmp.
     #[arg(long)]
     runtime: bool,
+    /// Emit machine-readable JSON output. Supported together with --runtime.
     #[arg(long)]
     json: bool,
 }
 
 #[derive(Args, Debug)]
 struct RunArgs {
-    #[arg(short, long)]
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
     profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     skip_quota_check: bool,
-    #[arg(long)]
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
     base_url: Option<String>,
+    /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     codex_args: Vec<OsString>,
 }
@@ -4879,7 +4985,7 @@ fn resolve_profile_name(state: &AppState, requested: Option<&str>) -> Result<Str
         return Ok(name.clone());
     }
 
-    bail!("no active profile selected; use `prodex profile use <name>` or pass --profile")
+    bail!("no active profile selected; use `prodex use --profile <name>` or pass --profile")
 }
 
 fn ensure_path_is_unique(state: &AppState, candidate: &Path) -> Result<()> {

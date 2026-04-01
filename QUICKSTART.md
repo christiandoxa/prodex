@@ -1,18 +1,44 @@
 # Quick Start
 
-Install from [crates.io](https://crates.io/crates/prodex):
-
-```bash
-cargo install prodex
-```
-
-Or, once the npm package is published, install the native wrapper from npm:
+Install from npm:
 
 ```bash
 npm install -g @christiandoxa/prodex
 ```
 
+This is usually the lightest option because it does not need a local Rust build.
+
+Or install from [crates.io](https://crates.io/crates/prodex):
+
+```bash
+cargo install prodex
+```
+
 The npm package version is kept in sync with the published crate version on crates.io.
+
+## Update Tips
+
+Check your installed version first:
+
+```bash
+prodex --version
+```
+
+The current local binary version in this repo is `0.2.96`, so matching update commands look like this:
+
+```bash
+npm install -g @christiandoxa/prodex@0.2.96
+cargo install prodex --force --version 0.2.96
+```
+
+If you prefer the lighter install path, npm is usually faster than `cargo install` because it skips the local build step.
+
+If you want to switch from a Cargo-installed binary to npm, uninstall the Cargo binary first and then install the npm package:
+
+```bash
+cargo uninstall prodex
+npm install -g @christiandoxa/prodex
+```
 
 ## Use the Installed Binary
 
@@ -78,7 +104,7 @@ Use `prodex quota --all --once` when you want a single snapshot instead of conti
 ## Select the active profile
 
 ```bash
-prodex use main
+prodex use --profile main
 prodex current
 ```
 
