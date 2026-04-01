@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -403,6 +403,9 @@ fi
 if [ -n "$TEST_CODEX_STDIN_LOG" ]; then
   cat > "$TEST_CODEX_STDIN_LOG"
 fi
+if [ -n "$TEST_LONG_RUNNING_RUN" ]; then
+  sleep "$TEST_LONG_RUNNING_RUN"
+fi
 if [ "$1" = "login" ]; then
   mkdir -p "$CODEX_HOME"
   account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
@@ -536,6 +539,29 @@ fn run_prodex_with_env_and_stdin(
         .expect("failed to wait for prodex output")
 }
 
+fn spawn_prodex_with_env(fixture: &Fixture, args: &[&str], extra_env: &[(&str, &str)]) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("PRODEX_HOME", &fixture.prodex_home)
+        .env("PRODEX_SHARED_CODEX_HOME", &fixture.shared_codex_home)
+        .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
+        .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
+        .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
+        .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
+        .env("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "3000")
+        .env("PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS", "250")
+        .env("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "250")
+        .env("PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS", "250")
+        .envs(extra_env.iter().copied())
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+        .expect("failed to spawn prodex")
+}
+
 fn read_state(path: &Path) -> Value {
     serde_json::from_slice(&fs::read(path.join("state.json")).expect("failed to read state.json"))
         .expect("failed to parse state.json")
@@ -546,6 +572,40 @@ fn active_profile(path: &Path) -> String {
         .as_str()
         .expect("active_profile should be a string")
         .to_string()
+}
+
+fn runtime_broker_registry_path(prodex_home: &Path) -> Option<PathBuf> {
+    fs::read_dir(prodex_home)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("runtime-broker-") && name.ends_with(".json"))
+        })
+}
+
+fn wait_for_runtime_broker_registry_path(prodex_home: &Path) -> PathBuf {
+    let deadline = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after unix epoch")
+        .as_secs()
+        + 5;
+    loop {
+        if let Some(path) = runtime_broker_registry_path(prodex_home) {
+            return path;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_secs();
+        assert!(
+            now < deadline,
+            "timed out waiting for runtime broker registry"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn add_managed_profile(fixture: &Fixture, name: &str, account_id: &str) -> PathBuf {
@@ -746,6 +806,66 @@ fn run_without_profile_selects_the_best_ready_account() {
     assert!(
         String::from_utf8_lossy(&output.stderr)
             .contains("Auto-selecting profile 'elite' over active profile 'second'")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
+    let fixture = setup_fixture();
+    let mut child = spawn_prodex_with_env(
+        &fixture,
+        &["run", "--profile", "main", "--skip-quota-check"],
+        &[("TEST_LONG_RUNNING_RUN", "5")],
+    );
+
+    let registry_path = wait_for_runtime_broker_registry_path(&fixture.prodex_home);
+    let initial_registry: Value =
+        serde_json::from_slice(&fs::read(&registry_path).expect("failed to read registry"))
+            .expect("failed to parse registry");
+    let initial_pid = initial_registry["pid"]
+        .as_u64()
+        .expect("registry pid should be numeric") as u32;
+    assert!(
+        initial_pid > 0,
+        "registry should contain a live broker pid before failure"
+    );
+
+    let _ = Command::new("kill")
+        .arg("-9")
+        .arg(initial_pid.to_string())
+        .status()
+        .expect("failed to kill broker pid");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let output = run_prodex(
+        &fixture,
+        &["run", "--profile", "main", "--skip-quota-check"],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let recovered_registry: Value = serde_json::from_slice(
+        &fs::read(&registry_path).expect("failed to read recovered registry"),
+    )
+    .expect("failed to parse recovered registry");
+    let recovered_pid = recovered_registry["pid"]
+        .as_u64()
+        .expect("recovered registry pid should be numeric") as u32;
+    assert_ne!(
+        recovered_pid, initial_pid,
+        "a stale broker registry should be replaced by a fresh broker process"
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_log)
+            .expect("failed to read codex log")
+            .trim(),
+        fixture.main_home.display().to_string()
     );
 }
 
