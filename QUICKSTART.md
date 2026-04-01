@@ -41,6 +41,8 @@ prodex login --profile second
 
 Use `--profile` when you want a fixed profile name, or when the login flow is not the ChatGPT account flow that writes an email-bearing `id_token`.
 
+`prodex login --device-auth` is also passed through unchanged when you need device-code auth.
+
 ## Check all profiles and quotas
 
 ```bash
@@ -85,6 +87,7 @@ Examples:
 ```bash
 prodex run -- --version
 prodex run exec "review this repo"
+printf 'context from stdin' | prodex run exec "summarize this"
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 prodex run --profile second
 prodex run --profile second --no-auto-rotate
@@ -154,7 +157,7 @@ If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whe
 
 - `prodex` is only a wrapper; login is still handled by `codex`
 - `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
-- that auto-create flow relies on being able to read the ChatGPT account email from `tokens.id_token` in `auth.json`
+- that auto-create flow first tries to read the ChatGPT account email from `tokens.id_token` in `auth.json`, then falls back to the usage endpoint email when needed
 - built-in quota checks only work for profiles using ChatGPT auth
 - managed Prodex profiles share selected native Codex state from the default `~/.codex`, including session history, rules, skills, config, and memories, so rotation stays closer to direct `codex`
 - `prodex run <session-id>` is a shortcut for resuming a saved Codex session through the Prodex proxy

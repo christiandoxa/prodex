@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -328,6 +328,8 @@ struct Fixture {
     main_home: PathBuf,
     second_home: PathBuf,
     codex_log: PathBuf,
+    codex_args_log: PathBuf,
+    codex_stdin_log: PathBuf,
     codex_bin: PathBuf,
 }
 
@@ -342,6 +344,8 @@ fn setup_fixture() -> Fixture {
     let main_home = homes_root.join("main");
     let second_home = homes_root.join("second");
     let codex_log = temp_dir.path.join("codex-home.log");
+    let codex_args_log = temp_dir.path.join("codex-args.log");
+    let codex_stdin_log = temp_dir.path.join("codex-stdin.log");
     let codex_bin = bin_root.join("codex");
 
     fs::create_dir_all(&prodex_home).expect("failed to create prodex home");
@@ -390,6 +394,15 @@ fn setup_fixture() -> Fixture {
         &codex_bin,
         r#"#!/bin/sh
 printf '%s\n' "$CODEX_HOME" > "$TEST_CODEX_LOG"
+if [ -n "$TEST_CODEX_ARGS_LOG" ]; then
+  : > "$TEST_CODEX_ARGS_LOG"
+  for arg in "$@"; do
+    printf '%s\n' "$arg" >> "$TEST_CODEX_ARGS_LOG"
+  done
+fi
+if [ -n "$TEST_CODEX_STDIN_LOG" ]; then
+  cat > "$TEST_CODEX_STDIN_LOG"
+fi
 if [ "$1" = "login" ]; then
   mkdir -p "$CODEX_HOME"
   account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
@@ -425,6 +438,8 @@ exit 0
         main_home,
         second_home,
         codex_log,
+        codex_args_log,
+        codex_stdin_log,
         codex_bin,
     }
 }
@@ -481,6 +496,44 @@ fn run_prodex_with_env(
         .args(args)
         .output()
         .expect("failed to execute prodex")
+}
+
+fn run_prodex_with_env_and_stdin(
+    fixture: &Fixture,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+    stdin: &str,
+) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("PRODEX_HOME", &fixture.prodex_home)
+        .env("PRODEX_SHARED_CODEX_HOME", &fixture.shared_codex_home)
+        .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
+        .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
+        .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
+        .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
+        .env("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "3000")
+        .env("PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS", "250")
+        .env("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "250")
+        .env("PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS", "250")
+        .envs(extra_env.iter().copied())
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn prodex");
+
+    let mut child_stdin = child.stdin.take().expect("prodex stdin should be piped");
+    child_stdin
+        .write_all(stdin.as_bytes())
+        .expect("failed to write prodex stdin");
+    drop(child_stdin);
+
+    child
+        .wait_with_output()
+        .expect("failed to wait for prodex output")
 }
 
 fn read_state(path: &Path) -> Value {
@@ -575,6 +628,55 @@ fn explicit_profile_auto_rotates_by_default() {
             .expect("failed to read codex log")
             .trim(),
         fixture.second_home.display().to_string()
+    );
+}
+
+#[test]
+fn run_exec_preserves_prompt_and_piped_stdin() {
+    let fixture = setup_fixture();
+    let args_log = fixture.codex_args_log.display().to_string();
+    let stdin_log = fixture.codex_stdin_log.display().to_string();
+
+    let output = run_prodex_with_env_and_stdin(
+        &fixture,
+        &[
+            "run",
+            "--profile",
+            "main",
+            "--no-auto-rotate",
+            "--skip-quota-check",
+            "exec",
+            "summarize concisely",
+        ],
+        &[
+            ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
+            ("TEST_CODEX_STDIN_LOG", stdin_log.as_str()),
+        ],
+        "piped input\n",
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(active_profile(&fixture.prodex_home), "main");
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_log)
+            .expect("failed to read codex log")
+            .trim(),
+        fixture.main_home.display().to_string()
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_args_log)
+            .expect("failed to read codex args log")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec!["exec", "summarize concisely"]
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_stdin_log).expect("failed to read codex stdin log"),
+        "piped input\n"
     );
 }
 
@@ -1234,5 +1336,49 @@ fn login_without_profile_uses_auth_email_before_quota_lookup() {
     assert_eq!(
         state["profiles"]["token_example.com"]["email"],
         "token@example.com"
+    );
+}
+
+#[test]
+fn login_without_profile_falls_back_to_usage_email_when_id_token_is_missing() {
+    let fixture = setup_fixture();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "profiles": {}
+        }),
+    );
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[
+            ("TEST_LOGIN_ACCOUNT_ID", "main-account"),
+            ("CODEX_CHATGPT_BASE_URL", fixture.usage_base_url.as_str()),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "main_example.com");
+    assert_eq!(
+        state["profiles"]["main_example.com"]["email"],
+        "main@example.com"
+    );
+
+    let auth_json = fs::read_to_string(
+        fixture
+            .prodex_home
+            .join("profiles/main_example.com/auth.json"),
+    )
+    .expect("failed to read created auth.json");
+    assert!(
+        !auth_json.contains("\"id_token\""),
+        "auth.json should not contain an id_token when login falls back to usage email"
     );
 }
