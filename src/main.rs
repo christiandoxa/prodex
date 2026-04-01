@@ -19,7 +19,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TrySendError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -120,12 +120,13 @@ const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 3
 const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
 const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
-const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 2;
+const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 3;
 const RUNTIME_STARTUP_PROBE_WARM_LIMIT: usize = 3;
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD: usize = 8;
 const RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD: usize = 8;
 const RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD: usize = 16;
+const RUNTIME_PROFILE_AUTH_FAILURE_DECAY_SECONDS: i64 = if cfg!(test) { 5 } else { 300 };
 const RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS: i64 = if cfg!(test) { 1 } else { 60 };
 const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
@@ -151,6 +152,9 @@ const RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS: u64 =
     if cfg!(test) { 60_000 } else { 60_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
+const RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY: usize = 2;
+const RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES: usize = 512 * 1024;
+const RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
@@ -320,6 +324,17 @@ fn runtime_proxy_long_lived_worker_count() -> usize {
         parallelism.clamp(2, 8),
     )
     .clamp(1, 32)
+}
+
+fn runtime_probe_refresh_worker_count() -> usize {
+    let parallelism = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4);
+    usize_override(
+        "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
+        parallelism.clamp(2, 4),
+    )
+    .clamp(1, 8)
 }
 
 fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
@@ -649,8 +664,10 @@ fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
             wake: Condvar::new(),
             active: Arc::new(AtomicUsize::new(0)),
         });
-        let worker_queue = Arc::clone(&queue);
-        thread::spawn(move || runtime_probe_refresh_worker_loop(worker_queue));
+        for _ in 0..runtime_probe_refresh_worker_count() {
+            let worker_queue = Arc::clone(&queue);
+            thread::spawn(move || runtime_probe_refresh_worker_loop(worker_queue));
+        }
         queue
     }))
 }
@@ -993,10 +1010,6 @@ fn runtime_profiles_needing_startup_probe_refresh(
     profile_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     now: i64,
 ) -> Vec<String> {
-    if profile_usage_snapshots.is_empty() {
-        return Vec::new();
-    }
-
     active_profile_selection_order(state, current_profile)
         .into_iter()
         .filter(|profile_name| {
@@ -1727,6 +1740,77 @@ fn invalidate_runtime_profile_usage_auth(shared: &RuntimeRotationProxyShared, pr
     if let Ok(mut runtime) = shared.runtime.lock() {
         runtime.profile_usage_auth.remove(profile_name);
     }
+}
+
+fn runtime_profile_auth_failure_key(profile_name: &str) -> String {
+    format!("__auth_failure__:{profile_name}")
+}
+
+fn runtime_profile_auth_failure_active_from_map(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+) -> bool {
+    runtime_profile_effective_score_from_map(
+        profile_health,
+        &runtime_profile_auth_failure_key(profile_name),
+        now,
+        RUNTIME_PROFILE_AUTH_FAILURE_DECAY_SECONDS,
+    ) > 0
+}
+
+fn runtime_profile_auth_failure_active(
+    runtime: &RuntimeRotationState,
+    profile_name: &str,
+    now: i64,
+) -> bool {
+    runtime_profile_auth_failure_active_from_map(&runtime.profile_health, profile_name, now)
+}
+
+fn note_runtime_profile_auth_failure(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    status: u16,
+) {
+    let mut runtime = match shared.runtime.lock() {
+        Ok(runtime) => runtime,
+        Err(_) => return,
+    };
+    let now = Local::now().timestamp();
+    runtime.profile_health.insert(
+        runtime_profile_auth_failure_key(profile_name),
+        RuntimeProfileHealth {
+            score: 1,
+            updated_at: now,
+        },
+    );
+    let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_auth_backoff profile={profile_name} route={} status={} seconds={}",
+            runtime_route_kind_label(route_kind),
+            status,
+            RUNTIME_PROFILE_AUTH_FAILURE_DECAY_SECONDS
+        ),
+    );
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        continuations_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!("profile_auth_backoff:{profile_name}"),
+    );
 }
 
 fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
@@ -3603,6 +3687,14 @@ enum RuntimeSseInspection {
     PreviousResponseNotFound(Vec<u8>),
 }
 
+#[derive(Debug)]
+enum RuntimeSseInspectionProgress {
+    Hold { response_ids: Vec<String> },
+    Commit { response_ids: Vec<String> },
+    QuotaBlocked,
+    PreviousResponseNotFound,
+}
+
 #[derive(Default)]
 struct RuntimeSseTapState {
     line: Vec<u8>,
@@ -3677,13 +3769,20 @@ enum RuntimePrefetchChunk {
     Error(io::ErrorKind, String),
 }
 
+#[derive(Default)]
+struct RuntimePrefetchSharedState {
+    terminal_error: Mutex<Option<(io::ErrorKind, String)>>,
+}
+
 struct RuntimePrefetchStream {
     receiver: Receiver<RuntimePrefetchChunk>,
+    shared: Arc<RuntimePrefetchSharedState>,
     backlog: VecDeque<RuntimePrefetchChunk>,
 }
 
 struct RuntimePrefetchReader {
     receiver: Receiver<RuntimePrefetchChunk>,
+    shared: Arc<RuntimePrefetchSharedState>,
     backlog: VecDeque<RuntimePrefetchChunk>,
     pending: Cursor<Vec<u8>>,
     finished: bool,
@@ -8090,7 +8189,7 @@ fn runtime_proxy_direct_current_fallback_profile(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (profile_name, codex_home) = {
+    let (profile_name, codex_home, auth_failure_active) = {
         let runtime = shared
             .runtime
             .lock()
@@ -8099,9 +8198,25 @@ fn runtime_proxy_direct_current_fallback_profile(
         let Some(profile) = runtime.state.profiles.get(&profile_name) else {
             return Ok(None);
         };
-        (profile_name, profile.codex_home.clone())
+        let now = Local::now().timestamp();
+        (
+            profile_name.clone(),
+            profile.codex_home.clone(),
+            runtime_profile_auth_failure_active(&runtime, &profile_name, now),
+        )
     };
     if excluded_profiles.contains(&profile_name) {
+        return Ok(None);
+    }
+    if auth_failure_active {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_current route={} profile={} reason=auth_failure_backoff",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+            ),
+        );
         return Ok(None);
     }
     if !read_auth_summary(&codex_home).quota_compatible {
@@ -8391,6 +8506,17 @@ fn next_runtime_previous_response_candidate(
         if !read_auth_summary(&profile.codex_home).quota_compatible {
             continue;
         }
+        if runtime_profile_auth_failure_active_from_map(&profile_health, &name, now) {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason=auth_failure_backoff",
+                    runtime_route_kind_label(route_kind),
+                    name,
+                ),
+            );
+            continue;
+        }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, &name, route_kind)?;
         if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
@@ -8426,6 +8552,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         circuit_open_until,
         inflight_count,
         health_score,
+        auth_failure_active,
     ) = {
         let mut runtime = shared
             .runtime
@@ -8453,18 +8580,22 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             ),
             runtime_profile_inflight_count(&runtime, &runtime.current_profile),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now, route_kind),
+            runtime_profile_auth_failure_active(&runtime, &runtime.current_profile, now),
         )
     };
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
 
-    if in_selection_backoff
+    if auth_failure_active
+        || in_selection_backoff
         || circuit_open_until.is_some()
         || health_score > 0
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
         || quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
     {
-        let reason = if in_selection_backoff {
+        let reason = if auth_failure_active {
+            "auth_failure_backoff"
+        } else if in_selection_backoff {
             "selection_backoff"
         } else if circuit_open_until.is_some() {
             "route_circuit_open"
@@ -10302,6 +10433,14 @@ fn connect_runtime_proxy_upstream_websocket(
             let body = response.body().clone().unwrap_or_default();
             if matches!(status, 401 | 403) {
                 invalidate_runtime_profile_usage_auth(shared, profile_name);
+                if status == 401 || extract_runtime_proxy_quota_message(&body).is_none() {
+                    note_runtime_profile_auth_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Websocket,
+                        status,
+                    );
+                }
             }
             runtime_proxy_log(
                 shared,
@@ -10526,13 +10665,16 @@ fn runtime_response_event_type(payload: &str) -> Option<String> {
         })
 }
 
+fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "response.created" | "response.in_progress" | "response.queued"
+    )
+}
+
 fn runtime_websocket_precommit_hold_frame(payload: &str) -> bool {
-    runtime_response_event_type(payload).is_some_and(|kind| {
-        matches!(
-            kind.as_str(),
-            "response.created" | "response.in_progress" | "response.queued"
-        )
-    })
+    runtime_response_event_type(payload)
+        .is_some_and(|kind| runtime_proxy_precommit_hold_event_kind(kind.as_str()))
 }
 
 fn is_runtime_terminal_event(payload: &str) -> bool {
@@ -11109,6 +11251,10 @@ fn attempt_runtime_standard_request(
             response,
             overload: retryable_overload,
         });
+    }
+
+    if matches!(status, 401 | 403) {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Compact, status);
     }
 
     Ok(RuntimeStandardAttempt::Success {
@@ -12026,6 +12172,14 @@ fn attempt_runtime_responses_request(
                 turn_state: response_turn_state,
             });
         }
+        if matches!(status, 401 | 403) {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Responses,
+                status,
+            );
+        }
 
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
@@ -12295,6 +12449,29 @@ fn next_runtime_response_candidate_for_route(
         )
     });
     for (index, candidate) in ready_candidates {
+        if runtime_profile_auth_failure_active_from_map(&profile_health, &candidate.name, now) {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=auth_failure_backoff inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(runtime_quota_summary_for_route(
+                        &candidate.usage,
+                        route_kind
+                    )),
+                ),
+            );
+            continue;
+        }
         if !reserve_runtime_profile_route_circuit_half_open_probe(
             shared,
             &candidate.name,
@@ -12360,6 +12537,29 @@ fn next_runtime_response_candidate_for_route(
     });
     let mut fallback = None;
     for (index, candidate) in fallback_candidates {
+        if runtime_profile_auth_failure_active_from_map(&profile_health, &candidate.name, now) {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=auth_failure_backoff inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(runtime_quota_summary_for_route(
+                        &candidate.usage,
+                        route_kind
+                    )),
+                ),
+            );
+            continue;
+        }
         if !reserve_runtime_profile_route_circuit_half_open_probe(
             shared,
             &candidate.name,
@@ -13961,6 +14161,14 @@ fn send_runtime_proxy_upstream_request(
     );
     if matches!(response.status().as_u16(), 401 | 403) {
         invalidate_runtime_profile_usage_auth(shared, profile_name);
+        if response.status().as_u16() == 401 {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                runtime_proxy_request_lane(&request.path_and_query, false),
+                response.status().as_u16(),
+            );
+        }
     }
     note_runtime_profile_latency_observation(
         shared,
@@ -14059,6 +14267,14 @@ fn send_runtime_proxy_upstream_responses_request(
     );
     if matches!(response.status().as_u16(), 401 | 403) {
         invalidate_runtime_profile_usage_auth(shared, profile_name);
+        if response.status().as_u16() == 401 {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Responses,
+                response.status().as_u16(),
+            );
+        }
     }
     note_runtime_profile_latency_observation(
         shared,
@@ -14416,7 +14632,14 @@ impl Read for RuntimePrefetchReader {
                             "runtime upstream stream idle timed out",
                         ));
                     }
-                    Err(RecvTimeoutError::Disconnected) => None,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        if let Some((kind, message)) = runtime_prefetch_terminal_error(&self.shared)
+                        {
+                            self.finished = true;
+                            return Err(io::Error::new(kind, message));
+                        }
+                        None
+                    }
                 }
             };
 
@@ -14564,12 +14787,16 @@ fn write_runtime_streaming_response(
                         err
                     ),
                 );
-                note_runtime_profile_latency_failure(
-                    &response.shared,
-                    &response.profile_name,
-                    RuntimeRouteKind::Responses,
-                    "stream_read_error",
-                );
+                let transport_error =
+                    anyhow::Error::new(io::Error::new(err.kind(), err.to_string()));
+                if is_runtime_proxy_transport_failure(&transport_error) {
+                    note_runtime_profile_latency_failure(
+                        &response.shared,
+                        &response.profile_name,
+                        RuntimeRouteKind::Responses,
+                        "stream_read_error",
+                    );
+                }
                 return Err(err);
             }
         };
@@ -14798,12 +15025,17 @@ impl RuntimePrefetchStream {
         log_path: PathBuf,
         request_id: u64,
     ) -> Self {
-        let (sender, receiver) = mpsc::channel::<RuntimePrefetchChunk>();
+        let (sender, receiver) =
+            mpsc::sync_channel::<RuntimePrefetchChunk>(RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY);
+        let shared = Arc::new(RuntimePrefetchSharedState::default());
+        let worker_shared = Arc::clone(&shared);
         async_runtime.spawn(async move {
-            runtime_prefetch_response_chunks(response, sender, log_path, request_id).await;
+            runtime_prefetch_response_chunks(response, sender, worker_shared, log_path, request_id)
+                .await;
         });
         Self {
             receiver,
+            shared,
             backlog: VecDeque::new(),
         }
     }
@@ -14825,6 +15057,7 @@ impl RuntimePrefetchStream {
     fn into_reader(self, prelude: Vec<u8>) -> RuntimePrefetchReader {
         RuntimePrefetchReader {
             receiver: self.receiver,
+            shared: self.shared,
             backlog: self.backlog,
             pending: Cursor::new(prelude),
             finished: false,
@@ -14832,9 +15065,34 @@ impl RuntimePrefetchStream {
     }
 }
 
+fn runtime_prefetch_set_terminal_error(
+    shared: &RuntimePrefetchSharedState,
+    kind: io::ErrorKind,
+    message: impl Into<String>,
+) {
+    let mut terminal_error = shared
+        .terminal_error
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if terminal_error.is_none() {
+        *terminal_error = Some((kind, message.into()));
+    }
+}
+
+fn runtime_prefetch_terminal_error(
+    shared: &RuntimePrefetchSharedState,
+) -> Option<(io::ErrorKind, String)> {
+    shared
+        .terminal_error
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
 async fn runtime_prefetch_response_chunks(
     mut response: reqwest::Response,
-    sender: Sender<RuntimePrefetchChunk>,
+    sender: SyncSender<RuntimePrefetchChunk>,
+    shared: Arc<RuntimePrefetchSharedState>,
     log_path: PathBuf,
     request_id: u64,
 ) {
@@ -14848,7 +15106,7 @@ async fn runtime_prefetch_response_chunks(
                         "request={request_id} transport=http upstream_stream_end saw_data={saw_data}"
                     ),
                 );
-                let _ = sender.send(RuntimePrefetchChunk::End);
+                let _ = sender.try_send(RuntimePrefetchChunk::End);
                 break;
             }
             Ok(Some(chunk)) => {
@@ -14862,28 +15120,78 @@ async fn runtime_prefetch_response_chunks(
                         ),
                     );
                 }
-                if sender
-                    .send(RuntimePrefetchChunk::Data(chunk.to_vec()))
-                    .is_err()
-                {
+                if chunk.len() > RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES {
+                    let message = format!(
+                        "runtime upstream chunk exceeded prefetch limit ({} > {})",
+                        chunk.len(),
+                        RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES
+                    );
+                    runtime_prefetch_set_terminal_error(
+                        &shared,
+                        io::ErrorKind::InvalidData,
+                        message.clone(),
+                    );
                     runtime_proxy_log_to_path(
                         &log_path,
                         &format!(
-                            "request={request_id} transport=http prefetch_receiver_disconnected"
+                            "request={request_id} transport=http prefetch_chunk_too_large bytes={} limit={} error={message}",
+                            chunk.len(),
+                            RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES,
                         ),
                     );
+                    let _ = sender.try_send(RuntimePrefetchChunk::Error(
+                        io::ErrorKind::InvalidData,
+                        message,
+                    ));
                     break;
+                }
+                match sender.try_send(RuntimePrefetchChunk::Data(chunk.to_vec())) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {
+                        let message = format!(
+                            "runtime prefetch backlog exceeded bounded capacity ({})",
+                            RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY
+                        );
+                        runtime_prefetch_set_terminal_error(
+                            &shared,
+                            io::ErrorKind::WouldBlock,
+                            message.clone(),
+                        );
+                        runtime_proxy_log_to_path(
+                            &log_path,
+                            &format!(
+                                "request={request_id} transport=http prefetch_backpressure_abort bytes={} capacity={} error={message}",
+                                chunk.len(),
+                                RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY,
+                            ),
+                        );
+                        let _ = sender.try_send(RuntimePrefetchChunk::Error(
+                            io::ErrorKind::WouldBlock,
+                            message,
+                        ));
+                        break;
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        runtime_proxy_log_to_path(
+                            &log_path,
+                            &format!(
+                                "request={request_id} transport=http prefetch_receiver_disconnected"
+                            ),
+                        );
+                        break;
+                    }
                 }
             }
             Err(err) => {
                 let kind = runtime_reqwest_error_kind(&err);
+                runtime_prefetch_set_terminal_error(&shared, kind, err.to_string());
                 runtime_proxy_log_to_path(
                     &log_path,
                     &format!(
                         "request={request_id} transport=http upstream_stream_error kind={kind:?} error={err}"
                     ),
                 );
-                let _ = sender.send(RuntimePrefetchChunk::Error(kind, err.to_string()));
+                let _ = sender.try_send(RuntimePrefetchChunk::Error(kind, err.to_string()));
                 break;
             }
         }
@@ -14910,14 +15218,12 @@ fn inspect_runtime_sse_lookahead(
         match prefetch.recv_timeout(remaining) {
             Ok(RuntimePrefetchChunk::Data(chunk)) => {
                 buffered.extend_from_slice(&chunk);
-                match inspect_runtime_sse_buffer(buffered.clone())? {
-                    RuntimeSseInspection::Commit { response_ids, .. }
-                        if !response_ids.is_empty() =>
-                    {
+                match inspect_runtime_sse_buffer(&buffered)? {
+                    RuntimeSseInspectionProgress::Commit { response_ids } => {
                         runtime_proxy_log_to_path(
                             log_path,
                             &format!(
-                                "request={request_id} transport=http lookahead_commit_with_response_ids bytes={} response_ids={}",
+                                "request={request_id} transport=http lookahead_commit bytes={} response_ids={}",
                                 buffered.len(),
                                 response_ids.len()
                             ),
@@ -14927,8 +15233,8 @@ fn inspect_runtime_sse_lookahead(
                             response_ids,
                         });
                     }
-                    RuntimeSseInspection::Commit { .. } => {}
-                    other => {
+                    RuntimeSseInspectionProgress::Hold { .. } => {}
+                    RuntimeSseInspectionProgress::QuotaBlocked => {
                         runtime_proxy_log_to_path(
                             log_path,
                             &format!(
@@ -14936,7 +15242,17 @@ fn inspect_runtime_sse_lookahead(
                                 buffered.len()
                             ),
                         );
-                        return Ok(other);
+                        return Ok(RuntimeSseInspection::QuotaBlocked(buffered));
+                    }
+                    RuntimeSseInspectionProgress::PreviousResponseNotFound => {
+                        runtime_proxy_log_to_path(
+                            log_path,
+                            &format!(
+                                "request={request_id} transport=http lookahead_retryable_signal bytes={}",
+                                buffered.len()
+                            ),
+                        );
+                        return Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered));
                     }
                 }
             }
@@ -14978,15 +15294,40 @@ fn inspect_runtime_sse_lookahead(
         }
     }
 
-    inspect_runtime_sse_buffer(buffered)
+    match inspect_runtime_sse_buffer(&buffered)? {
+        RuntimeSseInspectionProgress::Commit { response_ids }
+        | RuntimeSseInspectionProgress::Hold { response_ids } => {
+            if !buffered.is_empty() {
+                runtime_proxy_log_to_path(
+                    log_path,
+                    &format!(
+                        "request={request_id} transport=http lookahead_budget_exhausted bytes={} response_ids={}",
+                        buffered.len(),
+                        response_ids.len()
+                    ),
+                );
+            }
+            Ok(RuntimeSseInspection::Commit {
+                prelude: buffered,
+                response_ids,
+            })
+        }
+        RuntimeSseInspectionProgress::QuotaBlocked => {
+            Ok(RuntimeSseInspection::QuotaBlocked(buffered))
+        }
+        RuntimeSseInspectionProgress::PreviousResponseNotFound => {
+            Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered))
+        }
+    }
 }
 
-fn inspect_runtime_sse_buffer(buffered: Vec<u8>) -> Result<RuntimeSseInspection> {
+fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseInspectionProgress> {
     let mut line = Vec::new();
     let mut data_lines = Vec::new();
     let mut response_ids = BTreeSet::new();
+    let mut saw_commit_ready_event = false;
 
-    for byte in &buffered {
+    for byte in buffered {
         line.push(*byte);
         if *byte != b'\n' {
             continue;
@@ -14997,15 +15338,21 @@ fn inspect_runtime_sse_buffer(buffered: Vec<u8>) -> Result<RuntimeSseInspection>
         if trimmed.is_empty() {
             if let Some(message) = extract_runtime_proxy_quota_message_from_sse(&data_lines) {
                 let _ = message;
-                return Ok(RuntimeSseInspection::QuotaBlocked(buffered));
+                return Ok(RuntimeSseInspectionProgress::QuotaBlocked);
             }
             if let Some(message) =
                 extract_runtime_proxy_previous_response_message_from_sse(&data_lines)
             {
                 let _ = message;
-                return Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered));
+                return Ok(RuntimeSseInspectionProgress::PreviousResponseNotFound);
             }
             response_ids.extend(extract_runtime_response_ids_from_sse(&data_lines));
+            if !data_lines.is_empty()
+                && !extract_runtime_response_event_type_from_sse(&data_lines)
+                    .is_some_and(|kind| runtime_proxy_precommit_hold_event_kind(kind.as_str()))
+            {
+                saw_commit_ready_event = true;
+            }
             data_lines.clear();
             line.clear();
             continue;
@@ -15017,16 +15364,21 @@ fn inspect_runtime_sse_buffer(buffered: Vec<u8>) -> Result<RuntimeSseInspection>
         line.clear();
     }
 
-    Ok(RuntimeSseInspection::Commit {
-        prelude: buffered,
-        response_ids: response_ids.into_iter().collect(),
-    })
+    if saw_commit_ready_event {
+        Ok(RuntimeSseInspectionProgress::Commit {
+            response_ids: response_ids.into_iter().collect(),
+        })
+    } else {
+        Ok(RuntimeSseInspectionProgress::Hold {
+            response_ids: response_ids.into_iter().collect(),
+        })
+    }
 }
 
 fn buffer_runtime_proxy_async_response_parts(
     shared: &RuntimeRotationProxyShared,
-    response: reqwest::Response,
-    mut prelude: Vec<u8>,
+    mut response: reqwest::Response,
+    prelude: Vec<u8>,
 ) -> Result<RuntimeBufferedResponseParts> {
     let status = response.status().as_u16();
     let mut headers = Vec::new();
@@ -15036,15 +15388,33 @@ fn buffer_runtime_proxy_async_response_parts(
         }
         headers.push((name.as_str().to_string(), value.as_bytes().to_vec()));
     }
-    let body = shared
-        .async_runtime
-        .block_on(async move { response.bytes().await })
-        .context("failed to read upstream runtime response body")?;
-    prelude.extend_from_slice(&body);
+    let body = shared.async_runtime.block_on(async move {
+        let mut body = prelude;
+        loop {
+            let next = response
+                .chunk()
+                .await
+                .context("failed to read upstream runtime response body chunk")?;
+            let Some(chunk) = next else {
+                break;
+            };
+            if body.len().saturating_add(chunk.len()) > RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES {
+                return Err(anyhow::Error::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "runtime buffered response exceeded safe size limit ({})",
+                        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES
+                    ),
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok::<Vec<u8>, anyhow::Error>(body)
+    })?;
     Ok(RuntimeBufferedResponseParts {
         status,
         headers,
-        body: prelude,
+        body,
     })
 }
 
@@ -15114,6 +15484,15 @@ fn extract_runtime_response_ids_from_sse(data_lines: &[String]) -> Vec<String> {
 
     let payload = data_lines.join("\n");
     extract_runtime_response_ids_from_payload(&payload)
+}
+
+fn extract_runtime_response_event_type_from_sse(data_lines: &[String]) -> Option<String> {
+    if data_lines.is_empty() {
+        return None;
+    }
+
+    let payload = data_lines.join("\n");
+    runtime_response_event_type(&payload)
 }
 
 fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
