@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -52,20 +52,29 @@ struct TestDir {
     path: PathBuf,
 }
 
+static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
 impl TestDir {
     fn new() -> Self {
         wait_for_runtime_background_queues_idle();
-        let unique = format!(
-            "prodex-runtime-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock should be after unix epoch")
-                .as_nanos()
-        );
-        let path = std::env::temp_dir().join(unique);
-        fs::create_dir_all(&path).expect("failed to create test temp dir");
-        Self { path }
+        for _ in 0..32 {
+            let unique = format!(
+                "prodex-runtime-test-{}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system clock should be after unix epoch")
+                    .as_nanos(),
+                TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            );
+            let path = std::env::temp_dir().join(unique);
+            match fs::create_dir(&path) {
+                Ok(()) => return Self { path },
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("failed to create test temp dir: {err}"),
+            }
+        }
+        panic!("failed to allocate unique test temp dir after repeated collisions");
     }
 }
 
