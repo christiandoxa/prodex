@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex",
-  "version": "0.2.94",
+  "version": "0.2.95",
   "description": "Safe multi-account auto-rotate for Codex CLI with isolated CODEX_HOME profiles",
   "license": "MIT",
   "bin": {
@@ -13,12 +13,12 @@
     "@openai/codex": "^0.118.0"
   },
   "optionalDependencies": {
-    "@christiandoxa/prodex-linux-x64": "0.2.94",
-    "@christiandoxa/prodex-linux-arm64": "0.2.94",
-    "@christiandoxa/prodex-darwin-x64": "0.2.94",
-    "@christiandoxa/prodex-darwin-arm64": "0.2.94",
-    "@christiandoxa/prodex-win32-x64": "0.2.94",
-    "@christiandoxa/prodex-win32-arm64": "0.2.94"
+    "@christiandoxa/prodex-linux-x64": "0.2.95",
+    "@christiandoxa/prodex-linux-arm64": "0.2.95",
+    "@christiandoxa/prodex-darwin-x64": "0.2.95",
+    "@christiandoxa/prodex-darwin-arm64": "0.2.95",
+    "@christiandoxa/prodex-win32-x64": "0.2.95",
+    "@christiandoxa/prodex-win32-arm64": "0.2.95"
   },
   "publishConfig": {
     "access": "public"
