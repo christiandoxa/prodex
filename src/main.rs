@@ -2848,7 +2848,7 @@ enum Commands {
 enum ProfileCommands {
     /// Add a profile entry and optionally seed it from another CODEX_HOME.
     Add(AddProfileArgs),
-    /// Copy the current ~/.codex state into a new managed profile and activate it.
+    /// Copy the current shared Prodex CODEX_HOME into a new managed profile and activate it.
     ImportCurrent(ImportCurrentArgs),
     /// List configured profiles and show which one is active.
     List,
@@ -2868,7 +2868,7 @@ struct AddProfileArgs {
     /// Copy initial state from another CODEX_HOME path into the new managed profile.
     #[arg(long, value_name = "PATH")]
     copy_from: Option<PathBuf>,
-    /// Seed the new managed profile from the default ~/.codex directory.
+    /// Seed the new managed profile from the default shared Prodex CODEX_HOME.
     #[arg(long)]
     copy_current: bool,
     /// Make the new profile active after creation.
@@ -2878,7 +2878,7 @@ struct AddProfileArgs {
 
 #[derive(Args, Debug)]
 struct ImportCurrentArgs {
-    /// Name of the managed profile to create from the current ~/.codex state.
+    /// Name of the managed profile to create from the current shared Prodex CODEX_HOME.
     #[arg(default_value = "default")]
     name: String,
 }
@@ -4727,7 +4727,7 @@ fn format_relative_duration(seconds: i64) -> String {
 fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let codex_home = default_codex_home()?;
+    let codex_home = default_codex_home(&paths)?;
 
     if args.runtime && args.json {
         let summary = collect_runtime_doctor_summary();
@@ -16125,17 +16125,43 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
     Ok(current_dir.join(path))
 }
 
-fn default_codex_home() -> Result<PathBuf> {
+fn legacy_default_codex_home() -> Result<PathBuf> {
     Ok(home_dir()
         .context("failed to determine home directory")?
         .join(DEFAULT_CODEX_DIR))
 }
 
-fn shared_codex_root() -> Result<PathBuf> {
-    match env::var_os("PRODEX_SHARED_CODEX_HOME") {
-        Some(path) => absolutize(PathBuf::from(path)),
-        None => default_codex_home(),
+fn prodex_default_shared_codex_root(root: &Path) -> PathBuf {
+    root.join(DEFAULT_CODEX_DIR)
+}
+
+fn resolve_shared_codex_root(root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
     }
+}
+
+fn select_default_codex_home(
+    shared_codex_root: &Path,
+    legacy_codex_home: &Path,
+    override_active: bool,
+) -> PathBuf {
+    if override_active || shared_codex_root.exists() || !legacy_codex_home.exists() {
+        shared_codex_root.to_path_buf()
+    } else {
+        legacy_codex_home.to_path_buf()
+    }
+}
+
+fn default_codex_home(paths: &AppPaths) -> Result<PathBuf> {
+    let legacy = legacy_default_codex_home()?;
+    Ok(select_default_codex_home(
+        &paths.shared_codex_root,
+        &legacy,
+        env::var_os("PRODEX_SHARED_CODEX_HOME").is_some(),
+    ))
 }
 
 impl AppPaths {
@@ -16150,7 +16176,10 @@ impl AppPaths {
         Ok(Self {
             state_file: root.join("state.json"),
             managed_profiles_root: root.join("profiles"),
-            shared_codex_root: shared_codex_root()?,
+            shared_codex_root: match env::var_os("PRODEX_SHARED_CODEX_HOME") {
+                Some(path) => resolve_shared_codex_root(&root, PathBuf::from(path)),
+                None => prodex_default_shared_codex_root(&root),
+            },
             legacy_shared_codex_root: root.join("shared"),
             root,
         })

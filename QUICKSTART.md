@@ -50,7 +50,7 @@ Prodex-owned commands adapt to the current terminal width, and live quota views 
 
 ## Import your current `codex` login
 
-If `~/.codex` already contains an active login:
+If your shared Prodex Codex home or legacy `~/.codex` already contains an active login:
 
 ```bash
 prodex profile import-current main
@@ -198,7 +198,7 @@ If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whe
 - `prodex login` without `--profile` auto-creates or reuses a unique profile derived from the logged-in email
 - that auto-create flow first tries to read the ChatGPT account email from `tokens.id_token` in `auth.json`, then falls back to the usage endpoint email when needed
 - built-in quota checks only work for profiles using ChatGPT auth
-- managed Prodex profiles share selected native Codex state from the default `~/.codex`, including session history, rules, skills, config, and memories, so rotation stays closer to direct `codex`
+- managed Prodex profiles share selected native Codex state from the default `~/.prodex/.codex` home, with legacy `~/.codex` copied forward when needed, including session history, rules, skills, config, and memories, so rotation stays closer to direct `codex`
 - `prodex run <session-id>` is a shortcut for resuming a saved Codex session through the Prodex proxy
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity

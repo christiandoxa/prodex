@@ -77,11 +77,55 @@ pub(crate) fn copy_directory_contents(source: &Path, destination: &Path) -> Resu
 pub(crate) fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
     migrate_legacy_shared_codex_root(paths)?;
+    seed_legacy_default_codex_home(paths)?;
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
 
     for entry in shared_codex_entries(paths, codex_home)? {
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
+    }
+
+    Ok(())
+}
+
+fn seed_legacy_default_codex_home(paths: &AppPaths) -> Result<()> {
+    if env::var_os("PRODEX_SHARED_CODEX_HOME").is_some() {
+        return Ok(());
+    }
+
+    let legacy_root = legacy_default_codex_home()?;
+    if same_path(&paths.shared_codex_root, &legacy_root) || !legacy_root.is_dir() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(&paths.shared_codex_root)
+        .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
+
+    let mut entries = SHARED_CODEX_DIR_NAMES
+        .iter()
+        .map(|name| SharedCodexEntry {
+            name: (*name).to_string(),
+            kind: SharedCodexEntryKind::Directory,
+        })
+        .chain(SHARED_CODEX_FILE_NAMES.iter().map(|name| SharedCodexEntry {
+            name: (*name).to_string(),
+            kind: SharedCodexEntryKind::File,
+        }))
+        .collect::<Vec<_>>();
+
+    let mut sqlite_entries = BTreeSet::new();
+    collect_shared_codex_sqlite_entries(&legacy_root, &mut sqlite_entries)?;
+    for name in sqlite_entries {
+        entries.push(SharedCodexEntry {
+            name,
+            kind: SharedCodexEntryKind::File,
+        });
+    }
+
+    for entry in entries {
+        let legacy_path = legacy_root.join(&entry.name);
+        let shared_path = paths.shared_codex_root.join(&entry.name);
+        seed_shared_codex_entry(&legacy_path, &shared_path, entry.kind)?;
     }
 
     Ok(())
@@ -277,6 +321,70 @@ fn migrate_shared_codex_entry(
 
             fs::remove_file(local_path)
                 .with_context(|| format!("failed to remove {}", local_path.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn seed_shared_codex_entry(
+    legacy_path: &Path,
+    shared_path: &Path,
+    kind: SharedCodexEntryKind,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(legacy_path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to inspect {}", legacy_path.display()));
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+
+    if let Some(parent) = shared_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    match kind {
+        SharedCodexEntryKind::Directory => {
+            if !metadata.is_dir() {
+                bail!(
+                    "expected {} to be a directory for shared Codex state",
+                    legacy_path.display()
+                );
+            }
+
+            create_codex_home_if_missing(shared_path)?;
+            copy_directory_contents(legacy_path, shared_path)?;
+        }
+        SharedCodexEntryKind::File => {
+            if !metadata.is_file() {
+                bail!(
+                    "expected {} to be a file for shared Codex state",
+                    legacy_path.display()
+                );
+            }
+
+            if !shared_path.exists() {
+                fs::copy(legacy_path, shared_path).with_context(|| {
+                    format!(
+                        "failed to copy legacy shared Codex file {} to {}",
+                        legacy_path.display(),
+                        shared_path.display()
+                    )
+                })?;
+            } else if legacy_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "history.jsonl")
+            {
+                append_file_contents(legacy_path, shared_path)?;
+            }
         }
     }
 

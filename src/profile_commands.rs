@@ -28,7 +28,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
 
     let managed = args.codex_home.is_none();
     let source_home = if args.copy_current {
-        Some(default_codex_home()?)
+        Some(default_codex_home(&paths)?)
     } else if let Some(path) = args.copy_from {
         Some(absolutize(path)?)
     } else {
