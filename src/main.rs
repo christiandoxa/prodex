@@ -65,8 +65,8 @@ const DEFAULT_PRODEX_DIR: &str = ".prodex";
 const DEFAULT_CODEX_DIR: &str = ".codex";
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
-const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str =
-    concat!("/backend-api/prodex/v", env!("CARGO_PKG_VERSION"));
+const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
+const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
@@ -1836,6 +1836,26 @@ fn runtime_broker_ensure_lock_path(paths: &AppPaths, broker_key: &str) -> PathBu
         .join(format!("runtime-broker-{broker_key}-ensure"))
 }
 
+fn runtime_broker_registry_keys(paths: &AppPaths) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(&paths.root) else {
+        return Vec::new();
+    };
+
+    let mut keys = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            name.strip_prefix("runtime-broker-")
+                .and_then(|suffix| suffix.strip_suffix(".json"))
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
 fn last_good_file_path(path: &Path) -> PathBuf {
     let file_name = path
         .file_name()
@@ -3470,6 +3490,8 @@ struct RuntimeBrokerRegistry {
     current_profile: String,
     instance_token: String,
     admin_token: String,
+    #[serde(default)]
+    openai_mount_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -3501,6 +3523,7 @@ struct RuntimeBrokerLease {
 #[derive(Debug)]
 struct RuntimeProxyEndpoint {
     listen_addr: std::net::SocketAddr,
+    openai_mount_path: String,
     _lease: Option<RuntimeBrokerLease>,
 }
 
@@ -4996,7 +5019,17 @@ fn handle_run(args: RunArgs) -> Result<()> {
     };
     let runtime_args = runtime_proxy
         .as_ref()
-        .map(|proxy| runtime_proxy_codex_args(proxy.listen_addr, &codex_args))
+        .map(|proxy| {
+            if proxy.openai_mount_path == RUNTIME_PROXY_OPENAI_MOUNT_PATH {
+                runtime_proxy_codex_args(proxy.listen_addr, &codex_args)
+            } else {
+                runtime_proxy_codex_args_with_mount_path(
+                    proxy.listen_addr,
+                    &proxy.openai_mount_path,
+                    &codex_args,
+                )
+            }
+        })
         .unwrap_or(codex_args);
 
     let status = run_child(&codex_bin(), &runtime_args, &codex_home)?;
@@ -5037,6 +5070,7 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         current_profile: args.current_profile.clone(),
         instance_token: args.instance_token.clone(),
         admin_token: args.admin_token.clone(),
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
     save_runtime_broker_registry(&paths, &args.broker_key, &registry)?;
     runtime_proxy_log_to_path(
@@ -5210,8 +5244,20 @@ fn runtime_proxy_codex_args(
     listen_addr: std::net::SocketAddr,
     user_args: &[OsString],
 ) -> Vec<OsString> {
+    runtime_proxy_codex_args_with_mount_path(
+        listen_addr,
+        RUNTIME_PROXY_OPENAI_MOUNT_PATH,
+        user_args,
+    )
+}
+
+fn runtime_proxy_codex_args_with_mount_path(
+    listen_addr: std::net::SocketAddr,
+    openai_mount_path: &str,
+    user_args: &[OsString],
+) -> Vec<OsString> {
     let proxy_chatgpt_base = format!("http://{listen_addr}/backend-api");
-    let proxy_openai_base = format!("http://{listen_addr}{RUNTIME_PROXY_OPENAI_MOUNT_PATH}");
+    let proxy_openai_base = format!("http://{listen_addr}{openai_mount_path}");
     let overrides = [
         format!(
             "chatgpt_base_url={}",
@@ -14709,12 +14755,28 @@ fn path_without_query(path_and_query: &str) -> &str {
         .unwrap_or(path_and_query)
 }
 
+fn runtime_proxy_openai_suffix(path: &str) -> Option<&str> {
+    if let Some(suffix) = path.strip_prefix(LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX)
+        && let Some(version_suffix_index) = suffix.find('/')
+    {
+        return Some(&suffix[version_suffix_index..]);
+    }
+
+    if let Some(suffix) = path.strip_prefix(RUNTIME_PROXY_OPENAI_MOUNT_PATH)
+        && (suffix.is_empty() || suffix.starts_with('/'))
+    {
+        return Some(suffix);
+    }
+
+    None
+}
+
 fn runtime_proxy_normalize_openai_path(path_and_query: &str) -> Cow<'_, str> {
     let (path, query) = match path_and_query.split_once('?') {
         Some((path, query)) => (path, Some(query)),
         None => (path_and_query, None),
     };
-    let Some(suffix) = path.strip_prefix(RUNTIME_PROXY_OPENAI_MOUNT_PATH) else {
+    let Some(suffix) = runtime_proxy_openai_suffix(path) else {
         return Cow::Borrowed(path_and_query);
     };
 
@@ -15881,6 +15943,95 @@ fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     format!("http://{}/__prodex/runtime/activate", registry.listen_addr)
 }
 
+fn legacy_runtime_proxy_openai_mount_path(version: &str) -> String {
+    format!("{LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX}{version}")
+}
+
+fn parse_prodex_version_output(output: &str) -> Option<String> {
+    let mut parts = output.split_whitespace();
+    let binary_name = parts.next()?;
+    let version = parts.next()?;
+    if binary_name == "prodex" && !version.is_empty() {
+        return Some(version.to_string());
+    }
+    None
+}
+
+fn read_prodex_version_from_executable(executable: &Path) -> Result<String> {
+    let output = Command::new(executable)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .with_context(|| format!("failed to run {} --version", executable.display()))?;
+    if !output.status.success() {
+        bail!(
+            "{} --version exited with status {}",
+            executable.display(),
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string())
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_prodex_version_output(&stdout).with_context(|| {
+        format!(
+            "failed to parse prodex version output from {}",
+            executable.display()
+        )
+    })
+}
+
+fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
+    collect_process_rows()
+        .into_iter()
+        .find(|row| row.pid == pid)
+        .and_then(|row| {
+            row.args
+                .into_iter()
+                .filter(|arg| Path::new(arg).exists())
+                .last()
+        })
+        .map(PathBuf::from)
+        .or_else(|| fs::read_link(format!("/proc/{pid}/exe")).ok())
+}
+
+fn runtime_broker_openai_mount_path(registry: &RuntimeBrokerRegistry) -> Result<String> {
+    if let Some(openai_mount_path) = registry.openai_mount_path.as_deref() {
+        return Ok(openai_mount_path.to_string());
+    }
+
+    let executable = runtime_process_executable_path(registry.pid).with_context(|| {
+        format!(
+            "failed to resolve executable for runtime broker pid {}",
+            registry.pid
+        )
+    })?;
+    let version = read_prodex_version_from_executable(&executable)?;
+    Ok(legacy_runtime_proxy_openai_mount_path(&version))
+}
+
+fn runtime_proxy_endpoint_from_registry(
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+) -> Result<RuntimeProxyEndpoint> {
+    let lease = create_runtime_broker_lease(paths, broker_key)?;
+    let listen_addr = registry.listen_addr.parse().with_context(|| {
+        format!(
+            "invalid runtime broker listen address {}",
+            registry.listen_addr
+        )
+    })?;
+    Ok(RuntimeProxyEndpoint {
+        listen_addr,
+        openai_mount_path: runtime_broker_openai_mount_path(registry)?,
+        _lease: Some(lease),
+    })
+}
+
 fn runtime_broker_process_args(
     current_profile: &str,
     upstream_base_url: &str,
@@ -16032,6 +16183,43 @@ fn wait_for_existing_runtime_broker_recovery_or_exit(
     Ok(None)
 }
 
+fn find_compatible_runtime_broker_registry(
+    paths: &AppPaths,
+    excluded_broker_key: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
+    for broker_key in runtime_broker_registry_keys(paths) {
+        if broker_key == excluded_broker_key {
+            continue;
+        }
+
+        let Some(registry) = load_runtime_broker_registry(paths, &broker_key)? else {
+            continue;
+        };
+        if registry.upstream_base_url != upstream_base_url
+            || registry.include_code_review != include_code_review
+        {
+            continue;
+        }
+        if !runtime_process_pid_alive(registry.pid) {
+            remove_runtime_broker_registry_if_token_matches(
+                paths,
+                &broker_key,
+                &registry.instance_token,
+            );
+            continue;
+        }
+        if let Some(health) = probe_runtime_broker_health(&registry)?
+            && health.instance_token == registry.instance_token
+        {
+            return Ok(Some((broker_key, registry)));
+        }
+    }
+
+    Ok(None)
+}
+
 fn wait_for_runtime_broker_ready(
     paths: &AppPaths,
     broker_key: &str,
@@ -16098,17 +16286,7 @@ fn ensure_runtime_rotation_proxy_endpoint(
         include_code_review,
     )? {
         activate_runtime_broker_profile(&existing, current_profile)?;
-        let lease = create_runtime_broker_lease(paths, &broker_key)?;
-        let listen_addr = existing.listen_addr.parse().with_context(|| {
-            format!(
-                "invalid runtime broker listen address {}",
-                existing.listen_addr
-            )
-        })?;
-        return Ok(RuntimeProxyEndpoint {
-            listen_addr,
-            _lease: Some(lease),
-        });
+        return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
     }
 
     if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
@@ -16124,18 +16302,18 @@ fn ensure_runtime_rotation_proxy_endpoint(
             && health.instance_token == existing.instance_token
         {
             activate_runtime_broker_profile(&existing, current_profile)?;
-            let lease = create_runtime_broker_lease(paths, &broker_key)?;
-            let listen_addr = existing.listen_addr.parse().with_context(|| {
-                format!(
-                    "invalid runtime broker listen address {}",
-                    existing.listen_addr
-                )
-            })?;
-            return Ok(RuntimeProxyEndpoint {
-                listen_addr,
-                _lease: Some(lease),
-            });
+            return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
         }
+    }
+
+    if let Some((existing_broker_key, existing)) = find_compatible_runtime_broker_registry(
+        paths,
+        &broker_key,
+        upstream_base_url,
+        include_code_review,
+    )? {
+        activate_runtime_broker_profile(&existing, current_profile)?;
+        return runtime_proxy_endpoint_from_registry(paths, &existing_broker_key, &existing);
     }
 
     let instance_token = runtime_random_token("broker");
@@ -16151,15 +16329,5 @@ fn ensure_runtime_rotation_proxy_endpoint(
     )?;
     let registry = wait_for_runtime_broker_ready(paths, &broker_key, &instance_token)?;
     activate_runtime_broker_profile(&registry, current_profile)?;
-    let lease = create_runtime_broker_lease(paths, &broker_key)?;
-    let listen_addr = registry.listen_addr.parse().with_context(|| {
-        format!(
-            "invalid runtime broker listen address {}",
-            registry.listen_addr
-        )
-    })?;
-    Ok(RuntimeProxyEndpoint {
-        listen_addr,
-        _lease: Some(lease),
-    })
+    runtime_proxy_endpoint_from_registry(paths, &broker_key, &registry)
 }

@@ -9084,9 +9084,40 @@ fn runtime_proxy_maps_openai_prefix_to_upstream_backend_api() {
 }
 
 #[test]
+fn runtime_proxy_injects_custom_openai_mount_path_overrides() {
+    let args = runtime_proxy_codex_args_with_mount_path(
+        "127.0.0.1:4455".parse().expect("socket addr"),
+        "/backend-api/prodex/v0.2.99",
+        &[OsString::from("exec")],
+    );
+    let rendered = args
+        .iter()
+        .map(|arg| arg.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        rendered[3],
+        "openai_base_url=\"http://127.0.0.1:4455/backend-api/prodex/v0.2.99\""
+    );
+}
+
+#[test]
+fn runtime_proxy_maps_legacy_versioned_openai_prefix_to_upstream_backend_api() {
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api/prodex/v0.2.99/responses"
+        ),
+        "https://chatgpt.com/backend-api/codex/responses"
+    );
+}
+
+#[test]
 fn runtime_proxy_accepts_legacy_openai_prefix() {
     assert!(is_runtime_responses_path("/backend-api/codex/responses"));
     assert!(is_runtime_compact_path("/backend-api/codex/responses/compact"));
+    assert!(is_runtime_responses_path("/backend-api/prodex/v0.2.99/responses"));
+    assert!(is_runtime_compact_path("/backend-api/prodex/v0.2.99/responses/compact"));
     assert_eq!(
         runtime_proxy_upstream_url(
             "https://chatgpt.com/backend-api",
@@ -9097,17 +9128,27 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
 }
 
 #[test]
-fn runtime_proxy_broker_key_changes_with_versioned_mount_path() {
+fn runtime_proxy_broker_key_uses_stable_mount_path() {
     let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false);
 
-    let legacy_key = {
+    let stable_key = {
         let mut hasher = DefaultHasher::new();
         "https://chatgpt.com/backend-api".hash(&mut hasher);
         false.hash(&mut hasher);
+        "/backend-api/prodex".hash(&mut hasher);
         format!("{:016x}", hasher.finish())
     };
 
-    assert_ne!(current_key, legacy_key);
+    let versioned_key = {
+        let mut hasher = DefaultHasher::new();
+        "https://chatgpt.com/backend-api".hash(&mut hasher);
+        false.hash(&mut hasher);
+        "/backend-api/prodex/v0.2.99".hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+
+    assert_eq!(current_key, stable_key);
+    assert_ne!(current_key, versioned_key);
 }
 
 #[test]
@@ -16593,6 +16634,125 @@ fn runtime_broker_lease_drop_removes_file() {
 }
 
 #[test]
+fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TestDir::new();
+    let script_path = temp_dir.path.join("legacy-prodex.sh");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.2.99'\n  exit 0\nfi\nsleep 30\n",
+    )
+    .expect("legacy broker script should write");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("legacy broker script metadata should load")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions)
+        .expect("legacy broker script permissions should update");
+
+    let mut child = Command::new(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("legacy broker script should spawn");
+
+    for _ in 0..20 {
+        if collect_process_rows()
+            .into_iter()
+            .any(|row| row.pid == child.id())
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let registry = RuntimeBrokerRegistry {
+        pid: child.id(),
+        listen_addr: "127.0.0.1:9".to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "instance".to_string(),
+        admin_token: "secret".to_string(),
+        openai_mount_path: None,
+    };
+
+    let mount_path = runtime_broker_openai_mount_path(&registry)
+        .expect("legacy broker mount path should resolve from running broker version");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(mount_path, "/backend-api/prodex/v0.2.99");
+}
+
+#[test]
+fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let server = TinyServer::http("127.0.0.1:0").expect("health server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("health server should expose a TCP address");
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        listen_addr: listen_addr.to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "legacy-instance".to_string(),
+        admin_token: "secret".to_string(),
+        openai_mount_path: Some("/backend-api/prodex/v0.2.99".to_string()),
+    };
+    save_runtime_broker_registry(&paths, "legacy-key", &registry)
+        .expect("legacy broker registry should save");
+
+    let health_thread = thread::spawn(move || {
+        let request = server.recv().expect("health request should arrive");
+        let body = serde_json::to_string(&RuntimeBrokerHealth {
+            pid: std::process::id(),
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            active_requests: 0,
+            instance_token: "legacy-instance".to_string(),
+            persistence_role: "owner".to_string(),
+        })
+        .expect("health payload should serialize");
+        let response = TinyResponse::from_string(body).with_status_code(200);
+        request
+            .respond(response)
+            .expect("health response should write");
+    });
+
+    let discovered = find_compatible_runtime_broker_registry(
+        &paths,
+        "current-key",
+        "https://chatgpt.com/backend-api",
+        false,
+    )
+    .expect("registry scan should not fail")
+    .expect("compatible registry should be discovered");
+
+    health_thread
+        .join()
+        .expect("health server thread should join");
+    assert_eq!(discovered.0, "legacy-key");
+    assert_eq!(discovered.1.instance_token, "legacy-instance");
+}
+
+#[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy_registry_clears() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::new();
@@ -16613,6 +16773,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("registry should save for wait test");
