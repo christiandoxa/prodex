@@ -1912,6 +1912,35 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
 }
 
 #[test]
+fn runtime_proxy_default_long_lived_capacity_scales_for_terminal_fanout() {
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(1), 32);
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(4), 32);
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(8), 64);
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(32), 128);
+
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(1), 128);
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(32), 256);
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(64), 512);
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(128), 1024);
+}
+
+#[test]
+fn runtime_proxy_default_active_limit_scales_with_long_lived_streams() {
+    assert_eq!(runtime_proxy_active_request_limit_default(8, 32), 104);
+    assert_eq!(runtime_proxy_active_request_limit_default(32, 64), 224);
+    assert_eq!(runtime_proxy_active_request_limit_default(32, 128), 416);
+
+    let lane_limits = runtime_proxy_lane_limits(
+        runtime_proxy_active_request_limit_default(32, 64),
+        32,
+        64,
+    );
+    assert!(lane_limits.responses > lane_limits.compact);
+    assert!(lane_limits.responses > lane_limits.standard);
+    assert!(lane_limits.responses >= lane_limits.websocket);
+}
+
+#[test]
 fn runtime_state_save_debounce_only_applies_to_binding_updates() {
     assert_eq!(
         runtime_state_save_debounce("profile_commit:main"),

@@ -315,15 +315,19 @@ fn runtime_proxy_worker_count() -> usize {
     .clamp(1, 64)
 }
 
+fn runtime_proxy_long_lived_worker_count_default(parallelism: usize) -> usize {
+    parallelism.saturating_mul(8).clamp(32, 128)
+}
+
 fn runtime_proxy_long_lived_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
     usize_override(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
-        parallelism.clamp(2, 8),
+        runtime_proxy_long_lived_worker_count_default(parallelism),
     )
-    .clamp(1, 32)
+    .clamp(1, 256)
 }
 
 fn runtime_probe_refresh_worker_count() -> usize {
@@ -338,11 +342,21 @@ fn runtime_probe_refresh_worker_count() -> usize {
 }
 
 fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
+    let default_capacity = worker_count.saturating_mul(8).clamp(128, 1024);
     usize_override(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
-        worker_count.saturating_mul(8).clamp(16, 128),
+        default_capacity,
     )
     .max(1)
+}
+
+fn runtime_proxy_active_request_limit_default(
+    worker_count: usize,
+    long_lived_worker_count: usize,
+) -> usize {
+    worker_count
+        .saturating_add(long_lived_worker_count.saturating_mul(3))
+        .clamp(64, 512)
 }
 
 fn runtime_proxy_active_request_limit(
@@ -351,9 +365,7 @@ fn runtime_proxy_active_request_limit(
 ) -> usize {
     usize_override(
         "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
-        worker_count
-            .saturating_add(long_lived_worker_count.saturating_mul(4))
-            .clamp(16, 128),
+        runtime_proxy_active_request_limit_default(worker_count, long_lived_worker_count),
     )
     .max(1)
 }
