@@ -1,0 +1,20 @@
+{
+  "name": "@christiandoxa/prodex-darwin-arm64",
+  "version": "0.2.94",
+  "description": "Native prodex binary for aarch64-apple-darwin",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christiandoxa/prodex.git",
+    "directory": "npm/platforms/darwin-arm64"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "prodex-workspace",
+  "private": true,
+  "packageManager": "npm@11.12.1",
+  "workspaces": [
+    "npm/prodex",
+    "npm/platforms/*"
+  ],
+  "scripts": {
+    "npm:version": "node scripts/npm/version.mjs",
+    "npm:sync-version": "node scripts/npm/sync-version.mjs --root npm",
+    "npm:stage": "node scripts/npm/stage.mjs",
+    "npm:publish": "node scripts/npm/publish.mjs"
+  }
+}

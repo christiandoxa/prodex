@@ -1,0 +1,119 @@
+name: npm publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "prodex-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+            artifact-name: x86_64-unknown-linux-gnu
+            binary-name: prodex
+            use-cross: false
+          - target: aarch64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+            artifact-name: aarch64-unknown-linux-gnu
+            binary-name: prodex
+            use-cross: true
+          - target: x86_64-apple-darwin
+            runs-on: macos-13
+            artifact-name: x86_64-apple-darwin
+            binary-name: prodex
+            use-cross: false
+          - target: aarch64-apple-darwin
+            runs-on: macos-14
+            artifact-name: aarch64-apple-darwin
+            binary-name: prodex
+            use-cross: false
+          - target: x86_64-pc-windows-msvc
+            runs-on: windows-latest
+            artifact-name: x86_64-pc-windows-msvc
+            binary-name: prodex.exe
+            use-cross: false
+          - target: aarch64-pc-windows-msvc
+            runs-on: windows-latest
+            artifact-name: aarch64-pc-windows-msvc
+            binary-name: prodex.exe
+            use-cross: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ matrix.use-cross }}
+        run: cargo install cross --locked
+
+      - name: Build prodex
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            cross build --release --locked --target "${{ matrix.target }}"
+          else
+            cargo build --release --locked --target "${{ matrix.target }}"
+          fi
+
+      - name: Prepare binary artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "dist/${{ matrix.artifact-name }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Stage and publish npm packages
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Stage npm packages
+        run: node scripts/npm/stage.mjs --input-dir artifacts --output-dir release
+
+      - name: Sync package versions
+        run: node scripts/npm/sync-version.mjs --root release/packages
+
+      - name: Publish staged packages
+        run: node scripts/npm/publish.mjs --root release --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

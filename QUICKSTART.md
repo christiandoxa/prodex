@@ -6,6 +6,14 @@ Install from [crates.io](https://crates.io/crates/prodex):
 cargo install prodex
 ```
 
+Or, once the npm package is published, install the native wrapper from npm:
+
+```bash
+npm install -g @christiandoxa/prodex
+```
+
+The npm package version is kept in sync with the published crate version on crates.io.
+
 ## Use the Installed Binary
 
 ```bash

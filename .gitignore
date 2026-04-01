@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+/node_modules/
+/release/
 
 # JetBrains / IntelliJ
 /.idea/

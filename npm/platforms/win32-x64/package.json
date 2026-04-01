@@ -1,0 +1,20 @@
+{
+  "name": "@christiandoxa/prodex-win32-x64",
+  "version": "0.2.94",
+  "description": "Native prodex binary for x86_64-pc-windows-msvc",
+  "license": "MIT",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christiandoxa/prodex.git",
+    "directory": "npm/platforms/win32-x64"
+  }
+}

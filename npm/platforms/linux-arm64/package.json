@@ -1,0 +1,20 @@
+{
+  "name": "@christiandoxa/prodex-linux-arm64",
+  "version": "0.2.94",
+  "description": "Native prodex binary for aarch64-unknown-linux-gnu",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christiandoxa/prodex.git",
+    "directory": "npm/platforms/linux-arm64"
+  }
+}

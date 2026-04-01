@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+const { createRequire } = require("node:module");
+
+const PLATFORM_PACKAGES = {
+  linux: {
+    x64: {
+      packageName: "@christiandoxa/prodex-linux-x64",
+      binaryFileName: "prodex",
+    },
+    arm64: {
+      packageName: "@christiandoxa/prodex-linux-arm64",
+      binaryFileName: "prodex",
+    },
+  },
+  darwin: {
+    x64: {
+      packageName: "@christiandoxa/prodex-darwin-x64",
+      binaryFileName: "prodex",
+    },
+    arm64: {
+      packageName: "@christiandoxa/prodex-darwin-arm64",
+      binaryFileName: "prodex",
+    },
+  },
+  win32: {
+    x64: {
+      packageName: "@christiandoxa/prodex-win32-x64",
+      binaryFileName: "prodex.exe",
+    },
+    arm64: {
+      packageName: "@christiandoxa/prodex-win32-arm64",
+      binaryFileName: "prodex.exe",
+    },
+  },
+};
+
+const requireFromHere = createRequire(__filename);
+const packageJson = requireFromHere("./package.json");
+const packageRoot = path.dirname(requireFromHere.resolve("./package.json"));
+const codexShimPath = path.join(packageRoot, "lib", "codex-shim.cjs");
+const platformPackage = PLATFORM_PACKAGES[process.platform]?.[process.arch];
+
+if (!platformPackage) {
+  process.stderr.write(
+    `Unsupported platform for @christiandoxa/prodex: ${process.platform} ${process.arch}\n`,
+  );
+  process.exit(1);
+}
+
+let nativeBinaryPath;
+try {
+  const platformPackageJsonPath = requireFromHere.resolve(
+    `${platformPackage.packageName}/package.json`,
+  );
+  nativeBinaryPath = path.join(
+    path.dirname(platformPackageJsonPath),
+    "vendor",
+    platformPackage.binaryFileName,
+  );
+} catch {
+  process.stderr.write(
+    `Unable to locate ${platformPackage.packageName}; reinstall @christiandoxa/prodex with optional dependencies enabled.\n`,
+  );
+  process.exit(1);
+}
+
+if (!fs.existsSync(nativeBinaryPath)) {
+  process.stderr.write(`Missing prodex native binary at ${nativeBinaryPath}\n`);
+  process.exit(1);
+}
+
+const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "prodex-codex-"));
+const codexCmd = path.join(shimDir, "codex");
+const codexCmdWindows = path.join(shimDir, "codex.cmd");
+
+fs.writeFileSync(
+  codexCmd,
+  `#!/bin/sh\nexec node ${JSON.stringify(codexShimPath)} "$@"\n`,
+  { mode: 0o755 },
+);
+fs.writeFileSync(
+  codexCmdWindows,
+  `@echo off\r\nnode ${JSON.stringify(codexShimPath)} %*\r\n`,
+  { mode: 0o755 },
+);
+
+const cleanup = () => {
+  try {
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup only.
+  }
+};
+
+const child = spawn(nativeBinaryPath, process.argv.slice(2), {
+  env: {
+    ...process.env,
+    PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    PRODEX_CODEX_BIN: "codex",
+    npm_package_name: packageJson.name,
+    npm_package_version: packageJson.version,
+  },
+  stdio: "inherit",
+});
+
+for (const signalName of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signalName, () => {
+    child.kill(signalName);
+  });
+}
+
+child.on("error", (error) => {
+  cleanup();
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
+});
+
+child.on("exit", (code, signal) => {
+  cleanup();
+  if (signal) {
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exit(code ?? 1);
+});

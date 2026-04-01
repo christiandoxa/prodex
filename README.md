@@ -13,11 +13,19 @@ Safe multi-account auto-rotate for `codex`.
 
 ## Install
 
+Install from [crates.io](https://crates.io/crates/prodex):
+
 ```bash
 cargo install prodex
 ```
 
-Crate page: [crates.io/crates/prodex](https://crates.io/crates/prodex)
+Or, once the npm package is published, install the native wrapper from npm:
+
+```bash
+npm install -g @christiandoxa/prodex
+```
+
+The npm package version is kept in lockstep with the published crate version.
 
 ## Quick Start
 

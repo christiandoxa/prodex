@@ -9204,6 +9204,9 @@ fn proxy_runtime_websocket_text_message(
                     .contains(&profile_name)
                     && (bound_profile.as_deref() == Some(profile_name.as_str())
                         || turn_state_profile.as_deref() == Some(profile_name.as_str())
+                        || compact_followup_profile
+                            .as_ref()
+                            .is_some_and(|(owner, _)| owner == &profile_name)
                         || (request_session_id.is_some()
                             && session_profile.as_deref() == Some(profile_name.as_str())));
                 let reuse_failed_bound_previous_response = previous_response_id.is_some()
@@ -10474,11 +10477,14 @@ fn proxy_runtime_standard_request(
                 excluded_profiles.len()
             ),
         );
+        let session_affinity_candidate =
+            session_profile.as_deref() == Some(candidate_name.as_str());
         if runtime_profile_inflight_hard_limited_for_context(
             shared,
             &candidate_name,
             "compact_http",
-        )? {
+        )? && !session_affinity_candidate
+        {
             runtime_proxy_log(
                 shared,
                 format!(

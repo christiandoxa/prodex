@@ -12766,6 +12766,178 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
 }
 
 #[test]
+fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
+    let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
+    let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+    let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
+        .into_client_request()
+        .expect("websocket request should build");
+    request
+        .headers_mut()
+        .insert("session_id", "sess-compact".parse().expect("valid session header"));
+
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for first request")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.completed\""))
+    );
+
+    let compact = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .body("{\"input\":[],\"instructions\":\"compact\"}")
+        .send()
+        .expect("compact request should succeed");
+    assert!(compact.status().is_success(), "unexpected compact status: {}", compact.status());
+    assert_eq!(
+        compact.text().expect("compact response body should be readable"),
+        "{\"output\":[]}"
+    );
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("second runtime proxy websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for compact owner retry")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.completed\""))
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "second-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ],
+        "compact owner should reconnect fresh on the same profile instead of failing or rotating"
+    );
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "proxy should issue one fresh websocket reconnect after the failed reuse attempt"
+    );
+
+    let mut tail = Vec::new();
+    let mut observed_retry = false;
+    for _ in 0..160 {
+        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+            .into_iter()
+            .next_back()
+        else {
+            thread::sleep(Duration::from_millis(25));
+            continue;
+        };
+        tail = read_runtime_log_tail(&log_path, 32 * 1024)
+            .expect("runtime log tail should be readable");
+        let text = String::from_utf8_lossy(&tail);
+        if text.contains("websocket_reuse_owner_fresh_retry") {
+            observed_retry = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        observed_retry,
+        "runtime log should capture a fresh reconnect on the compact follow-up owner"
+    );
+    let tail = String::from_utf8_lossy(&tail);
+    assert!(tail.contains("websocket_reuse_owner_fresh_retry"));
+    assert!(
+        !tail.contains("compact_fresh_fallback_blocked"),
+        "compact follow-up owner should not be blocked after a reuse watchdog when a fresh reconnect is possible"
+    );
+}
+
+#[test]
 fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog() {
     let backend = RuntimeProxyBackend::start_websocket_reuse_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
