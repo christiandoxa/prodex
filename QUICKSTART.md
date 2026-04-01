@@ -24,11 +24,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local binary version in this repo is `0.2.96`, so matching update commands look like this:
+The current local binary version in this repo is `0.2.97`, so matching update commands look like this:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.96
-cargo install prodex --force --version 0.2.96
+npm install -g @christiandoxa/prodex@0.2.97
+cargo install prodex --force --version 0.2.97
 ```
 
 If you prefer the lighter install path, npm is usually faster than `cargo install` because it skips the local build step.
