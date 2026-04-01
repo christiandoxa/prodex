@@ -24,6 +24,12 @@ pub(crate) enum ProdexVersionStatus {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProdexInstallChannel {
+    Npm,
+    Native,
+}
+
 pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> {
     if !should_emit_update_notice(command) {
         return Ok(());
@@ -37,7 +43,10 @@ pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> 
             current_prodex_version(),
             latest_version
         ));
-        print_wrapped_stderr("Update with: cargo install prodex --force");
+        print_wrapped_stderr(&format!(
+            "Update with: {}",
+            prodex_update_command_for_version(&latest_version)
+        ));
     }
 
     Ok(())
@@ -54,6 +63,32 @@ pub(crate) fn should_emit_update_notice(command: &Commands) -> bool {
 
 pub(crate) fn current_prodex_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+fn current_prodex_install_channel() -> ProdexInstallChannel {
+    if env::var("npm_package_name").ok().as_deref() == Some("@christiandoxa/prodex") {
+        return ProdexInstallChannel::Npm;
+    }
+
+    if env::current_exe().ok().is_some_and(|path| {
+        path.to_string_lossy()
+            .contains("node_modules/@christiandoxa/prodex-")
+    }) {
+        return ProdexInstallChannel::Npm;
+    }
+
+    ProdexInstallChannel::Native
+}
+
+pub(crate) fn prodex_update_command_for_version(latest_version: &str) -> String {
+    match current_prodex_install_channel() {
+        ProdexInstallChannel::Npm => format!(
+            "npm install -g @christiandoxa/prodex@{latest_version} or npm install -g @christiandoxa/prodex@latest"
+        ),
+        ProdexInstallChannel::Native => {
+            format!("cargo install prodex --force --version {latest_version}")
+        }
+    }
 }
 
 pub(crate) fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {

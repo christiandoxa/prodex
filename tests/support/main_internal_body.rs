@@ -15999,6 +15999,24 @@ fn version_is_newer_compares_semver_like_versions() {
 }
 
 #[test]
+fn prodex_update_command_prefers_cargo_for_native_installations() {
+    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
+    assert_eq!(
+        prodex_update_command_for_version("0.2.98"),
+        "cargo install prodex --force --version 0.2.98"
+    );
+}
+
+#[test]
+fn prodex_update_command_prefers_npm_for_npm_installations() {
+    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "@christiandoxa/prodex");
+    assert_eq!(
+        prodex_update_command_for_version("0.2.98"),
+        "npm install -g @christiandoxa/prodex@0.2.98 or npm install -g @christiandoxa/prodex@latest"
+    );
+}
+
+#[test]
 fn update_notice_is_suppressed_for_machine_output_modes() {
     assert!(!should_emit_update_notice(&Commands::Info(InfoArgs {})));
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
