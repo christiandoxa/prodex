@@ -1644,6 +1644,91 @@ fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppS
     compact_app_state(merged, Local::now().timestamp())
 }
 
+fn runtime_profile_usage_auth_metadata(path: &Path) -> Result<(u64, Option<SystemTime>)> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    Ok((metadata.len(), metadata.modified().ok()))
+}
+
+fn load_runtime_profile_usage_auth_cache_entry(
+    codex_home: &Path,
+) -> Result<RuntimeProfileUsageAuthCacheEntry> {
+    let auth_path = codex_home.join("auth.json");
+    let (file_len, modified_at) = runtime_profile_usage_auth_metadata(&auth_path)?;
+    let auth = read_usage_auth(codex_home)?;
+    Ok(RuntimeProfileUsageAuthCacheEntry {
+        auth,
+        auth_path,
+        file_len,
+        modified_at,
+    })
+}
+
+fn runtime_profile_usage_auth_cache_entry_matches(
+    entry: &RuntimeProfileUsageAuthCacheEntry,
+) -> Result<bool> {
+    let (file_len, modified_at) = runtime_profile_usage_auth_metadata(&entry.auth_path)?;
+    Ok(file_len == entry.file_len && modified_at == entry.modified_at)
+}
+
+fn load_runtime_profile_usage_auth_cache(
+    state: &AppState,
+) -> BTreeMap<String, RuntimeProfileUsageAuthCacheEntry> {
+    state
+        .profiles
+        .iter()
+        .filter_map(|(name, profile)| {
+            load_runtime_profile_usage_auth_cache_entry(&profile.codex_home)
+                .ok()
+                .map(|entry| (name.clone(), entry))
+        })
+        .collect()
+}
+
+fn runtime_profile_usage_auth(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<UsageAuth> {
+    let (cached_entry, codex_home) = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let profile = runtime
+            .state
+            .profiles
+            .get(profile_name)
+            .with_context(|| format!("profile '{}' is missing", profile_name))?;
+        (
+            runtime.profile_usage_auth.get(profile_name).cloned(),
+            profile.codex_home.clone(),
+        )
+    };
+
+    if let Some(entry) = cached_entry {
+        match runtime_profile_usage_auth_cache_entry_matches(&entry) {
+            Ok(true) => return Ok(entry.auth),
+            Ok(false) => {}
+            Err(_) => return Ok(entry.auth),
+        }
+    }
+
+    let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
+    let auth = entry.auth.clone();
+    if let Ok(mut runtime) = shared.runtime.lock() {
+        runtime
+            .profile_usage_auth
+            .insert(profile_name.to_string(), entry);
+    }
+    Ok(auth)
+}
+
+fn invalidate_runtime_profile_usage_auth(shared: &RuntimeRotationProxyShared, profile_name: &str) {
+    if let Ok(mut runtime) = shared.runtime.lock() {
+        runtime.profile_usage_auth.remove(profile_name);
+    }
+}
+
 fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
     let active_profile = desired
         .active_profile
@@ -3150,6 +3235,7 @@ struct RuntimeRotationState {
     upstream_base_url: String,
     include_code_review: bool,
     current_profile: String,
+    profile_usage_auth: BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
     turn_state_bindings: BTreeMap<String, ResponseProfileBinding>,
     session_id_bindings: BTreeMap<String, ResponseProfileBinding>,
     continuation_statuses: RuntimeContinuationStatuses,
@@ -3160,6 +3246,14 @@ struct RuntimeRotationState {
     profile_route_circuit_open_until: BTreeMap<String, i64>,
     profile_inflight: BTreeMap<String, usize>,
     profile_health: BTreeMap<String, RuntimeProfileHealth>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeProfileUsageAuthCacheEntry {
+    auth: UsageAuth,
+    auth_path: PathBuf,
+    file_len: u64,
+    modified_at: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone)]
@@ -5292,6 +5386,7 @@ fn start_runtime_rotation_proxy(
             upstream_base_url: upstream_base_url.clone(),
             include_code_review,
             current_profile: current_profile.to_string(),
+            profile_usage_auth: load_runtime_profile_usage_auth_cache(&restored_state),
             turn_state_bindings: restored_continuations.turn_state_bindings.clone(),
             session_id_bindings: restored_session_id_bindings,
             continuation_statuses: restored_continuations.statuses.clone(),
@@ -10059,12 +10154,7 @@ fn connect_runtime_proxy_upstream_websocket(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
         .clone();
-    let profile = runtime
-        .state
-        .profiles
-        .get(profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let auth = read_usage_auth(&profile.codex_home)?;
+    let auth = runtime_profile_usage_auth(shared, profile_name)?;
     let upstream_url = runtime_proxy_upstream_websocket_url(
         &runtime.upstream_base_url,
         &handshake_request.path_and_query,
@@ -10164,6 +10254,9 @@ fn connect_runtime_proxy_upstream_websocket(
         Err(WsError::Http(response)) => {
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
+            if matches!(status, 401 | 403) {
+                invalidate_runtime_profile_usage_auth(shared, profile_name);
+            }
             runtime_proxy_log(
                 shared,
                 format!(
@@ -13748,12 +13841,7 @@ fn send_runtime_proxy_upstream_request(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
         .clone();
-    let profile = runtime
-        .state
-        .profiles
-        .get(profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let auth = read_usage_auth(&profile.codex_home)?;
+    let auth = runtime_profile_usage_auth(shared, profile_name)?;
     let upstream_url =
         runtime_proxy_upstream_url(&runtime.upstream_base_url, &request.path_and_query);
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
@@ -13825,6 +13913,9 @@ fn send_runtime_proxy_upstream_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
+    if matches!(response.status().as_u16(), 401 | 403) {
+        invalidate_runtime_profile_usage_auth(shared, profile_name);
+    }
     note_runtime_profile_latency_observation(
         shared,
         profile_name,
@@ -13848,12 +13939,7 @@ fn send_runtime_proxy_upstream_responses_request(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
         .clone();
-    let profile = runtime
-        .state
-        .profiles
-        .get(profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let auth = read_usage_auth(&profile.codex_home)?;
+    let auth = runtime_profile_usage_auth(shared, profile_name)?;
     let upstream_url =
         runtime_proxy_upstream_url(&runtime.upstream_base_url, &request.path_and_query);
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
@@ -13925,6 +14011,9 @@ fn send_runtime_proxy_upstream_responses_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
+    if matches!(response.status().as_u16(), 401 | 403) {
+        invalidate_runtime_profile_usage_auth(shared, profile_name);
+    }
     note_runtime_profile_latency_observation(
         shared,
         profile_name,

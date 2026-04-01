@@ -2715,6 +2715,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -2794,6 +2795,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -2896,6 +2898,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -2972,6 +2975,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3046,6 +3050,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3126,6 +3131,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3207,6 +3213,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3290,6 +3297,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3358,6 +3366,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3416,6 +3425,7 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3482,6 +3492,7 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3577,6 +3588,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3650,6 +3662,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3736,6 +3749,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3845,6 +3859,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -3954,6 +3969,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4066,6 +4082,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4187,6 +4204,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4308,6 +4326,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4420,6 +4439,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4526,6 +4546,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4632,6 +4653,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4732,6 +4754,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4816,6 +4839,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4901,6 +4925,7 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -4974,6 +4999,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -5088,6 +5114,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -5199,6 +5226,7 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -5702,6 +5730,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -5806,6 +5835,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::from([(
             "sess-123".to_string(),
@@ -5916,6 +5946,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -6023,6 +6054,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "second".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::from([(
             "sess-unknown".to_string(),
@@ -6132,6 +6164,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -6225,6 +6258,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -6393,6 +6427,7 @@ fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -7014,6 +7049,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -7905,6 +7941,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::from([(
             "turn-second".to_string(),
             ResponseProfileBinding {
@@ -8003,6 +8040,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::from([(
             "turn-second".to_string(),
             ResponseProfileBinding {
@@ -8122,6 +8160,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -8209,6 +8248,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -8293,6 +8333,7 @@ fn response_affinity_skips_dead_continuation_status() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses {
@@ -8383,6 +8424,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -8702,6 +8744,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
         upstream_base_url: backend.base_url(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::from([(
             "sess-second".to_string(),
@@ -8803,6 +8846,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
         upstream_base_url: backend.base_url(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -8891,6 +8935,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "second".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9297,6 +9342,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9387,6 +9433,7 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9468,6 +9515,7 @@ fn runtime_proxy_active_request_limit_is_enforced_and_released() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9539,6 +9587,7 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9628,6 +9677,7 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -10521,6 +10571,7 @@ fn exhausted_usage_snapshot_releases_persisted_affinity_bindings() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: state.session_profile_bindings.clone(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -10687,6 +10738,7 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "valid".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::from([(
             "turn-missing".to_string(),
             ResponseProfileBinding {
@@ -10822,6 +10874,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_is_single_flight() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -11504,6 +11557,7 @@ fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -11585,6 +11639,7 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -13321,6 +13376,7 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "second".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -13874,6 +13930,7 @@ fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
             turn_state_bindings: BTreeMap::new(),
             session_id_bindings: BTreeMap::new(),
             continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -16002,8 +16059,8 @@ fn version_is_newer_compares_semver_like_versions() {
 fn prodex_update_command_prefers_cargo_for_native_installations() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
     assert_eq!(
-        prodex_update_command_for_version("0.2.98"),
-        "cargo install prodex --force --version 0.2.98"
+        prodex_update_command_for_version("0.2.99"),
+        "cargo install prodex --force --version 0.2.99"
     );
 }
 
@@ -16011,9 +16068,42 @@ fn prodex_update_command_prefers_cargo_for_native_installations() {
 fn prodex_update_command_prefers_npm_for_npm_installations() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "@christiandoxa/prodex");
     assert_eq!(
-        prodex_update_command_for_version("0.2.98"),
-        "npm install -g @christiandoxa/prodex@0.2.98 or npm install -g @christiandoxa/prodex@latest"
+        prodex_update_command_for_version("0.2.99"),
+        "npm install -g @christiandoxa/prodex@0.2.99 or npm install -g @christiandoxa/prodex@latest"
     );
+}
+
+#[test]
+fn current_prodex_release_source_is_npm_when_wrapped_by_npm() {
+    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "@christiandoxa/prodex");
+    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::Npm);
+}
+
+#[test]
+fn current_prodex_release_source_defaults_to_crates_io() {
+    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
+    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::CratesIo);
+}
+
+#[test]
+fn cached_update_version_is_scoped_to_release_source() {
+    let now = Local::now().timestamp();
+    assert!(!should_use_cached_update_version(
+        ProdexReleaseSource::CratesIo,
+        "0.2.99",
+        now,
+        ProdexReleaseSource::Npm,
+        current_prodex_version(),
+        now
+    ));
+    assert!(should_use_cached_update_version(
+        ProdexReleaseSource::Npm,
+        "0.2.99",
+        now,
+        ProdexReleaseSource::Npm,
+        current_prodex_version(),
+        now
+    ));
 }
 
 #[test]
@@ -16054,6 +16144,7 @@ fn update_check_cache_ttl_is_short_when_cached_version_matches_current() {
 
 #[test]
 fn format_info_prodex_version_reports_up_to_date_from_cache() {
+    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
     let temp_dir = TestDir::new();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -16066,6 +16157,7 @@ fn format_info_prodex_version_reports_up_to_date_from_cache() {
     fs::write(
         update_check_cache_file_path(&paths),
         serde_json::to_string_pretty(&serde_json::json!({
+            "source": "CratesIo",
             "latest_version": current_prodex_version(),
             "checked_at": Local::now().timestamp(),
         }))
@@ -16081,6 +16173,7 @@ fn format_info_prodex_version_reports_up_to_date_from_cache() {
 
 #[test]
 fn format_info_prodex_version_reports_available_update_from_cache() {
+    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
     let temp_dir = TestDir::new();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -16093,6 +16186,7 @@ fn format_info_prodex_version_reports_available_update_from_cache() {
     fs::write(
         update_check_cache_file_path(&paths),
         serde_json::to_string_pretty(&serde_json::json!({
+            "source": "CratesIo",
             "latest_version": "99.0.0",
             "checked_at": Local::now().timestamp(),
         }))

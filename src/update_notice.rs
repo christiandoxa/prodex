@@ -2,8 +2,17 @@ use super::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct UpdateCheckCache {
+    #[serde(default)]
+    source: ProdexReleaseSource,
     latest_version: String,
     checked_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum ProdexReleaseSource {
+    Npm,
+    #[default]
+    CratesIo,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,17 +26,16 @@ struct CratesIoCrateInfo {
     max_version: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct NpmLatestVersionResponse {
+    version: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProdexVersionStatus {
     UpToDate,
     UpdateAvailable(String),
     Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProdexInstallChannel {
-    Npm,
-    Native,
 }
 
 pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> {
@@ -65,27 +73,27 @@ pub(crate) fn current_prodex_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-fn current_prodex_install_channel() -> ProdexInstallChannel {
+pub(crate) fn current_prodex_release_source() -> ProdexReleaseSource {
     if env::var("npm_package_name").ok().as_deref() == Some("@christiandoxa/prodex") {
-        return ProdexInstallChannel::Npm;
+        return ProdexReleaseSource::Npm;
     }
 
     if env::current_exe().ok().is_some_and(|path| {
         path.to_string_lossy()
             .contains("node_modules/@christiandoxa/prodex-")
     }) {
-        return ProdexInstallChannel::Npm;
+        return ProdexReleaseSource::Npm;
     }
 
-    ProdexInstallChannel::Native
+    ProdexReleaseSource::CratesIo
 }
 
 pub(crate) fn prodex_update_command_for_version(latest_version: &str) -> String {
-    match current_prodex_install_channel() {
-        ProdexInstallChannel::Npm => format!(
+    match current_prodex_release_source() {
+        ProdexReleaseSource::Npm => format!(
             "npm install -g @christiandoxa/prodex@{latest_version} or npm install -g @christiandoxa/prodex@latest"
         ),
-        ProdexInstallChannel::Native => {
+        ProdexReleaseSource::CratesIo => {
             format!("cargo install prodex --force --version {latest_version}")
         }
     }
@@ -113,25 +121,46 @@ pub(crate) fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
 }
 
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
+    let source = current_prodex_release_source();
     if let Some(cached) = load_update_check_cache(paths)?
-        && Local::now().timestamp().saturating_sub(cached.checked_at)
-            < update_check_cache_ttl_seconds(&cached.latest_version, current_prodex_version())
+        && should_use_cached_update_version(
+            cached.source,
+            &cached.latest_version,
+            cached.checked_at,
+            source,
+            current_prodex_version(),
+            Local::now().timestamp(),
+        )
     {
         return Ok(Some(cached.latest_version));
     }
 
-    let latest_version = match fetch_latest_prodex_version() {
+    let latest_version = match fetch_latest_prodex_version(source) {
         Ok(version) => version,
         Err(_) => return Ok(None),
     };
     save_update_check_cache(
         paths,
         &UpdateCheckCache {
+            source,
             latest_version: latest_version.clone(),
             checked_at: Local::now().timestamp(),
         },
     )?;
     Ok(Some(latest_version))
+}
+
+pub(crate) fn should_use_cached_update_version(
+    cached_source: ProdexReleaseSource,
+    cached_latest_version: &str,
+    cached_checked_at: i64,
+    current_source: ProdexReleaseSource,
+    current_version: &str,
+    now: i64,
+) -> bool {
+    cached_source == current_source
+        && now.saturating_sub(cached_checked_at)
+            < update_check_cache_ttl_seconds(cached_latest_version, current_version)
 }
 
 pub(crate) fn update_check_cache_ttl_seconds(
@@ -171,7 +200,14 @@ fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result
     Ok(())
 }
 
-fn fetch_latest_prodex_version() -> Result<String> {
+fn fetch_latest_prodex_version(source: ProdexReleaseSource) -> Result<String> {
+    match source {
+        ProdexReleaseSource::Npm => fetch_latest_prodex_npm_version(),
+        ProdexReleaseSource::CratesIo => fetch_latest_prodex_crates_version(),
+    }
+}
+
+fn fetch_latest_prodex_crates_version() -> Result<String> {
     let client = Client::builder()
         .connect_timeout(Duration::from_millis(UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS))
         .timeout(Duration::from_millis(UPDATE_CHECK_HTTP_READ_TIMEOUT_MS))
@@ -195,6 +231,32 @@ fn fetch_latest_prodex_version() -> Result<String> {
     let payload: CratesIoVersionResponse =
         serde_json::from_slice(&body).context("failed to parse crates.io prodex metadata")?;
     Ok(payload.crate_info.max_version)
+}
+
+fn fetch_latest_prodex_npm_version() -> Result<String> {
+    let client = Client::builder()
+        .connect_timeout(Duration::from_millis(UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(UPDATE_CHECK_HTTP_READ_TIMEOUT_MS))
+        .build()
+        .context("failed to build update-check HTTP client")?;
+    let response = client
+        .get("https://registry.npmjs.org/%40christiandoxa%2Fprodex/latest")
+        .header(
+            "User-Agent",
+            format!("prodex/{}", env!("CARGO_PKG_VERSION")),
+        )
+        .send()
+        .context("failed to request npm prodex metadata")?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .context("failed to read npm prodex metadata")?;
+    if !status.is_success() {
+        bail!("npm registry returned HTTP {}", status.as_u16());
+    }
+    let payload: NpmLatestVersionResponse =
+        serde_json::from_slice(&body).context("failed to parse npm prodex metadata")?;
+    Ok(payload.version)
 }
 
 pub(crate) fn version_is_newer(candidate: &str, current: &str) -> bool {
