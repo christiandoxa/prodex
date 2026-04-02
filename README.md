@@ -1,5 +1,7 @@
 # prodex
 
+[![CI](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml/badge.svg)](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml)
+
 Safe multi-account auto-rotate for `codex`.
 
 `prodex` wraps `codex` with isolated profiles, built-in quota checks, and seamless account rotation.
