@@ -346,6 +346,7 @@ enum RuntimeProxyBackendMode {
     WebsocketCloseMidTurn,
     WebsocketPreviousResponseNeedsTurnState,
     WebsocketStaleReuseNeedsTurnState,
+    WebsocketTopLevelResponseId,
 }
 
 impl RuntimeProxyBackend {
@@ -425,6 +426,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState)
     }
 
+    fn start_websocket_top_level_response_id() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketTopLevelResponseId)
+    }
+
     fn start_with_mode(mode: RuntimeProxyBackendMode) -> Self {
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("failed to bind runtime proxy backend");
@@ -462,6 +467,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
+                                | RuntimeProxyBackendMode::WebsocketTopLevelResponseId
                         );
                         thread::spawn(move || {
                             if websocket_enabled
@@ -1297,30 +1303,56 @@ fn handle_runtime_proxy_backend_websocket(
                     ));
                     break;
                 }
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.created",
-                            "response": {
-                                "id": next_response_id.clone()
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.created should be sent");
-                websocket
-                    .send(WsMessage::Text(
-                        serde_json::json!({
-                            "type": "response.completed",
-                            "response": {
-                                "id": next_response_id
-                            }
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .expect("response.completed should be sent");
+                if matches!(mode, RuntimeProxyBackendMode::WebsocketTopLevelResponseId) {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.output_item.done",
+                                "response_id": next_response_id.clone(),
+                                "item": {
+                                    "id": "item-second"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.output_item.done should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.completed",
+                                "response_id": next_response_id
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.completed should be sent");
+                } else {
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.created",
+                                "response": {
+                                    "id": next_response_id.clone()
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.created should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.completed",
+                                "response": {
+                                    "id": next_response_id
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.completed should be sent");
+                }
             }
             "second-account" if previous_response_id.is_some() => {
                 websocket
@@ -12698,6 +12730,23 @@ fn inspect_runtime_sse_buffer_detects_retryable_error_after_hold_frames() {
 }
 
 #[test]
+fn extract_runtime_response_ids_accepts_top_level_response_fields() {
+    let response_id_only = extract_runtime_response_ids_from_payload(
+        "{\"type\":\"response.output_item.done\",\"response_id\":\"resp-second-next\"}",
+    );
+    assert_eq!(response_id_only, vec!["resp-second-next".to_string()]);
+
+    let realtime_object = serde_json::json!({
+        "object": "realtime.response",
+        "id": "resp-realtime"
+    });
+    assert_eq!(
+        extract_runtime_response_ids_from_value(&realtime_object),
+        vec!["resp-realtime".to_string()]
+    );
+}
+
+#[test]
 fn runtime_prefetch_reader_surfaces_terminal_backpressure_error_after_disconnect() {
     let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(1);
     let shared = Arc::new(RuntimePrefetchSharedState::default());
@@ -16329,6 +16378,106 @@ fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner() {
                 .iter()
                 .any(|payload| payload.contains("\"previous_response_not_found\"")),
             "chained websocket continuation should not degrade into previous_response_not_found: {payloads:?}"
+        );
+        let seen_response_ids = payloads
+            .iter()
+            .flat_map(|payload| extract_runtime_response_ids_from_payload(payload))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            seen_response_ids.last().map(String::as_str),
+            Some(expected_response_id),
+            "unexpected websocket continuation chain payloads: {payloads:?}"
+        );
+        previous_response_id = Some(expected_response_id.to_string());
+    }
+
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "backend should see each chained websocket continuation request"
+    );
+}
+
+#[test]
+fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner_with_top_level_response_id()
+{
+    let backend = RuntimeProxyBackend::start_websocket_top_level_response_id();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+
+    let mut previous_response_id: Option<String> = None;
+    for expected_response_id in ["resp-second", "resp-second-next", "resp-second-next-next"] {
+        let request = previous_response_id
+            .as_deref()
+            .map(|previous_response_id| {
+                format!("{{\"previous_response_id\":\"{previous_response_id}\",\"input\":[]}}")
+            })
+            .unwrap_or_else(|| "{\"input\":[]}".to_string());
+        socket
+            .send(WsMessage::Text(request.into()))
+            .expect("runtime proxy websocket request should be sent");
+
+        let mut payloads = Vec::new();
+        loop {
+            match socket
+                .read()
+                .expect("runtime proxy websocket should stay open across chained turns")
+            {
+                WsMessage::Text(text) => {
+                    let text = text.to_string();
+                    let done = is_runtime_terminal_event(&text);
+                    payloads.push(text);
+                    if done {
+                        break;
+                    }
+                }
+                WsMessage::Ping(payload) => {
+                    socket
+                        .send(WsMessage::Pong(payload))
+                        .expect("pong should be sent");
+                }
+                WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+                other => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+
+        assert!(
+            !payloads
+                .iter()
+                .any(|payload| payload.contains("\"previous_response_not_found\"")),
+            "chained websocket continuation with top-level response_id should not degrade into previous_response_not_found: {payloads:?}"
         );
         let seen_response_ids = payloads
             .iter()
