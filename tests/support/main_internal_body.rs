@@ -18050,6 +18050,7 @@ fn runtime_proxy_lane_classifies_anthropic_messages_as_responses() {
 
 #[test]
 fn runtime_proxy_claude_launch_env_uses_api_key_mode_only() {
+    let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43123"
             .parse()
@@ -18067,10 +18068,32 @@ fn runtime_proxy_claude_launch_env_uses_api_key_mode_only() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some(PRODEX_CLAUDE_PROXY_API_KEY.to_string())
     );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some(DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+    );
     assert!(env
         .iter()
         .all(|(key, _)| *key != "ANTHROPIC_AUTH_TOKEN"));
     assert_eq!(runtime_proxy_claude_removed_env(), ["ANTHROPIC_AUTH_TOKEN"]);
+}
+
+#[test]
+fn runtime_proxy_claude_launch_env_honors_model_override() {
+    let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5-mini");
+    let env = runtime_proxy_claude_launch_env(
+        "127.0.0.1:43124"
+            .parse()
+            .expect("listen address should parse"),
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5-mini".to_string())
+    );
 }
 
 #[test]
@@ -18142,28 +18165,36 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
         .get("data")
         .and_then(serde_json::Value::as_array)
         .expect("models data should be an array");
+    assert_eq!(data.len(), 2, "metadata route should only expose prodex Claude models");
+    assert!(data.iter().all(|model| {
+        !model
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .starts_with("claude-")
+    }));
     assert!(data.iter().any(|model| {
-        model.get("id").and_then(serde_json::Value::as_str) == Some("claude-sonnet-4-6")
+        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5")
+    }));
+    assert!(data.iter().any(|model| {
+        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5-mini")
     }));
 
     let model: serde_json::Value = client
-        .get(format!(
-            "http://{}/v1/models/claude-sonnet-4-6?beta=true",
-            proxy.listen_addr
-        ))
+        .get(format!("http://{}/v1/models/gpt-5?beta=true", proxy.listen_addr))
         .send()
         .expect("model request should succeed")
         .json()
         .expect("model response should parse");
     assert_eq!(
         model.get("id").and_then(serde_json::Value::as_str),
-        Some("claude-sonnet-4-6")
+        Some("gpt-5")
     );
     assert_eq!(
         model
             .get("display_name")
             .and_then(serde_json::Value::as_str),
-        Some("Claude Sonnet 4.6")
+        Some("GPT-5")
     );
 
     assert!(

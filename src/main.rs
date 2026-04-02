@@ -5026,11 +5026,26 @@ fn runtime_proxy_claude_launch_env(
             "ANTHROPIC_API_KEY",
             OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
         ),
+        (
+            "ANTHROPIC_MODEL",
+            OsString::from(runtime_proxy_claude_launch_model()),
+        ),
     ]
 }
 
 fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
     &["ANTHROPIC_AUTH_TOKEN"]
+}
+
+fn runtime_proxy_claude_model_override() -> Option<String> {
+    env::var("PRODEX_CLAUDE_MODEL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn runtime_proxy_claude_launch_model() -> String {
+    runtime_proxy_claude_model_override().unwrap_or_else(|| DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
 }
 
 fn prepare_runtime_launch(request: RuntimeLaunchRequest<'_>) -> Result<PreparedRuntimeLaunch> {
@@ -6051,15 +6066,10 @@ fn handle_runtime_proxy_anthropic_compat_request(
 }
 
 fn runtime_proxy_anthropic_models_list() -> serde_json::Value {
-    let data = [
-        "claude-sonnet-4-6",
-        "claude-opus-4-6",
-        "claude-haiku-4-5",
-        "claude-sonnet-4-5",
-    ]
-    .into_iter()
-    .map(runtime_proxy_anthropic_model_descriptor)
-    .collect::<Vec<_>>();
+    let data = runtime_proxy_anthropic_exposed_models()
+        .iter()
+        .map(|(model_id, _)| runtime_proxy_anthropic_model_descriptor(model_id))
+        .collect::<Vec<_>>();
     let first_id = data
         .first()
         .and_then(|model| model.get("id"))
@@ -6087,14 +6097,19 @@ fn runtime_proxy_anthropic_model_descriptor(model_id: &str) -> serde_json::Value
     })
 }
 
+fn runtime_proxy_anthropic_exposed_models() -> &'static [(&'static str, &'static str)] {
+    &[("gpt-5", "GPT-5"), ("gpt-5-mini", "GPT-5 Mini")]
+}
+
 fn runtime_proxy_anthropic_model_display_name(model_id: &str) -> String {
-    match model_id.to_ascii_lowercase().as_str() {
-        "claude-sonnet-4-6" => "Claude Sonnet 4.6".to_string(),
-        "claude-opus-4-6" => "Claude Opus 4.6".to_string(),
-        "claude-haiku-4-5" => "Claude Haiku 4.5".to_string(),
-        "claude-sonnet-4-5" => "Claude Sonnet 4.5".to_string(),
-        _ => model_id.to_string(),
-    }
+    runtime_proxy_anthropic_exposed_models()
+        .iter()
+        .find_map(|(candidate_id, display_name)| {
+            candidate_id
+                .eq_ignore_ascii_case(model_id)
+                .then_some((*display_name).to_string())
+        })
+        .unwrap_or_else(|| model_id.to_string())
 }
 
 fn runtime_proxy_anthropic_model_id_from_path(path: &str) -> Option<&str> {
@@ -6763,11 +6778,7 @@ fn runtime_proxy_claude_session_id(request: &RuntimeProxyRequest) -> Option<Stri
 }
 
 fn runtime_proxy_claude_target_model(requested_model: &str) -> String {
-    if let Some(override_model) = env::var("PRODEX_CLAUDE_MODEL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(override_model) = runtime_proxy_claude_model_override() {
         return override_model;
     }
 
