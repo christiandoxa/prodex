@@ -112,19 +112,49 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run runtime proxy stress loop
+      - name: Run parallel-safe runtime proxy stress tests
         run: |
           set -euo pipefail
           # The main test job already covers runtime_proxy_ once. Keep one extra focused
           # stress pass here, but leave the slow continuation-heavy cases to the dedicated
-          # rerun step below so they are not paid twice in this loop as well.
+          # rerun step below so they are not paid twice in this loop as well. Keep the
+          # process-global and race-prone cases out of the shared process so the rest of
+          # runtime_proxy_ can use libtest's default parallelism.
           for iteration in 1; do
             echo "runtime_proxy_ stress iteration ${iteration}"
-            cargo test --test main_internal runtime_proxy_ -- --test-threads=1 \
+            cargo test --test main_internal runtime_proxy_ -- \
               --skip runtime_proxy_persists_previous_response_affinity_across_restart \
               --skip runtime_proxy_persists_session_affinity_across_restart_for_compact \
               --skip runtime_proxy_retries_after_websocket_reuse_silent_hang \
-              --skip runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall
+              --skip runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall \
+              --skip runtime_proxy_sheds_long_lived_queue_overload_fast \
+              --skip runtime_proxy_absorbs_brief_long_lived_queue_burst \
+              --skip runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
+              --skip runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
+              --skip runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog \
+              --skip runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
+              --skip runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
+              --skip runtime_proxy_broker_health_endpoint_reports_registered_metadata \
+              --skip runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
+              --skip runtime_proxy_reuses_rotated_profile_without_reprobing_quota
+          done
+
+      - name: Run serialized runtime-sensitive stress tests
+        run: |
+          set -euo pipefail
+          for test_name in \
+            runtime_proxy_sheds_long_lived_queue_overload_fast \
+            runtime_proxy_absorbs_brief_long_lived_queue_burst \
+            runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
+            runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
+            runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog \
+            runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
+            runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
+            runtime_proxy_broker_health_endpoint_reports_registered_metadata \
+            runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
+            runtime_proxy_reuses_rotated_profile_without_reprobing_quota
+          do
+            cargo test -q --test main_internal "${test_name}" -- --test-threads=1
           done
 
       - name: Rerun continuation-heavy tests
