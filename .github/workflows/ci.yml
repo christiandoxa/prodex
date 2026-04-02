@@ -58,11 +58,16 @@ jobs:
       - name: Run runtime proxy stress loop
         run: |
           set -euo pipefail
-          # runtime_proxy_ coverage lives in main_internal; two reruns keep flake pressure
-          # without spending another full 12-minute pass on top of the main test job.
-          for iteration in 1 2; do
+          # The main test job already covers runtime_proxy_ once. Keep one extra focused
+          # stress pass here, but leave the slow continuation-heavy cases to the dedicated
+          # rerun step below so they are not paid twice in this loop as well.
+          for iteration in 1; do
             echo "runtime_proxy_ stress iteration ${iteration}"
-            cargo test -q --test main_internal runtime_proxy_ -- --test-threads=1
+            cargo test -q --test main_internal runtime_proxy_ -- --test-threads=1 \
+              --skip runtime_proxy_persists_previous_response_affinity_across_restart \
+              --skip runtime_proxy_persists_session_affinity_across_restart_for_compact \
+              --skip runtime_proxy_retries_after_websocket_reuse_silent_hang \
+              --skip runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall
           done
 
       - name: Rerun continuation-heavy tests
