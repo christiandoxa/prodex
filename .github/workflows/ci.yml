@@ -137,7 +137,8 @@ jobs:
               --skip runtime_proxy_broker_health_endpoint_reports_registered_metadata \
               --skip runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
               --skip runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
-              --skip runtime_proxy_keeps_previous_response_affinity_for_http_requests
+              --skip runtime_proxy_keeps_previous_response_affinity_for_http_requests \
+              --skip runtime_proxy_keeps_previous_response_affinity_for_websocket_requests
           done
 
       - name: Run serialized runtime-sensitive stress tests
@@ -154,7 +155,8 @@ jobs:
             runtime_proxy_broker_health_endpoint_reports_registered_metadata \
             runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
             runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
-            runtime_proxy_keeps_previous_response_affinity_for_http_requests
+            runtime_proxy_keeps_previous_response_affinity_for_http_requests \
+            runtime_proxy_keeps_previous_response_affinity_for_websocket_requests
           do
             cargo test -q --test main_internal "${test_name}" -- --test-threads=1
           done
