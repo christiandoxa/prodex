@@ -2219,6 +2219,98 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
 }
 
 #[test]
+fn run_profile_probe_is_ready_only_when_live_quota_is_clear() {
+    let ready = RunProfileProbeReport {
+        name: "main".to_string(),
+        order_index: 0,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Ok(usage_with_main_windows(90, 3_600, 95, 86_400)),
+    };
+    let blocked = RunProfileProbeReport {
+        name: "main".to_string(),
+        order_index: 0,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Ok(usage_with_main_windows(0, 300, 95, 86_400)),
+    };
+    let failed = RunProfileProbeReport {
+        name: "main".to_string(),
+        order_index: 0,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Err("timeout".to_string()),
+    };
+
+    assert!(run_profile_probe_is_ready(&ready, false));
+    assert!(!run_profile_probe_is_ready(&blocked, false));
+    assert!(!run_profile_probe_is_ready(&failed, false));
+}
+
+#[test]
+fn run_preflight_reports_with_current_first_preserves_current_and_rotation_order() {
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/main"),
+                    managed: true,
+                    email: None,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/second"),
+                    managed: true,
+                    email: None,
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/third"),
+                    managed: true,
+                    email: None,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let current_report = RunProfileProbeReport {
+        name: "main".to_string(),
+        order_index: 0,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Ok(usage_with_main_windows(90, 3_600, 95, 86_400)),
+    };
+
+    let reports =
+        run_preflight_reports_with_current_first(&state, "main", current_report.clone(), None);
+
+    assert_eq!(reports.len(), 3);
+    assert_eq!(reports[0].name, "main");
+    assert_eq!(reports[0].order_index, 0);
+    assert_eq!(reports[0].result.as_ref().ok().map(format_main_windows_compact), current_report.result.as_ref().ok().map(format_main_windows_compact));
+    assert_eq!(reports[1].name, "second");
+    assert_eq!(reports[1].order_index, 1);
+    assert_eq!(reports[2].name, "third");
+    assert_eq!(reports[2].order_index, 2);
+}
+
+#[test]
 fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
     let reports = vec![
         QuotaReport {

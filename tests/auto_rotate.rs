@@ -791,9 +791,9 @@ fn run_preflight_checks_fallback_profiles_in_parallel() {
 }
 
 #[test]
-fn run_without_profile_selects_the_best_ready_account() {
+fn run_without_profile_keeps_the_active_ready_account() {
     let fixture = setup_fixture();
-    let elite_home = add_managed_profile(&fixture, "elite", "elite-account");
+    add_managed_profile(&fixture, "elite", "elite-account");
     let mut state = read_state(&fixture.prodex_home);
     state["active_profile"] = Value::String("second".to_string());
     write_json(&fixture.prodex_home.join("state.json"), &state);
@@ -805,17 +805,14 @@ fn run_without_profile_selects_the_best_ready_account() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(active_profile(&fixture.prodex_home), "elite");
+    assert_eq!(active_profile(&fixture.prodex_home), "second");
     assert_eq!(
         fs::read_to_string(&fixture.codex_log)
             .expect("failed to read codex log")
             .trim(),
-        elite_home.display().to_string()
+        fixture.second_home.display().to_string()
     );
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("Auto-selecting profile 'elite' over active profile 'second'")
-    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("Auto-selecting profile"));
 }
 
 #[cfg(unix)]

@@ -3162,7 +3162,7 @@ struct RunProfileProbeJob {
     codex_home: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RunProfileProbeReport {
     name: String,
     order_index: usize,
@@ -4927,103 +4927,111 @@ fn handle_run(args: RunArgs) -> Result<()> {
 
     if !args.skip_quota_check {
         if allow_auto_rotate && !explicit_profile_requested && state.profiles.len() > 1 {
-            let persisted_usage_snapshots =
-                load_runtime_usage_snapshots(&paths, &state.profiles).unwrap_or_default();
-            let reports = collect_run_profile_reports(
-                &state,
-                active_profile_selection_order(&state, &profile_name),
-                args.base_url.as_deref(),
-            );
-            let ready_candidates = ready_profile_candidates(
-                &reports,
-                include_code_review,
-                Some(&profile_name),
-                &state,
-                Some(&persisted_usage_snapshots),
-            );
-            let selected_report = reports.iter().find(|report| report.name == profile_name);
+            let current_report =
+                probe_run_profile(&state, &profile_name, 0, args.base_url.as_deref())?;
+            if !run_profile_probe_is_ready(&current_report, include_code_review) {
+                let persisted_usage_snapshots =
+                    load_runtime_usage_snapshots(&paths, &state.profiles).unwrap_or_default();
+                let reports = run_preflight_reports_with_current_first(
+                    &state,
+                    &profile_name,
+                    current_report,
+                    args.base_url.as_deref(),
+                );
+                let ready_candidates = ready_profile_candidates(
+                    &reports,
+                    include_code_review,
+                    Some(&profile_name),
+                    &state,
+                    Some(&persisted_usage_snapshots),
+                );
+                let selected_report = reports.iter().find(|report| report.name == profile_name);
 
-            if let Some(best_candidate) = ready_candidates.first() {
-                if best_candidate.name != profile_name {
-                    print_wrapped_stderr(&section_header("Quota Preflight"));
-                    let mut selection_message = format!(
-                        "Using profile '{}' ({})",
-                        best_candidate.name,
-                        format_main_windows_compact(&best_candidate.usage)
-                    );
-                    if let Some(report) = selected_report {
-                        match &report.result {
-                            Ok(usage) => {
-                                let blocked = collect_blocked_limits(usage, include_code_review);
-                                if !blocked.is_empty() {
+                if let Some(best_candidate) = ready_candidates.first() {
+                    if best_candidate.name != profile_name {
+                        print_wrapped_stderr(&section_header("Quota Preflight"));
+                        let mut selection_message = format!(
+                            "Using profile '{}' ({})",
+                            best_candidate.name,
+                            format_main_windows_compact(&best_candidate.usage)
+                        );
+                        if let Some(report) = selected_report {
+                            match &report.result {
+                                Ok(usage) => {
+                                    let blocked =
+                                        collect_blocked_limits(usage, include_code_review);
+                                    if !blocked.is_empty() {
+                                        print_wrapped_stderr(&format!(
+                                            "Quota preflight blocked profile '{}': {}",
+                                            profile_name,
+                                            format_blocked_limits(&blocked)
+                                        ));
+                                        selection_message = format!(
+                                            "Auto-rotating to profile '{}' using quota-pressure scoring ({}).",
+                                            best_candidate.name,
+                                            format_main_windows_compact(&best_candidate.usage)
+                                        );
+                                    } else {
+                                        selection_message = format!(
+                                            "Auto-selecting profile '{}' over active profile '{}' using quota-pressure scoring ({}).",
+                                            best_candidate.name,
+                                            profile_name,
+                                            format_main_windows_compact(&best_candidate.usage)
+                                        );
+                                    }
+                                }
+                                Err(err) => {
                                     print_wrapped_stderr(&format!(
-                                        "Quota preflight blocked profile '{}': {}",
-                                        profile_name,
-                                        format_blocked_limits(&blocked)
+                                        "Warning: quota preflight failed for '{}': {err}",
+                                        profile_name
                                     ));
                                     selection_message = format!(
-                                        "Auto-rotating to profile '{}' using quota-pressure scoring ({}).",
+                                        "Using ready profile '{}' after quota preflight failed ({})",
                                         best_candidate.name,
-                                        format_main_windows_compact(&best_candidate.usage)
-                                    );
-                                } else {
-                                    selection_message = format!(
-                                        "Auto-selecting profile '{}' over active profile '{}' using quota-pressure scoring ({}).",
-                                        best_candidate.name,
-                                        profile_name,
                                         format_main_windows_compact(&best_candidate.usage)
                                     );
                                 }
                             }
-                            Err(err) => {
-                                print_wrapped_stderr(&format!(
-                                    "Warning: quota preflight failed for '{}': {err}",
-                                    profile_name
-                                ));
-                                selection_message = format!(
-                                    "Using ready profile '{}' after quota preflight failed ({})",
-                                    best_candidate.name,
-                                    format_main_windows_compact(&best_candidate.usage)
-                                );
-                            }
                         }
-                    }
 
-                    codex_home = state
-                        .profiles
-                        .get(&best_candidate.name)
-                        .with_context(|| format!("profile '{}' is missing", best_candidate.name))?
-                        .codex_home
-                        .clone();
-                    selected_profile_name = best_candidate.name.clone();
-                    state.active_profile = Some(best_candidate.name.clone());
-                    state.save(&paths)?;
-                    print_wrapped_stderr(&selection_message);
-                }
-            } else if let Some(report) = selected_report {
-                match &report.result {
-                    Ok(usage) => {
-                        let blocked = collect_blocked_limits(usage, include_code_review);
-                        print_wrapped_stderr(&section_header("Quota Preflight"));
-                        print_wrapped_stderr(&format!(
-                            "Quota preflight blocked profile '{}': {}",
-                            profile_name,
-                            format_blocked_limits(&blocked)
-                        ));
-                        print_wrapped_stderr("No ready profile was found.");
-                        print_wrapped_stderr(&format!(
-                            "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
-                            profile_name
-                        ));
-                        std::process::exit(2);
+                        codex_home = state
+                            .profiles
+                            .get(&best_candidate.name)
+                            .with_context(|| {
+                                format!("profile '{}' is missing", best_candidate.name)
+                            })?
+                            .codex_home
+                            .clone();
+                        selected_profile_name = best_candidate.name.clone();
+                        state.active_profile = Some(best_candidate.name.clone());
+                        state.save(&paths)?;
+                        print_wrapped_stderr(&selection_message);
                     }
-                    Err(err) => {
-                        print_wrapped_stderr(&section_header("Quota Preflight"));
-                        print_wrapped_stderr(&format!(
-                            "Warning: quota preflight failed for '{}': {err:#}",
-                            profile_name
-                        ));
-                        print_wrapped_stderr("Continuing without quota gate.");
+                } else if let Some(report) = selected_report {
+                    match &report.result {
+                        Ok(usage) => {
+                            let blocked = collect_blocked_limits(usage, include_code_review);
+                            print_wrapped_stderr(&section_header("Quota Preflight"));
+                            print_wrapped_stderr(&format!(
+                                "Quota preflight blocked profile '{}': {}",
+                                profile_name,
+                                format_blocked_limits(&blocked)
+                            ));
+                            print_wrapped_stderr("No ready profile was found.");
+                            print_wrapped_stderr(&format!(
+                                "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
+                                profile_name
+                            ));
+                            std::process::exit(2);
+                        }
+                        Err(err) => {
+                            print_wrapped_stderr(&section_header("Quota Preflight"));
+                            print_wrapped_stderr(&format!(
+                                "Warning: quota preflight failed for '{}': {err:#}",
+                                profile_name
+                            ));
+                            print_wrapped_stderr("Continuing without quota gate.");
+                        }
                     }
                 }
             }
@@ -15849,6 +15857,61 @@ fn collect_run_profile_reports(
             result,
         }
     })
+}
+
+fn probe_run_profile(
+    state: &AppState,
+    profile_name: &str,
+    order_index: usize,
+    base_url: Option<&str>,
+) -> Result<RunProfileProbeReport> {
+    let profile = state
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    let auth = read_auth_summary(&profile.codex_home);
+    let result = if auth.quota_compatible {
+        fetch_usage(&profile.codex_home, base_url).map_err(|err| err.to_string())
+    } else {
+        Err("auth mode is not quota-compatible".to_string())
+    };
+
+    Ok(RunProfileProbeReport {
+        name: profile_name.to_string(),
+        order_index,
+        auth,
+        result,
+    })
+}
+
+fn run_profile_probe_is_ready(report: &RunProfileProbeReport, include_code_review: bool) -> bool {
+    match report.result.as_ref() {
+        Ok(usage) => collect_blocked_limits(usage, include_code_review).is_empty(),
+        Err(_) => false,
+    }
+}
+
+fn run_preflight_reports_with_current_first(
+    state: &AppState,
+    current_profile: &str,
+    current_report: RunProfileProbeReport,
+    base_url: Option<&str>,
+) -> Vec<RunProfileProbeReport> {
+    let mut reports = Vec::with_capacity(state.profiles.len());
+    reports.push(current_report);
+    reports.extend(
+        collect_run_profile_reports(
+            state,
+            profile_rotation_order(state, current_profile),
+            base_url,
+        )
+        .into_iter()
+        .map(|mut report| {
+            report.order_index += 1;
+            report
+        }),
+    );
+    reports
 }
 
 fn ready_profile_candidates(
