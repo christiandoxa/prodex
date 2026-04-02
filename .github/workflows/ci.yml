@@ -52,9 +52,11 @@ jobs:
       - name: Run runtime proxy stress loop
         run: |
           set -euo pipefail
-          for iteration in 1 2 3; do
+          # runtime_proxy_ coverage lives in main_internal; two reruns keep flake pressure
+          # without spending another full 12-minute pass on top of the main test job.
+          for iteration in 1 2; do
             echo "runtime_proxy_ stress iteration ${iteration}"
-            cargo test -q runtime_proxy_ -- --test-threads=1
+            cargo test -q --test main_internal runtime_proxy_ -- --test-threads=1
           done
 
       - name: Rerun continuation-heavy tests
@@ -62,8 +64,8 @@ jobs:
           set -euo pipefail
           for iteration in 1 2; do
             echo "continuation-heavy iteration ${iteration}"
-            cargo test -q runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
-            cargo test -q runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
-            cargo test -q runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
-            cargo test -q runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
+            cargo test -q --test main_internal runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
+            cargo test -q --test main_internal runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
+            cargo test -q --test main_internal runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
+            cargo test -q --test main_internal runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
           done
