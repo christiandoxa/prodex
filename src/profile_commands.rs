@@ -453,7 +453,7 @@ fn login_with_auto_profile(
 fn run_codex_login(codex_home: &Path, codex_args: &[OsString]) -> Result<ExitStatus> {
     let mut command_args = vec![OsString::from("login")];
     command_args.extend(codex_args.iter().cloned());
-    run_child(&codex_bin(), &command_args, codex_home, &[])
+    run_child(&codex_bin(), &command_args, codex_home, &[], &[])
 }
 
 fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
@@ -493,6 +493,12 @@ pub(crate) fn handle_codex_logout(selector: ProfileSelector) -> Result<()> {
         .codex_home
         .clone();
 
-    let status = run_child(&codex_bin(), &[OsString::from("logout")], &codex_home, &[])?;
+    let status = run_child(
+        &codex_bin(),
+        &[OsString::from("logout")],
+        &codex_home,
+        &[],
+        &[],
+    )?;
     exit_with_status(status)
 }

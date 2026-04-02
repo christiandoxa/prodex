@@ -67,9 +67,12 @@ const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
 const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
+const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
+const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 const PRODEX_CLAUDE_PROXY_API_KEY: &str = "prodex-runtime-proxy";
 const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5";
+const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
@@ -4980,7 +4983,7 @@ fn handle_run(args: RunArgs) -> Result<()> {
         })
         .unwrap_or(codex_args);
 
-    let status = run_child(&codex_bin(), &runtime_args, &prepared.codex_home, &[])?;
+    let status = run_child(&codex_bin(), &runtime_args, &prepared.codex_home, &[], &[])?;
     // `std::process::exit` does not run destructors, so release the broker lease
     // before mirroring Codex's exit status back to the caller.
     drop(runtime_proxy);
@@ -4999,28 +5002,35 @@ fn handle_claude(args: ClaudeArgs) -> Result<()> {
     let runtime_proxy = prepared
         .runtime_proxy
         .context("Claude Code launch requires a local runtime proxy")?;
-    let extra_env = vec![
-        (
-            "ANTHROPIC_BASE_URL",
-            OsString::from(format!("http://{}", runtime_proxy.listen_addr)),
-        ),
-        (
-            "ANTHROPIC_API_KEY",
-            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
-        ),
-        (
-            "ANTHROPIC_AUTH_TOKEN",
-            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
-        ),
-    ];
+    let extra_env = runtime_proxy_claude_launch_env(runtime_proxy.listen_addr);
     let status = run_child(
         &claude_bin(),
         &args.claude_args,
         &prepared.codex_home,
         &extra_env,
+        runtime_proxy_claude_removed_env(),
     )?;
     drop(runtime_proxy);
     exit_with_status(status)
+}
+
+fn runtime_proxy_claude_launch_env(
+    listen_addr: std::net::SocketAddr,
+) -> Vec<(&'static str, OsString)> {
+    vec![
+        (
+            "ANTHROPIC_BASE_URL",
+            OsString::from(format!("http://{listen_addr}")),
+        ),
+        (
+            "ANTHROPIC_API_KEY",
+            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
+        ),
+    ]
+}
+
+fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
+    &["ANTHROPIC_AUTH_TOKEN"]
 }
 
 fn prepare_runtime_launch(request: RuntimeLaunchRequest<'_>) -> Result<PreparedRuntimeLaunch> {
@@ -6001,6 +6011,97 @@ fn handle_runtime_proxy_admin_request(
     ))
 }
 
+fn handle_runtime_proxy_anthropic_compat_request(
+    request: &tiny_http::Request,
+) -> Option<tiny_http::ResponseBox> {
+    let path = path_without_query(request.url());
+    let method = request.method().as_str();
+    if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
+        return None;
+    }
+
+    match path {
+        "/" => Some(build_runtime_proxy_json_response(
+            200,
+            serde_json::json!({
+                "service": "prodex",
+                "status": "ok",
+                "version": env!("CARGO_PKG_VERSION"),
+            })
+            .to_string(),
+        )),
+        RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH => Some(build_runtime_proxy_json_response(
+            200,
+            serde_json::json!({
+                "status": "ok",
+            })
+            .to_string(),
+        )),
+        RUNTIME_PROXY_ANTHROPIC_MODELS_PATH => Some(build_runtime_proxy_json_response(
+            200,
+            runtime_proxy_anthropic_models_list().to_string(),
+        )),
+        _ => runtime_proxy_anthropic_model_id_from_path(path).map(|model_id| {
+            build_runtime_proxy_json_response(
+                200,
+                runtime_proxy_anthropic_model_descriptor(model_id).to_string(),
+            )
+        }),
+    }
+}
+
+fn runtime_proxy_anthropic_models_list() -> serde_json::Value {
+    let data = [
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+        "claude-haiku-4-5",
+        "claude-sonnet-4-5",
+    ]
+    .into_iter()
+    .map(runtime_proxy_anthropic_model_descriptor)
+    .collect::<Vec<_>>();
+    let first_id = data
+        .first()
+        .and_then(|model| model.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let last_id = data
+        .last()
+        .and_then(|model| model.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    serde_json::json!({
+        "data": data,
+        "first_id": first_id,
+        "has_more": false,
+        "last_id": last_id,
+    })
+}
+
+fn runtime_proxy_anthropic_model_descriptor(model_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "model",
+        "id": model_id,
+        "display_name": runtime_proxy_anthropic_model_display_name(model_id),
+        "created_at": RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT,
+    })
+}
+
+fn runtime_proxy_anthropic_model_display_name(model_id: &str) -> String {
+    match model_id.to_ascii_lowercase().as_str() {
+        "claude-sonnet-4-6" => "Claude Sonnet 4.6".to_string(),
+        "claude-opus-4-6" => "Claude Opus 4.6".to_string(),
+        "claude-haiku-4-5" => "Claude Haiku 4.5".to_string(),
+        "claude-sonnet-4-5" => "Claude Sonnet 4.5".to_string(),
+        _ => model_id.to_string(),
+    }
+}
+
+fn runtime_proxy_anthropic_model_id_from_path(path: &str) -> Option<&str> {
+    path.strip_prefix(&format!("{RUNTIME_PROXY_ANTHROPIC_MODELS_PATH}/"))
+        .filter(|model_id| !model_id.is_empty())
+}
+
 fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason: &str) {
     let now = Local::now().timestamp().max(0) as u64;
     let until = now.saturating_add(RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS.max(1) as u64);
@@ -6430,6 +6531,10 @@ fn handle_runtime_rotation_proxy_request(
     shared: &RuntimeRotationProxyShared,
 ) {
     if let Some(response) = handle_runtime_proxy_admin_request(&mut request, shared) {
+        let _ = request.respond(response);
+        return;
+    }
+    if let Some(response) = handle_runtime_proxy_anthropic_compat_request(&request) {
         let _ = request.respond(response);
         return;
     }
@@ -7135,12 +7240,6 @@ fn translate_runtime_anthropic_messages_request(
         ),
     );
     translated_body.insert("store".to_string(), serde_json::Value::Bool(false));
-    if let Some(max_tokens) = value.get("max_tokens").and_then(serde_json::Value::as_u64) {
-        translated_body.insert(
-            "max_output_tokens".to_string(),
-            serde_json::Value::Number(max_tokens.into()),
-        );
-    }
     if let Some(instructions) = runtime_proxy_anthropic_system_instructions(&value)? {
         translated_body.insert(
             "instructions".to_string(),
@@ -17083,6 +17182,217 @@ fn runtime_anthropic_json_response_parts(value: serde_json::Value) -> RuntimeBuf
     }
 }
 
+fn runtime_anthropic_sse_event_bytes(event_type: &str, data: serde_json::Value) -> Vec<u8> {
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string())
+    )
+    .into_bytes()
+}
+
+fn runtime_anthropic_sse_response_parts_from_message_value(
+    value: serde_json::Value,
+) -> RuntimeBufferedResponseParts {
+    let mut body = Vec::new();
+    let message_id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("msg_prodex")
+        .to_string();
+    let model = value
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("claude-sonnet-4-6")
+        .to_string();
+    let stop_reason = value
+        .get("stop_reason")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let stop_sequence = value
+        .get("stop_sequence")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let usage = value
+        .get("usage")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    body.extend(runtime_anthropic_sse_event_bytes(
+        "message_start",
+        serde_json::json!({
+            "type": "message_start",
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": model,
+                "stop_reason": serde_json::Value::Null,
+                "stop_sequence": serde_json::Value::Null,
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                }
+            }
+        }),
+    ));
+
+    for (index, block) in value
+        .get("content")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let index_value = serde_json::Value::Number((index as u64).into());
+        match block.get("type").and_then(serde_json::Value::as_str) {
+            Some("thinking") => {
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": index_value,
+                        "content_block": {
+                            "type": "thinking",
+                            "thinking": "",
+                        }
+                    }),
+                ));
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_delta",
+                    serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "thinking_delta",
+                            "thinking": block
+                                .get("thinking")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(""),
+                        }
+                    }),
+                ));
+            }
+            Some("tool_use") => {
+                let input_json = block
+                    .get("input")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": index_value,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": block.get("id").cloned().unwrap_or(serde_json::Value::String("tool_use".to_string())),
+                            "name": block.get("name").cloned().unwrap_or(serde_json::Value::String("tool".to_string())),
+                            "input": serde_json::json!({}),
+                        }
+                    }),
+                ));
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_delta",
+                    serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": serde_json::to_string(&input_json)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        }
+                    }),
+                ));
+            }
+            _ => {
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": index_value,
+                        "content_block": {
+                            "type": "text",
+                            "text": "",
+                        }
+                    }),
+                ));
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_delta",
+                    serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "text_delta",
+                            "text": block.get("text").and_then(serde_json::Value::as_str).unwrap_or(""),
+                        }
+                    }),
+                ));
+            }
+        }
+        body.extend(runtime_anthropic_sse_event_bytes(
+            "content_block_stop",
+            serde_json::json!({
+                "type": "content_block_stop",
+                "index": index,
+            }),
+        ));
+    }
+
+    body.extend(runtime_anthropic_sse_event_bytes(
+        "message_delta",
+        serde_json::json!({
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": stop_reason,
+                "stop_sequence": stop_sequence,
+            },
+            "usage": usage,
+        }),
+    ));
+    body.extend(runtime_anthropic_sse_event_bytes(
+        "message_stop",
+        serde_json::json!({
+            "type": "message_stop",
+        }),
+    ));
+
+    RuntimeBufferedResponseParts {
+        status: 200,
+        headers: vec![("Content-Type".to_string(), b"text/event-stream".to_vec())],
+        body,
+    }
+}
+
+fn runtime_response_body_looks_like_sse(body: &[u8]) -> bool {
+    let trimmed = body
+        .iter()
+        .copied()
+        .skip_while(|byte| byte.is_ascii_whitespace());
+    let prefix = trimmed.take(8).collect::<Vec<_>>();
+    prefix.starts_with(b"event:") || prefix.starts_with(b"data:")
+}
+
+fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
+    body: &[u8],
+    requested_model: &str,
+    want_thinking: bool,
+) -> Result<RuntimeBufferedResponseParts> {
+    let mut reader = RuntimeAnthropicSseReader::new(
+        Box::new(Cursor::new(body.to_vec())),
+        requested_model.to_string(),
+        want_thinking,
+    );
+    let mut translated = Vec::new();
+    reader
+        .read_to_end(&mut translated)
+        .context("failed to translate buffered Responses SSE body")?;
+    Ok(RuntimeBufferedResponseParts {
+        status: 200,
+        headers: vec![("Content-Type".to_string(), b"text/event-stream".to_vec())],
+        body: translated,
+    })
+}
+
 fn buffer_runtime_streaming_response_parts(
     response: RuntimeStreamingResponse,
 ) -> Result<RuntimeBufferedResponseParts> {
@@ -17628,7 +17938,19 @@ fn translate_runtime_buffered_responses_reply_to_anthropic(
     let content_type = runtime_buffered_response_content_type(&parts)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let response = if content_type.contains("text/event-stream") {
+    let looks_like_sse = content_type.contains("text/event-stream")
+        || runtime_response_body_looks_like_sse(&parts.body);
+    if request.stream && looks_like_sse {
+        return Ok(RuntimeResponsesReply::Buffered(
+            runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
+                &parts.body,
+                &request.requested_model,
+                request.want_thinking,
+            )?,
+        ));
+    }
+
+    let response = if looks_like_sse {
         runtime_anthropic_response_from_sse_bytes(
             &parts.body,
             &request.requested_model,
@@ -17648,6 +17970,12 @@ fn translate_runtime_buffered_responses_reply_to_anthropic(
             request.want_thinking,
         )
     };
+
+    if request.stream {
+        return Ok(RuntimeResponsesReply::Buffered(
+            runtime_anthropic_sse_response_parts_from_message_value(response),
+        ));
+    }
 
     Ok(RuntimeResponsesReply::Buffered(
         runtime_anthropic_json_response_parts(response),
@@ -17981,9 +18309,13 @@ fn run_child(
     args: &[OsString],
     codex_home: &Path,
     extra_env: &[(&str, OsString)],
+    removed_env: &[&str],
 ) -> Result<ExitStatus> {
     let mut command = Command::new(binary);
     command.args(args).env("CODEX_HOME", codex_home);
+    for key in removed_env {
+        command.env_remove(key);
+    }
     for (key, value) in extra_env {
         command.env(key, value);
     }

@@ -18049,6 +18049,130 @@ fn runtime_proxy_lane_classifies_anthropic_messages_as_responses() {
 }
 
 #[test]
+fn runtime_proxy_claude_launch_env_uses_api_key_mode_only() {
+    let env = runtime_proxy_claude_launch_env(
+        "127.0.0.1:43123"
+            .parse()
+            .expect("listen address should parse"),
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_BASE_URL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("http://127.0.0.1:43123".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_API_KEY")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some(PRODEX_CLAUDE_PROXY_API_KEY.to_string())
+    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_AUTH_TOKEN"));
+    assert_eq!(runtime_proxy_claude_removed_env(), ["ANTHROPIC_AUTH_TOKEN"]);
+}
+
+#[test]
+fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "compat-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let root: serde_json::Value = client
+        .get(format!("http://{}/", proxy.listen_addr))
+        .send()
+        .expect("root request should succeed")
+        .json()
+        .expect("root response should parse");
+    assert_eq!(root.get("service").and_then(serde_json::Value::as_str), Some("prodex"));
+    assert_eq!(root.get("status").and_then(serde_json::Value::as_str), Some("ok"));
+
+    let health: serde_json::Value = client
+        .get(format!("http://{}/health", proxy.listen_addr))
+        .send()
+        .expect("health request should succeed")
+        .json()
+        .expect("health response should parse");
+    assert_eq!(
+        health.get("status").and_then(serde_json::Value::as_str),
+        Some("ok")
+    );
+    let head = client
+        .head(format!("http://{}/", proxy.listen_addr))
+        .send()
+        .expect("root HEAD request should succeed");
+    assert!(head.status().is_success(), "unexpected HEAD status: {}", head.status());
+
+    let models: serde_json::Value = client
+        .get(format!("http://{}/v1/models?beta=true", proxy.listen_addr))
+        .send()
+        .expect("models request should succeed")
+        .json()
+        .expect("models response should parse");
+    let data = models
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .expect("models data should be an array");
+    assert!(data.iter().any(|model| {
+        model.get("id").and_then(serde_json::Value::as_str) == Some("claude-sonnet-4-6")
+    }));
+
+    let model: serde_json::Value = client
+        .get(format!(
+            "http://{}/v1/models/claude-sonnet-4-6?beta=true",
+            proxy.listen_addr
+        ))
+        .send()
+        .expect("model request should succeed")
+        .json()
+        .expect("model response should parse");
+    assert_eq!(
+        model.get("id").and_then(serde_json::Value::as_str),
+        Some("claude-sonnet-4-6")
+    );
+    assert_eq!(
+        model
+            .get("display_name")
+            .and_then(serde_json::Value::as_str),
+        Some("Claude Sonnet 4.6")
+    );
+
+    assert!(
+        backend.responses_headers().is_empty(),
+        "local compatibility routes should not hit the upstream backend"
+    );
+}
+
+#[test]
 fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -18169,10 +18293,9 @@ fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
         body.get("tool_choice").and_then(serde_json::Value::as_str),
         Some("required")
     );
-    assert_eq!(
-        body.get("max_output_tokens")
-            .and_then(serde_json::Value::as_u64),
-        Some(1024)
+    assert!(
+        body.get("max_tokens").is_none(),
+        "translated request should not send unsupported max_tokens"
     );
     assert_eq!(
         body.get("reasoning")
@@ -18469,4 +18592,77 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
             .and_then(serde_json::Value::as_str),
         Some("hello from Claude")
     );
+}
+
+#[test]
+fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "stream-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!("http://{}/v1/messages?beta=true", proxy.listen_addr))
+        .header("Content-Type", "application/json")
+        .header("x-api-key", "dummy")
+        .header("anthropic-version", "2023-06-01")
+        .header("User-Agent", "claude-cli/test")
+        .body(
+            serde_json::json!({
+                "model": "claude-sonnet-4-6",
+                "stream": true,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "hello from Claude"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("anthropic proxy request should succeed");
+
+    assert!(
+        response.status().is_success(),
+        "unexpected status: {}",
+        response.status()
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    let body = response.text().expect("stream body should decode");
+    assert!(body.contains("event: message_start"));
+    assert!(body.contains("event: message_stop"));
 }
