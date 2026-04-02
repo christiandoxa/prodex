@@ -36,16 +36,104 @@ fn usage_with_main_windows(
     }
 }
 
-fn runtime_proxy_backend_next_second_response_id(
-    previous_response_id: Option<&str>,
-) -> Option<String> {
+fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str) -> Option<&'static str> {
+    match account_id {
+        "main-account" => Some("main"),
+        "second-account" => Some("second"),
+        "third-account" => Some("third"),
+        _ => None,
+    }
+}
+
+fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &str) -> Option<&'static str> {
+    match profile_name {
+        "main" => Some("main-account"),
+        "second" => Some("second-account"),
+        "third" => Some("third-account"),
+        _ => None,
+    }
+}
+
+fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Option<&'static str> {
+    match account_id {
+        "second-account" => Some("resp-second"),
+        "third-account" => Some("resp-third"),
+        _ => None,
+    }
+}
+
+fn runtime_proxy_backend_response_owner_account_id(
+    response_id: &str,
+) -> Option<&'static str> {
+    if response_id == "resp-second" || response_id.starts_with("resp-second-next") {
+        Some("second-account")
+    } else if response_id == "resp-third" || response_id.starts_with("resp-third-next") {
+        Some("third-account")
+    } else {
+        None
+    }
+}
+
+fn runtime_proxy_backend_profile_name_for_response_id(
+    response_id: &str,
+) -> Option<&'static str> {
+    runtime_proxy_backend_response_owner_account_id(response_id)
+        .and_then(runtime_proxy_backend_profile_name_for_account_id)
+}
+
+fn runtime_proxy_backend_initial_response_id_for_profile_name(
+    profile_name: &str,
+) -> Option<&'static str> {
+    runtime_proxy_backend_account_id_for_profile_name(profile_name)
+        .and_then(runtime_proxy_backend_initial_response_id_for_account)
+}
+
+fn runtime_proxy_backend_next_response_id(previous_response_id: Option<&str>) -> Option<String> {
     match previous_response_id {
-        Some("resp-second") => Some("resp-second-next".to_string()),
-        Some(previous_response_id) if previous_response_id.starts_with("resp-second-next") => {
+        Some("resp-second") | Some("resp-third") => {
+            Some(format!("{}-next", previous_response_id.unwrap()))
+        }
+        Some(previous_response_id)
+            if previous_response_id.starts_with("resp-second-next")
+                || previous_response_id.starts_with("resp-third-next") =>
+        {
             Some(format!("{previous_response_id}-next"))
         }
         _ => None,
     }
+}
+
+fn runtime_proxy_backend_is_owned_continuation(
+    account_id: &str,
+    previous_response_id: Option<&str>,
+) -> bool {
+    previous_response_id.is_some_and(|previous_response_id| {
+        runtime_proxy_backend_response_owner_account_id(previous_response_id) == Some(account_id)
+            && runtime_proxy_backend_next_response_id(Some(previous_response_id)).is_some()
+    })
+}
+
+fn runtime_proxy_backend_profile_name_for_compact_turn_state(
+    turn_state: &str,
+) -> Option<&'static str> {
+    match turn_state {
+        "compact-turn-main" => Some("main"),
+        "compact-turn-second" => Some("second"),
+        "compact-turn-third" => Some("third"),
+        _ => None,
+    }
+}
+
+fn runtime_proxy_response_ids_from_http_body(body: &str) -> Vec<String> {
+    let response_ids = extract_runtime_response_ids_from_body_bytes(body.as_bytes());
+    if !response_ids.is_empty() {
+        return response_ids;
+    }
+
+    body.lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .flat_map(extract_runtime_response_ids_from_payload)
+        .collect()
 }
 
 struct TestDir {
@@ -92,6 +180,27 @@ fn wait_for_runtime_background_queues_idle() {
         }
         if Instant::now() >= deadline {
             return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_backend_usage_accounts(
+    backend: &RuntimeProxyBackend,
+    expected_accounts: &[&str],
+) -> Vec<String> {
+    let mut expected_accounts = expected_accounts
+        .iter()
+        .map(|account| (*account).to_string())
+        .collect::<Vec<_>>();
+    expected_accounts.sort();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut usage_accounts = backend.usage_accounts();
+        usage_accounts.sort();
+        if usage_accounts == expected_accounts || Instant::now() >= deadline {
+            return usage_accounts;
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -706,10 +815,10 @@ fn handle_runtime_proxy_backend_request(
                     if matches!(
                         mode,
                         RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState
-                    ) && runtime_proxy_backend_next_second_response_id(
-                        previous_response_id.as_deref()
+                    ) && runtime_proxy_backend_is_owned_continuation(
+                        "second-account",
+                        previous_response_id.as_deref(),
                     )
-                    .is_some()
                         && turn_state.as_deref() != Some("turn-second") =>
                 {
                     (
@@ -735,12 +844,12 @@ fn handle_runtime_proxy_backend_request(
                 }
                 "second-account"
                     if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson)
-                        && runtime_proxy_backend_next_second_response_id(
-                            previous_response_id.as_deref()
-                        )
-                        .is_some() =>
+                        && runtime_proxy_backend_is_owned_continuation(
+                            "second-account",
+                            previous_response_id.as_deref(),
+                        ) =>
                 {
-                    let next_response_id = runtime_proxy_backend_next_second_response_id(
+                    let next_response_id = runtime_proxy_backend_next_response_id(
                         previous_response_id.as_deref(),
                     )
                     .expect("next response id should exist");
@@ -760,12 +869,12 @@ fn handle_runtime_proxy_backend_request(
                     )
                 }
                 "second-account"
-                    if runtime_proxy_backend_next_second_response_id(
-                        previous_response_id.as_deref()
-                    )
-                    .is_some() =>
+                    if runtime_proxy_backend_is_owned_continuation(
+                        "second-account",
+                        previous_response_id.as_deref(),
+                    ) =>
                 {
-                    let next_response_id = runtime_proxy_backend_next_second_response_id(
+                    let next_response_id = runtime_proxy_backend_next_response_id(
                         previous_response_id.as_deref(),
                     )
                     .expect("next response id should exist");
@@ -818,12 +927,15 @@ fn handle_runtime_proxy_backend_request(
                     None,
                 ),
                 "second-account" => {
+                    let response_id =
+                        runtime_proxy_backend_initial_response_id_for_account("second-account")
+                            .expect("second-account response id should exist");
                     if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson) {
                         (
                             "HTTP/1.1 200 OK",
                             "application/json",
                             serde_json::json!({
-                                "id": "resp-second",
+                                "id": response_id,
                                 "object": "response",
                                 "status": "completed",
                                 "output": []
@@ -837,26 +949,89 @@ fn handle_runtime_proxy_backend_request(
                         (
                             "HTTP/1.1 200 OK",
                             "text/event-stream",
-                            concat!(
-                                "event: response.created\r\n",
-                                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second\"}}\r\n",
-                                "\r\n",
-                                "event: response.completed\r\n",
-                                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n",
-                                "\r\n"
-                                )
-                                .to_string(),
-                                None,
-                                matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
-                                    .then_some(Duration::from_millis(750)),
-                                matches!(
-                                    mode,
-                                    RuntimeProxyBackendMode::HttpOnlySlowStream
-                                        | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
-                                )
-                                    .then_some(Duration::from_millis(100)),
+                            format!(
+                                concat!(
+                                    "event: response.created\r\n",
+                                    "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                    "\r\n",
+                                    "event: response.completed\r\n",
+                                    "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                    "\r\n"
+                                ),
+                                response_id,
+                                response_id
+                            )
+                            .to_string(),
+                            None,
+                            matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                                .then_some(Duration::from_millis(750)),
+                            matches!(
+                                mode,
+                                RuntimeProxyBackendMode::HttpOnlySlowStream
+                                    | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
+                            )
+                                .then_some(Duration::from_millis(100)),
                         )
                     }
+                }
+                "third-account"
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson)
+                        && runtime_proxy_backend_is_owned_continuation(
+                            "third-account",
+                            previous_response_id.as_deref(),
+                        ) =>
+                {
+                    let next_response_id = runtime_proxy_backend_next_response_id(
+                        previous_response_id.as_deref(),
+                    )
+                    .expect("next response id should exist");
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        serde_json::json!({
+                            "id": next_response_id,
+                            "object": "response",
+                            "status": "completed",
+                            "output": []
+                        })
+                        .to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                "third-account"
+                    if runtime_proxy_backend_is_owned_continuation(
+                        "third-account",
+                        previous_response_id.as_deref(),
+                    ) =>
+                {
+                    let next_response_id = runtime_proxy_backend_next_response_id(
+                        previous_response_id.as_deref(),
+                    )
+                    .expect("next response id should exist");
+                    (
+                        "HTTP/1.1 200 OK",
+                        "text/event-stream",
+                        format!(
+                            concat!(
+                                "event: response.created\r\n",
+                                "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                "\r\n",
+                                "event: response.completed\r\n",
+                                "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                "\r\n"
+                            ),
+                            next_response_id.clone(),
+                            next_response_id
+                        )
+                        .to_string(),
+                        None,
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                            .then_some(Duration::from_millis(750)),
+                        matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                            .then_some(Duration::from_millis(100)),
+                    )
                 }
                 "third-account" if previous_response_id.is_some() => (
                     "HTTP/1.1 400 Bad Request",
@@ -879,24 +1054,50 @@ fn handle_runtime_proxy_backend_request(
                         .then_some(Duration::from_millis(750)),
                     None,
                 ),
-                "third-account" => (
-                    "HTTP/1.1 200 OK",
-                    "text/event-stream",
-                    concat!(
-                        "event: response.created\r\n",
-                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-third\"}}\r\n",
-                        "\r\n",
-                        "event: response.completed\r\n",
-                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-third\"}}\r\n",
-                        "\r\n"
+                "third-account" => {
+                    let response_id =
+                        runtime_proxy_backend_initial_response_id_for_account("third-account")
+                            .expect("third-account response id should exist");
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson) {
+                        (
+                            "HTTP/1.1 200 OK",
+                            "application/json",
+                            serde_json::json!({
+                                "id": response_id,
+                                "object": "response",
+                                "status": "completed",
+                                "output": []
+                            })
+                            .to_string(),
+                            None,
+                            None,
+                            None,
                         )
-                        .to_string(),
-                        None,
-                        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
-                            .then_some(Duration::from_millis(750)),
-                        matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
-                            .then_some(Duration::from_millis(100)),
-                ),
+                    } else {
+                        (
+                            "HTTP/1.1 200 OK",
+                            "text/event-stream",
+                            format!(
+                                concat!(
+                                    "event: response.created\r\n",
+                                    "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                    "\r\n",
+                                    "event: response.completed\r\n",
+                                    "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                    "\r\n"
+                                ),
+                                response_id,
+                                response_id
+                            )
+                            .to_string(),
+                            None,
+                            matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                                .then_some(Duration::from_millis(750)),
+                            matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                                .then_some(Duration::from_millis(100)),
+                        )
+                    }
+                }
                 _ => (
                     "HTTP/1.1 200 OK",
                     "text/event-stream",
@@ -1283,8 +1484,10 @@ fn handle_runtime_proxy_backend_websocket(
                     RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                         | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
                         | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
-                ) && runtime_proxy_backend_next_second_response_id(previous_response_id.as_deref())
-                    .is_some()
+                ) && runtime_proxy_backend_is_owned_continuation(
+                    "second-account",
+                    previous_response_id.as_deref(),
+                )
                     && effective_turn_state.as_deref() != Some("turn-second") =>
             {
                 websocket
@@ -1307,11 +1510,13 @@ fn handle_runtime_proxy_backend_websocket(
                     .expect("previous_response_not_found should be sent");
             }
             "second-account"
-                if runtime_proxy_backend_next_second_response_id(previous_response_id.as_deref())
-                    .is_some() =>
+                if runtime_proxy_backend_is_owned_continuation(
+                    "second-account",
+                    previous_response_id.as_deref(),
+                ) =>
             {
                 let next_response_id =
-                    runtime_proxy_backend_next_second_response_id(previous_response_id.as_deref())
+                    runtime_proxy_backend_next_response_id(previous_response_id.as_deref())
                         .expect("next response id should exist");
                 if matches!(
                     mode,
@@ -1405,6 +1610,9 @@ fn handle_runtime_proxy_backend_websocket(
                     .expect("previous_response_not_found should be sent");
             }
             "second-account" => {
+                let response_id =
+                    runtime_proxy_backend_initial_response_id_for_account("second-account")
+                        .expect("second-account response id should exist");
                 if matches!(mode, RuntimeProxyBackendMode::WebsocketReuseSilentHang)
                     && request_count == 2
                 {
@@ -1418,7 +1626,7 @@ fn handle_runtime_proxy_backend_websocket(
                         serde_json::json!({
                             "type": "response.created",
                             "response": {
-                                "id": "resp-second"
+                                "id": response_id
                             }
                         })
                         .to_string()
@@ -1434,7 +1642,41 @@ fn handle_runtime_proxy_backend_websocket(
                         serde_json::json!({
                             "type": "response.completed",
                             "response": {
-                                "id": "resp-second"
+                                "id": response_id
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("response.completed should be sent");
+            }
+            "third-account"
+                if runtime_proxy_backend_is_owned_continuation(
+                    "third-account",
+                    previous_response_id.as_deref(),
+                ) =>
+            {
+                let next_response_id =
+                    runtime_proxy_backend_next_response_id(previous_response_id.as_deref())
+                        .expect("next response id should exist");
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.created",
+                            "response": {
+                                "id": next_response_id.clone()
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("response.created should be sent");
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.completed",
+                            "response": {
+                                "id": next_response_id
                             }
                         })
                         .to_string()
@@ -1463,12 +1705,15 @@ fn handle_runtime_proxy_backend_websocket(
                     .expect("previous_response_not_found should be sent");
             }
             "third-account" => {
+                let response_id =
+                    runtime_proxy_backend_initial_response_id_for_account("third-account")
+                        .expect("third-account response id should exist");
                 websocket
                     .send(WsMessage::Text(
                         serde_json::json!({
                             "type": "response.created",
                             "response": {
-                                "id": "resp-third"
+                                "id": response_id
                             }
                         })
                         .to_string()
@@ -1480,7 +1725,7 @@ fn handle_runtime_proxy_backend_websocket(
                         serde_json::json!({
                             "type": "response.completed",
                             "response": {
-                                "id": "resp-third"
+                                "id": response_id
                             }
                         })
                         .to_string()
@@ -11908,6 +12153,12 @@ fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
         .expect("compact response should expose turn state");
+    let compact_owner_profile =
+        runtime_proxy_backend_profile_name_for_compact_turn_state(&compact_turn_state)
+            .expect("compact turn state should map to a backend profile");
+    let compact_owner_account =
+        runtime_proxy_backend_account_id_for_profile_name(compact_owner_profile)
+            .expect("compact owner should map to a backend account");
     assert!(compact.status().is_success());
     assert_eq!(
         compact.text().expect("compact response body should be readable"),
@@ -11918,32 +12169,32 @@ fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
         continuations
             .session_id_bindings
             .get(&runtime_compact_session_lineage_key("sess-compact"))
-            .is_some_and(|binding| binding.profile_name == "second")
+            .is_some_and(|binding| binding.profile_name == compact_owner_profile)
             && continuations
                 .turn_state_bindings
-                .get(&runtime_compact_turn_state_lineage_key("compact-turn-second"))
-                .is_some_and(|binding| binding.profile_name == "second")
+                .get(&runtime_compact_turn_state_lineage_key(&compact_turn_state))
+                .is_some_and(|binding| binding.profile_name == compact_owner_profile)
     });
     assert_eq!(
         continuations
             .session_id_bindings
             .get(&runtime_compact_session_lineage_key("sess-compact"))
             .map(|binding| binding.profile_name.as_str()),
-        Some("second")
+        Some(compact_owner_profile)
     );
     assert_eq!(
         continuations
             .turn_state_bindings
             .get(&runtime_compact_turn_state_lineage_key(&compact_turn_state))
             .map(|binding| binding.profile_name.as_str()),
-        Some("second")
+        Some(compact_owner_profile)
     );
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
             "main-account".to_string(),
-            "second-account".to_string(),
+            compact_owner_account.to_string(),
         ]
     );
 }
@@ -12019,6 +12270,15 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
         .expect("compact response should expose turn state");
+    let compact_owner_profile =
+        runtime_proxy_backend_profile_name_for_compact_turn_state(&compact_turn_state)
+            .expect("compact turn state should map to a backend profile");
+    let compact_owner_account =
+        runtime_proxy_backend_account_id_for_profile_name(compact_owner_profile)
+            .expect("compact owner should map to a backend account");
+    let followup_response_id =
+        runtime_proxy_backend_initial_response_id_for_profile_name(compact_owner_profile)
+            .expect("compact owner should expose an initial response id");
     assert!(compact.status().is_success());
     assert_eq!(
         compact.text().expect("compact response body should be readable"),
@@ -12039,14 +12299,17 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
     let followup_body = followup
         .text()
         .expect("follow-up response body should be readable");
-    assert!(followup_body.contains("\"resp-second\""));
+    assert!(
+        followup_body.contains(&format!("\"{followup_response_id}\"")),
+        "unexpected compact follow-up body: {followup_body}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            compact_owner_account.to_string(),
+            compact_owner_account.to_string(),
         ]
     );
 
@@ -12107,7 +12370,7 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
         .expect("failed to save initial state");
 
     let client = Client::builder().build().expect("client");
-    let compact_turn_state = {
+    let (compact_turn_state, compact_owner_profile, compact_owner_account, followup_response_id) = {
         let proxy =
             start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
                 .expect("runtime proxy should start");
@@ -12127,19 +12390,33 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
             .and_then(|value| value.to_str().ok())
             .map(str::to_string)
             .expect("compact response should expose turn state");
+        let compact_owner_profile =
+            runtime_proxy_backend_profile_name_for_compact_turn_state(&compact_turn_state)
+                .expect("compact turn state should map to a backend profile");
+        let compact_owner_account =
+            runtime_proxy_backend_account_id_for_profile_name(compact_owner_profile)
+                .expect("compact owner should map to a backend account");
+        let followup_response_id =
+            runtime_proxy_backend_initial_response_id_for_profile_name(compact_owner_profile)
+                .expect("compact owner should expose an initial response id");
         assert!(compact.status().is_success());
         assert_eq!(
             compact.text().expect("compact response body should be readable"),
             "{\"output\":[]}"
         );
-        compact_turn_state
+        (
+            compact_turn_state,
+            compact_owner_profile,
+            compact_owner_account,
+            followup_response_id,
+        )
     };
 
     let _ = wait_for_runtime_continuations(&paths, |continuations| {
         continuations
             .session_id_bindings
             .get(&runtime_compact_session_lineage_key("sess-compact"))
-            .is_some_and(|binding| binding.profile_name == "second")
+            .is_some_and(|binding| binding.profile_name == compact_owner_profile)
     });
 
     let mut resumed_state = AppState::load(&paths).expect("state should reload");
@@ -12165,14 +12442,17 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
     let followup_body = followup
         .text()
         .expect("follow-up response body should be readable");
-    assert!(followup_body.contains("\"resp-second\""));
+    assert!(
+        followup_body.contains(&format!("\"{followup_response_id}\"")),
+        "unexpected compact follow-up body after restart: {followup_body}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            compact_owner_account.to_string(),
+            compact_owner_account.to_string(),
         ]
     );
 }
@@ -12223,8 +12503,8 @@ fn runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe() {
         .expect("runtime proxy should start");
     wait_for_runtime_background_queues_idle();
 
-    let mut startup_usage_accounts = backend.usage_accounts();
-    startup_usage_accounts.sort();
+    let startup_usage_accounts =
+        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
     assert_eq!(
         startup_usage_accounts,
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -12477,8 +12757,8 @@ fn runtime_proxy_reuses_rotated_profile_without_reprobing_quota() {
     wait_for_runtime_background_queues_idle();
     let client = Client::builder().build().expect("client");
 
-    let mut startup_usage_accounts = backend.usage_accounts();
-    startup_usage_accounts.sort();
+    let startup_usage_accounts =
+        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
     assert_eq!(
         startup_usage_accounts,
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -14479,8 +14759,16 @@ fn runtime_proxy_keeps_previous_response_affinity_for_http_requests() {
     let first_body = first
         .text()
         .expect("first response body should be readable");
+    let first_response_id = runtime_proxy_response_ids_from_http_body(&first_body)
+        .into_iter()
+        .last()
+        .expect("first response should expose a response id");
+    let owner_account = runtime_proxy_backend_response_owner_account_id(&first_response_id)
+        .expect("first response id should map to a backend account");
+    let second_response_id = runtime_proxy_backend_next_response_id(Some(&first_response_id))
+        .expect("continuation response id should exist");
     assert!(
-        first_body.contains("\"resp-second\""),
+        first_body.contains(&format!("\"{first_response_id}\"")),
         "unexpected first buffered-json body: {first_body}"
     );
 
@@ -14490,19 +14778,24 @@ fn runtime_proxy_keeps_previous_response_affinity_for_http_requests() {
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .body(format!(
+            "{{\"previous_response_id\":\"{first_response_id}\",\"input\":[]}}"
+        ))
         .send()
         .expect("second runtime proxy request should succeed");
     let second_body = second
         .text()
         .expect("second response body should be readable");
-    assert!(second_body.contains("\"resp-second-next\""));
+    assert!(
+        second_body.contains(&format!("\"{second_response_id}\"")),
+        "unexpected continued HTTP body: {second_body}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            owner_account.to_string(),
+            owner_account.to_string(),
         ]
     );
 }
@@ -14563,7 +14856,7 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
         .expect("failed to save initial state");
 
     let client = Client::builder().build().expect("client");
-    {
+    let (first_response_id, owner_account) = {
         let proxy =
             start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
                 .expect("runtime proxy should start");
@@ -14580,8 +14873,20 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
         let first_body = first
             .text()
             .expect("first response body should be readable");
-        assert!(first_body.contains("\"resp-second\""));
-    }
+        let first_response_id = runtime_proxy_response_ids_from_http_body(&first_body)
+            .into_iter()
+            .last()
+            .expect("first response should expose a response id");
+        let owner_account = runtime_proxy_backend_response_owner_account_id(&first_response_id)
+            .expect("first response id should map to a backend account");
+        assert!(
+            first_body.contains(&format!("\"{first_response_id}\"")),
+            "unexpected first response body after quota rotation: {first_body}"
+        );
+        (first_response_id, owner_account)
+    };
+    let second_response_id = runtime_proxy_backend_next_response_id(Some(&first_response_id))
+        .expect("continuation response id should exist");
 
     let mut resumed_state = AppState::load(&paths).expect("state should reload");
     resumed_state.active_profile = Some("third".to_string());
@@ -14599,19 +14904,24 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
             resumed_proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .body(format!(
+            "{{\"previous_response_id\":\"{first_response_id}\",\"input\":[]}}"
+        ))
         .send()
         .expect("second runtime proxy request should succeed");
     let second_body = second
         .text()
         .expect("second response body should be readable");
-    assert!(second_body.contains("\"resp-second-next\""));
+    assert!(
+        second_body.contains(&format!("\"{second_response_id}\"")),
+        "unexpected continued HTTP body after restart: {second_body}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            owner_account.to_string(),
+            owner_account.to_string(),
         ]
     );
 }
@@ -15060,7 +15370,18 @@ fn runtime_proxy_persists_previous_response_affinity_for_buffered_json_responses
     let first_body = first
         .text()
         .expect("first response body should be readable");
-    assert!(first_body.contains("\"resp-second\""));
+    let first_response_id = runtime_proxy_response_ids_from_http_body(&first_body)
+        .into_iter()
+        .last()
+        .expect("first response should expose a response id");
+    let owner_account = runtime_proxy_backend_response_owner_account_id(&first_response_id)
+        .expect("first response id should map to a backend account");
+    let second_response_id = runtime_proxy_backend_next_response_id(Some(&first_response_id))
+        .expect("continuation response id should exist");
+    assert!(
+        first_body.contains(&format!("\"{first_response_id}\"")),
+        "unexpected first buffered-json body: {first_body}"
+    );
 
     let second = client
         .post(format!(
@@ -15068,19 +15389,24 @@ fn runtime_proxy_persists_previous_response_affinity_for_buffered_json_responses
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .body(format!(
+            "{{\"previous_response_id\":\"{first_response_id}\",\"input\":[]}}"
+        ))
         .send()
         .expect("second runtime proxy request should succeed");
     let second_body = second
         .text()
         .expect("second response body should be readable");
-    assert!(second_body.contains("\"resp-second-next\""));
+    assert!(
+        second_body.contains(&format!("\"{second_response_id}\"")),
+        "unexpected buffered-json continuation body: {second_body}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            owner_account.to_string(),
+            owner_account.to_string(),
         ]
     );
 }
@@ -15426,7 +15752,7 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
         .expect("failed to save initial state");
 
     let client = Client::builder().build().expect("client");
-    {
+    let owner_profile = {
         let proxy =
             start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
                 .expect("runtime proxy should start");
@@ -15444,21 +15770,33 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
         let first_body = first
             .text()
             .expect("first response body should be readable");
-        assert!(first_body.contains("\"resp-second\""));
-    }
+        let first_response_id = runtime_proxy_response_ids_from_http_body(&first_body)
+            .into_iter()
+            .last()
+            .expect("first response should expose a response id");
+        let owner_profile = runtime_proxy_backend_profile_name_for_response_id(&first_response_id)
+            .expect("first response id should map to a backend profile");
+        assert!(
+            first_body.contains(&format!("\"{first_response_id}\"")),
+            "unexpected session-affinity seed body: {first_body}"
+        );
+        owner_profile
+    };
+    let owner_account = runtime_proxy_backend_account_id_for_profile_name(owner_profile)
+        .expect("owner profile should map to a backend account");
 
     let persisted = wait_for_state(&paths, |state| {
         state
             .session_profile_bindings
             .get("sess-second")
-            .is_some_and(|binding| binding.profile_name == "second")
+            .is_some_and(|binding| binding.profile_name == owner_profile)
     });
     assert_eq!(
         persisted
             .session_profile_bindings
             .get("sess-second")
             .map(|binding| binding.profile_name.as_str()),
-        Some("second")
+        Some(owner_profile)
     );
 
     let mut resumed_state = AppState::load(&paths).expect("state should reload");
@@ -15492,8 +15830,8 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            owner_account.to_string(),
+            owner_account.to_string(),
         ]
     );
 }
@@ -16596,7 +16934,7 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
         .expect("failed to save initial state");
 
     let client = Client::builder().build().expect("client");
-    let mut previous_response_id = {
+    let (mut previous_response_id, owner_profile, owner_account) = {
         let proxy =
             start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
                 .expect("runtime proxy should start");
@@ -16613,20 +16951,30 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
         let first_body = first
             .text()
             .expect("first response body should be readable");
+        let first_response_id = runtime_proxy_response_ids_from_http_body(&first_body)
+            .into_iter()
+            .last()
+            .expect("first response should expose a response id");
+        let owner_profile = runtime_proxy_backend_profile_name_for_response_id(&first_response_id)
+            .expect("first response id should map to a backend profile");
+        let owner_account = runtime_proxy_backend_account_id_for_profile_name(owner_profile)
+            .expect("owner profile should map to a backend account");
         assert!(
-            first_body.contains("\"resp-second\""),
+            first_body.contains(&format!("\"{first_response_id}\"")),
             "unexpected first continuation body: {first_body}"
         );
         let _ = wait_for_runtime_continuations(&paths, |continuations| {
             continuations
                 .response_profile_bindings
-                .get("resp-second")
-                .is_some_and(|binding| binding.profile_name == "second")
+                .get(&first_response_id)
+                .is_some_and(|binding| binding.profile_name == owner_profile)
         });
-        "resp-second".to_string()
+        (first_response_id, owner_profile, owner_account)
     };
 
-    for expected_response_id in ["resp-second-next", "resp-second-next-next"] {
+    for _ in 0..2 {
+        let expected_response_id = runtime_proxy_backend_next_response_id(Some(&previous_response_id))
+            .expect("continuation response id should exist");
         let mut resumed_state = AppState::load(&paths).expect("state should reload");
         resumed_state.active_profile = Some("third".to_string());
         resumed_state
@@ -16653,23 +17001,22 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
             body.contains(&format!("\"{expected_response_id}\"")),
             "unexpected continued body: {body}"
         );
-        let expected_response_id_owned = expected_response_id.to_string();
         let _ = wait_for_runtime_continuations(&paths, |continuations| {
             continuations
                 .response_profile_bindings
-                .get(expected_response_id)
-                .is_some_and(|binding| binding.profile_name == "second")
+                .get(&expected_response_id)
+                .is_some_and(|binding| binding.profile_name == owner_profile)
         });
-        previous_response_id = expected_response_id_owned;
+        previous_response_id = expected_response_id;
     }
 
     assert_eq!(
         backend.responses_accounts(),
         vec![
             "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string(),
+            owner_account.to_string(),
+            owner_account.to_string(),
+            owner_account.to_string(),
         ],
         "restarts should keep the continuation chain pinned to the original owner"
     );
@@ -16761,17 +17108,25 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
             other => panic!("unexpected websocket message: {other:?}"),
         }
     }
+    let first_response_id = first_payloads
+        .iter()
+        .flat_map(|payload| extract_runtime_response_ids_from_payload(payload))
+        .last()
+        .expect("first websocket response should expose a response id");
+    let owner_account = runtime_proxy_backend_response_owner_account_id(&first_response_id)
+        .expect("first websocket response id should map to a backend account");
+    let second_response_id = runtime_proxy_backend_next_response_id(Some(&first_response_id))
+        .expect("continuation response id should exist");
     assert!(
         first_payloads
             .iter()
-            .any(|payload| payload.contains("\"resp-second\""))
+            .any(|payload| payload.contains(&format!("\"{first_response_id}\""))),
+        "unexpected initial websocket payloads: {first_payloads:?}"
     );
 
     socket
         .send(WsMessage::Text(
-            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
-                .to_string()
-                .into(),
+            format!("{{\"previous_response_id\":\"{first_response_id}\",\"input\":[]}}").into(),
         ))
         .expect("second runtime proxy websocket request should be sent");
 
@@ -16801,11 +17156,12 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
     assert!(
         second_payloads
             .iter()
-            .any(|payload| payload.contains("\"resp-second-next\""))
+            .any(|payload| payload.contains(&format!("\"{second_response_id}\""))),
+        "unexpected continued websocket payloads: {second_payloads:?}"
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string(), "second-account".to_string()]
+        vec!["main-account".to_string(), owner_account.to_string()]
     );
 }
 
