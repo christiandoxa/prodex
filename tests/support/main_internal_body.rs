@@ -115,6 +115,13 @@ impl TestEnvVarGuard {
         unsafe { env::set_var(key, value) };
         Self { key, previous }
     }
+
+    fn unset(key: &'static str) -> Self {
+        let previous = env::var_os(key);
+        // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+        unsafe { env::remove_var(key) };
+        Self { key, previous }
+    }
 }
 
 impl Drop for TestEnvVarGuard {

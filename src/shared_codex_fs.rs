@@ -359,7 +359,24 @@ fn seed_shared_codex_entry(
                 );
             }
 
-            create_codex_home_if_missing(shared_path)?;
+            if shared_path.exists() {
+                if !shared_path.is_dir() {
+                    bail!(
+                        "expected {} to be a directory for shared Codex state",
+                        shared_path.display()
+                    );
+                }
+
+                // Legacy seeding is a one-time bootstrap. Recopying populated
+                // session trees from ~/.codex on every `prodex run` adds large
+                // disk I/O directly to the startup hot path.
+                if !dir_is_empty(shared_path)? {
+                    return Ok(());
+                }
+            } else {
+                create_codex_home_if_missing(shared_path)?;
+            }
+
             copy_directory_contents(legacy_path, shared_path)?;
         }
         SharedCodexEntryKind::File => {

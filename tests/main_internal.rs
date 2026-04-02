@@ -101,5 +101,51 @@ mod prodex_impl {
                     .expect("auth cache entry should detect auth.json change")
             );
         }
+
+        #[test]
+        fn prepare_managed_codex_home_does_not_reseed_populated_legacy_sessions_every_run() {
+            let temp_dir = TestDir::new();
+            let home_dir = temp_dir.path.join("home");
+            let prodex_home = temp_dir.path.join("prodex");
+            create_codex_home_if_missing(&home_dir).expect("home dir should be created");
+            create_codex_home_if_missing(&prodex_home).expect("prodex dir should be created");
+            let _home_guard = TestEnvVarGuard::set("HOME", &home_dir.display().to_string());
+            let _prodex_guard =
+                TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
+            let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
+
+            let legacy_session_dir = home_dir.join(".codex/sessions/2026/04/02");
+            create_codex_home_if_missing(&legacy_session_dir)
+                .expect("legacy session dir should be created");
+            let first_legacy_session = legacy_session_dir.join("legacy-first.jsonl");
+            fs::write(&first_legacy_session, "legacy-first")
+                .expect("first legacy session should be written");
+
+            let paths = AppPaths::discover().expect("app paths should resolve");
+            let profile_home = paths.root.join("profiles/main");
+
+            prepare_managed_codex_home(&paths, &profile_home)
+                .expect("first prepare should seed legacy sessions");
+
+            let shared_session_dir = paths.shared_codex_root.join("sessions/2026/04/02");
+            let first_shared_session = shared_session_dir.join("legacy-first.jsonl");
+            assert_eq!(
+                fs::read_to_string(&first_shared_session)
+                    .expect("shared session should exist after initial seed"),
+                "legacy-first"
+            );
+
+            let second_legacy_session = legacy_session_dir.join("legacy-second.jsonl");
+            fs::write(&second_legacy_session, "legacy-second")
+                .expect("second legacy session should be written");
+
+            prepare_managed_codex_home(&paths, &profile_home)
+                .expect("second prepare should keep startup cheap");
+
+            assert!(
+                !shared_session_dir.join("legacy-second.jsonl").exists(),
+                "populated shared session trees should not be re-seeded on every run"
+            );
+        }
     }
 }
