@@ -320,6 +320,7 @@ struct RuntimeProxyBackend {
     shutdown: Arc<AtomicBool>,
     responses_accounts: Arc<Mutex<Vec<String>>>,
     responses_headers: Arc<Mutex<Vec<BTreeMap<String, String>>>>,
+    responses_bodies: Arc<Mutex<Vec<String>>>,
     websocket_requests: Arc<Mutex<Vec<String>>>,
     usage_accounts: Arc<Mutex<Vec<String>>>,
     thread: Option<JoinHandle<()>>,
@@ -443,11 +444,13 @@ impl RuntimeProxyBackend {
         let shutdown = Arc::new(AtomicBool::new(false));
         let responses_accounts = Arc::new(Mutex::new(Vec::new()));
         let responses_headers = Arc::new(Mutex::new(Vec::new()));
+        let responses_bodies = Arc::new(Mutex::new(Vec::new()));
         let websocket_requests = Arc::new(Mutex::new(Vec::new()));
         let usage_accounts = Arc::new(Mutex::new(Vec::new()));
         let shutdown_flag = Arc::clone(&shutdown);
         let responses_accounts_flag = Arc::clone(&responses_accounts);
         let responses_headers_flag = Arc::clone(&responses_headers);
+        let responses_bodies_flag = Arc::clone(&responses_bodies);
         let websocket_requests_flag = Arc::clone(&websocket_requests);
         let usage_accounts_flag = Arc::clone(&usage_accounts);
         let thread = thread::spawn(move || {
@@ -456,6 +459,7 @@ impl RuntimeProxyBackend {
                     Ok((stream, _)) => {
                         let responses_accounts_flag = Arc::clone(&responses_accounts_flag);
                         let responses_headers_flag = Arc::clone(&responses_headers_flag);
+                        let responses_bodies_flag = Arc::clone(&responses_bodies_flag);
                         let websocket_requests_flag = Arc::clone(&websocket_requests_flag);
                         let usage_accounts_flag = Arc::clone(&usage_accounts_flag);
                         let websocket_enabled = matches!(
@@ -485,6 +489,7 @@ impl RuntimeProxyBackend {
                                     stream,
                                     &responses_accounts_flag,
                                     &responses_headers_flag,
+                                    &responses_bodies_flag,
                                     &usage_accounts_flag,
                                     mode,
                                 );
@@ -504,6 +509,7 @@ impl RuntimeProxyBackend {
             shutdown,
             responses_accounts,
             responses_headers,
+            responses_bodies,
             websocket_requests,
             usage_accounts,
             thread: Some(thread),
@@ -525,6 +531,13 @@ impl RuntimeProxyBackend {
         self.responses_headers
             .lock()
             .expect("responses_headers poisoned")
+            .clone()
+    }
+
+    fn responses_bodies(&self) -> Vec<String> {
+        self.responses_bodies
+            .lock()
+            .expect("responses_bodies poisoned")
             .clone()
     }
 
@@ -557,6 +570,7 @@ fn handle_runtime_proxy_backend_request(
     mut stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
+    responses_bodies: &Arc<Mutex<Vec<String>>>,
     usage_accounts: &Arc<Mutex<Vec<String>>>,
     mode: RuntimeProxyBackendMode,
 ) {
@@ -570,6 +584,10 @@ fn handle_runtime_proxy_backend_request(
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .unwrap_or("/");
+    let request_body = request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_default();
     let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
     let turn_state = request_header(&request, "x-codex-turn-state");
     let captured_headers = request_headers_map(&request);
@@ -586,6 +604,10 @@ fn handle_runtime_proxy_backend_request(
             .lock()
             .expect("responses_headers poisoned")
             .push(captured_headers);
+        responses_bodies
+            .lock()
+            .expect("responses_bodies poisoned")
+            .push(request_body);
         return;
     }
 
@@ -619,6 +641,10 @@ fn handle_runtime_proxy_backend_request(
                 .lock()
                 .expect("responses_headers poisoned")
                 .push(captured_headers);
+            responses_bodies
+                .lock()
+                .expect("responses_bodies poisoned")
+                .push(request_body);
             let previous_response_id = request_previous_response_id(&request);
             match account_id.as_str() {
                 "main-account" if matches!(mode, RuntimeProxyBackendMode::HttpOnlyPlain429) => (
@@ -900,6 +926,10 @@ fn handle_runtime_proxy_backend_request(
                 .lock()
                 .expect("responses_headers poisoned")
                 .push(captured_headers);
+            responses_bodies
+                .lock()
+                .expect("responses_bodies poisoned")
+                .push(request_body);
             match (account_id.as_str(), mode) {
                 ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
                     "HTTP/1.1 429 Too Many Requests",
@@ -17801,4 +17831,464 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
 fn runtime_broker_startup_grace_covers_ready_timeout() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "15000");
     assert!(runtime_broker_startup_grace_seconds() >= 16);
+}
+
+#[test]
+fn claude_command_accepts_passthrough_args() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "claude",
+        "--profile",
+        "main",
+        "--",
+        "-p",
+        "--output-format",
+        "json",
+        "hello",
+    ])
+    .expect("claude command should parse");
+    let Commands::Claude(args) = command else {
+        panic!("expected claude command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(
+        args.claude_args,
+        vec![
+            OsString::from("-p"),
+            OsString::from("--output-format"),
+            OsString::from("json"),
+            OsString::from("hello"),
+        ]
+    );
+}
+
+#[test]
+fn runtime_proxy_lane_classifies_anthropic_messages_as_responses() {
+    assert_eq!(
+        runtime_proxy_request_lane("/v1/messages?beta=true", false),
+        RuntimeRouteKind::Responses
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![
+            ("User-Agent".to_string(), "claude-cli/test".to_string()),
+            (
+                "X-Claude-Code-Session-Id".to_string(),
+                "claude-session-123".to_string(),
+            ),
+        ],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "stream": true,
+            "thinking": {
+                "type": "adaptive"
+            },
+            "system": [
+                {
+                    "type": "text",
+                    "text": "System instructions",
+                }
+            ],
+            "output_config": {
+                "effort": "medium",
+            },
+            "tools": [
+                {
+                    "name": "shell",
+                    "description": "Run a shell command",
+                    "input_schema": {
+                        "type": "object"
+                    }
+                }
+            ],
+            "tool_choice": {
+                "type": "any"
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Show the logs",
+                        },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "YWJj",
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Calling shell",
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "shell",
+                            "input": {
+                                "cmd": "ls"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "file1",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    assert_eq!(
+        translated.translated_request.path_and_query,
+        "/backend-api/codex/responses"
+    );
+    assert_eq!(translated.requested_model, "claude-sonnet-4-6");
+    assert!(translated.stream);
+    assert!(translated.want_thinking);
+    assert_eq!(
+        runtime_proxy_request_header_value(&translated.translated_request.headers, "session_id"),
+        Some("claude-session-123")
+    );
+
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    assert_eq!(body.get("model").and_then(serde_json::Value::as_str), Some("gpt-5"));
+    assert_eq!(
+        body.get("instructions").and_then(serde_json::Value::as_str),
+        Some("System instructions")
+    );
+    assert_eq!(
+        body.get("tool_choice").and_then(serde_json::Value::as_str),
+        Some("required")
+    );
+    assert_eq!(
+        body.get("max_output_tokens")
+            .and_then(serde_json::Value::as_u64),
+        Some(1024)
+    );
+    assert_eq!(
+        body.get("reasoning")
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(serde_json::Value::as_str),
+        Some("medium")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("parameters"))
+            .and_then(|parameters| parameters.get("properties"))
+            .and_then(serde_json::Value::as_object)
+            .map(serde_json::Map::len),
+        Some(0)
+    );
+
+    let input = body
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .expect("input array should exist");
+    assert_eq!(input.len(), 4);
+    assert_eq!(input[0].get("role").and_then(serde_json::Value::as_str), Some("user"));
+    assert_eq!(
+        input[0]
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        input[1].get("role").and_then(serde_json::Value::as_str),
+        Some("assistant")
+    );
+    assert_eq!(
+        input[1].get("content").and_then(serde_json::Value::as_str),
+        Some("Calling shell")
+    );
+    assert_eq!(
+        input[2].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call")
+    );
+    assert_eq!(
+        input[2].get("call_id").and_then(serde_json::Value::as_str),
+        Some("toolu_1")
+    );
+    assert_eq!(
+        input[3].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call_output")
+    );
+    assert_eq!(
+        input[3].get("output").and_then(serde_json::Value::as_str),
+        Some("file1")
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_json_value_preserves_tool_use_and_usage() {
+    let response = runtime_anthropic_response_from_json_value(
+        &serde_json::json!({
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7,
+                "input_tokens_details": {
+                    "cached_tokens": 3
+                }
+            },
+            "output": [
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {
+                            "type": "summary_text",
+                            "text": "Plan first",
+                        }
+                    ]
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Hello from prodex",
+                        }
+                    ]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_123",
+                    "name": "shell",
+                    "arguments": "{\"cmd\":\"ls\"}"
+                }
+            ]
+        }),
+        "claude-sonnet-4-6",
+        true,
+    );
+
+    assert_eq!(response.get("type").and_then(serde_json::Value::as_str), Some("message"));
+    assert_eq!(
+        response.get("model").and_then(serde_json::Value::as_str),
+        Some("claude-sonnet-4-6")
+    );
+    assert_eq!(
+        response
+            .get("stop_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("tool_use")
+    );
+    let content = response
+        .get("content")
+        .and_then(serde_json::Value::as_array)
+        .expect("content should be an array");
+    assert_eq!(
+        content[0].get("type").and_then(serde_json::Value::as_str),
+        Some("thinking")
+    );
+    assert_eq!(
+        content[1].get("text").and_then(serde_json::Value::as_str),
+        Some("Hello from prodex")
+    );
+    assert_eq!(
+        content[2].get("type").and_then(serde_json::Value::as_str),
+        Some("tool_use")
+    );
+    assert_eq!(
+        content[2].get("id").and_then(serde_json::Value::as_str),
+        Some("call_123")
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("cache_read_input_tokens"))
+            .and_then(serde_json::Value::as_u64),
+        Some(3)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_sse_bytes_collects_deltas_and_tool_use() {
+    let body = concat!(
+        "event: response.reasoning_summary_text.delta\r\n",
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"Plan.\"}\r\n",
+        "\r\n",
+        "event: response.output_text.delta\r\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\r\n",
+        "\r\n",
+        "event: response.output_item.added\r\n",
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"shell\"}}\r\n",
+        "\r\n",
+        "event: response.function_call_arguments.delta\r\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}\r\n",
+        "\r\n",
+        "event: response.output_item.done\r\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"shell\"}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4}}}\r\n",
+        "\r\n"
+    )
+    .as_bytes()
+    .to_vec();
+    let response = runtime_anthropic_response_from_sse_bytes(&body, "claude-sonnet-4-6", true)
+        .expect("SSE translation should succeed");
+    let content = response
+        .get("content")
+        .and_then(serde_json::Value::as_array)
+        .expect("content should be an array");
+    assert_eq!(
+        content[0].get("type").and_then(serde_json::Value::as_str),
+        Some("thinking")
+    );
+    assert_eq!(
+        content[1].get("text").and_then(serde_json::Value::as_str),
+        Some("Hello")
+    );
+    assert_eq!(
+        content[2].get("type").and_then(serde_json::Value::as_str),
+        Some("tool_use")
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("input_tokens"))
+            .and_then(serde_json::Value::as_u64),
+        Some(9)
+    );
+}
+
+#[test]
+fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!("http://{}/v1/messages?beta=true", proxy.listen_addr))
+        .header("Content-Type", "application/json")
+        .header("x-api-key", "dummy")
+        .header("anthropic-version", "2023-06-01")
+        .header("x-claude-code-session-id", "claude-session-42")
+        .header("User-Agent", "claude-cli/test")
+        .body(
+            serde_json::json!({
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 256,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "hello from Claude"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("anthropic proxy request should succeed");
+
+    assert!(
+        response.status().is_success(),
+        "unexpected status: {}",
+        response.status()
+    );
+    let body: serde_json::Value = response.json().expect("anthropic response should parse");
+    assert_eq!(body.get("type").and_then(serde_json::Value::as_str), Some("message"));
+    assert_eq!(
+        body.get("model").and_then(serde_json::Value::as_str),
+        Some("claude-sonnet-4-6")
+    );
+
+    let headers = backend.responses_headers();
+    let request_headers = headers
+        .first()
+        .expect("backend should capture translated request headers");
+    assert_eq!(
+        request_headers.get("session_id").map(String::as_str),
+        Some("claude-session-42")
+    );
+    assert_eq!(
+        request_headers.get("user-agent").map(String::as_str),
+        Some("claude-cli/test")
+    );
+    assert_eq!(
+        request_headers.get("chatgpt-account-id").map(String::as_str),
+        Some("second-account")
+    );
+
+    let translated_body = backend
+        .responses_bodies()
+        .into_iter()
+        .next()
+        .expect("backend should capture translated request body");
+    let translated_json: serde_json::Value =
+        serde_json::from_str(&translated_body).expect("translated request body should parse");
+    assert_eq!(
+        translated_json.get("model").and_then(serde_json::Value::as_str),
+        Some("gpt-5")
+    );
+    assert_eq!(
+        translated_json
+            .get("input")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|input| input.first())
+            .and_then(|item| item.get("content"))
+            .and_then(serde_json::Value::as_str),
+        Some("hello from Claude")
+    );
 }

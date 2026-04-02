@@ -66,7 +66,10 @@ const DEFAULT_CODEX_DIR: &str = ".codex";
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
+const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
+const PRODEX_CLAUDE_PROXY_API_KEY: &str = "prodex-runtime-proxy";
+const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
@@ -230,6 +233,16 @@ Notes:
   Auto-rotate is enabled by default.
   Bare `prodex <args>` is treated as `prodex run <args>`.
   A lone session id is forwarded as `codex resume <session-id>`.";
+const CLI_CLAUDE_AFTER_HELP: &str = "\
+Examples:
+  prodex claude --print \"summarize this repo\"
+  prodex claude --profile main --print \"review the latest changes\"
+  prodex claude --skip-quota-check -- --help
+
+Notes:
+  Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
+  Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
+  Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.";
 const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor
@@ -2840,6 +2853,12 @@ enum Commands {
         after_help = CLI_RUN_AFTER_HELP
     )]
     Run(RunArgs),
+    #[command(
+        trailing_var_arg = true,
+        about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
+        after_help = CLI_CLAUDE_AFTER_HELP
+    )]
+    Claude(ClaudeArgs),
     #[command(name = "__runtime-broker", hide = true)]
     RuntimeBroker(RuntimeBrokerArgs),
 }
@@ -2969,6 +2988,28 @@ struct RunArgs {
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+struct ClaudeArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching Claude Code.
+    #[arg(long)]
+    skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    base_url: Option<String>,
+    /// Arguments passed through to `claude` unchanged.
+    #[arg(value_name = "CLAUDE_ARG", allow_hyphen_values = true)]
+    claude_args: Vec<OsString>,
 }
 
 #[derive(Args, Debug)]
@@ -3623,6 +3664,20 @@ struct RuntimeProxyEndpoint {
     _lease: Option<RuntimeBrokerLease>,
 }
 
+struct RuntimeLaunchRequest<'a> {
+    profile: Option<&'a str>,
+    allow_auto_rotate: bool,
+    skip_quota_check: bool,
+    base_url: Option<&'a str>,
+    include_code_review: bool,
+    force_runtime_proxy: bool,
+}
+
+struct PreparedRuntimeLaunch {
+    codex_home: PathBuf,
+    runtime_proxy: Option<RuntimeProxyEndpoint>,
+}
+
 type RuntimeLocalWebSocket = WsSocket<Box<dyn TinyReadWrite + Send>>;
 type RuntimeUpstreamWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
 
@@ -3715,7 +3770,7 @@ struct RuntimeSseTapState {
 }
 
 enum RuntimeResponsesReply {
-    Buffered(tiny_http::ResponseBox),
+    Buffered(RuntimeBufferedResponseParts),
     Streaming(RuntimeStreamingResponse),
 }
 
@@ -3874,6 +3929,7 @@ fn run() -> Result<()> {
         Commands::Logout(selector) => handle_codex_logout(selector),
         Commands::Quota(args) => handle_quota(args),
         Commands::Run(args) => handle_run(args),
+        Commands::Claude(args) => handle_claude(args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
     }
 }
@@ -3918,6 +3974,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "logout"
             | "quota"
             | "run"
+            | "claude"
             | "help"
             | "__runtime-broker"
     )
@@ -4911,13 +4968,83 @@ fn handle_quota(args: QuotaArgs) -> Result<()> {
 
 fn handle_run(args: RunArgs) -> Result<()> {
     let codex_args = normalize_run_codex_args(&args.codex_args);
-    let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
-    let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
-    let mut selected_profile_name = profile_name.clone();
-    let explicit_profile_requested = args.profile.is_some();
     let allow_auto_rotate = !args.no_auto_rotate;
     let include_code_review = is_review_invocation(&codex_args);
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: args.profile.as_deref(),
+        allow_auto_rotate,
+        skip_quota_check: args.skip_quota_check,
+        base_url: args.base_url.as_deref(),
+        include_code_review,
+        force_runtime_proxy: false,
+    })?;
+    let runtime_proxy = prepared.runtime_proxy;
+    let runtime_args = runtime_proxy
+        .as_ref()
+        .map(|proxy| {
+            if proxy.openai_mount_path == RUNTIME_PROXY_OPENAI_MOUNT_PATH {
+                runtime_proxy_codex_args(proxy.listen_addr, &codex_args)
+            } else {
+                runtime_proxy_codex_args_with_mount_path(
+                    proxy.listen_addr,
+                    &proxy.openai_mount_path,
+                    &codex_args,
+                )
+            }
+        })
+        .unwrap_or(codex_args);
+
+    let status = run_child(&codex_bin(), &runtime_args, &prepared.codex_home, &[])?;
+    // `std::process::exit` does not run destructors, so release the broker lease
+    // before mirroring Codex's exit status back to the caller.
+    drop(runtime_proxy);
+    exit_with_status(status)
+}
+
+fn handle_claude(args: ClaudeArgs) -> Result<()> {
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: args.profile.as_deref(),
+        allow_auto_rotate: !args.no_auto_rotate,
+        skip_quota_check: args.skip_quota_check,
+        base_url: args.base_url.as_deref(),
+        include_code_review: false,
+        force_runtime_proxy: true,
+    })?;
+    let runtime_proxy = prepared
+        .runtime_proxy
+        .context("Claude Code launch requires a local runtime proxy")?;
+    let extra_env = vec![
+        (
+            "ANTHROPIC_BASE_URL",
+            OsString::from(format!("http://{}", runtime_proxy.listen_addr)),
+        ),
+        (
+            "ANTHROPIC_API_KEY",
+            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
+        ),
+        (
+            "ANTHROPIC_AUTH_TOKEN",
+            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
+        ),
+    ];
+    let status = run_child(
+        &claude_bin(),
+        &args.claude_args,
+        &prepared.codex_home,
+        &extra_env,
+    )?;
+    drop(runtime_proxy);
+    exit_with_status(status)
+}
+
+fn prepare_runtime_launch(request: RuntimeLaunchRequest<'_>) -> Result<PreparedRuntimeLaunch> {
+    let paths = AppPaths::discover()?;
+    let mut state = AppState::load(&paths)?;
+    let profile_name = resolve_profile_name(&state, request.profile)?;
+    let mut selected_profile_name = profile_name.clone();
+    let explicit_profile_requested = request.profile.is_some();
+    let allow_auto_rotate = request.allow_auto_rotate;
+    let include_code_review = request.include_code_review;
     let mut codex_home = state
         .profiles
         .get(&profile_name)
@@ -4925,10 +5052,9 @@ fn handle_run(args: RunArgs) -> Result<()> {
         .codex_home
         .clone();
 
-    if !args.skip_quota_check {
+    if !request.skip_quota_check {
         if allow_auto_rotate && !explicit_profile_requested && state.profiles.len() > 1 {
-            let current_report =
-                probe_run_profile(&state, &profile_name, 0, args.base_url.as_deref())?;
+            let current_report = probe_run_profile(&state, &profile_name, 0, request.base_url)?;
             if !run_profile_probe_is_ready(&current_report, include_code_review) {
                 let persisted_usage_snapshots =
                     load_runtime_usage_snapshots(&paths, &state.profiles).unwrap_or_default();
@@ -4936,7 +5062,7 @@ fn handle_run(args: RunArgs) -> Result<()> {
                     &state,
                     &profile_name,
                     current_report,
-                    args.base_url.as_deref(),
+                    request.base_url,
                 );
                 let ready_candidates = ready_profile_candidates(
                     &reports,
@@ -5036,14 +5162,14 @@ fn handle_run(args: RunArgs) -> Result<()> {
                 }
             }
         } else {
-            match fetch_usage(&codex_home, args.base_url.as_deref()) {
+            match fetch_usage(&codex_home, request.base_url) {
                 Ok(usage) => {
                     let blocked = collect_blocked_limits(&usage, include_code_review);
                     if !blocked.is_empty() {
                         let alternatives = find_ready_profiles(
                             &state,
                             &profile_name,
-                            args.base_url.as_deref(),
+                            request.base_url,
                             include_code_review,
                         );
 
@@ -5122,42 +5248,24 @@ fn handle_run(args: RunArgs) -> Result<()> {
         prepare_managed_codex_home(&paths, &codex_home)?;
     }
 
-    let runtime_upstream_base_url = quota_base_url(args.base_url.as_deref());
-    let runtime_proxy = if should_enable_runtime_rotation_proxy(
-        &state,
-        &selected_profile_name,
-        allow_auto_rotate,
-    ) {
-        let proxy = ensure_runtime_rotation_proxy_endpoint(
+    let runtime_upstream_base_url = quota_base_url(request.base_url);
+    let runtime_proxy = if request.force_runtime_proxy
+        || should_enable_runtime_rotation_proxy(&state, &selected_profile_name, allow_auto_rotate)
+    {
+        Some(ensure_runtime_rotation_proxy_endpoint(
             &paths,
             &selected_profile_name,
             runtime_upstream_base_url.as_str(),
             include_code_review,
-        )?;
-        Some(proxy)
+        )?)
     } else {
         None
     };
-    let runtime_args = runtime_proxy
-        .as_ref()
-        .map(|proxy| {
-            if proxy.openai_mount_path == RUNTIME_PROXY_OPENAI_MOUNT_PATH {
-                runtime_proxy_codex_args(proxy.listen_addr, &codex_args)
-            } else {
-                runtime_proxy_codex_args_with_mount_path(
-                    proxy.listen_addr,
-                    &proxy.openai_mount_path,
-                    &codex_args,
-                )
-            }
-        })
-        .unwrap_or(codex_args);
 
-    let status = run_child(&codex_bin(), &runtime_args, &codex_home)?;
-    // `std::process::exit` does not run destructors, so release the broker lease
-    // before mirroring Codex's exit status back to the caller.
-    drop(runtime_proxy);
-    exit_with_status(status)
+    Ok(PreparedRuntimeLaunch {
+        codex_home,
+        runtime_proxy,
+    })
 }
 
 fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
@@ -5939,7 +6047,7 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
         RuntimeRouteKind::Websocket
     } else if is_runtime_compact_path(path) {
         RuntimeRouteKind::Compact
-    } else if is_runtime_responses_path(path) {
+    } else if is_runtime_responses_path(path) || is_runtime_anthropic_messages_path(path) {
         RuntimeRouteKind::Responses
     } else {
         RuntimeRouteKind::Standard
@@ -6398,6 +6506,36 @@ fn handle_runtime_rotation_proxy_request(
         ),
     );
 
+    if is_runtime_anthropic_messages_path(&captured.path_and_query) {
+        let response = match proxy_runtime_anthropic_messages_request(request_id, &captured, shared)
+        {
+            Ok(response) => response,
+            Err(err) => {
+                if is_runtime_proxy_transport_failure(&err) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http anthropic_transport_failure={err:#}"
+                        ),
+                    );
+                    return;
+                } else {
+                    runtime_proxy_log(
+                        shared,
+                        format!("request={request_id} transport=http anthropic_error={err:#}"),
+                    );
+                    RuntimeResponsesReply::Buffered(build_runtime_anthropic_error_parts(
+                        502,
+                        "api_error",
+                        &err.to_string(),
+                    ))
+                }
+            }
+        };
+        respond_runtime_responses_reply(request, response);
+        return;
+    }
+
     if is_runtime_responses_path(&captured.path_and_query) {
         let response = match proxy_runtime_responses_request(request_id, &captured, shared) {
             Ok(response) => response,
@@ -6415,22 +6553,14 @@ fn handle_runtime_rotation_proxy_request(
                         shared,
                         format!("request={request_id} transport=http responses_error={err:#}"),
                     );
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response(
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
                         502,
                         &err.to_string(),
                     ))
                 }
             }
         };
-        match response {
-            RuntimeResponsesReply::Buffered(response) => {
-                let _ = request.respond(response);
-            }
-            RuntimeResponsesReply::Streaming(response) => {
-                let writer = request.into_writer();
-                let _ = write_runtime_streaming_response(writer, response);
-            }
-        }
+        respond_runtime_responses_reply(request, response);
         return;
     }
 
@@ -6455,6 +6585,18 @@ fn handle_runtime_rotation_proxy_request(
         }
     };
     let _ = request.respond(response);
+}
+
+fn respond_runtime_responses_reply(request: tiny_http::Request, response: RuntimeResponsesReply) {
+    match response {
+        RuntimeResponsesReply::Buffered(parts) => {
+            let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
+        }
+        RuntimeResponsesReply::Streaming(response) => {
+            let writer = request.into_writer();
+            let _ = write_runtime_streaming_response(writer, response);
+        }
+    }
 }
 
 fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bool {
@@ -6498,6 +6640,577 @@ fn runtime_proxy_request_headers(request: &tiny_http::Request) -> Vec<(String, S
             )
         })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeAnthropicMessagesRequest {
+    translated_request: RuntimeProxyRequest,
+    requested_model: String,
+    stream: bool,
+    want_thinking: bool,
+}
+
+fn runtime_proxy_request_header_value<'a>(
+    headers: &'a [(String, String)],
+    name: &str,
+) -> Option<&'a str> {
+    headers
+        .iter()
+        .find_map(|(header_name, value)| {
+            header_name
+                .eq_ignore_ascii_case(name)
+                .then_some(value.as_str())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn runtime_proxy_claude_session_id(request: &RuntimeProxyRequest) -> Option<String> {
+    runtime_proxy_request_header_value(&request.headers, "x-claude-code-session-id")
+        .or_else(|| runtime_proxy_request_header_value(&request.headers, "session_id"))
+        .map(str::to_string)
+}
+
+fn runtime_proxy_claude_target_model(requested_model: &str) -> String {
+    if let Some(override_model) = env::var("PRODEX_CLAUDE_MODEL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return override_model;
+    }
+
+    let normalized = requested_model.trim();
+    let lower = normalized.to_ascii_lowercase();
+    if lower.starts_with("gpt-")
+        || lower.starts_with("o1")
+        || lower.starts_with("o3")
+        || lower.starts_with("o4")
+        || lower.contains("codex")
+    {
+        normalized.to_string()
+    } else if lower.contains("haiku") {
+        "gpt-5-mini".to_string()
+    } else {
+        DEFAULT_PRODEX_CLAUDE_MODEL.to_string()
+    }
+}
+
+fn runtime_proxy_anthropic_wants_thinking(value: &serde_json::Value) -> bool {
+    value
+        .get("thinking")
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|thinking| matches!(thinking, "enabled" | "adaptive"))
+}
+
+fn runtime_proxy_anthropic_reasoning_effort(value: &serde_json::Value) -> Option<String> {
+    if let Some(effort) = value
+        .get("output_config")
+        .and_then(|config| config.get("effort"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+    {
+        return Some(effort.to_string());
+    }
+
+    let budget_tokens = value
+        .get("thinking")
+        .and_then(|thinking| thinking.get("budget_tokens"))
+        .and_then(serde_json::Value::as_u64)?;
+    Some(
+        if budget_tokens <= 2_048 {
+            "low"
+        } else if budget_tokens <= 8_192 {
+            "medium"
+        } else {
+            "high"
+        }
+        .to_string(),
+    )
+}
+
+fn runtime_proxy_anthropic_system_instructions(
+    value: &serde_json::Value,
+) -> Result<Option<String>> {
+    let Some(system) = value.get("system") else {
+        return Ok(None);
+    };
+    if let Some(text) = system.as_str() {
+        let text = text.trim();
+        return Ok((!text.is_empty()).then(|| text.to_string()));
+    }
+    let blocks = system
+        .as_array()
+        .context("Anthropic system content must be a string or an array of text blocks")?;
+    let text = blocks
+        .iter()
+        .filter_map(|block| {
+            (block.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                .then(|| block.get("text").and_then(serde_json::Value::as_str))
+                .flatten()
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    Ok((!text.trim().is_empty()).then_some(text))
+}
+
+fn runtime_proxy_anthropic_normalize_tool_schema(schema: &serde_json::Value) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(map)
+            if map.get("type").and_then(serde_json::Value::as_str) == Some("object")
+                && !map.contains_key("properties") =>
+        {
+            let mut normalized = map.clone();
+            normalized.insert(
+                "properties".to_string(),
+                serde_json::Value::Object(serde_json::Map::new()),
+            );
+            serde_json::Value::Object(normalized)
+        }
+        _ => schema.clone(),
+    }
+}
+
+fn runtime_proxy_translate_anthropic_tools(
+    value: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>> {
+    let Some(tools) = value.get("tools") else {
+        return Ok(Vec::new());
+    };
+    let tools = tools
+        .as_array()
+        .context("Anthropic tools must be an array when present")?;
+    tools
+        .iter()
+        .map(runtime_proxy_translate_anthropic_tool)
+        .collect()
+}
+
+fn runtime_proxy_translate_anthropic_tool(tool: &serde_json::Value) -> Result<serde_json::Value> {
+    let name = tool
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("Anthropic tool definition is missing a non-empty name")?;
+    let mut translated = serde_json::Map::new();
+    translated.insert(
+        "type".to_string(),
+        serde_json::Value::String("function".to_string()),
+    );
+    translated.insert(
+        "name".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+    if let Some(description) = tool
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        translated.insert(
+            "description".to_string(),
+            serde_json::Value::String(description.to_string()),
+        );
+    }
+    if let Some(schema) = tool.get("input_schema") {
+        translated.insert(
+            "parameters".to_string(),
+            runtime_proxy_anthropic_normalize_tool_schema(schema),
+        );
+    }
+    Ok(serde_json::Value::Object(translated))
+}
+
+fn runtime_proxy_translate_anthropic_tool_choice(
+    value: &serde_json::Value,
+) -> Result<Option<serde_json::Value>> {
+    let Some(choice) = value.get("tool_choice") else {
+        return Ok(None);
+    };
+    let choice_type = choice
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("Anthropic tool_choice requires a non-empty type")?;
+    Ok(match choice_type {
+        "auto" => Some(serde_json::Value::String("auto".to_string())),
+        "any" => Some(serde_json::Value::String("required".to_string())),
+        "tool" => {
+            let name = choice
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .context("Anthropic tool_choice type=tool requires a non-empty name")?;
+            Some(serde_json::json!({
+                "type": "function",
+                "name": name,
+            }))
+        }
+        other => bail!("Unsupported Anthropic tool_choice type '{other}'"),
+    })
+}
+
+fn runtime_proxy_translate_anthropic_image_part(
+    block: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let source = block.get("source")?;
+    if source.get("type").and_then(serde_json::Value::as_str) != Some("base64") {
+        return None;
+    }
+    let media_type = source
+        .get("media_type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let data = source
+        .get("data")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(serde_json::json!({
+        "type": "input_image",
+        "image_url": format!("data:{media_type};base64,{data}"),
+    }))
+}
+
+fn runtime_proxy_translate_anthropic_message_content(
+    role: &str,
+    content: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>> {
+    if let Some(text) = content.as_str() {
+        return Ok(vec![serde_json::json!({
+            "role": role,
+            "content": text,
+        })]);
+    }
+
+    let blocks = content
+        .as_array()
+        .context("Anthropic message content must be a string or an array of content blocks")?;
+    let mut input_items = Vec::new();
+    let has_tool_blocks = blocks.iter().any(|block| {
+        block
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|block_type| matches!(block_type, "tool_use" | "tool_result"))
+    });
+
+    match role {
+        "user" => {
+            if let Some(message_content) =
+                runtime_proxy_translate_anthropic_user_content_blocks(blocks)
+            {
+                input_items.push(serde_json::json!({
+                    "role": "user",
+                    "content": message_content,
+                }));
+            } else if !has_tool_blocks {
+                input_items.push(serde_json::json!({
+                    "role": "user",
+                    "content": "",
+                }));
+            }
+        }
+        "assistant" => {
+            let text = runtime_proxy_translate_anthropic_text_blocks(blocks);
+            if !text.is_empty() || !has_tool_blocks {
+                input_items.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": text,
+                }));
+            }
+        }
+        other => bail!("Unsupported Anthropic role '{other}'"),
+    }
+
+    for block in blocks {
+        match block.get("type").and_then(serde_json::Value::as_str) {
+            Some("tool_use") => {
+                let name = block
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .context("Anthropic tool_use block requires a non-empty name")?;
+                let call_id = block
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .context("Anthropic tool_use block requires a non-empty id")?;
+                let arguments = serde_json::to_string(
+                    block
+                        .get("input")
+                        .unwrap_or(&serde_json::Value::Object(serde_json::Map::new())),
+                )
+                .context("failed to serialize Anthropic tool_use input")?;
+                input_items.push(serde_json::json!({
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                }));
+            }
+            Some("tool_result") => {
+                input_items.extend(runtime_proxy_translate_anthropic_tool_result(block)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(input_items)
+}
+
+fn runtime_proxy_translate_anthropic_user_content_blocks(
+    blocks: &[serde_json::Value],
+) -> Option<serde_json::Value> {
+    let mut text_blocks = Vec::new();
+    let mut parts = Vec::new();
+    let mut saw_image = false;
+
+    for block in blocks {
+        match block.get("type").and_then(serde_json::Value::as_str) {
+            Some("text") => {
+                let text = block
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if saw_image {
+                    parts.push(serde_json::json!({
+                        "type": "input_text",
+                        "text": text,
+                    }));
+                } else {
+                    text_blocks.push(text.to_string());
+                }
+            }
+            Some("image") => {
+                if !saw_image {
+                    for text in text_blocks.drain(..) {
+                        parts.push(serde_json::json!({
+                            "type": "input_text",
+                            "text": text,
+                        }));
+                    }
+                }
+                saw_image = true;
+                if let Some(part) = runtime_proxy_translate_anthropic_image_part(block) {
+                    parts.push(part);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if saw_image {
+        (!parts.is_empty()).then_some(serde_json::Value::Array(parts))
+    } else {
+        let text = text_blocks.join("\n");
+        (!text.is_empty()).then_some(serde_json::Value::String(text))
+    }
+}
+
+fn runtime_proxy_translate_anthropic_text_blocks(blocks: &[serde_json::Value]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| {
+            (block.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                .then(|| block.get("text").and_then(serde_json::Value::as_str))
+                .flatten()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn runtime_proxy_translate_anthropic_tool_result(
+    block: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>> {
+    let call_id = block
+        .get("tool_use_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("Anthropic tool_result block requires a non-empty tool_use_id")?;
+    let mut output_text = String::new();
+    let mut image_parts = Vec::new();
+
+    match block.get("content") {
+        Some(serde_json::Value::String(text)) => {
+            output_text = text.clone();
+        }
+        Some(serde_json::Value::Array(items)) => {
+            output_text = items
+                .iter()
+                .filter_map(|item| {
+                    (item.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                        .then(|| item.get("text").and_then(serde_json::Value::as_str))
+                        .flatten()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            image_parts.extend(
+                items
+                    .iter()
+                    .filter_map(runtime_proxy_translate_anthropic_image_part),
+            );
+        }
+        Some(_) => {
+            bail!("Anthropic tool_result content must be a string or an array of content blocks")
+        }
+        None => {}
+    }
+
+    if block
+        .get("is_error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        output_text = if output_text.is_empty() {
+            "Error".to_string()
+        } else {
+            format!("Error: {output_text}")
+        };
+    }
+
+    let mut translated = vec![serde_json::json!({
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": output_text,
+    })];
+    if !image_parts.is_empty() {
+        translated.push(serde_json::json!({
+            "role": "user",
+            "content": image_parts,
+        }));
+    }
+    Ok(translated)
+}
+
+fn translate_runtime_anthropic_messages_request(
+    request: &RuntimeProxyRequest,
+) -> Result<RuntimeAnthropicMessagesRequest> {
+    let value = serde_json::from_slice::<serde_json::Value>(&request.body)
+        .context("failed to parse Anthropic request body as JSON")?;
+    let requested_model = value
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("Anthropic request requires a non-empty model")?
+        .to_string();
+    let messages = value
+        .get("messages")
+        .and_then(serde_json::Value::as_array)
+        .context("Anthropic request requires a messages array")?;
+    if messages.is_empty() {
+        bail!("Anthropic request requires at least one message");
+    }
+
+    let mut input = Vec::new();
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .context("Anthropic message is missing a non-empty role")?;
+        let content = message
+            .get("content")
+            .context("Anthropic message is missing content")?;
+        input.extend(runtime_proxy_translate_anthropic_message_content(
+            role, content,
+        )?);
+    }
+    if input.is_empty() {
+        input.push(serde_json::json!({
+            "role": "user",
+            "content": "",
+        }));
+    }
+
+    let mut translated_body = serde_json::Map::new();
+    translated_body.insert(
+        "model".to_string(),
+        serde_json::Value::String(runtime_proxy_claude_target_model(&requested_model)),
+    );
+    translated_body.insert("input".to_string(), serde_json::Value::Array(input));
+    translated_body.insert(
+        "stream".to_string(),
+        serde_json::Value::Bool(
+            value
+                .get("stream")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        ),
+    );
+    translated_body.insert("store".to_string(), serde_json::Value::Bool(false));
+    if let Some(max_tokens) = value.get("max_tokens").and_then(serde_json::Value::as_u64) {
+        translated_body.insert(
+            "max_output_tokens".to_string(),
+            serde_json::Value::Number(max_tokens.into()),
+        );
+    }
+    if let Some(instructions) = runtime_proxy_anthropic_system_instructions(&value)? {
+        translated_body.insert(
+            "instructions".to_string(),
+            serde_json::Value::String(instructions),
+        );
+    }
+    let translated_tools = runtime_proxy_translate_anthropic_tools(&value)?;
+    if !translated_tools.is_empty() {
+        translated_body.insert(
+            "tools".to_string(),
+            serde_json::Value::Array(translated_tools),
+        );
+    }
+    if let Some(tool_choice) = runtime_proxy_translate_anthropic_tool_choice(&value)? {
+        translated_body.insert("tool_choice".to_string(), tool_choice);
+    }
+    if let Some(effort) = runtime_proxy_anthropic_reasoning_effort(&value) {
+        translated_body.insert(
+            "reasoning".to_string(),
+            serde_json::json!({
+                "summary": "auto",
+                "effort": effort,
+            }),
+        );
+    } else if runtime_proxy_anthropic_wants_thinking(&value) {
+        translated_body.insert(
+            "reasoning".to_string(),
+            serde_json::json!({
+                "summary": "auto",
+            }),
+        );
+    }
+
+    let mut translated_headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+    if let Some(user_agent) = runtime_proxy_request_header_value(&request.headers, "User-Agent") {
+        translated_headers.push(("User-Agent".to_string(), user_agent.to_string()));
+    }
+    if let Some(session_id) = runtime_proxy_claude_session_id(request) {
+        translated_headers.push(("session_id".to_string(), session_id));
+    }
+
+    Ok(RuntimeAnthropicMessagesRequest {
+        translated_request: RuntimeProxyRequest {
+            method: request.method.clone(),
+            path_and_query: format!("{RUNTIME_PROXY_OPENAI_UPSTREAM_PATH}/responses"),
+            headers: translated_headers,
+            body: serde_json::to_vec(&serde_json::Value::Object(translated_body))
+                .context("failed to serialize translated Anthropic request")?,
+        },
+        requested_model,
+        stream: value
+            .get("stream")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        want_thinking: runtime_proxy_anthropic_wants_thinking(&value),
+    })
 }
 
 fn runtime_request_previous_response_id(request: &RuntimeProxyRequest) -> Option<String> {
@@ -11285,6 +11998,27 @@ fn attempt_runtime_standard_request(
     })
 }
 
+fn proxy_runtime_anthropic_messages_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+) -> Result<RuntimeResponsesReply> {
+    let translated_request = match translate_runtime_anthropic_messages_request(request) {
+        Ok(translated_request) => translated_request,
+        Err(err) => {
+            return Ok(RuntimeResponsesReply::Buffered(
+                build_runtime_anthropic_error_parts(400, "invalid_request_error", &err.to_string()),
+            ));
+        }
+    };
+    let response = proxy_runtime_responses_request(
+        request_id,
+        &translated_request.translated_request,
+        shared,
+    )?;
+    translate_runtime_responses_reply_to_anthropic(response, &translated_request)
+}
+
 fn proxy_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -11417,13 +12151,13 @@ fn proxy_runtime_responses_request(
                 return Ok(match last_failure {
                     Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
                     _ if saw_inflight_saturation => {
-                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                             503,
                             "service_unavailable",
                             "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                         ))
                     }
-                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                         503,
                         "service_unavailable",
                         runtime_proxy_local_selection_failure_message(),
@@ -11600,13 +12334,13 @@ fn proxy_runtime_responses_request(
             return Ok(match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
                 _ if saw_inflight_saturation => {
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                         503,
                         "service_unavailable",
                         "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                     ))
                 }
-                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                     503,
                     "service_unavailable",
                     runtime_proxy_local_selection_failure_message(),
@@ -11681,13 +12415,13 @@ fn proxy_runtime_responses_request(
                 return Ok(match last_failure {
                     Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
                     _ if saw_inflight_saturation => {
-                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                             503,
                             "service_unavailable",
                             "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                         ))
                     }
-                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                         503,
                         "service_unavailable",
                         runtime_proxy_local_selection_failure_message(),
@@ -11864,13 +12598,13 @@ fn proxy_runtime_responses_request(
             return Ok(match last_failure {
                 Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
                 _ if saw_inflight_saturation => {
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                         503,
                         "service_unavailable",
                         "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                     ))
                 }
-                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_response(
+                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                     503,
                     "service_unavailable",
                     runtime_proxy_local_selection_failure_message(),
@@ -12178,8 +12912,7 @@ fn attempt_runtime_responses_request(
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
         let retryable_previous =
             status == 400 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
-        let response =
-            RuntimeResponsesReply::Buffered(build_runtime_proxy_response_from_parts(parts));
+        let response = RuntimeResponsesReply::Buffered(parts);
 
         if retryable_quota {
             return Ok(RuntimeResponsesAttempt::QuotaBlocked {
@@ -14485,9 +15218,7 @@ fn prepare_runtime_proxy_responses_success(
         }
         return Ok(RuntimeResponsesAttempt::Success {
             profile_name: profile_name.to_string(),
-            response: RuntimeResponsesReply::Buffered(build_runtime_proxy_response_from_parts(
-                parts,
-            )),
+            response: RuntimeResponsesReply::Buffered(parts),
         });
     }
 
@@ -14958,12 +15689,24 @@ fn write_runtime_streaming_response(
     Ok(())
 }
 
-fn build_runtime_proxy_text_response(status: u16, message: &str) -> tiny_http::ResponseBox {
-    let mut response = TinyResponse::from_string(message.to_string()).with_status_code(status);
-    if let Ok(header) = TinyHeader::from_bytes("Content-Type", "text/plain; charset=utf-8") {
-        response = response.with_header(header);
+fn build_runtime_proxy_text_response_parts(
+    status: u16,
+    message: &str,
+) -> RuntimeBufferedResponseParts {
+    RuntimeBufferedResponseParts {
+        status,
+        headers: vec![(
+            "Content-Type".to_string(),
+            b"text/plain; charset=utf-8".to_vec(),
+        )],
+        body: message.as_bytes().to_vec(),
     }
-    response.boxed()
+}
+
+fn build_runtime_proxy_text_response(status: u16, message: &str) -> tiny_http::ResponseBox {
+    build_runtime_proxy_response_from_parts(build_runtime_proxy_text_response_parts(
+        status, message,
+    ))
 }
 
 fn runtime_proxy_header_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
@@ -15001,11 +15744,11 @@ fn is_runtime_proxy_transport_failure(err: &anyhow::Error) -> bool {
     })
 }
 
-fn build_runtime_proxy_json_error_response(
+fn build_runtime_proxy_json_error_parts(
     status: u16,
     code: &str,
     message: &str,
-) -> tiny_http::ResponseBox {
+) -> RuntimeBufferedResponseParts {
     let body = serde_json::json!({
         "error": {
             "code": code,
@@ -15013,11 +15756,21 @@ fn build_runtime_proxy_json_error_response(
         }
     })
     .to_string();
-    let mut response = TinyResponse::from_string(body).with_status_code(status);
-    if let Ok(header) = TinyHeader::from_bytes("Content-Type", "application/json") {
-        response = response.with_header(header);
+    RuntimeBufferedResponseParts {
+        status,
+        headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
+        body: body.into_bytes(),
     }
-    response.boxed()
+}
+
+fn build_runtime_proxy_json_error_response(
+    status: u16,
+    code: &str,
+    message: &str,
+) -> tiny_http::ResponseBox {
+    build_runtime_proxy_response_from_parts(build_runtime_proxy_json_error_parts(
+        status, code, message,
+    ))
 }
 
 struct RuntimeBufferedResponseParts {
@@ -15029,6 +15782,10 @@ struct RuntimeBufferedResponseParts {
 fn is_runtime_responses_path(path_and_query: &str) -> bool {
     let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
     path_without_query(normalized_path_and_query.as_ref()).ends_with("/codex/responses")
+}
+
+fn is_runtime_anthropic_messages_path(path_and_query: &str) -> bool {
+    path_without_query(path_and_query).ends_with(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH)
 }
 
 fn is_runtime_compact_path(path_and_query: &str) -> bool {
@@ -15536,6 +16293,1122 @@ fn build_runtime_proxy_response_from_parts(
     .boxed()
 }
 
+fn runtime_buffered_response_content_type(parts: &RuntimeBufferedResponseParts) -> Option<&str> {
+    parts.headers.iter().find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("content-type")
+            .then(|| std::str::from_utf8(value).ok())
+            .flatten()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn runtime_anthropic_message_id() -> String {
+    format!("msg_{}", runtime_random_token("claude").replace('-', ""))
+}
+
+fn runtime_anthropic_error_type_for_status(status: u16) -> &'static str {
+    match status {
+        400 => "invalid_request_error",
+        401 => "authentication_error",
+        403 => "permission_error",
+        404 => "not_found_error",
+        429 => "rate_limit_error",
+        500 | 502 | 503 | 504 | 529 => "overloaded_error",
+        _ => "api_error",
+    }
+}
+
+fn runtime_anthropic_error_message_from_parts(parts: &RuntimeBufferedResponseParts) -> String {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&parts.body) {
+        if let Some(message) = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return message.to_string();
+        }
+        if let Some(message) = value
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return message.to_string();
+        }
+    }
+    let body = String::from_utf8_lossy(&parts.body).trim().to_string();
+    if body.is_empty() {
+        "Upstream runtime proxy request failed.".to_string()
+    } else {
+        body
+    }
+}
+
+fn build_runtime_anthropic_error_parts(
+    status: u16,
+    error_type: &str,
+    message: &str,
+) -> RuntimeBufferedResponseParts {
+    RuntimeBufferedResponseParts {
+        status,
+        headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
+        body: serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": error_type,
+                "message": message,
+            }
+        })
+        .to_string()
+        .into_bytes(),
+    }
+}
+
+fn runtime_anthropic_error_from_upstream_parts(
+    parts: RuntimeBufferedResponseParts,
+) -> RuntimeBufferedResponseParts {
+    let status = parts.status;
+    let message = runtime_anthropic_error_message_from_parts(&parts);
+    build_runtime_anthropic_error_parts(
+        status,
+        runtime_anthropic_error_type_for_status(status),
+        &message,
+    )
+}
+
+fn runtime_anthropic_usage_from_value(value: &serde_json::Value) -> (u64, u64, Option<u64>) {
+    let usage = value.get("usage").or_else(|| {
+        value
+            .get("response")
+            .and_then(|response| response.get("usage"))
+    });
+    let input_tokens = usage
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .and_then(|usage| usage.get("output_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .and_then(|usage| usage.get("input_tokens_details"))
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(serde_json::Value::as_u64);
+    (input_tokens, output_tokens, cached_tokens)
+}
+
+fn runtime_anthropic_tool_input_from_arguments(arguments: &str) -> serde_json::Value {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .filter(|value| value.is_object())
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()))
+}
+
+fn runtime_anthropic_reasoning_summary_text(item: &serde_json::Value) -> String {
+    item.get("summary")
+        .and_then(serde_json::Value::as_array)
+        .map(|summary| {
+            summary
+                .iter()
+                .filter_map(|entry| {
+                    entry
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .or_else(|| {
+                            (entry.get("type").and_then(serde_json::Value::as_str)
+                                == Some("summary_text"))
+                            .then(|| entry.get("text").and_then(serde_json::Value::as_str))
+                            .flatten()
+                        })
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+fn runtime_anthropic_output_blocks_from_json(
+    output: &[serde_json::Value],
+    want_thinking: bool,
+) -> (Vec<serde_json::Value>, bool) {
+    let mut content = Vec::new();
+    let mut has_tool_calls = false;
+
+    for item in output {
+        match item.get("type").and_then(serde_json::Value::as_str) {
+            Some("reasoning") if want_thinking => {
+                let thinking = runtime_anthropic_reasoning_summary_text(item);
+                if !thinking.is_empty() {
+                    content.push(serde_json::json!({
+                        "type": "thinking",
+                        "thinking": thinking,
+                    }));
+                }
+            }
+            Some("message") => {
+                if let Some(parts) = item.get("content").and_then(serde_json::Value::as_array) {
+                    let mut text = String::new();
+                    for part in parts {
+                        if part
+                            .get("type")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|part_type| matches!(part_type, "output_text" | "text"))
+                            && let Some(part_text) =
+                                part.get("text").and_then(serde_json::Value::as_str)
+                        {
+                            text.push_str(part_text);
+                        }
+                    }
+                    if !text.is_empty() {
+                        content.push(serde_json::json!({
+                            "type": "text",
+                            "text": text,
+                        }));
+                    }
+                }
+            }
+            Some("function_call") => {
+                has_tool_calls = true;
+                content.push(serde_json::json!({
+                    "type": "tool_use",
+                    "id": item
+                        .get("call_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("tool_call"),
+                    "name": item
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("tool"),
+                    "input": runtime_anthropic_tool_input_from_arguments(
+                        item.get("arguments")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("{}"),
+                    ),
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    if content.is_empty() {
+        content.push(serde_json::json!({
+            "type": "text",
+            "text": "",
+        }));
+    }
+
+    (content, has_tool_calls)
+}
+
+fn runtime_anthropic_response_from_json_value(
+    value: &serde_json::Value,
+    requested_model: &str,
+    want_thinking: bool,
+) -> serde_json::Value {
+    let (input_tokens, output_tokens, cached_tokens) = runtime_anthropic_usage_from_value(value);
+    let output = value
+        .get("output")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let (content, has_tool_calls) =
+        runtime_anthropic_output_blocks_from_json(&output, want_thinking);
+    let mut usage = serde_json::Map::new();
+    usage.insert(
+        "input_tokens".to_string(),
+        serde_json::Value::Number(input_tokens.into()),
+    );
+    usage.insert(
+        "output_tokens".to_string(),
+        serde_json::Value::Number(output_tokens.into()),
+    );
+    if let Some(cached_tokens) = cached_tokens {
+        usage.insert(
+            "cache_read_input_tokens".to_string(),
+            serde_json::Value::Number(cached_tokens.into()),
+        );
+    }
+    serde_json::json!({
+        "id": runtime_anthropic_message_id(),
+        "type": "message",
+        "role": "assistant",
+        "content": content,
+        "model": requested_model,
+        "stop_reason": if has_tool_calls { "tool_use" } else { "end_turn" },
+        "stop_sequence": serde_json::Value::Null,
+        "usage": usage,
+    })
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeAnthropicCollectedToolUse {
+    call_id: String,
+    name: String,
+    arguments: String,
+    saw_delta: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeAnthropicCollectedResponse {
+    content: Vec<serde_json::Value>,
+    pending_text: String,
+    pending_thinking: String,
+    active_tool_use: Option<RuntimeAnthropicCollectedToolUse>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: Option<u64>,
+    has_tool_calls: bool,
+    want_thinking: bool,
+}
+
+impl RuntimeAnthropicCollectedResponse {
+    fn flush_text(&mut self) {
+        if self.pending_text.is_empty() {
+            return;
+        }
+        self.content.push(serde_json::json!({
+            "type": "text",
+            "text": std::mem::take(&mut self.pending_text),
+        }));
+    }
+
+    fn flush_thinking(&mut self) {
+        if self.pending_thinking.is_empty() {
+            return;
+        }
+        self.content.push(serde_json::json!({
+            "type": "thinking",
+            "thinking": std::mem::take(&mut self.pending_thinking),
+        }));
+    }
+
+    fn flush_pending_textual_content(&mut self) {
+        self.flush_thinking();
+        self.flush_text();
+    }
+
+    fn close_active_tool_use(&mut self) {
+        let Some(active_tool_use) = self.active_tool_use.take() else {
+            return;
+        };
+        self.has_tool_calls = true;
+        self.content.push(serde_json::json!({
+            "type": "tool_use",
+            "id": active_tool_use.call_id,
+            "name": active_tool_use.name,
+            "input": runtime_anthropic_tool_input_from_arguments(&active_tool_use.arguments),
+        }));
+    }
+
+    fn observe_event(&mut self, value: &serde_json::Value) -> Result<()> {
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("response.reasoning_summary_text.delta") if self.want_thinking => {
+                self.flush_text();
+                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+                    self.pending_thinking.push_str(delta);
+                }
+            }
+            Some("response.output_text.delta") => {
+                self.flush_thinking();
+                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+                    self.pending_text.push_str(delta);
+                }
+            }
+            Some("response.output_item.added") => {
+                if value
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("function_call")
+                {
+                    self.flush_pending_textual_content();
+                    self.active_tool_use = Some(RuntimeAnthropicCollectedToolUse {
+                        call_id: value
+                            .get("item")
+                            .and_then(|item| item.get("call_id"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("tool_call")
+                            .to_string(),
+                        name: value
+                            .get("item")
+                            .and_then(|item| item.get("name"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("tool")
+                            .to_string(),
+                        ..RuntimeAnthropicCollectedToolUse::default()
+                    });
+                }
+            }
+            Some("response.function_call_arguments.delta") => {
+                if let Some(active_tool_use) = self.active_tool_use.as_mut()
+                    && let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str)
+                {
+                    active_tool_use.saw_delta = true;
+                    active_tool_use.arguments.push_str(delta);
+                }
+            }
+            Some("response.function_call_arguments.done") => {
+                if let Some(active_tool_use) = self.active_tool_use.as_mut()
+                    && let Some(arguments) =
+                        value.get("arguments").and_then(serde_json::Value::as_str)
+                    && !active_tool_use.saw_delta
+                {
+                    active_tool_use.arguments = arguments.to_string();
+                }
+            }
+            Some("response.output_item.done") => {
+                if value
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("function_call")
+                {
+                    if let Some(active_tool_use) = self.active_tool_use.as_mut() {
+                        if let Some(arguments) = value
+                            .get("item")
+                            .and_then(|item| item.get("arguments"))
+                            .and_then(serde_json::Value::as_str)
+                            && !active_tool_use.saw_delta
+                        {
+                            active_tool_use.arguments = arguments.to_string();
+                        }
+                        if let Some(name) = value
+                            .get("item")
+                            .and_then(|item| item.get("name"))
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            active_tool_use.name = name.to_string();
+                        }
+                    }
+                    self.close_active_tool_use();
+                }
+            }
+            Some("response.completed") => {
+                let (input_tokens, output_tokens, cached_tokens) =
+                    runtime_anthropic_usage_from_value(value);
+                self.input_tokens = input_tokens;
+                self.output_tokens = output_tokens;
+                self.cached_tokens = cached_tokens;
+            }
+            Some("error" | "response.failed") => {
+                let message = value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("Codex returned an error.");
+                bail!(message.to_string());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn into_response(mut self, requested_model: &str) -> serde_json::Value {
+        self.close_active_tool_use();
+        self.flush_pending_textual_content();
+        if self.content.is_empty() {
+            self.content.push(serde_json::json!({
+                "type": "text",
+                "text": "",
+            }));
+        }
+        let mut usage = serde_json::Map::new();
+        usage.insert(
+            "input_tokens".to_string(),
+            serde_json::Value::Number(self.input_tokens.into()),
+        );
+        usage.insert(
+            "output_tokens".to_string(),
+            serde_json::Value::Number(self.output_tokens.into()),
+        );
+        if let Some(cached_tokens) = self.cached_tokens {
+            usage.insert(
+                "cache_read_input_tokens".to_string(),
+                serde_json::Value::Number(cached_tokens.into()),
+            );
+        }
+        serde_json::json!({
+            "id": runtime_anthropic_message_id(),
+            "type": "message",
+            "role": "assistant",
+            "content": self.content,
+            "model": requested_model,
+            "stop_reason": if self.has_tool_calls { "tool_use" } else { "end_turn" },
+            "stop_sequence": serde_json::Value::Null,
+            "usage": usage,
+        })
+    }
+}
+
+fn runtime_anthropic_response_from_sse_bytes(
+    body: &[u8],
+    requested_model: &str,
+    want_thinking: bool,
+) -> Result<serde_json::Value> {
+    let mut collected = RuntimeAnthropicCollectedResponse {
+        want_thinking,
+        ..RuntimeAnthropicCollectedResponse::default()
+    };
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+
+    let mut process_event = |data_lines: &mut Vec<String>| -> Result<()> {
+        if data_lines.is_empty() {
+            return Ok(());
+        }
+        let payload = data_lines.join("\n");
+        let value = serde_json::from_str::<serde_json::Value>(&payload)
+            .context("failed to parse buffered Responses SSE payload")?;
+        collected.observe_event(&value)?;
+        data_lines.clear();
+        Ok(())
+    };
+
+    for byte in body {
+        line.push(*byte);
+        if *byte != b'\n' {
+            continue;
+        }
+        let line_text = String::from_utf8_lossy(&line);
+        let trimmed = line_text.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            process_event(&mut data_lines)?;
+            line.clear();
+            continue;
+        }
+        if let Some(payload) = trimmed.strip_prefix("data:") {
+            data_lines.push(payload.trim_start().to_string());
+        }
+        line.clear();
+    }
+    if !line.is_empty() {
+        let line_text = String::from_utf8_lossy(&line);
+        let trimmed = line_text.trim_end_matches(['\r', '\n']);
+        if let Some(payload) = trimmed.strip_prefix("data:") {
+            data_lines.push(payload.trim_start().to_string());
+        }
+    }
+    process_event(&mut data_lines)?;
+    Ok(collected.into_response(requested_model))
+}
+
+fn runtime_anthropic_json_response_parts(value: serde_json::Value) -> RuntimeBufferedResponseParts {
+    RuntimeBufferedResponseParts {
+        status: 200,
+        headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
+        body: serde_json::to_vec(&value).unwrap_or_else(|_| b"{}".to_vec()),
+    }
+}
+
+fn buffer_runtime_streaming_response_parts(
+    response: RuntimeStreamingResponse,
+) -> Result<RuntimeBufferedResponseParts> {
+    let RuntimeStreamingResponse {
+        status,
+        headers,
+        mut body,
+        ..
+    } = response;
+    let mut buffered_body = Vec::new();
+    body.read_to_end(&mut buffered_body)
+        .context("failed to buffer streaming runtime response")?;
+    Ok(RuntimeBufferedResponseParts {
+        status,
+        headers: headers
+            .into_iter()
+            .map(|(name, value)| (name, value.into_bytes()))
+            .collect(),
+        body: buffered_body,
+    })
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeAnthropicStreamToolUse {
+    call_id: String,
+    name: String,
+    arguments: String,
+    saw_delta: bool,
+}
+
+struct RuntimeAnthropicSseReader {
+    inner: Box<dyn Read + Send>,
+    pending: VecDeque<u8>,
+    upstream_line: Vec<u8>,
+    upstream_data_lines: Vec<String>,
+    message_id: String,
+    model: String,
+    want_thinking: bool,
+    content_index: usize,
+    thinking_block_open: bool,
+    text_block_open: bool,
+    has_tool_calls: bool,
+    has_content: bool,
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: Option<u64>,
+    active_tool_use: Option<RuntimeAnthropicStreamToolUse>,
+    terminal_sent: bool,
+    inner_finished: bool,
+}
+
+impl RuntimeAnthropicSseReader {
+    fn new(inner: Box<dyn Read + Send>, model: String, want_thinking: bool) -> Self {
+        let mut reader = Self {
+            inner,
+            pending: VecDeque::new(),
+            upstream_line: Vec::new(),
+            upstream_data_lines: Vec::new(),
+            message_id: runtime_anthropic_message_id(),
+            model,
+            want_thinking,
+            content_index: 0,
+            thinking_block_open: false,
+            text_block_open: false,
+            has_tool_calls: false,
+            has_content: false,
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_tokens: None,
+            active_tool_use: None,
+            terminal_sent: false,
+            inner_finished: false,
+        };
+        reader.push_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {
+                    "id": reader.message_id.clone(),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": reader.model.clone(),
+                    "stop_reason": serde_json::Value::Null,
+                    "stop_sequence": serde_json::Value::Null,
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                    }
+                }
+            }),
+        );
+        reader
+    }
+
+    fn push_event(&mut self, event_type: &str, data: serde_json::Value) {
+        let frame = format!(
+            "event: {event_type}\ndata: {}\n\n",
+            serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string())
+        );
+        self.pending.extend(frame.into_bytes());
+    }
+
+    fn close_thinking_block(&mut self) {
+        if !self.thinking_block_open {
+            return;
+        }
+        self.push_event(
+            "content_block_stop",
+            serde_json::json!({
+                "type": "content_block_stop",
+                "index": self.content_index,
+            }),
+        );
+        self.content_index += 1;
+        self.thinking_block_open = false;
+    }
+
+    fn close_text_block(&mut self) {
+        if !self.text_block_open {
+            return;
+        }
+        self.push_event(
+            "content_block_stop",
+            serde_json::json!({
+                "type": "content_block_stop",
+                "index": self.content_index,
+            }),
+        );
+        self.content_index += 1;
+        self.text_block_open = false;
+    }
+
+    fn ensure_text_block(&mut self) {
+        if self.text_block_open {
+            return;
+        }
+        self.push_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start",
+                "index": self.content_index,
+                "content_block": {
+                    "type": "text",
+                    "text": "",
+                }
+            }),
+        );
+        self.text_block_open = true;
+    }
+
+    fn ensure_thinking_block(&mut self) {
+        if self.thinking_block_open {
+            return;
+        }
+        self.push_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start",
+                "index": self.content_index,
+                "content_block": {
+                    "type": "thinking",
+                    "thinking": "",
+                }
+            }),
+        );
+        self.thinking_block_open = true;
+    }
+
+    fn start_tool_use_block(&mut self, call_id: &str, name: &str) {
+        self.close_thinking_block();
+        self.close_text_block();
+        self.push_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start",
+                "index": self.content_index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": name,
+                    "input": {},
+                }
+            }),
+        );
+        self.active_tool_use = Some(RuntimeAnthropicStreamToolUse {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            ..RuntimeAnthropicStreamToolUse::default()
+        });
+        self.has_content = true;
+        self.has_tool_calls = true;
+    }
+
+    fn finish_active_tool_use(
+        &mut self,
+        arguments_override: Option<&str>,
+        name_override: Option<&str>,
+        call_id_override: Option<&str>,
+    ) {
+        let Some(mut active_tool_use) = self.active_tool_use.take() else {
+            return;
+        };
+        if let Some(name) = name_override {
+            active_tool_use.name = name.to_string();
+        }
+        if let Some(call_id) = call_id_override {
+            active_tool_use.call_id = call_id.to_string();
+        }
+        if let Some(arguments) = arguments_override
+            && !active_tool_use.saw_delta
+        {
+            active_tool_use.arguments = arguments.to_string();
+        }
+        if !active_tool_use.saw_delta && !active_tool_use.arguments.is_empty() {
+            self.push_event(
+                "content_block_delta",
+                serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": self.content_index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": active_tool_use.arguments,
+                    }
+                }),
+            );
+        }
+        self.push_event(
+            "content_block_stop",
+            serde_json::json!({
+                "type": "content_block_stop",
+                "index": self.content_index,
+            }),
+        );
+        self.content_index += 1;
+    }
+
+    fn finish_success(&mut self) {
+        if self.terminal_sent {
+            return;
+        }
+        self.finish_active_tool_use(None, None, None);
+        self.close_thinking_block();
+        self.close_text_block();
+        if !self.has_content {
+            self.ensure_text_block();
+            self.close_text_block();
+        }
+        let mut usage = serde_json::Map::new();
+        usage.insert(
+            "input_tokens".to_string(),
+            serde_json::Value::Number(self.input_tokens.into()),
+        );
+        usage.insert(
+            "output_tokens".to_string(),
+            serde_json::Value::Number(self.output_tokens.into()),
+        );
+        if let Some(cached_tokens) = self.cached_tokens {
+            usage.insert(
+                "cache_read_input_tokens".to_string(),
+                serde_json::Value::Number(cached_tokens.into()),
+            );
+        }
+        self.push_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": if self.has_tool_calls { "tool_use" } else { "end_turn" },
+                },
+                "usage": usage,
+            }),
+        );
+        self.push_event(
+            "message_stop",
+            serde_json::json!({
+                "type": "message_stop",
+            }),
+        );
+        self.terminal_sent = true;
+        self.inner_finished = true;
+    }
+
+    fn finish_error(&mut self, message: &str) {
+        if self.terminal_sent {
+            return;
+        }
+        self.finish_active_tool_use(None, None, None);
+        self.close_thinking_block();
+        self.close_text_block();
+        self.ensure_text_block();
+        self.push_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta",
+                "index": self.content_index,
+                "delta": {
+                    "type": "text_delta",
+                    "text": format!("[Error] {message}"),
+                }
+            }),
+        );
+        self.has_content = true;
+        self.close_text_block();
+        self.push_event(
+            "error",
+            serde_json::json!({
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": message,
+                }
+            }),
+        );
+        self.push_event(
+            "message_stop",
+            serde_json::json!({
+                "type": "message_stop",
+            }),
+        );
+        self.terminal_sent = true;
+        self.inner_finished = true;
+    }
+
+    fn observe_upstream_event(&mut self, value: &serde_json::Value) {
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("response.reasoning_summary_text.delta") if self.want_thinking => {
+                self.close_text_block();
+                self.ensure_thinking_block();
+                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+                    self.push_event(
+                        "content_block_delta",
+                        serde_json::json!({
+                            "type": "content_block_delta",
+                            "index": self.content_index,
+                            "delta": {
+                                "type": "thinking_delta",
+                                "thinking": delta,
+                            }
+                        }),
+                    );
+                    self.has_content = true;
+                }
+            }
+            Some("response.output_text.delta") => {
+                self.close_thinking_block();
+                self.ensure_text_block();
+                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+                    self.push_event(
+                        "content_block_delta",
+                        serde_json::json!({
+                            "type": "content_block_delta",
+                            "index": self.content_index,
+                            "delta": {
+                                "type": "text_delta",
+                                "text": delta,
+                            }
+                        }),
+                    );
+                    self.has_content = true;
+                }
+            }
+            Some("response.output_item.added") => {
+                if value
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("function_call")
+                {
+                    let call_id = value
+                        .get("item")
+                        .and_then(|item| item.get("call_id"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("tool_call");
+                    let name = value
+                        .get("item")
+                        .and_then(|item| item.get("name"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("tool");
+                    self.start_tool_use_block(call_id, name);
+                }
+            }
+            Some("response.function_call_arguments.delta") => {
+                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+                    if let Some(active_tool_use) = self.active_tool_use.as_mut() {
+                        active_tool_use.saw_delta = true;
+                        active_tool_use.arguments.push_str(delta);
+                    }
+                    self.push_event(
+                        "content_block_delta",
+                        serde_json::json!({
+                            "type": "content_block_delta",
+                            "index": self.content_index,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": delta,
+                            }
+                        }),
+                    );
+                }
+            }
+            Some("response.function_call_arguments.done") => {
+                if let Some(active_tool_use) = self.active_tool_use.as_mut()
+                    && let Some(arguments) =
+                        value.get("arguments").and_then(serde_json::Value::as_str)
+                    && !active_tool_use.saw_delta
+                {
+                    active_tool_use.arguments = arguments.to_string();
+                }
+            }
+            Some("response.output_item.done") => {
+                if value
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("function_call")
+                {
+                    if self.active_tool_use.is_none() {
+                        let call_id = value
+                            .get("item")
+                            .and_then(|item| item.get("call_id"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("tool_call");
+                        let name = value
+                            .get("item")
+                            .and_then(|item| item.get("name"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("tool");
+                        self.start_tool_use_block(call_id, name);
+                    }
+                    let arguments = value
+                        .get("item")
+                        .and_then(|item| item.get("arguments"))
+                        .and_then(serde_json::Value::as_str);
+                    let name = value
+                        .get("item")
+                        .and_then(|item| item.get("name"))
+                        .and_then(serde_json::Value::as_str);
+                    let call_id = value
+                        .get("item")
+                        .and_then(|item| item.get("call_id"))
+                        .and_then(serde_json::Value::as_str);
+                    self.finish_active_tool_use(arguments, name, call_id);
+                }
+            }
+            Some("response.completed") => {
+                let (input_tokens, output_tokens, cached_tokens) =
+                    runtime_anthropic_usage_from_value(value);
+                self.input_tokens = input_tokens;
+                self.output_tokens = output_tokens;
+                self.cached_tokens = cached_tokens;
+                self.finish_success();
+            }
+            Some("error" | "response.failed") => {
+                let message = value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("Codex returned an error.");
+                self.finish_error(message);
+            }
+            _ => {}
+        }
+    }
+
+    fn process_upstream_event(&mut self) -> io::Result<()> {
+        if self.upstream_data_lines.is_empty() {
+            return Ok(());
+        }
+        let payload = self.upstream_data_lines.join("\n");
+        self.upstream_data_lines.clear();
+        let value = serde_json::from_str::<serde_json::Value>(&payload).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to parse runtime Responses SSE payload: {err}"),
+            )
+        })?;
+        self.observe_upstream_event(&value);
+        Ok(())
+    }
+
+    fn observe_upstream_bytes(&mut self, chunk: &[u8]) -> io::Result<()> {
+        for byte in chunk {
+            self.upstream_line.push(*byte);
+            if *byte != b'\n' {
+                continue;
+            }
+            let line_text = String::from_utf8_lossy(&self.upstream_line);
+            let trimmed = line_text.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() {
+                self.process_upstream_event()?;
+                self.upstream_line.clear();
+                if self.inner_finished {
+                    break;
+                }
+                continue;
+            }
+            if let Some(payload) = trimmed.strip_prefix("data:") {
+                self.upstream_data_lines
+                    .push(payload.trim_start().to_string());
+            }
+            self.upstream_line.clear();
+        }
+        Ok(())
+    }
+}
+
+impl Read for RuntimeAnthropicSseReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let read = buf.len().min(self.pending.len());
+            if read > 0 {
+                for (index, byte) in self.pending.drain(..read).enumerate() {
+                    buf[index] = byte;
+                }
+                return Ok(read);
+            }
+            if self.inner_finished {
+                return Ok(0);
+            }
+
+            let mut upstream_buffer = [0_u8; 8192];
+            let read = self.inner.read(&mut upstream_buffer)?;
+            if read == 0 {
+                self.finish_success();
+                continue;
+            }
+            self.observe_upstream_bytes(&upstream_buffer[..read])?;
+        }
+    }
+}
+
+fn translate_runtime_buffered_responses_reply_to_anthropic(
+    parts: RuntimeBufferedResponseParts,
+    request: &RuntimeAnthropicMessagesRequest,
+) -> Result<RuntimeResponsesReply> {
+    if parts.status >= 400 {
+        return Ok(RuntimeResponsesReply::Buffered(
+            runtime_anthropic_error_from_upstream_parts(parts),
+        ));
+    }
+
+    let content_type = runtime_buffered_response_content_type(&parts)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let response = if content_type.contains("text/event-stream") {
+        runtime_anthropic_response_from_sse_bytes(
+            &parts.body,
+            &request.requested_model,
+            request.want_thinking,
+        )?
+    } else {
+        let value = serde_json::from_slice::<serde_json::Value>(&parts.body)
+            .context("failed to parse buffered Responses JSON body")?;
+        if value.get("error").is_some() {
+            return Ok(RuntimeResponsesReply::Buffered(
+                runtime_anthropic_error_from_upstream_parts(parts),
+            ));
+        }
+        runtime_anthropic_response_from_json_value(
+            &value,
+            &request.requested_model,
+            request.want_thinking,
+        )
+    };
+
+    Ok(RuntimeResponsesReply::Buffered(
+        runtime_anthropic_json_response_parts(response),
+    ))
+}
+
+fn translate_runtime_responses_reply_to_anthropic(
+    response: RuntimeResponsesReply,
+    request: &RuntimeAnthropicMessagesRequest,
+) -> Result<RuntimeResponsesReply> {
+    match response {
+        RuntimeResponsesReply::Buffered(parts) => {
+            translate_runtime_buffered_responses_reply_to_anthropic(parts, request)
+        }
+        RuntimeResponsesReply::Streaming(response) => {
+            if !request.stream {
+                let parts = buffer_runtime_streaming_response_parts(response)?;
+                return translate_runtime_buffered_responses_reply_to_anthropic(parts, request);
+            }
+
+            let mut headers = response.headers;
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+            headers.push(("Content-Type".to_string(), "text/event-stream".to_string()));
+            Ok(RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
+                status: response.status,
+                headers,
+                body: Box::new(RuntimeAnthropicSseReader::new(
+                    response.body,
+                    request.requested_model.clone(),
+                    request.want_thinking,
+                )),
+                request_id: response.request_id,
+                profile_name: response.profile_name,
+                log_path: response.log_path,
+                shared: response.shared,
+                _inflight_guard: response._inflight_guard,
+            }))
+        }
+    }
+}
+
 fn extract_runtime_proxy_quota_message_from_sse(data_lines: &[String]) -> Option<String> {
     if data_lines.is_empty() {
         return None;
@@ -15823,10 +17696,18 @@ fn extract_runtime_turn_state_from_headers_value(value: &serde_json::Value) -> O
     })
 }
 
-fn run_child(binary: &OsString, args: &[OsString], codex_home: &Path) -> Result<ExitStatus> {
-    let status = Command::new(binary)
-        .args(args)
-        .env("CODEX_HOME", codex_home)
+fn run_child(
+    binary: &OsString,
+    args: &[OsString],
+    codex_home: &Path,
+    extra_env: &[(&str, OsString)],
+) -> Result<ExitStatus> {
+    let mut command = Command::new(binary);
+    command.args(args).env("CODEX_HOME", codex_home);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    let status = command
         .status()
         .with_context(|| format!("failed to execute {}", binary.to_string_lossy()))?;
     Ok(status)
@@ -16384,6 +18265,10 @@ fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
 
 fn codex_bin() -> OsString {
     env::var_os("PRODEX_CODEX_BIN").unwrap_or_else(|| OsString::from("codex"))
+}
+
+fn claude_bin() -> OsString {
+    env::var_os("PRODEX_CLAUDE_BIN").unwrap_or_else(|| OsString::from("claude"))
 }
 
 impl Drop for RuntimeBrokerLease {

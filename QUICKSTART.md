@@ -154,6 +154,27 @@ In practice, that means:
 - `/responses/compact` also gets the same safe retry/rotate treatment for temporary overload or quota exhaustion
 - `session_id` affinity is persisted in Prodex state, so compact and other session-scoped unary routes can keep using the owning profile after a proxy restart
 
+## Run Claude Code through `prodex`
+
+```bash
+prodex claude -- -p "summarize this repo"
+prodex claude --profile second -- -p --output-format json "show the latest diff"
+```
+
+`prodex claude` launches Claude Code with `ANTHROPIC_BASE_URL` pointed at a local Prodex proxy. Prodex translates Anthropic `POST /v1/messages` requests into the runtime Responses path, so Claude Code can reuse the same profile pool, quota preflight, and runtime auto-rotate logic.
+
+If `claude` is not on your `PATH`, point Prodex at a specific binary:
+
+```bash
+PRODEX_CLAUDE_BIN=/path/to/claude prodex claude -- -p "hello"
+```
+
+If you want to force a specific upstream Responses model for Anthropic-compatible requests:
+
+```bash
+PRODEX_CLAUDE_MODEL=gpt-5 prodex claude -- -p "hello"
+```
+
 ## Debug the Environment
 
 ```bash
@@ -200,6 +221,7 @@ If you hit `exceeded retry limit, last status: 429 Too Many Requests`, check whe
 - built-in quota checks only work for profiles using ChatGPT auth
 - managed Prodex profiles share selected native Codex state from the default `~/.prodex/.codex` home, with legacy `~/.codex` copied forward when needed, including session history, rules, skills, config, and memories, so rotation stays closer to direct `codex`
 - `prodex run <session-id>` is a shortcut for resuming a saved Codex session through the Prodex proxy
+- `prodex claude` always uses a local Anthropic-compatible proxy because Claude Code needs request/response translation even with a single profile
 - `prodex run` performs quota preflight unless you use `--skip-quota-check`
 - a profile is only treated as ready when both `5h` and `weekly` quota windows exist and still have remaining capacity
 - `prodex run` auto-rotates to the next ready profile when the current one hits a limit, including when you pass `--profile`
