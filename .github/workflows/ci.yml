@@ -37,7 +37,7 @@ jobs:
         run: cargo test -q --test auto_rotate
 
       - name: Run main integration tests
-        run: cargo test -q --test main_internal -- --test-threads=1
+        run: cargo test --test main_internal -- --test-threads=1
 
   runtime-stress:
     runs-on: ubuntu-latest
@@ -63,7 +63,7 @@ jobs:
           # rerun step below so they are not paid twice in this loop as well.
           for iteration in 1; do
             echo "runtime_proxy_ stress iteration ${iteration}"
-            cargo test -q --test main_internal runtime_proxy_ -- --test-threads=1 \
+            cargo test --test main_internal runtime_proxy_ -- --test-threads=1 \
               --skip runtime_proxy_persists_previous_response_affinity_across_restart \
               --skip runtime_proxy_persists_session_affinity_across_restart_for_compact \
               --skip runtime_proxy_retries_after_websocket_reuse_silent_hang \
@@ -75,8 +75,8 @@ jobs:
           set -euo pipefail
           for iteration in 1 2; do
             echo "continuation-heavy iteration ${iteration}"
-            cargo test -q --test main_internal runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
-            cargo test -q --test main_internal runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
-            cargo test -q --test main_internal runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
-            cargo test -q --test main_internal runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
+            cargo test --test main_internal runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
+            cargo test --test main_internal runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
+            cargo test --test main_internal runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
+            cargo test --test main_internal runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
           done
