@@ -30,8 +30,14 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      - name: Run test suite
-        run: cargo test -q -- --test-threads=1
+      - name: Run binary test targets
+        run: cargo test -q --bins -- --test-threads=1
+
+      - name: Run auto-rotate integration tests
+        run: cargo test -q --test auto_rotate
+
+      - name: Run main integration tests
+        run: cargo test -q --test main_internal -- --test-threads=1
 
   runtime-stress:
     runs-on: ubuntu-latest
