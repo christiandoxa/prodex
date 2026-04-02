@@ -1134,24 +1134,10 @@ fn apply_runtime_profile_probe_result(
         .profile_usage_snapshots
         .insert(profile_name.to_string(), snapshot);
     if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
-        runtime
-            .state
-            .response_profile_bindings
-            .retain(|_, binding| binding.profile_name != profile_name);
-        runtime
-            .state
-            .session_profile_bindings
-            .retain(|_, binding| binding.profile_name != profile_name);
-        runtime.turn_state_bindings.retain(|key, binding| {
-            binding.profile_name != profile_name || runtime_is_compact_turn_state_lineage_key(key)
-        });
-        runtime.session_id_bindings.retain(|key, binding| {
-            binding.profile_name != profile_name || runtime_is_compact_session_lineage_key(key)
-        });
         runtime_proxy_log(
             shared,
             format!(
-                "quota_release_profile_affinity profile={profile_name} reason=usage_snapshot_exhausted {}",
+                "quota_probe_exhausted profile={profile_name} reason=usage_snapshot_exhausted {}",
                 runtime_quota_summary_log_fields(quota_summary)
             ),
         );
@@ -7570,10 +7556,6 @@ fn runtime_is_compact_session_lineage_key(key: &str) -> bool {
     key.starts_with(RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX)
 }
 
-fn runtime_is_compact_turn_state_lineage_key(key: &str) -> bool {
-    key.starts_with(RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX)
-}
-
 fn runtime_external_session_id_bindings(
     bindings: &BTreeMap<String, ResponseProfileBinding>,
 ) -> BTreeMap<String, ResponseProfileBinding> {
@@ -9060,6 +9042,59 @@ fn runtime_profile_quota_summary_for_route(
         )))
 }
 
+fn runtime_previous_response_affinity_is_trusted(
+    shared: &RuntimeRotationProxyShared,
+    previous_response_id: Option<&str>,
+    bound_profile: Option<&str>,
+) -> Result<bool> {
+    let Some(previous_response_id) = previous_response_id else {
+        return Ok(false);
+    };
+    let Some(bound_profile) = bound_profile else {
+        return Ok(false);
+    };
+
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let Some(binding) = runtime
+        .state
+        .response_profile_bindings
+        .get(previous_response_id)
+    else {
+        return Ok(false);
+    };
+    if binding.profile_name != bound_profile {
+        return Ok(false);
+    }
+    let Some(status) = runtime_continuation_status_map(
+        &runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::Response,
+    )
+    .get(previous_response_id) else {
+        return Ok(false);
+    };
+    Ok(status.state == RuntimeContinuationBindingLifecycle::Verified)
+}
+
+fn runtime_candidate_has_hard_affinity(
+    route_kind: RuntimeRouteKind,
+    candidate_name: &str,
+    strict_affinity_profile: Option<&str>,
+    pinned_profile: Option<&str>,
+    turn_state_profile: Option<&str>,
+    session_profile: Option<&str>,
+    trusted_previous_response_affinity: bool,
+) -> bool {
+    strict_affinity_profile.is_some_and(|profile_name| profile_name == candidate_name)
+        || turn_state_profile.is_some_and(|profile_name| profile_name == candidate_name)
+        || (trusted_previous_response_affinity
+            && pinned_profile.is_some_and(|profile_name| profile_name == candidate_name))
+        || (route_kind == RuntimeRouteKind::Compact
+            && session_profile.is_some_and(|profile_name| profile_name == candidate_name))
+}
+
 fn select_runtime_response_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
@@ -9074,6 +9109,17 @@ fn select_runtime_response_candidate_for_route(
     if let Some(profile_name) = strict_affinity_profile {
         if excluded_profiles.contains(profile_name) {
             return Ok(None);
+        }
+        if runtime_candidate_has_hard_affinity(
+            route_kind,
+            profile_name,
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            false,
+        ) {
+            return Ok(Some(profile_name.to_string()));
         }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
@@ -9103,6 +9149,21 @@ fn select_runtime_response_candidate_for_route(
     }
 
     if let Some(profile_name) = pinned_profile.filter(|name| !excluded_profiles.contains(*name)) {
+        if runtime_candidate_has_hard_affinity(
+            route_kind,
+            profile_name,
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            runtime_previous_response_affinity_is_trusted(
+                shared,
+                previous_response_id,
+                pinned_profile,
+            )?,
+        ) {
+            return Ok(Some(profile_name.to_string()));
+        }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
         if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
@@ -9125,6 +9186,17 @@ fn select_runtime_response_candidate_for_route(
 
     if let Some(profile_name) = turn_state_profile.filter(|name| !excluded_profiles.contains(*name))
     {
+        if runtime_candidate_has_hard_affinity(
+            route_kind,
+            profile_name,
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            false,
+        ) {
+            return Ok(Some(profile_name.to_string()));
+        }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
         if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
@@ -9155,6 +9227,17 @@ fn select_runtime_response_candidate_for_route(
     }
 
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
+        if runtime_candidate_has_hard_affinity(
+            route_kind,
+            profile_name,
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            false,
+        ) {
+            return Ok(Some(profile_name.to_string()));
+        }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
         let compact_session_owner_without_probe =
@@ -9682,6 +9765,11 @@ fn proxy_runtime_websocket_text_message(
         })
         .transpose()?
         .flatten();
+    let mut trusted_previous_response_affinity = runtime_previous_response_affinity_is_trusted(
+        shared,
+        previous_response_id.as_deref(),
+        bound_profile.as_deref(),
+    )?;
     let mut turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
@@ -9780,6 +9868,7 @@ fn proxy_runtime_websocket_text_message(
                 previous_response_retry_index = 0;
                 candidate_turn_state_retry_profile = None;
                 candidate_turn_state_retry_value = None;
+                trusted_previous_response_affinity = false;
                 bound_profile = None;
                 pinned_profile = None;
                 turn_state_profile = None;
@@ -9850,6 +9939,17 @@ fn proxy_runtime_websocket_text_message(
                         websocket_session,
                         &current_profile,
                         request_turn_state.as_deref(),
+                        runtime_candidate_has_hard_affinity(
+                            RuntimeRouteKind::Websocket,
+                            &current_profile,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                        ),
                     )? {
                         RuntimeWebsocketAttempt::Delivered => return Ok(()),
                         RuntimeWebsocketAttempt::QuotaBlocked {
@@ -10038,6 +10138,7 @@ fn proxy_runtime_websocket_text_message(
                 previous_response_retry_index = 0;
                 candidate_turn_state_retry_profile = None;
                 candidate_turn_state_retry_value = None;
+                trusted_previous_response_affinity = false;
                 bound_profile = None;
                 pinned_profile = None;
                 turn_state_profile = None;
@@ -10108,6 +10209,17 @@ fn proxy_runtime_websocket_text_message(
                         websocket_session,
                         &current_profile,
                         request_turn_state.as_deref(),
+                        runtime_candidate_has_hard_affinity(
+                            RuntimeRouteKind::Websocket,
+                            &current_profile,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                        ),
                     )? {
                         RuntimeWebsocketAttempt::Delivered => return Ok(()),
                         RuntimeWebsocketAttempt::QuotaBlocked {
@@ -10297,6 +10409,17 @@ fn proxy_runtime_websocket_text_message(
             websocket_session,
             &candidate_name,
             turn_state_override,
+            runtime_candidate_has_hard_affinity(
+                RuntimeRouteKind::Websocket,
+                &candidate_name,
+                compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                pinned_profile.as_deref(),
+                turn_state_profile.as_deref(),
+                session_profile.as_deref(),
+                trusted_previous_response_affinity,
+            ),
         )? {
             RuntimeWebsocketAttempt::Delivered => return Ok(()),
             RuntimeWebsocketAttempt::QuotaBlocked {
@@ -10310,6 +10433,20 @@ fn proxy_runtime_websocket_text_message(
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                if runtime_candidate_has_hard_affinity(
+                    RuntimeRouteKind::Websocket,
+                    &profile_name,
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                    trusted_previous_response_affinity,
+                ) {
+                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                    return Ok(());
+                }
                 let released_affinity = release_runtime_quota_blocked_affinity(
                     shared,
                     &profile_name,
@@ -10465,6 +10602,7 @@ fn proxy_runtime_websocket_text_message(
                     previous_response_retry_index = 0;
                     candidate_turn_state_retry_profile = None;
                     candidate_turn_state_retry_value = None;
+                    trusted_previous_response_affinity = false;
                     bound_profile = None;
                     session_profile = None;
                     pinned_profile = None;
@@ -10570,6 +10708,7 @@ fn proxy_runtime_websocket_text_message(
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     pinned_profile = None;
                 }
+                trusted_previous_response_affinity = false;
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
                 }
@@ -10596,13 +10735,16 @@ fn attempt_runtime_websocket_request(
     websocket_session: &mut RuntimeWebsocketSessionState,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    allow_quota_exhausted_send: bool,
 ) -> Result<RuntimeWebsocketAttempt> {
     let request_previous_response_id = runtime_request_previous_response_id(handshake_request);
     let request_session_id = runtime_request_session_id(handshake_request);
     let request_turn_state = runtime_request_turn_state(handshake_request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
+        && !allow_quota_exhausted_send
+    {
         websocket_session.close();
         runtime_proxy_log(
             shared,
@@ -10617,6 +10759,17 @@ fn attempt_runtime_websocket_request(
         return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
             profile_name: profile_name.to_string(),
         });
+    } else if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket websocket_reuse_allow_quota_exhausted profile={profile_name} quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
     }
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
     let reuse_started_at = reuse_existing_session.then(Instant::now);
@@ -11561,6 +11714,15 @@ fn proxy_runtime_standard_request(
                     request,
                     shared,
                     &compact_owner_profile,
+                    runtime_candidate_has_hard_affinity(
+                        RuntimeRouteKind::Compact,
+                        &compact_owner_profile,
+                        None,
+                        None,
+                        None,
+                        session_profile.as_deref(),
+                        false,
+                    ),
                 )? {
                     RuntimeStandardAttempt::Success {
                         profile_name,
@@ -11626,6 +11788,15 @@ fn proxy_runtime_standard_request(
                     request,
                     shared,
                     &compact_owner_profile,
+                    runtime_candidate_has_hard_affinity(
+                        RuntimeRouteKind::Compact,
+                        &compact_owner_profile,
+                        None,
+                        None,
+                        None,
+                        session_profile.as_deref(),
+                        false,
+                    ),
                 )? {
                     RuntimeStandardAttempt::Success {
                         profile_name,
@@ -11681,7 +11852,21 @@ fn proxy_runtime_standard_request(
             continue;
         }
 
-        match attempt_runtime_standard_request(request_id, request, shared, &candidate_name)? {
+        match attempt_runtime_standard_request(
+            request_id,
+            request,
+            shared,
+            &candidate_name,
+            runtime_candidate_has_hard_affinity(
+                RuntimeRouteKind::Compact,
+                &candidate_name,
+                None,
+                None,
+                None,
+                session_profile.as_deref(),
+                false,
+            ),
+        )? {
             RuntimeStandardAttempt::Success {
                 profile_name,
                 response,
@@ -11747,6 +11932,19 @@ fn proxy_runtime_standard_request(
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                if !overload
+                    && runtime_candidate_has_hard_affinity(
+                        RuntimeRouteKind::Compact,
+                        &profile_name,
+                        None,
+                        None,
+                        None,
+                        session_profile.as_deref(),
+                        false,
+                    )
+                {
+                    return Ok(response);
+                }
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -11873,11 +12071,14 @@ fn attempt_runtime_standard_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    allow_quota_exhausted_send: bool,
 ) -> Result<RuntimeStandardAttempt> {
     let request_session_id = runtime_request_session_id(request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Compact)?;
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
+        && !allow_quota_exhausted_send
+    {
         runtime_proxy_log(
             shared,
             format!(
@@ -11891,6 +12092,17 @@ fn attempt_runtime_standard_request(
         return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
             profile_name: profile_name.to_string(),
         });
+    } else if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_pre_send_allow_quota_exhausted profile={profile_name} quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
@@ -12035,6 +12247,11 @@ fn proxy_runtime_responses_request(
         })
         .transpose()?
         .flatten();
+    let mut trusted_previous_response_affinity = runtime_previous_response_affinity_is_trusted(
+        shared,
+        previous_response_id.as_deref(),
+        bound_profile.as_deref(),
+    )?;
     let mut turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
@@ -12131,6 +12348,7 @@ fn proxy_runtime_responses_request(
                 previous_response_retry_index = 0;
                 candidate_turn_state_retry_profile = None;
                 candidate_turn_state_retry_value = None;
+                trusted_previous_response_affinity = false;
                 bound_profile = None;
                 pinned_profile = None;
                 turn_state_profile = None;
@@ -12190,6 +12408,17 @@ fn proxy_runtime_responses_request(
                         shared,
                         &current_profile,
                         request_turn_state.as_deref(),
+                        runtime_candidate_has_hard_affinity(
+                            RuntimeRouteKind::Responses,
+                            &current_profile,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                        ),
                     )? {
                         RuntimeResponsesAttempt::Success {
                             profile_name,
@@ -12395,6 +12624,7 @@ fn proxy_runtime_responses_request(
                 previous_response_retry_index = 0;
                 candidate_turn_state_retry_profile = None;
                 candidate_turn_state_retry_value = None;
+                trusted_previous_response_affinity = false;
                 bound_profile = None;
                 pinned_profile = None;
                 turn_state_profile = None;
@@ -12454,6 +12684,17 @@ fn proxy_runtime_responses_request(
                         shared,
                         &current_profile,
                         request_turn_state.as_deref(),
+                        runtime_candidate_has_hard_affinity(
+                            RuntimeRouteKind::Responses,
+                            &current_profile,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                        ),
                     )? {
                         RuntimeResponsesAttempt::Success {
                             profile_name,
@@ -12655,6 +12896,17 @@ fn proxy_runtime_responses_request(
             shared,
             &candidate_name,
             turn_state_override,
+            runtime_candidate_has_hard_affinity(
+                RuntimeRouteKind::Responses,
+                &candidate_name,
+                compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                pinned_profile.as_deref(),
+                turn_state_profile.as_deref(),
+                session_profile.as_deref(),
+                trusted_previous_response_affinity,
+            ),
         )? {
             RuntimeResponsesAttempt::Success {
                 profile_name,
@@ -12697,6 +12949,19 @@ fn proxy_runtime_responses_request(
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                if runtime_candidate_has_hard_affinity(
+                    RuntimeRouteKind::Responses,
+                    &profile_name,
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                    trusted_previous_response_affinity,
+                ) {
+                    return Ok(response);
+                }
                 let released_affinity = release_runtime_quota_blocked_affinity(
                     shared,
                     &profile_name,
@@ -12833,6 +13098,7 @@ fn proxy_runtime_responses_request(
                 if pinned_profile.as_deref() == Some(profile_name.as_str()) {
                     pinned_profile = None;
                 }
+                trusted_previous_response_affinity = false;
                 if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
                     turn_state_profile = None;
                 }
@@ -12856,11 +13122,14 @@ fn attempt_runtime_responses_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    allow_quota_exhausted_send: bool,
 ) -> Result<RuntimeResponsesAttempt> {
     let request_session_id = runtime_request_session_id(request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Responses)?;
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
+        && !allow_quota_exhausted_send
+    {
         runtime_proxy_log(
             shared,
             format!(
@@ -12874,6 +13143,17 @@ fn attempt_runtime_responses_request(
         return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
             profile_name: profile_name.to_string(),
         });
+    } else if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http responses_pre_send_allow_quota_exhausted profile={profile_name} quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
     }
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
