@@ -200,6 +200,23 @@ impl Write for FailAfterFirstChunkWriter {
     }
 }
 
+fn set_test_websocket_io_timeout(
+    socket: &mut WsSocket<MaybeTlsStream<TcpStream>>,
+    timeout: Duration,
+) {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => {
+            let _ = stream.set_read_timeout(Some(timeout));
+            let _ = stream.set_write_timeout(Some(timeout));
+        }
+        MaybeTlsStream::Rustls(stream) => {
+            let _ = stream.sock.set_read_timeout(Some(timeout));
+            let _ = stream.sock.set_write_timeout(Some(timeout));
+        }
+        _ => {}
+    }
+}
+
 fn wait_for_state<F>(paths: &AppPaths, predicate: F) -> AppState
 where
     F: Fn(&AppState) -> bool,
@@ -15139,6 +15156,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
         proxy.listen_addr
     ))
     .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
     socket
         .send(WsMessage::Text(
             "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
@@ -15149,11 +15167,8 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
 
     let mut payloads = Vec::new();
     loop {
-        match socket
-            .read()
-            .expect("runtime proxy websocket should stay open")
-        {
-            WsMessage::Text(text) => {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text);
                 payloads.push(text);
@@ -15161,13 +15176,23 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
                     break;
                 }
             }
-            WsMessage::Ping(payload) => {
+            Ok(WsMessage::Ping(payload)) => {
                 socket
                     .send(WsMessage::Pong(payload))
                     .expect("pong should be sent");
             }
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket message: {other:?}"),
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => {
+                break;
+            }
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for retry payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
         }
     }
 
@@ -15195,6 +15220,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
         proxy.listen_addr
     ))
     .expect("second runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut retry_socket, Duration::from_secs(5));
     retry_socket
         .send(WsMessage::Text(
             "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
@@ -15205,11 +15231,8 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
 
     let mut retry_payloads = Vec::new();
     loop {
-        match retry_socket
-            .read()
-            .expect("second runtime proxy websocket should stay open")
-        {
-            WsMessage::Text(text) => {
+        match retry_socket.read() {
+            Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text);
                 retry_payloads.push(text);
@@ -15217,13 +15240,21 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
                     break;
                 }
             }
-            WsMessage::Ping(payload) => {
+            Ok(WsMessage::Ping(payload)) => {
                 retry_socket
                     .send(WsMessage::Pong(payload))
                     .expect("pong should be sent");
             }
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket message: {other:?}"),
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for retry-after-release payloads: {err}; payloads={retry_payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
         }
     }
 
@@ -15509,6 +15540,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
         proxy.listen_addr
     ))
     .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
     socket
         .send(WsMessage::Text(
             "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
@@ -15519,11 +15551,8 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
 
     let mut payloads = Vec::new();
     loop {
-        match socket
-            .read()
-            .expect("runtime proxy websocket should stay open")
-        {
-            WsMessage::Text(text) => {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text);
                 payloads.push(text);
@@ -15531,13 +15560,21 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
                     break;
                 }
             }
-            WsMessage::Ping(payload) => {
+            Ok(WsMessage::Ping(payload)) => {
                 socket
                     .send(WsMessage::Pong(payload))
                     .expect("pong should be sent");
             }
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket message: {other:?}"),
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for previous_response turn-state retry payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
         }
     }
 
@@ -15731,6 +15768,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
         proxy.listen_addr
     ))
     .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
     socket
         .send(WsMessage::Text(
             "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
@@ -15741,11 +15779,8 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
 
     let mut payloads = Vec::new();
     loop {
-        match socket
-            .read()
-            .expect("runtime proxy websocket should stay open")
-        {
-            WsMessage::Text(text) => {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text);
                 payloads.push(text);
@@ -15753,13 +15788,21 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
                     break;
                 }
             }
-            WsMessage::Ping(payload) => {
+            Ok(WsMessage::Ping(payload)) => {
                 socket
                     .send(WsMessage::Pong(payload))
                     .expect("pong should be sent");
             }
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket message: {other:?}"),
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for upstream turn-state retry payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
         }
     }
 
@@ -16150,6 +16193,7 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() 
         proxy.listen_addr
     ))
     .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
     socket
         .send(WsMessage::Text(
             "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
@@ -16160,11 +16204,8 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() 
 
     let mut payloads = Vec::new();
     loop {
-        match socket
-            .read()
-            .expect("runtime proxy websocket should stay open")
-        {
-            WsMessage::Text(text) => {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text);
                 payloads.push(text);
@@ -16172,13 +16213,21 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() 
                     break;
                 }
             }
-            WsMessage::Ping(payload) => {
+            Ok(WsMessage::Ping(payload)) => {
                 socket
                     .send(WsMessage::Pong(payload))
                     .expect("pong should be sent");
             }
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket message: {other:?}"),
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for upstream turn-state retry payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
         }
     }
 
