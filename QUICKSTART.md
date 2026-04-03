@@ -112,7 +112,10 @@ What changes on this path:
 
 - Claude Code talks to a local Anthropic-compatible Prodex proxy
 - each profile gets its own `CLAUDE_CONFIG_DIR`
-- the default Claude custom model follows the shared Codex `config.toml` model when available
+- the initial Claude model follows the shared Codex `config.toml` model when available
+- Claude's `opus`, `sonnet`, and `haiku` entries are pinned to representative GPT models
+- Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
+- Claude Code's picker is upstream-limited to built-in aliases plus one custom model option on third-party providers
 
 Useful overrides:
 

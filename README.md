@@ -106,7 +106,10 @@ Use this path when you want Claude Code to be the front end while Prodex still r
 
 - `prodex claude` runs Claude Code through a local Anthropic-compatible proxy
 - Claude Code state is isolated per profile in `CLAUDE_CONFIG_DIR`
-- the default Claude custom model follows the shared Codex `config.toml` model when available
+- the initial Claude model follows the shared Codex `config.toml` model when available
+- Claude's `opus`, `sonnet`, and `haiku` picker entries are pinned to representative GPT models
+- Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
+- Claude Code itself only exposes built-in aliases plus one custom model option on third-party providers
 - use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
 - use `PRODEX_CLAUDE_MODEL` to force a specific upstream Responses model
 - use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream reasoning tier

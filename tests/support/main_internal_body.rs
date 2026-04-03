@@ -16928,6 +16928,88 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
 }
 
 #[test]
+fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fallback() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let now = Local::now().timestamp();
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("initial state should save");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-main\",\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status.as_u16(), 200, "unexpected status: {status} body={body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "proxy should degrade to a fresh request after clearing stale binding: {body}"
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        !state.response_profile_bindings.contains_key("resp-main")
+    });
+    assert!(
+        !persisted.response_profile_bindings.contains_key("resp-main"),
+        "stale previous_response binding should be cleared after safe fallback: {:?}",
+        persisted.response_profile_bindings
+    );
+}
+
+#[test]
 fn runtime_proxy_retries_previous_response_with_upstream_turn_state_http() {
     let backend = RuntimeProxyBackend::start_http_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
@@ -18830,6 +18912,36 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some(DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
     );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_DEFAULT_OPUS_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5.4".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("effort,max_effort,thinking,adaptive_thinking,interleaved_thinking".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_DEFAULT_SONNET_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5.3-codex".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_DEFAULT_HAIKU_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5.4-mini".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some(DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+    );
     assert!(env
         .iter()
         .all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
@@ -18838,7 +18950,22 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
         [
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
-            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"
         ]
     );
 }
@@ -18857,6 +18984,12 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
     assert_eq!(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5-mini".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5-mini".to_string())
     );
@@ -18881,7 +19014,26 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("opus".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5.4".to_string())
+    );
+}
+
+#[test]
+fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models() {
+    assert_eq!(runtime_proxy_claude_target_model("opus"), "gpt-5.4".to_string());
+    assert_eq!(
+        runtime_proxy_claude_target_model("claude-sonnet-4-6"),
+        "gpt-5.3-codex".to_string()
+    );
+    assert_eq!(
+        runtime_proxy_claude_target_model("haiku"),
+        "gpt-5.4-mini".to_string()
     );
 }
 
@@ -19230,7 +19382,10 @@ fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
 
     let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
         .expect("translated body should parse");
-    assert_eq!(body.get("model").and_then(serde_json::Value::as_str), Some("gpt-5"));
+    assert_eq!(
+        body.get("model").and_then(serde_json::Value::as_str),
+        Some("gpt-5.3-codex")
+    );
     assert_eq!(
         body.get("instructions").and_then(serde_json::Value::as_str),
         Some("System instructions")
@@ -19302,30 +19457,68 @@ fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
 #[test]
 fn runtime_proxy_anthropic_reasoning_effort_normalizes_output_config_levels() {
     let cases = [
-        ("low", Some("low")),
-        ("medium", Some("medium")),
-        ("high", Some("high")),
-        ("max", Some("high")),
-        ("HIGH", Some("high")),
-        ("unknown", None),
+        ("gpt-5.4", "low", Some("low")),
+        ("gpt-5.4", "medium", Some("medium")),
+        ("gpt-5.4", "high", Some("high")),
+        ("gpt-5.4", "max", Some("xhigh")),
+        ("gpt-5", "max", Some("high")),
+        ("gpt-5.4", "HIGH", Some("high")),
+        ("gpt-5.4", "unknown", None),
     ];
 
-    for (input_effort, expected) in cases {
+    for (target_model, input_effort, expected) in cases {
         let value = serde_json::json!({
             "output_config": {
                 "effort": input_effort,
             }
         });
         assert_eq!(
-            runtime_proxy_anthropic_reasoning_effort(&value).as_deref(),
+            runtime_proxy_anthropic_reasoning_effort(&value, target_model).as_deref(),
             expected,
-            "input effort {input_effort:?} normalized incorrectly"
+            "input effort {input_effort:?} normalized incorrectly for target model {target_model}"
         );
     }
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_downgrades_max_effort_to_high() {
+fn translate_runtime_anthropic_messages_request_maps_max_effort_to_xhigh_for_supported_model() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "gpt-5.4",
+            "thinking": {
+                "type": "adaptive"
+            },
+            "output_config": {
+                "effort": "max",
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hello"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    assert_eq!(
+        body.get("reasoning")
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(serde_json::Value::as_str),
+        Some("xhigh")
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_keeps_max_effort_at_high_for_legacy_model() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -19627,7 +19820,7 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
         serde_json::from_str(&translated_body).expect("translated request body should parse");
     assert_eq!(
         translated_json.get("model").and_then(serde_json::Value::as_str),
-        Some("gpt-5")
+        Some("gpt-5.3-codex")
     );
     assert_eq!(
         translated_json

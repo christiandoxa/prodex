@@ -93,6 +93,22 @@ const ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS: i64 =
 const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
 const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
 const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProxyClaudeModelAlias {
+    Opus,
+    Sonnet,
+    Haiku,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeProxyResponsesModelDescriptor {
+    id: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+    claude_alias: Option<RuntimeProxyClaudeModelAlias>,
+    supports_xhigh: bool,
+}
 const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
 const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_000 };
 const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
@@ -5045,7 +5061,8 @@ fn runtime_proxy_claude_launch_env(
     config_dir: &Path,
     codex_home: &Path,
 ) -> Vec<(&'static str, OsString)> {
-    vec![
+    let target_model = runtime_proxy_claude_launch_model(codex_home);
+    let mut env = vec![
         ("CLAUDE_CONFIG_DIR", OsString::from(config_dir.as_os_str())),
         (
             "ANTHROPIC_BASE_URL",
@@ -5057,9 +5074,12 @@ fn runtime_proxy_claude_launch_env(
         ),
         (
             "ANTHROPIC_MODEL",
-            OsString::from(runtime_proxy_claude_launch_model(codex_home)),
+            OsString::from(runtime_proxy_claude_picker_model(&target_model)),
         ),
-    ]
+    ];
+    env.extend(runtime_proxy_claude_pinned_alias_env());
+    env.extend(runtime_proxy_claude_custom_model_option_env(&target_model));
+    env
 }
 
 fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
@@ -5067,6 +5087,21 @@ fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
         "ANTHROPIC_API_KEY",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+        "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
     ]
 }
 
@@ -5145,6 +5180,134 @@ fn runtime_proxy_claude_launch_model(codex_home: &Path) -> String {
     runtime_proxy_claude_model_override()
         .or_else(|| runtime_proxy_claude_config_value(codex_home, "model"))
         .unwrap_or_else(|| DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+}
+
+fn runtime_proxy_claude_alias_name(alias: RuntimeProxyClaudeModelAlias) -> &'static str {
+    match alias {
+        RuntimeProxyClaudeModelAlias::Opus => "opus",
+        RuntimeProxyClaudeModelAlias::Sonnet => "sonnet",
+        RuntimeProxyClaudeModelAlias::Haiku => "haiku",
+    }
+}
+
+fn runtime_proxy_claude_alias_env_keys(
+    alias: RuntimeProxyClaudeModelAlias,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    match alias {
+        RuntimeProxyClaudeModelAlias::Opus => (
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+        ),
+        RuntimeProxyClaudeModelAlias::Sonnet => (
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+        ),
+        RuntimeProxyClaudeModelAlias::Haiku => (
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+        ),
+    }
+}
+
+fn runtime_proxy_claude_alias_model(
+    alias: RuntimeProxyClaudeModelAlias,
+) -> &'static RuntimeProxyResponsesModelDescriptor {
+    runtime_proxy_responses_model_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.claude_alias == Some(alias))
+        .expect("Claude alias model should exist")
+}
+
+fn runtime_proxy_responses_model_descriptor(
+    model_id: &str,
+) -> Option<&'static RuntimeProxyResponsesModelDescriptor> {
+    runtime_proxy_responses_model_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.id.eq_ignore_ascii_case(model_id))
+}
+
+fn runtime_proxy_responses_model_capabilities(model_id: &str) -> &'static str {
+    if runtime_proxy_responses_model_supports_xhigh(model_id) {
+        "effort,max_effort,thinking,adaptive_thinking,interleaved_thinking"
+    } else {
+        "effort,thinking,adaptive_thinking,interleaved_thinking"
+    }
+}
+
+fn runtime_proxy_responses_model_supports_xhigh(model_id: &str) -> bool {
+    runtime_proxy_responses_model_descriptor(model_id)
+        .map(|descriptor| descriptor.supports_xhigh)
+        .unwrap_or_else(|| {
+            matches!(
+                model_id.trim().to_ascii_lowercase().as_str(),
+                value
+                    if value.starts_with("gpt-5.2")
+                        || value.starts_with("gpt-5.3")
+                        || value.starts_with("gpt-5.4")
+            )
+        })
+}
+
+fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
+    let mut env = Vec::new();
+    for alias in [
+        RuntimeProxyClaudeModelAlias::Opus,
+        RuntimeProxyClaudeModelAlias::Sonnet,
+        RuntimeProxyClaudeModelAlias::Haiku,
+    ] {
+        let descriptor = runtime_proxy_claude_alias_model(alias);
+        let (model_key, name_key, description_key, caps_key) =
+            runtime_proxy_claude_alias_env_keys(alias);
+        env.push((model_key, OsString::from(descriptor.id)));
+        env.push((name_key, OsString::from(descriptor.display_name)));
+        env.push((description_key, OsString::from(descriptor.description)));
+        env.push((
+            caps_key,
+            OsString::from(runtime_proxy_responses_model_capabilities(descriptor.id)),
+        ));
+    }
+    env
+}
+
+fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
+    runtime_proxy_responses_model_descriptor(target_model)
+        .and_then(|descriptor| descriptor.claude_alias)
+        .map(runtime_proxy_claude_alias_name)
+        .unwrap_or(target_model)
+        .to_string()
+}
+
+fn runtime_proxy_claude_custom_model_option_env(
+    target_model: &str,
+) -> Vec<(&'static str, OsString)> {
+    let descriptor = runtime_proxy_responses_model_descriptor(target_model);
+    let display_name = descriptor
+        .map(|descriptor| descriptor.display_name)
+        .unwrap_or(target_model);
+    let description = descriptor
+        .map(|descriptor| descriptor.description.to_string())
+        .unwrap_or_else(|| format!("Custom OpenAI model routed through prodex ({target_model})"));
+
+    vec![
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+            OsString::from(target_model),
+        ),
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+            OsString::from(display_name),
+        ),
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+            OsString::from(description),
+        ),
+    ]
 }
 
 fn runtime_proxy_claude_config_dir(codex_home: &Path) -> PathBuf {
@@ -6305,9 +6468,9 @@ fn handle_runtime_proxy_anthropic_compat_request(
 }
 
 fn runtime_proxy_anthropic_models_list() -> serde_json::Value {
-    let data = runtime_proxy_anthropic_exposed_models()
+    let data = runtime_proxy_responses_model_descriptors()
         .iter()
-        .map(|(model_id, _)| runtime_proxy_anthropic_model_descriptor(model_id))
+        .map(|descriptor| runtime_proxy_anthropic_model_descriptor(descriptor.id))
         .collect::<Vec<_>>();
     let first_id = data
         .first()
@@ -6336,28 +6499,77 @@ fn runtime_proxy_anthropic_model_descriptor(model_id: &str) -> serde_json::Value
     })
 }
 
-fn runtime_proxy_anthropic_exposed_models() -> &'static [(&'static str, &'static str)] {
+fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponsesModelDescriptor] {
     &[
-        ("gpt-5.4", "GPT-5.4"),
-        ("gpt-5.4-mini", "GPT-5.4 Mini"),
-        ("gpt-5.3-codex", "GPT-5.3 Codex"),
-        ("gpt-5.2-codex", "GPT-5.2 Codex"),
-        ("gpt-5.2", "GPT-5.2"),
-        ("gpt-5.1-codex-max", "GPT-5.1 Codex Max"),
-        ("gpt-5.1-codex-mini", "GPT-5.1 Codex Mini"),
-        ("gpt-5", "GPT-5"),
-        ("gpt-5-mini", "GPT-5 Mini"),
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.4",
+            display_name: "GPT-5.4",
+            description: "Latest frontier agentic coding model.",
+            claude_alias: Some(RuntimeProxyClaudeModelAlias::Opus),
+            supports_xhigh: true,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.4-mini",
+            display_name: "GPT-5.4 Mini",
+            description: "Smaller frontier agentic coding model.",
+            claude_alias: Some(RuntimeProxyClaudeModelAlias::Haiku),
+            supports_xhigh: true,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.3-codex",
+            display_name: "GPT-5.3 Codex",
+            description: "Frontier Codex-optimized agentic coding model.",
+            claude_alias: Some(RuntimeProxyClaudeModelAlias::Sonnet),
+            supports_xhigh: true,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.2-codex",
+            display_name: "GPT-5.2 Codex",
+            description: "Frontier agentic coding model.",
+            claude_alias: None,
+            supports_xhigh: true,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.2",
+            display_name: "GPT-5.2",
+            description: "Optimized for professional work and long-running agents.",
+            claude_alias: None,
+            supports_xhigh: true,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.1-codex-max",
+            display_name: "GPT-5.1 Codex Max",
+            description: "Codex-optimized model for deep and fast reasoning.",
+            claude_alias: None,
+            supports_xhigh: false,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5.1-codex-mini",
+            display_name: "GPT-5.1 Codex Mini",
+            description: "Optimized for Codex. Cheaper, faster, but less capable.",
+            claude_alias: None,
+            supports_xhigh: false,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5",
+            display_name: "GPT-5",
+            description: "General-purpose GPT-5 model.",
+            claude_alias: None,
+            supports_xhigh: false,
+        },
+        RuntimeProxyResponsesModelDescriptor {
+            id: "gpt-5-mini",
+            display_name: "GPT-5 Mini",
+            description: "Smaller GPT-5 model for fast, lower-cost tasks.",
+            claude_alias: None,
+            supports_xhigh: false,
+        },
     ]
 }
 
 fn runtime_proxy_anthropic_model_display_name(model_id: &str) -> String {
-    runtime_proxy_anthropic_exposed_models()
-        .iter()
-        .find_map(|(candidate_id, display_name)| {
-            candidate_id
-                .eq_ignore_ascii_case(model_id)
-                .then_some((*display_name).to_string())
-        })
+    runtime_proxy_responses_model_descriptor(model_id)
+        .map(|descriptor| descriptor.display_name.to_string())
         .unwrap_or_else(|| model_id.to_string())
 }
 
@@ -7040,8 +7252,18 @@ fn runtime_proxy_claude_target_model(requested_model: &str) -> String {
         || lower.contains("codex")
     {
         normalized.to_string()
+    } else if lower == "best" || lower == "default" || lower.contains("opus") {
+        runtime_proxy_claude_alias_model(RuntimeProxyClaudeModelAlias::Opus)
+            .id
+            .to_string()
+    } else if lower.contains("sonnet") {
+        runtime_proxy_claude_alias_model(RuntimeProxyClaudeModelAlias::Sonnet)
+            .id
+            .to_string()
     } else if lower.contains("haiku") {
-        "gpt-5-mini".to_string()
+        runtime_proxy_claude_alias_model(RuntimeProxyClaudeModelAlias::Haiku)
+            .id
+            .to_string()
     } else {
         DEFAULT_PRODEX_CLAUDE_MODEL.to_string()
     }
@@ -7055,18 +7277,29 @@ fn runtime_proxy_anthropic_wants_thinking(value: &serde_json::Value) -> bool {
         .is_some_and(|thinking| matches!(thinking, "enabled" | "adaptive"))
 }
 
-fn runtime_proxy_normalize_anthropic_reasoning_effort(effort: &str) -> Option<&'static str> {
+fn runtime_proxy_translate_anthropic_reasoning_effort(
+    effort: &str,
+    target_model: &str,
+) -> Option<&'static str> {
     match effort.trim().to_ascii_lowercase().as_str() {
         "low" => Some("low"),
         "medium" => Some("medium"),
-        // Claude Code exposes `max`, but on the Anthropic-compatible request
-        // surface it still maps to the strongest three-tier level.
-        "high" | "max" => Some("high"),
+        "high" => Some("high"),
+        "max" => Some(
+            if runtime_proxy_responses_model_supports_xhigh(target_model) {
+                "xhigh"
+            } else {
+                "high"
+            },
+        ),
         _ => None,
     }
 }
 
-fn runtime_proxy_anthropic_reasoning_effort(value: &serde_json::Value) -> Option<String> {
+fn runtime_proxy_anthropic_reasoning_effort(
+    value: &serde_json::Value,
+    target_model: &str,
+) -> Option<String> {
     if let Some(effort) = runtime_proxy_claude_reasoning_effort_override() {
         return Some(effort);
     }
@@ -7075,7 +7308,7 @@ fn runtime_proxy_anthropic_reasoning_effort(value: &serde_json::Value) -> Option
         .get("output_config")
         .and_then(|config| config.get("effort"))
         .and_then(serde_json::Value::as_str)
-        .and_then(runtime_proxy_normalize_anthropic_reasoning_effort)
+        .and_then(|effort| runtime_proxy_translate_anthropic_reasoning_effort(effort, target_model))
     {
         return Some(effort.to_string());
     }
@@ -7499,9 +7732,10 @@ fn translate_runtime_anthropic_messages_request(
     }
 
     let mut translated_body = serde_json::Map::new();
+    let target_model = runtime_proxy_claude_target_model(&requested_model);
     translated_body.insert(
         "model".to_string(),
-        serde_json::Value::String(runtime_proxy_claude_target_model(&requested_model)),
+        serde_json::Value::String(target_model.clone()),
     );
     translated_body.insert("input".to_string(), serde_json::Value::Array(input));
     translated_body.insert(
@@ -7530,7 +7764,7 @@ fn translate_runtime_anthropic_messages_request(
     if let Some(tool_choice) = runtime_proxy_translate_anthropic_tool_choice(&value)? {
         translated_body.insert("tool_choice".to_string(), tool_choice);
     }
-    if let Some(effort) = runtime_proxy_anthropic_reasoning_effort(&value) {
+    if let Some(effort) = runtime_proxy_anthropic_reasoning_effort(&value, &target_model) {
         translated_body.insert(
             "reasoning".to_string(),
             serde_json::json!({
@@ -8981,6 +9215,62 @@ fn remember_runtime_successful_previous_response_owner(
         drop(runtime);
     }
     Ok(())
+}
+
+fn clear_runtime_stale_previous_response_binding(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+) -> Result<bool> {
+    let Some(previous_response_id) = previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(false);
+    };
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    if !runtime
+        .state
+        .response_profile_bindings
+        .get(previous_response_id)
+        .is_some_and(|binding| binding.profile_name == profile_name)
+    {
+        drop(runtime);
+        return Ok(false);
+    }
+
+    runtime
+        .state
+        .response_profile_bindings
+        .remove(previous_response_id);
+    let state_snapshot = runtime.state.clone();
+    let continuations_snapshot = runtime_continuation_store_snapshot(&runtime);
+    let profile_scores_snapshot = runtime.profile_health.clone();
+    let usage_snapshots = runtime.profile_usage_snapshots.clone();
+    let backoffs_snapshot = runtime_profile_backoffs_snapshot(&runtime);
+    let paths_snapshot = runtime.paths.clone();
+    drop(runtime);
+    schedule_runtime_state_save(
+        shared,
+        state_snapshot,
+        continuations_snapshot,
+        profile_scores_snapshot,
+        usage_snapshots,
+        backoffs_snapshot,
+        paths_snapshot,
+        &format!("previous_response_binding_clear:{profile_name}"),
+    );
+    runtime_proxy_log(
+        shared,
+        format!(
+            "previous_response_binding_cleared profile={profile_name} response_id={previous_response_id}"
+        ),
+    );
+    Ok(true)
 }
 
 fn release_runtime_quota_blocked_affinity(
@@ -10465,6 +10755,14 @@ fn proxy_runtime_websocket_text_message(
                             }
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
+                            if !has_turn_state_retry && !request_requires_previous_response_affinity
+                            {
+                                let _ = clear_runtime_stale_previous_response_binding(
+                                    shared,
+                                    &profile_name,
+                                    previous_response_id.as_deref(),
+                                )?;
+                            }
                             let released_affinity = release_runtime_previous_response_affinity(
                                 shared,
                                 &profile_name,
@@ -10785,6 +11083,14 @@ fn proxy_runtime_websocket_text_message(
                             }
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
+                            if !has_turn_state_retry && !request_requires_previous_response_affinity
+                            {
+                                let _ = clear_runtime_stale_previous_response_binding(
+                                    shared,
+                                    &profile_name,
+                                    previous_response_id.as_deref(),
+                                )?;
+                            }
                             let released_affinity = release_runtime_previous_response_affinity(
                                 shared,
                                 &profile_name,
@@ -11185,6 +11491,13 @@ fn proxy_runtime_websocket_text_message(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
+                if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                    let _ = clear_runtime_stale_previous_response_binding(
+                        shared,
+                        &profile_name,
+                        previous_response_id.as_deref(),
+                    )?;
+                }
                 let released_affinity = release_runtime_previous_response_affinity(
                     shared,
                     &profile_name,
@@ -13066,6 +13379,14 @@ fn proxy_runtime_responses_request(
                             }
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
+                            if !has_turn_state_retry && !request_requires_previous_response_affinity
+                            {
+                                let _ = clear_runtime_stale_previous_response_binding(
+                                    shared,
+                                    &profile_name,
+                                    previous_response_id.as_deref(),
+                                )?;
+                            }
                             let released_affinity = release_runtime_previous_response_affinity(
                                 shared,
                                 &profile_name,
@@ -13392,6 +13713,14 @@ fn proxy_runtime_responses_request(
                             }
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
+                            if !has_turn_state_retry && !request_requires_previous_response_affinity
+                            {
+                                let _ = clear_runtime_stale_previous_response_binding(
+                                    shared,
+                                    &profile_name,
+                                    previous_response_id.as_deref(),
+                                )?;
+                            }
                             let released_affinity = release_runtime_previous_response_affinity(
                                 shared,
                                 &profile_name,
@@ -13678,6 +14007,13 @@ fn proxy_runtime_responses_request(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
+                if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                    let _ = clear_runtime_stale_previous_response_binding(
+                        shared,
+                        &profile_name,
+                        previous_response_id.as_deref(),
+                    )?;
+                }
                 let released_affinity = release_runtime_previous_response_affinity(
                     shared,
                     &profile_name,
