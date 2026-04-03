@@ -72,6 +72,7 @@ const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 const PRODEX_CLAUDE_PROXY_API_KEY: &str = "prodex-runtime-proxy";
 const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5";
+const PRODEX_CLAUDE_CONFIG_DIR_NAME: &str = ".claude-code";
 const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
@@ -5002,9 +5003,19 @@ fn handle_claude(args: ClaudeArgs) -> Result<()> {
     let runtime_proxy = prepared
         .runtime_proxy
         .context("Claude Code launch requires a local runtime proxy")?;
-    let extra_env = runtime_proxy_claude_launch_env(runtime_proxy.listen_addr);
+    let claude_bin = claude_bin();
+    let claude_config_dir = runtime_proxy_claude_config_dir(&prepared.codex_home);
+    let current_dir =
+        env::current_dir().context("failed to determine current directory for Claude Code")?;
+    let claude_version = runtime_proxy_claude_binary_version(&claude_bin);
+    ensure_runtime_proxy_claude_launch_config(
+        &claude_config_dir,
+        &current_dir,
+        claude_version.as_deref(),
+    )?;
+    let extra_env = runtime_proxy_claude_launch_env(runtime_proxy.listen_addr, &claude_config_dir);
     let status = run_child(
-        &claude_bin(),
+        &claude_bin,
         &args.claude_args,
         &prepared.codex_home,
         &extra_env,
@@ -5016,14 +5027,16 @@ fn handle_claude(args: ClaudeArgs) -> Result<()> {
 
 fn runtime_proxy_claude_launch_env(
     listen_addr: std::net::SocketAddr,
+    config_dir: &Path,
 ) -> Vec<(&'static str, OsString)> {
     vec![
+        ("CLAUDE_CONFIG_DIR", OsString::from(config_dir.as_os_str())),
         (
             "ANTHROPIC_BASE_URL",
             OsString::from(format!("http://{listen_addr}")),
         ),
         (
-            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
             OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
         ),
         (
@@ -5034,7 +5047,11 @@ fn runtime_proxy_claude_launch_env(
 }
 
 fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
-    &["ANTHROPIC_AUTH_TOKEN"]
+    &[
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+    ]
 }
 
 fn runtime_proxy_claude_model_override() -> Option<String> {
@@ -5046,6 +5063,146 @@ fn runtime_proxy_claude_model_override() -> Option<String> {
 
 fn runtime_proxy_claude_launch_model() -> String {
     runtime_proxy_claude_model_override().unwrap_or_else(|| DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+}
+
+fn runtime_proxy_claude_config_dir(codex_home: &Path) -> PathBuf {
+    codex_home.join(PRODEX_CLAUDE_CONFIG_DIR_NAME)
+}
+
+fn runtime_proxy_claude_binary_version(binary: &OsString) -> Option<String> {
+    let output = Command::new(binary).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_runtime_proxy_claude_version_text(&String::from_utf8_lossy(&output.stdout)).or_else(
+        || parse_runtime_proxy_claude_version_text(&String::from_utf8_lossy(&output.stderr)),
+    )
+}
+
+fn parse_runtime_proxy_claude_version_text(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|token| token.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+fn ensure_runtime_proxy_claude_launch_config(
+    config_dir: &Path,
+    cwd: &Path,
+    claude_version: Option<&str>,
+) -> Result<()> {
+    fs::create_dir_all(config_dir).with_context(|| {
+        format!(
+            "failed to create Claude Code config dir at {}",
+            config_dir.display()
+        )
+    })?;
+    let config_path = config_dir.join(".claude.json");
+    let raw = fs::read_to_string(&config_path).ok();
+    let mut config = raw
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !config.is_object() {
+        config = serde_json::json!({});
+    }
+
+    let object = config
+        .as_object_mut()
+        .expect("Claude Code config should be normalized to an object");
+    let num_startups = object
+        .get("numStartups")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        .max(1);
+    object.insert("numStartups".to_string(), serde_json::json!(num_startups));
+    object.insert(
+        "hasCompletedOnboarding".to_string(),
+        serde_json::json!(true),
+    );
+    if let Some(version) = claude_version {
+        object.insert(
+            "lastOnboardingVersion".to_string(),
+            serde_json::json!(version),
+        );
+    }
+
+    let projects = object
+        .entry("projects".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !projects.is_object() {
+        *projects = serde_json::json!({});
+    }
+    let projects = projects
+        .as_object_mut()
+        .expect("Claude Code projects config should be an object");
+    let project_key = cwd.to_string_lossy().into_owned();
+    let project = projects
+        .entry(project_key)
+        .or_insert_with(|| serde_json::json!({}));
+    if !project.is_object() {
+        *project = serde_json::json!({});
+    }
+    let project = project
+        .as_object_mut()
+        .expect("Claude Code project config should be an object");
+    project.insert(
+        "hasTrustDialogAccepted".to_string(),
+        serde_json::json!(true),
+    );
+    let project_onboarding_seen_count = project
+        .get("projectOnboardingSeenCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        .max(1);
+    project.insert(
+        "projectOnboardingSeenCount".to_string(),
+        serde_json::json!(project_onboarding_seen_count),
+    );
+    for key in [
+        "allowedTools",
+        "mcpContextUris",
+        "enabledMcpjsonServers",
+        "disabledMcpjsonServers",
+        "exampleFiles",
+    ] {
+        if !project.get(key).is_some_and(serde_json::Value::is_array) {
+            project.insert(key.to_string(), serde_json::json!([]));
+        }
+    }
+    if !project
+        .get("mcpServers")
+        .is_some_and(serde_json::Value::is_object)
+    {
+        project.insert("mcpServers".to_string(), serde_json::json!({}));
+    }
+    project.insert(
+        "hasClaudeMdExternalIncludesApproved".to_string(),
+        serde_json::json!(
+            project
+                .get("hasClaudeMdExternalIncludesApproved")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        ),
+    );
+    project.insert(
+        "hasClaudeMdExternalIncludesWarningShown".to_string(),
+        serde_json::json!(
+            project
+                .get("hasClaudeMdExternalIncludesWarningShown")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        ),
+    );
+
+    let rendered =
+        serde_json::to_string_pretty(&config).context("failed to render Claude Code config")?;
+    fs::write(&config_path, rendered).with_context(|| {
+        format!(
+            "failed to write Claude Code config at {}",
+            config_path.display()
+        )
+    })?;
+    Ok(())
 }
 
 fn prepare_runtime_launch(request: RuntimeLaunchRequest<'_>) -> Result<PreparedRuntimeLaunch> {

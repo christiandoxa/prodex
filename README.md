@@ -143,6 +143,7 @@ prodex claude -- -p "summarize this repo"
 - `prodex quota` live-refreshes every 5 seconds by default, and `prodex quota --all` also shows aggregated `5h` and `weekly` pool remaining before the per-profile table
 - Prodex-owned screens adapt to terminal width, and live views can also adapt to terminal height
 - `prodex claude` injects a local Anthropic-compatible proxy for Claude Code and still uses Prodex profile selection and runtime rotation
+- `prodex claude` also keeps Claude Code state in an isolated per-profile `CLAUDE_CONFIG_DIR`, so theme/login onboarding does not reappear every launch and the current workspace can open directly in chat mode
 - use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
 - use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model used for Anthropic-compatible requests
 

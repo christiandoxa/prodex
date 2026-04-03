@@ -163,6 +163,8 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 `prodex claude` launches Claude Code with `ANTHROPIC_BASE_URL` pointed at a local Prodex proxy. Prodex translates Anthropic `POST /v1/messages` requests into the runtime Responses path, so Claude Code can reuse the same profile pool, quota preflight, and runtime auto-rotate logic.
 
+Unlike a generic Anthropic-compatible proxy setup, Prodex also keeps Claude Code state in an isolated per-profile `CLAUDE_CONFIG_DIR` and seeds the minimal launch config that Claude expects. That prevents repeated theme/login onboarding screens and lets the current workspace open directly in chat mode.
+
 If `claude` is not on your `PATH`, point Prodex at a specific binary:
 
 ```bash

@@ -18405,12 +18405,21 @@ fn runtime_proxy_lane_classifies_anthropic_messages_as_responses() {
 }
 
 #[test]
-fn runtime_proxy_claude_launch_env_uses_api_key_mode_only() {
+fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir() {
+    let temp_dir = TestDir::new();
     let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
+    let config_dir = temp_dir.path.join("claude-config");
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43123"
             .parse()
             .expect("listen address should parse"),
+        &config_dir,
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some(config_dir.to_string_lossy().into_owned())
     );
     assert_eq!(
         env.iter()
@@ -18420,7 +18429,7 @@ fn runtime_proxy_claude_launch_env_uses_api_key_mode_only() {
     );
     assert_eq!(
         env.iter()
-            .find(|(key, _)| *key == "ANTHROPIC_API_KEY")
+            .find(|(key, _)| *key == "ANTHROPIC_AUTH_TOKEN")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some(PRODEX_CLAUDE_PROXY_API_KEY.to_string())
     );
@@ -18432,23 +18441,133 @@ fn runtime_proxy_claude_launch_env_uses_api_key_mode_only() {
     );
     assert!(env
         .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_AUTH_TOKEN"));
-    assert_eq!(runtime_proxy_claude_removed_env(), ["ANTHROPIC_AUTH_TOKEN"]);
+        .all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
+    assert_eq!(
+        runtime_proxy_claude_removed_env(),
+        [
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"
+        ]
+    );
 }
 
 #[test]
 fn runtime_proxy_claude_launch_env_honors_model_override() {
     let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5-mini");
+    let temp_dir = TestDir::new();
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43124"
             .parse()
             .expect("listen address should parse"),
+        &temp_dir.path.join("claude-config"),
     );
     assert_eq!(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5-mini".to_string())
+    );
+}
+
+#[test]
+fn parse_runtime_proxy_claude_version_text_extracts_semver_prefix() {
+    assert_eq!(
+        parse_runtime_proxy_claude_version_text("2.1.90 (Claude Code)"),
+        Some("2.1.90".to_string())
+    );
+    assert_eq!(
+        parse_runtime_proxy_claude_version_text("Claude Code 2.1.90"),
+        Some("2.1.90".to_string())
+    );
+    assert_eq!(parse_runtime_proxy_claude_version_text("Claude Code"), None);
+}
+
+#[test]
+fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust() {
+    let temp_dir = TestDir::new();
+    let config_dir = temp_dir.path.join("claude-config");
+    let cwd = temp_dir.path.join("workspace");
+    fs::create_dir_all(&cwd).expect("workspace dir should exist");
+
+    ensure_runtime_proxy_claude_launch_config(&config_dir, &cwd, Some("2.1.90"))
+        .expect("Claude config seed should succeed");
+
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(config_dir.join(".claude.json"))
+            .expect("Claude config should be written"),
+    )
+    .expect("Claude config should be valid JSON");
+    assert_eq!(config["numStartups"], serde_json::json!(1));
+    assert_eq!(config["hasCompletedOnboarding"], serde_json::json!(true));
+    assert_eq!(
+        config["lastOnboardingVersion"],
+        serde_json::json!("2.1.90")
+    );
+
+    let project_key = cwd.to_string_lossy().into_owned();
+    let project = config["projects"]
+        .get(project_key.as_str())
+        .expect("seeded project entry should exist");
+    assert_eq!(
+        project["hasTrustDialogAccepted"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        project["projectOnboardingSeenCount"],
+        serde_json::json!(1)
+    );
+    assert!(project["allowedTools"].is_array());
+    assert!(project["mcpContextUris"].is_array());
+    assert!(project["mcpServers"].is_object());
+    assert!(project["enabledMcpjsonServers"].is_array());
+    assert!(project["disabledMcpjsonServers"].is_array());
+    assert!(project["exampleFiles"].is_array());
+}
+
+#[test]
+fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
+    let temp_dir = TestDir::new();
+    let config_dir = temp_dir.path.join("claude-config");
+    let cwd = temp_dir.path.join("workspace");
+    let other_project = temp_dir.path.join("other");
+    fs::create_dir_all(&cwd).expect("workspace dir should exist");
+    fs::create_dir_all(&config_dir).expect("config dir should exist");
+    fs::write(
+        config_dir.join(".claude.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "numStartups": 7,
+            "customField": "keep-me",
+            "projects": {
+                other_project.to_string_lossy().to_string(): {
+                    "hasTrustDialogAccepted": false,
+                    "allowedTools": ["Bash"]
+                }
+            }
+        }))
+        .expect("existing config should serialize"),
+    )
+    .expect("existing config should write");
+
+    ensure_runtime_proxy_claude_launch_config(&config_dir, &cwd, Some("2.1.90"))
+        .expect("Claude config merge should succeed");
+
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(config_dir.join(".claude.json"))
+            .expect("Claude config should still exist"),
+    )
+    .expect("merged Claude config should be valid JSON");
+    assert_eq!(config["numStartups"], serde_json::json!(7));
+    assert_eq!(config["customField"], serde_json::json!("keep-me"));
+    let other_project_key = other_project.to_string_lossy().to_string();
+    let cwd_key = cwd.to_string_lossy().to_string();
+    assert_eq!(
+        config["projects"][other_project_key.as_str()]["allowedTools"],
+        serde_json::json!(["Bash"])
+    );
+    assert_eq!(
+        config["projects"][cwd_key.as_str()]["hasTrustDialogAccepted"],
+        serde_json::json!(true)
     );
 }
 
