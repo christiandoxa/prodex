@@ -6554,7 +6554,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.4",
             description: "Latest frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Opus),
-            claude_picker_model: Some("claude-opus-4-6"),
+            claude_picker_model: Some("opus"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6562,7 +6562,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.4 Mini",
             description: "Smaller frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Haiku),
-            claude_picker_model: Some("claude-haiku-4-5"),
+            claude_picker_model: Some("haiku"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6570,7 +6570,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.3 Codex",
             description: "Frontier Codex-optimized agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Sonnet),
-            claude_picker_model: Some("claude-sonnet-4-6"),
+            claude_picker_model: Some("sonnet"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
