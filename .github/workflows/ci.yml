@@ -46,6 +46,7 @@ jobs:
             --skip app_paths_discover_resolves_relative_shared_codex_home_inside_prodex_root \
             --skip runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir \
             --skip runtime_proxy_claude_launch_env_honors_model_override \
+            --skip runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override \
             --skip runtime_proxy_claude_launch_env_uses_codex_config_model_by_default \
             --skip runtime_proxy_claude_reasoning_effort_override_normalizes_env \
             --skip runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env \
@@ -81,6 +82,7 @@ jobs:
             app_paths_discover_resolves_relative_shared_codex_home_inside_prodex_root \
             runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir \
             runtime_proxy_claude_launch_env_honors_model_override \
+            runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override \
             runtime_proxy_claude_launch_env_uses_codex_config_model_by_default \
             runtime_proxy_claude_reasoning_effort_override_normalizes_env \
             runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env \
