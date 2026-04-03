@@ -107,6 +107,7 @@ struct RuntimeProxyResponsesModelDescriptor {
     display_name: &'static str,
     description: &'static str,
     claude_alias: Option<RuntimeProxyClaudeModelAlias>,
+    claude_picker_model: Option<&'static str>,
     supports_xhigh: bool,
 }
 const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
@@ -5184,14 +5185,6 @@ fn runtime_proxy_claude_launch_model(codex_home: &Path) -> String {
         .unwrap_or_else(|| DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
 }
 
-fn runtime_proxy_claude_alias_name(alias: RuntimeProxyClaudeModelAlias) -> &'static str {
-    match alias {
-        RuntimeProxyClaudeModelAlias::Opus => "opus",
-        RuntimeProxyClaudeModelAlias::Sonnet => "sonnet",
-        RuntimeProxyClaudeModelAlias::Haiku => "haiku",
-    }
-}
-
 fn runtime_proxy_claude_alias_env_keys(
     alias: RuntimeProxyClaudeModelAlias,
 ) -> (&'static str, &'static str, &'static str, &'static str) {
@@ -5224,6 +5217,20 @@ fn runtime_proxy_claude_alias_model(
         .iter()
         .find(|descriptor| descriptor.claude_alias == Some(alias))
         .expect("Claude alias model should exist")
+}
+
+fn runtime_proxy_claude_picker_model_descriptor(
+    picker_model: &str,
+) -> Option<&'static RuntimeProxyResponsesModelDescriptor> {
+    let normalized = picker_model.trim();
+    let without_extended_context = normalized.strip_suffix("[1m]").unwrap_or(normalized);
+    runtime_proxy_responses_model_descriptors()
+        .iter()
+        .find(|descriptor| {
+            descriptor
+                .claude_picker_model
+                .is_some_and(|value| value.eq_ignore_ascii_case(without_extended_context))
+        })
 }
 
 fn runtime_proxy_responses_model_descriptor(
@@ -5279,8 +5286,7 @@ fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
 
 fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
     runtime_proxy_responses_model_descriptor(target_model)
-        .and_then(|descriptor| descriptor.claude_alias)
-        .map(runtime_proxy_claude_alias_name)
+        .and_then(|descriptor| descriptor.claude_picker_model)
         .unwrap_or(target_model)
         .to_string()
 }
@@ -5288,6 +5294,10 @@ fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
 fn runtime_proxy_claude_custom_model_option_env(
     target_model: &str,
 ) -> Vec<(&'static str, OsString)> {
+    if runtime_proxy_responses_model_descriptor(target_model).is_some() {
+        return Vec::new();
+    }
+
     let descriptor = runtime_proxy_responses_model_descriptor(target_model);
     let display_name = descriptor
         .map(|descriptor| descriptor.display_name)
@@ -5310,6 +5320,21 @@ fn runtime_proxy_claude_custom_model_option_env(
             OsString::from(description),
         ),
     ]
+}
+
+fn runtime_proxy_claude_additional_model_option_entries() -> Vec<serde_json::Value> {
+    runtime_proxy_responses_model_descriptors()
+        .iter()
+        .filter_map(|descriptor| {
+            descriptor.claude_picker_model.map(|picker_model| {
+                serde_json::json!({
+                    "value": picker_model,
+                    "label": descriptor.id,
+                    "description": descriptor.description,
+                })
+            })
+        })
+        .collect()
 }
 
 fn runtime_proxy_claude_config_dir(codex_home: &Path) -> PathBuf {
@@ -5372,6 +5397,27 @@ fn ensure_runtime_proxy_claude_launch_config(
             serde_json::json!(version),
         );
     }
+    let mut additional_model_options = runtime_proxy_claude_additional_model_option_entries();
+    if let Some(existing) = object
+        .get("additionalModelOptionsCache")
+        .and_then(serde_json::Value::as_array)
+    {
+        for entry in existing {
+            let existing_value = entry.get("value").and_then(serde_json::Value::as_str);
+            if existing_value.is_some_and(|value| {
+                additional_model_options.iter().any(|managed| {
+                    managed.get("value").and_then(serde_json::Value::as_str) == Some(value)
+                })
+            }) {
+                continue;
+            }
+            additional_model_options.push(entry.clone());
+        }
+    }
+    object.insert(
+        "additionalModelOptionsCache".to_string(),
+        serde_json::Value::Array(additional_model_options),
+    );
 
     let projects = object
         .entry("projects".to_string())
@@ -6508,6 +6554,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.4",
             description: "Latest frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Opus),
+            claude_picker_model: Some("claude-opus-4-6"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6515,6 +6562,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.4 Mini",
             description: "Smaller frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Haiku),
+            claude_picker_model: Some("claude-haiku-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6522,6 +6570,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.3 Codex",
             description: "Frontier Codex-optimized agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Sonnet),
+            claude_picker_model: Some("claude-sonnet-4-6"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6529,6 +6578,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.2 Codex",
             description: "Frontier agentic coding model.",
             claude_alias: None,
+            claude_picker_model: Some("claude-sonnet-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6536,6 +6586,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.2",
             description: "Optimized for professional work and long-running agents.",
             claude_alias: None,
+            claude_picker_model: Some("claude-opus-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6543,6 +6594,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.1 Codex Max",
             description: "Codex-optimized model for deep and fast reasoning.",
             claude_alias: None,
+            claude_picker_model: Some("claude-opus-4-1"),
             supports_xhigh: false,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6550,6 +6602,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.1 Codex Mini",
             description: "Optimized for Codex. Cheaper, faster, but less capable.",
             claude_alias: None,
+            claude_picker_model: Some("claude-haiku-4"),
             supports_xhigh: false,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6557,6 +6610,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5",
             description: "General-purpose GPT-5 model.",
             claude_alias: None,
+            claude_picker_model: Some("claude-sonnet-4"),
             supports_xhigh: false,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6564,6 +6618,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5 Mini",
             description: "Smaller GPT-5 model for fast, lower-cost tasks.",
             claude_alias: None,
+            claude_picker_model: Some("claude-haiku-3-5"),
             supports_xhigh: false,
         },
     ]
@@ -7246,6 +7301,12 @@ fn runtime_proxy_claude_target_model(requested_model: &str) -> String {
     }
 
     let normalized = requested_model.trim();
+    if let Some(descriptor) = runtime_proxy_responses_model_descriptor(normalized) {
+        return descriptor.id.to_string();
+    }
+    if let Some(descriptor) = runtime_proxy_claude_picker_model_descriptor(normalized) {
+        return descriptor.id.to_string();
+    }
     let lower = normalized.to_ascii_lowercase();
     if lower.starts_with("gpt-")
         || lower.starts_with("o1")

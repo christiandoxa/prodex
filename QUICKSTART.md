@@ -114,8 +114,9 @@ What changes on this path:
 - each profile gets its own `CLAUDE_CONFIG_DIR`
 - the initial Claude model follows the shared Codex `config.toml` model when available
 - Claude's `opus`, `sonnet`, and `haiku` entries are pinned to representative GPT models
+- Prodex seeds Claude's picker with the Prodex GPT catalog via Claude-native placeholder model IDs
 - Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
-- Claude Code's picker is upstream-limited to built-in aliases plus one custom model option on third-party providers
+- supported picker entries use Claude-native placeholders so Claude can expose native effort controls
 
 Useful overrides:
 

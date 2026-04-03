@@ -110,8 +110,9 @@ Use this path when you want Claude Code to be the front end while Prodex still r
 - Claude Code state is isolated per profile in `CLAUDE_CONFIG_DIR`
 - the initial Claude model follows the shared Codex `config.toml` model when available
 - Claude's `opus`, `sonnet`, and `haiku` picker entries are pinned to representative GPT models
+- Prodex also seeds Claude's picker with the full Prodex GPT catalog using Claude-native placeholder model IDs
 - Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
-- Claude Code itself only exposes built-in aliases plus one custom model option on third-party providers
+- supported picker entries use Claude-native placeholders so Claude can expose its native effort controls
 - use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
 - use `PRODEX_CLAUDE_MODEL` to force a specific upstream Responses model
 - use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream reasoning tier

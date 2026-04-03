@@ -18952,7 +18952,7 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some(DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+        Some("claude-sonnet-4".to_string())
     );
     assert_eq!(
         env.iter()
@@ -18978,12 +18978,9 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5.4-mini".to_string())
     );
-    assert_eq!(
-        env.iter()
-            .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
-            .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some(DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
-    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
     assert!(env
         .iter()
         .all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
@@ -19027,13 +19024,35 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("gpt-5-mini".to_string())
+        Some("claude-haiku-3-5".to_string())
+    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+}
+
+#[test]
+fn runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override() {
+    let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "my-gateway-model");
+    let temp_dir = TestDir::new();
+    let env = runtime_proxy_claude_launch_env(
+        "127.0.0.1:43124"
+            .parse()
+            .expect("listen address should parse"),
+        &temp_dir.path.join("claude-config"),
+        &temp_dir.path.join("codex-home"),
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("my-gateway-model".to_string())
     );
     assert_eq!(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("gpt-5-mini".to_string())
+        Some("my-gateway-model".to_string())
     );
 }
 
@@ -19056,14 +19075,11 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("opus".to_string())
+        Some("claude-opus-4-6".to_string())
     );
-    assert_eq!(
-        env.iter()
-            .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
-            .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("gpt-5.4".to_string())
-    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
 }
 
 #[test]
@@ -19076,6 +19092,14 @@ fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models()
     assert_eq!(
         runtime_proxy_claude_target_model("haiku"),
         "gpt-5.4-mini".to_string()
+    );
+    assert_eq!(
+        runtime_proxy_claude_target_model("claude-opus-4-5"),
+        "gpt-5.2".to_string()
+    );
+    assert_eq!(
+        runtime_proxy_claude_target_model("claude-haiku-3-5"),
+        "gpt-5-mini".to_string()
     );
 }
 
@@ -19128,6 +19152,18 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
         config["lastOnboardingVersion"],
         serde_json::json!("2.1.90")
     );
+    let additional_model_options = config["additionalModelOptionsCache"]
+        .as_array()
+        .expect("additional model options cache should be an array");
+    assert_eq!(additional_model_options.len(), 9);
+    assert!(additional_model_options.iter().any(|entry| {
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-opus-4-6")
+            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+    }));
+    assert!(additional_model_options.iter().any(|entry| {
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-sonnet-4-5")
+            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.2-codex")
+    }));
 
     let project_key = cwd.to_string_lossy().into_owned();
     let project = config["projects"]
@@ -19162,6 +19198,13 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
         serde_json::to_string_pretty(&serde_json::json!({
             "numStartups": 7,
             "customField": "keep-me",
+            "additionalModelOptionsCache": [
+                {
+                    "value": "custom-provider/model",
+                    "label": "custom-provider/model",
+                    "description": "Existing custom model"
+                }
+            ],
             "projects": {
                 other_project.to_string_lossy().to_string(): {
                     "hasTrustDialogAccepted": false,
@@ -19183,6 +19226,16 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
     .expect("merged Claude config should be valid JSON");
     assert_eq!(config["numStartups"], serde_json::json!(7));
     assert_eq!(config["customField"], serde_json::json!("keep-me"));
+    let additional_model_options = config["additionalModelOptionsCache"]
+        .as_array()
+        .expect("additional model options cache should be preserved as an array");
+    assert!(additional_model_options.iter().any(|entry| {
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("custom-provider/model")
+    }));
+    assert!(additional_model_options.iter().any(|entry| {
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-opus-4-6")
+            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+    }));
     let other_project_key = other_project.to_string_lossy().to_string();
     let cwd_key = cwd.to_string_lossy().to_string();
     assert_eq!(
