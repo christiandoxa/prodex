@@ -283,6 +283,7 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl", "config.toml"];
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static RUNTIME_PROXY_LOG_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock::new();
 static RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE: OnceLock<Arc<RuntimeContinuationJournalSaveQueue>> =
     OnceLock::new();
@@ -306,10 +307,11 @@ fn create_runtime_proxy_log_path() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
+    let sequence = RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let dir = runtime_proxy_log_dir();
     let _ = fs::create_dir_all(&dir);
     dir.join(format!(
-        "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}.log",
+        "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}-{sequence}.log",
         std::process::id()
     ))
 }

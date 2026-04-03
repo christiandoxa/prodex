@@ -18500,6 +18500,48 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
 }
 
 #[test]
+fn runtime_proxy_log_paths_remain_unique_under_parallel_generation() {
+    let worker_count = 32;
+    let paths_per_worker = 8;
+    let barrier = Arc::new(std::sync::Barrier::new(worker_count + 1));
+    let (sender, receiver) = mpsc::channel();
+    let mut workers = Vec::new();
+
+    for _ in 0..worker_count {
+        let barrier = Arc::clone(&barrier);
+        let sender = sender.clone();
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            let paths = (0..paths_per_worker)
+                .map(|_| create_runtime_proxy_log_path())
+                .collect::<Vec<_>>();
+            sender
+                .send(paths)
+                .expect("parallel log path batch should send");
+        }));
+    }
+
+    barrier.wait();
+    drop(sender);
+
+    let mut all_paths = Vec::new();
+    for paths in receiver {
+        all_paths.extend(paths);
+    }
+
+    for worker in workers {
+        worker.join().expect("parallel log path worker should join");
+    }
+
+    let unique_paths = all_paths.iter().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(
+        unique_paths.len(),
+        all_paths.len(),
+        "runtime proxy log paths should stay unique even under parallel creation"
+    );
+}
+
+#[test]
 fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
