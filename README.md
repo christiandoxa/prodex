@@ -47,11 +47,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.110`:
+The current local version in this repo is `0.2.111`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.110
-cargo install prodex --force --version 0.2.110
+npm install -g @christiandoxa/prodex@0.2.111
+cargo install prodex --force --version 0.2.111
 ```
 
 If you want to switch from a Cargo-installed binary to npm:
@@ -109,10 +109,11 @@ Use this path when you want Claude Code to be the front end while Prodex still r
 - `prodex claude` runs Claude Code through a local Anthropic-compatible proxy
 - Claude Code state is isolated per profile in `CLAUDE_CONFIG_DIR`
 - the initial Claude model follows the shared Codex `config.toml` model when available
-- Claude's `opus`, `sonnet`, and `haiku` picker entries are pinned to representative GPT models
-- Prodex also seeds Claude's picker with the full Prodex GPT catalog using Claude-native placeholder model IDs
+- Claude's native `opus`, `sonnet`, and `haiku` picker entries are pinned to representative GPT models
+- Prodex also seeds Claude's picker with the full Prodex GPT catalog
 - Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
-- supported picker entries use Claude-native placeholders so Claude can expose its native effort controls
+- alias-backed GPT entries reuse Claude's native alias picker values so the picker and confirmation text stay aligned
+- additional GPT entries use Claude-native placeholder IDs where needed so Claude can still expose its native effort controls
 - use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
 - use `PRODEX_CLAUDE_MODEL` to force a specific upstream Responses model
 - use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream reasoning tier
