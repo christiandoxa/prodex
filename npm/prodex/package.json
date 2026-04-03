@@ -1,7 +1,7 @@
 {
   "name": "@christiandoxa/prodex",
   "version": "0.2.107",
-  "description": "Safe multi-account auto-rotate for Codex CLI with isolated CODEX_HOME profiles",
+  "description": "Safe multi-account auto-rotate for Codex CLI and Claude Code with isolated per-profile state",
   "license": "MIT",
   "bin": {
     "prodex": "./prodex"

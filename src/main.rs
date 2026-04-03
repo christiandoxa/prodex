@@ -246,7 +246,9 @@ Examples:
 Notes:
   Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
   Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
-  Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.";
+  Claude defaults to the current Codex model from `config.toml` when available.
+  Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.
+  Use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream Responses reasoning effort.";
 const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor
@@ -5022,7 +5024,11 @@ fn handle_claude(args: ClaudeArgs) -> Result<()> {
         &current_dir,
         claude_version.as_deref(),
     )?;
-    let extra_env = runtime_proxy_claude_launch_env(runtime_proxy.listen_addr, &claude_config_dir);
+    let extra_env = runtime_proxy_claude_launch_env(
+        runtime_proxy.listen_addr,
+        &claude_config_dir,
+        &prepared.codex_home,
+    );
     let status = run_child(
         &claude_bin,
         &args.claude_args,
@@ -5037,6 +5043,7 @@ fn handle_claude(args: ClaudeArgs) -> Result<()> {
 fn runtime_proxy_claude_launch_env(
     listen_addr: std::net::SocketAddr,
     config_dir: &Path,
+    codex_home: &Path,
 ) -> Vec<(&'static str, OsString)> {
     vec![
         ("CLAUDE_CONFIG_DIR", OsString::from(config_dir.as_os_str())),
@@ -5050,7 +5057,7 @@ fn runtime_proxy_claude_launch_env(
         ),
         (
             "ANTHROPIC_MODEL",
-            OsString::from(runtime_proxy_claude_launch_model()),
+            OsString::from(runtime_proxy_claude_launch_model(codex_home)),
         ),
     ]
 }
@@ -5070,8 +5077,74 @@ fn runtime_proxy_claude_model_override() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn runtime_proxy_claude_launch_model() -> String {
-    runtime_proxy_claude_model_override().unwrap_or_else(|| DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+fn parse_toml_string_assignment(contents: &str, key: &str) -> Option<String> {
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix(key) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix('=')?.trim_start();
+        let rest = rest.strip_prefix('"')?;
+        let mut value = String::new();
+        let mut escaped = false;
+        for ch in rest.chars() {
+            if escaped {
+                value.push(match ch {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '"' => '"',
+                    '\\' => '\\',
+                    other => other,
+                });
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => return Some(value),
+                other => value.push(other),
+            }
+        }
+    }
+    None
+}
+
+fn runtime_proxy_claude_config_value(codex_home: &Path, key: &str) -> Option<String> {
+    let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
+    parse_toml_string_assignment(&contents, key).filter(|value| !value.trim().is_empty())
+}
+
+fn runtime_proxy_normalize_responses_reasoning_effort(effort: &str) -> Option<&'static str> {
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "minimal" => Some("minimal"),
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "xhigh" => Some("xhigh"),
+        "none" => Some("none"),
+        // Claude Code exposes `max`; treat it as the strongest explicit upstream tier.
+        "max" => Some("xhigh"),
+        _ => None,
+    }
+}
+
+fn runtime_proxy_claude_reasoning_effort_override() -> Option<String> {
+    env::var("PRODEX_CLAUDE_REASONING_EFFORT")
+        .ok()
+        .and_then(|value| {
+            runtime_proxy_normalize_responses_reasoning_effort(value.trim()).map(str::to_string)
+        })
+}
+
+fn runtime_proxy_claude_launch_model(codex_home: &Path) -> String {
+    runtime_proxy_claude_model_override()
+        .or_else(|| runtime_proxy_claude_config_value(codex_home, "model"))
+        .unwrap_or_else(|| DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
 }
 
 fn runtime_proxy_claude_config_dir(codex_home: &Path) -> PathBuf {
@@ -6264,7 +6337,17 @@ fn runtime_proxy_anthropic_model_descriptor(model_id: &str) -> serde_json::Value
 }
 
 fn runtime_proxy_anthropic_exposed_models() -> &'static [(&'static str, &'static str)] {
-    &[("gpt-5", "GPT-5"), ("gpt-5-mini", "GPT-5 Mini")]
+    &[
+        ("gpt-5.4", "GPT-5.4"),
+        ("gpt-5.4-mini", "GPT-5.4 Mini"),
+        ("gpt-5.3-codex", "GPT-5.3 Codex"),
+        ("gpt-5.2-codex", "GPT-5.2 Codex"),
+        ("gpt-5.2", "GPT-5.2"),
+        ("gpt-5.1-codex-max", "GPT-5.1 Codex Max"),
+        ("gpt-5.1-codex-mini", "GPT-5.1 Codex Mini"),
+        ("gpt-5", "GPT-5"),
+        ("gpt-5-mini", "GPT-5 Mini"),
+    ]
 }
 
 fn runtime_proxy_anthropic_model_display_name(model_id: &str) -> String {
@@ -6972,13 +7055,27 @@ fn runtime_proxy_anthropic_wants_thinking(value: &serde_json::Value) -> bool {
         .is_some_and(|thinking| matches!(thinking, "enabled" | "adaptive"))
 }
 
+fn runtime_proxy_normalize_anthropic_reasoning_effort(effort: &str) -> Option<&'static str> {
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        // Claude Code exposes `max`, but on the Anthropic-compatible request
+        // surface it still maps to the strongest three-tier level.
+        "high" | "max" => Some("high"),
+        _ => None,
+    }
+}
+
 fn runtime_proxy_anthropic_reasoning_effort(value: &serde_json::Value) -> Option<String> {
+    if let Some(effort) = runtime_proxy_claude_reasoning_effort_override() {
+        return Some(effort);
+    }
+
     if let Some(effort) = value
         .get("output_config")
         .and_then(|config| config.get("effort"))
         .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
+        .and_then(runtime_proxy_normalize_anthropic_reasoning_effort)
     {
         return Some(effort.to_string());
     }

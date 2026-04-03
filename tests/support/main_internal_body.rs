@@ -18798,11 +18798,13 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
     let temp_dir = TestDir::new();
     let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
     let config_dir = temp_dir.path.join("claude-config");
+    let codex_home = temp_dir.path.join("codex-home");
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43123"
             .parse()
             .expect("listen address should parse"),
         &config_dir,
+        &codex_home,
     );
     assert_eq!(
         env.iter()
@@ -18850,6 +18852,7 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .parse()
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
+        &temp_dir.path.join("codex-home"),
     );
     assert_eq!(
         env.iter()
@@ -18857,6 +18860,44 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5-mini".to_string())
     );
+}
+
+#[test]
+fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
+    let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
+    let temp_dir = TestDir::new();
+    let codex_home = temp_dir.path.join("codex-home");
+    fs::create_dir_all(&codex_home).expect("codex home should exist");
+    fs::write(codex_home.join("config.toml"), "model = \"gpt-5.4\"\n")
+        .expect("config should write");
+    let env = runtime_proxy_claude_launch_env(
+        "127.0.0.1:43124"
+            .parse()
+            .expect("listen address should parse"),
+        &temp_dir.path.join("claude-config"),
+        &codex_home,
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5.4".to_string())
+    );
+}
+
+#[test]
+fn runtime_proxy_claude_reasoning_effort_override_normalizes_env() {
+    let _effort_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_REASONING_EFFORT", "max");
+    assert_eq!(
+        runtime_proxy_claude_reasoning_effort_override(),
+        Some("xhigh".to_string())
+    );
+}
+
+#[test]
+fn runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env() {
+    let _effort_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_REASONING_EFFORT", "ultra");
+    assert_eq!(runtime_proxy_claude_reasoning_effort_override(), None);
 }
 
 #[test]
@@ -19029,13 +19070,23 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
         .get("data")
         .and_then(serde_json::Value::as_array)
         .expect("models data should be an array");
-    assert_eq!(data.len(), 2, "metadata route should only expose prodex Claude models");
+    assert_eq!(
+        data.len(),
+        9,
+        "metadata route should expose the prodex Claude OpenAI model catalog"
+    );
     assert!(data.iter().all(|model| {
         !model
             .get("id")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .starts_with("claude-")
+    }));
+    assert!(data.iter().any(|model| {
+        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+    }));
+    assert!(data.iter().any(|model| {
+        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
     }));
     assert!(data.iter().any(|model| {
         model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5")
@@ -19245,6 +19296,106 @@ fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
     assert_eq!(
         input[3].get("output").and_then(serde_json::Value::as_str),
         Some("file1")
+    );
+}
+
+#[test]
+fn runtime_proxy_anthropic_reasoning_effort_normalizes_output_config_levels() {
+    let cases = [
+        ("low", Some("low")),
+        ("medium", Some("medium")),
+        ("high", Some("high")),
+        ("max", Some("high")),
+        ("HIGH", Some("high")),
+        ("unknown", None),
+    ];
+
+    for (input_effort, expected) in cases {
+        let value = serde_json::json!({
+            "output_config": {
+                "effort": input_effort,
+            }
+        });
+        assert_eq!(
+            runtime_proxy_anthropic_reasoning_effort(&value).as_deref(),
+            expected,
+            "input effort {input_effort:?} normalized incorrectly"
+        );
+    }
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_downgrades_max_effort_to_high() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "gpt-5",
+            "thinking": {
+                "type": "adaptive"
+            },
+            "output_config": {
+                "effort": "max",
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hello"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    assert_eq!(
+        body.get("reasoning")
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(serde_json::Value::as_str),
+        Some("high")
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_honors_reasoning_override_env() {
+    let _effort_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_REASONING_EFFORT", "xhigh");
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "gpt-5.2",
+            "thinking": {
+                "type": "adaptive"
+            },
+            "output_config": {
+                "effort": "low",
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hello"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    assert_eq!(
+        body.get("reasoning")
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(serde_json::Value::as_str),
+        Some("xhigh")
     );
 }
 

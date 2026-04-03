@@ -165,6 +165,8 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 Unlike a generic Anthropic-compatible proxy setup, Prodex also keeps Claude Code state in an isolated per-profile `CLAUDE_CONFIG_DIR` and seeds the minimal launch config that Claude expects. That prevents repeated theme/login onboarding screens and lets the current workspace open directly in chat mode.
 
+When the shared Codex `config.toml` already sets a model, `prodex claude` uses that as the default Claude custom model instead of always falling back to plain `gpt-5`.
+
 If `claude` is not on your `PATH`, point Prodex at a specific binary:
 
 ```bash
@@ -175,6 +177,12 @@ If you want to force a specific upstream Responses model for Anthropic-compatibl
 
 ```bash
 PRODEX_CLAUDE_MODEL=gpt-5 prodex claude -- -p "hello"
+```
+
+If you need to force a specific upstream reasoning tier, use `PRODEX_CLAUDE_REASONING_EFFORT`. This is useful for models that support `xhigh`, such as `gpt-5.2`:
+
+```bash
+PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -- -p "hello"
 ```
 
 ## Debug the Environment
