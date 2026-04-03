@@ -2,17 +2,24 @@
 
 [![CI](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml/badge.svg)](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml)
 
-Safe multi-account auto-rotate for Codex CLI and Claude Code.
+One OpenAI profile pool for Codex CLI and Claude Code.
 
-`prodex` is a multi-account wrapper for Codex CLI and a profile-aware proxy launcher for Claude Code. It keeps per-profile state isolated, runs built-in quota checks, and rotates to another ready account before a request or stream is committed.
+`prodex` gives you two entry points backed by the same OpenAI account pool:
 
-## Why prodex
+| Use case | Command |
+| --- | --- |
+| Run Codex CLI through Prodex | `prodex` or `prodex run` |
+| Run Claude Code through Prodex | `prodex claude` |
 
-- use the same Prodex profile pool from both `codex` and Claude Code
-- auto-rotate to another ready account when the current one is quota-blocked or temporarily unhealthy
-- keep each account isolated in its own `CODEX_HOME`, while `prodex claude` also keeps Claude Code state isolated per profile
-- preserve continuation affinity so ongoing chains stay on the right account
-- keep transport behavior close to the direct upstream CLIs
+It keeps each profile isolated, checks quota before launch, and rotates to another ready account before a request or stream is committed.
+
+## Requirements
+
+- An OpenAI account, plus at least one logged-in Prodex profile
+- Codex CLI if you want to use `prodex`
+- Claude Code (`claude`) if you want to use `prodex claude`
+
+If you install `@christiandoxa/prodex` from npm, the Codex runtime dependency is installed for you. Claude Code is still a separate CLI and should already be available on your `PATH` when you use `prodex claude`.
 
 ## Install
 
@@ -22,8 +29,6 @@ Install from npm:
 npm install -g @christiandoxa/prodex
 ```
 
-This is usually the lightest option because it does not need a local Rust build.
-
 Or install from [crates.io](https://crates.io/crates/prodex):
 
 ```bash
@@ -32,123 +37,99 @@ cargo install prodex
 
 The npm package version is kept in lockstep with the published crate version.
 
-## Update Tips
+## Update
 
-Check your installed version first:
+Check your installed version:
 
 ```bash
 prodex --version
 ```
 
-The current local binary version in this repo is `0.2.107`, so matching update commands look like this:
+The current local version in this repo is `0.2.108`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.107
-cargo install prodex --force --version 0.2.107
+npm install -g @christiandoxa/prodex@0.2.108
+cargo install prodex --force --version 0.2.108
 ```
 
-If you just want the lighter install path, prefer npm over `cargo install` because npm does not need to compile `prodex` locally.
-
-If you want to move from a Cargo-installed binary to npm, uninstall the Cargo binary first and then install the npm package:
+If you want to switch from a Cargo-installed binary to npm:
 
 ```bash
 cargo uninstall prodex
 npm install -g @christiandoxa/prodex
 ```
 
-## Quick Start
+## Start
 
-Import your current `codex` login:
+Import your current login:
 
 ```bash
 prodex profile import-current main
 ```
 
-Or create a profile through `codex login`:
+Or create a profile through the normal Codex login flow:
 
 ```bash
 prodex login
-```
-
-If you need device-code auth, pass it through unchanged:
-
-```bash
 prodex login --device-auth
 ```
 
-Check quotas:
+Check the pool:
 
 ```bash
+prodex profile list
 prodex quota --all
 prodex info
 ```
 
-Run Codex CLI with safe auto-rotate:
+## Use `prodex` for Codex CLI
+
+`prodex` without a subcommand is shorthand for `prodex run`.
 
 ```bash
 prodex
-prodex run
-```
-
-Running `prodex` without a subcommand is shorthand for `prodex run`.
-
-Resume a saved Codex session directly:
-
-```bash
-prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-```
-
-Pin a specific profile when needed:
-
-```bash
 prodex run --profile second
-```
-
-`prodex run exec` also preserves stdin passthrough, so prompt and piped input stay together:
-
-```bash
+prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
-Run Claude Code CLI through the same profile pool:
+Use this path when you want Codex CLI itself to be the front end. Prodex handles profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
+
+## Use `prodex claude` for Claude Code
 
 ```bash
 prodex claude -- -p "summarize this repo"
+prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
-## Core Commands
+Use this path when you want Claude Code to be the front end while Prodex still routes requests through your OpenAI-backed profile pool.
+
+- `prodex claude` runs Claude Code through a local Anthropic-compatible proxy
+- Claude Code state is isolated per profile in `CLAUDE_CONFIG_DIR`
+- the default Claude custom model follows the shared Codex `config.toml` model when available
+- use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
+- use `PRODEX_CLAUDE_MODEL` to force a specific upstream Responses model
+- use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream reasoning tier
+
+Example:
 
 ```bash
-prodex
-prodex exec "review this repo"
+PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -- -p "hello"
+```
+
+## Common Commands
+
+```bash
 prodex profile list
 prodex use --profile main
-prodex info
+prodex current
 prodex quota --all
 prodex quota --all --once
+prodex info
 prodex doctor
 prodex doctor --runtime
-prodex run
-prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-prodex claude -- -p "summarize this repo"
 ```
 
-## Notes
+## More
 
-- `prodex` is not only for `codex`: `prodex run` targets Codex CLI, and `prodex claude` launches Claude Code through the same profile pool
-- one `prodex` profile = one isolated `CODEX_HOME`, and `prodex claude` also gets an isolated per-profile `CLAUDE_CONFIG_DIR`
-- `prodex login` still uses the real `codex login` flow, including `--device-auth`
-- `prodex login` without `--profile` first tries to read the ChatGPT account email from `tokens.id_token` in `auth.json`, then falls back to the usage endpoint email when needed
-- `prodex` without a subcommand behaves like `prodex run`
-- `prodex run <session-id>` forwards to `codex resume <session-id>`
-- `prodex info` summarizes profile count, the installed prodex version and update status, running Prodex processes, aggregated quota pool, and a no-reset runway estimate from active runtime logs
-- `prodex quota` live-refreshes every 5 seconds by default, and `prodex quota --all` also shows aggregated `5h` and `weekly` pool remaining before the per-profile table
-- Prodex-owned screens adapt to terminal width, and live views can also adapt to terminal height
-- `prodex claude` injects a local Anthropic-compatible proxy for Claude Code and still uses Prodex profile selection and runtime rotation
-- `prodex claude` also keeps Claude Code state in an isolated per-profile `CLAUDE_CONFIG_DIR`, so theme/login onboarding does not reappear every launch and the current workspace can open directly in chat mode
-- `prodex claude` defaults to the current Codex model from shared `config.toml` when available, instead of always starting from plain `gpt-5`
-- use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
-- use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model used for Anthropic-compatible requests
-- use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream Responses reasoning tier; for example, `PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -- -p "hello"`
-
-For a slightly longer setup guide, see [QUICKSTART.md](./QUICKSTART.md).
+For a slightly longer walkthrough, see [QUICKSTART.md](./QUICKSTART.md).
