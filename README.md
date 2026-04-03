@@ -47,11 +47,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.109`:
+The current local version in this repo is `0.2.110`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.109
-cargo install prodex --force --version 0.2.109
+npm install -g @christiandoxa/prodex@0.2.110
+cargo install prodex --force --version 0.2.110
 ```
 
 If you want to switch from a Cargo-installed binary to npm:
