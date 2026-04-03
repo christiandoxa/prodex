@@ -13,6 +13,8 @@ One OpenAI profile pool for Codex CLI and Claude Code.
 
 It keeps each profile isolated, checks quota before launch, and rotates to another ready account before a request or stream is committed.
 
+Use `prodex` when Codex CLI is your front end. Use `prodex claude` when Claude Code is your front end. The account pool, profile isolation, quota checks, and continuation routing stay in Prodex either way.
+
 ## Requirements
 
 - An OpenAI account, plus at least one logged-in Prodex profile
@@ -45,11 +47,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.108`:
+The current local version in this repo is `0.2.109`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.108
-cargo install prodex --force --version 0.2.108
+npm install -g @christiandoxa/prodex@0.2.109
+cargo install prodex --force --version 0.2.109
 ```
 
 If you want to switch from a Cargo-installed binary to npm:
@@ -93,7 +95,7 @@ prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
-Use this path when you want Codex CLI itself to be the front end. Prodex handles profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
+Use this path when you want Codex CLI itself to be the front end. Prodex handles profile selection, quota preflight, continuation affinity, and safe pre-commit rotation across your OpenAI-backed profiles.
 
 ## Use `prodex claude` for Claude Code
 
@@ -102,7 +104,7 @@ prodex claude -- -p "summarize this repo"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
-Use this path when you want Claude Code to be the front end while Prodex still routes requests through your OpenAI-backed profile pool.
+Use this path when you want Claude Code to be the front end while Prodex still routes requests through the same OpenAI-backed profile pool.
 
 - `prodex claude` runs Claude Code through a local Anthropic-compatible proxy
 - Claude Code state is isolated per profile in `CLAUDE_CONFIG_DIR`
