@@ -14649,10 +14649,8 @@ fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_a
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
-    let third_home = temp_dir.path.join("homes/third");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     write_auth_json(&second_home.join("auth.json"), "second-account");
-    write_auth_json(&third_home.join("auth.json"), "third-account");
 
     let state = AppState {
         active_profile: Some("main".to_string()),
@@ -14671,14 +14669,6 @@ fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_a
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                },
-            ),
-            (
-                "third".to_string(),
-                ProfileEntry {
-                    codex_home: third_home,
-                    managed: true,
-                    email: Some("third@example.com".to_string()),
                 },
             ),
         ]),
