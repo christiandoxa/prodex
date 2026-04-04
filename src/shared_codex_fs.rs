@@ -264,6 +264,7 @@ fn migrate_shared_codex_entry(
     };
 
     if metadata.file_type().is_symlink() {
+        migrate_shared_codex_symlink_target(local_path, shared_path, kind)?;
         remove_path(local_path)?;
         return Ok(());
     }
@@ -311,16 +312,87 @@ fn migrate_shared_codex_entry(
                 );
             }
 
-            if local_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "history.jsonl")
-            {
-                append_file_contents(local_path, shared_path)?;
+            if is_history_jsonl(local_path) {
+                merge_history_files(local_path, shared_path)?;
             }
 
             fs::remove_file(local_path)
                 .with_context(|| format!("failed to remove {}", local_path.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn migrate_shared_codex_symlink_target(
+    local_path: &Path,
+    shared_path: &Path,
+    kind: SharedCodexEntryKind,
+) -> Result<()> {
+    let target = fs::read_link(local_path)
+        .with_context(|| format!("failed to read symlink {}", local_path.display()))?;
+    let target_path = if target.is_absolute() {
+        target
+    } else {
+        local_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(target)
+    };
+
+    if same_path(&target_path, shared_path) || !target_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = shared_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    match kind {
+        SharedCodexEntryKind::Directory => {
+            if !target_path.is_dir() {
+                bail!(
+                    "expected {} to be a directory for shared Codex state",
+                    target_path.display()
+                );
+            }
+
+            if !shared_path.exists() {
+                create_codex_home_if_missing(shared_path)?;
+            } else if !shared_path.is_dir() {
+                bail!(
+                    "expected {} to be a directory for shared Codex state",
+                    shared_path.display()
+                );
+            }
+
+            copy_directory_contents(&target_path, shared_path)?;
+        }
+        SharedCodexEntryKind::File => {
+            if !target_path.is_file() {
+                bail!(
+                    "expected {} to be a file for shared Codex state",
+                    target_path.display()
+                );
+            }
+
+            if !shared_path.exists() {
+                fs::copy(&target_path, shared_path).with_context(|| {
+                    format!(
+                        "failed to copy {} to {}",
+                        target_path.display(),
+                        shared_path.display()
+                    )
+                })?;
+            } else if !shared_path.is_file() {
+                bail!(
+                    "expected {} to be a file for shared Codex state",
+                    shared_path.display()
+                );
+            } else if is_history_jsonl(local_path) {
+                merge_history_files(&target_path, shared_path)?;
+            }
         }
     }
 
@@ -395,12 +467,16 @@ fn seed_shared_codex_entry(
                         shared_path.display()
                     )
                 })?;
-            } else if legacy_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "history.jsonl")
-            {
-                append_file_contents(legacy_path, shared_path)?;
+            } else if !shared_path.is_file() {
+                bail!(
+                    "expected {} to be a file for shared Codex state",
+                    shared_path.display()
+                );
+            } else if is_history_jsonl(legacy_path) {
+                // Legacy default CODEX_HOME seeding should stay one-shot so
+                // startup does not reread and rewrite large history files on
+                // every `prodex run`.
+                return Ok(());
             }
         }
     }
@@ -447,38 +523,71 @@ fn move_file(source: &Path, destination: &Path) -> Result<()> {
     }
 }
 
-fn append_file_contents(source: &Path, destination: &Path) -> Result<()> {
-    let content =
-        fs::read(source).with_context(|| format!("failed to read {}", source.display()))?;
-    if content.is_empty() {
-        return Ok(());
+fn is_history_jsonl(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "history.jsonl")
+}
+
+fn merge_history_files(source: &Path, destination: &Path) -> Result<()> {
+    #[derive(Debug)]
+    struct HistoryLine {
+        ts: Option<i64>,
+        line: String,
+        order: usize,
     }
 
-    use std::io::Write as _;
+    fn load_history_lines(
+        path: &Path,
+        merged: &mut Vec<HistoryLine>,
+        seen: &mut BTreeSet<String>,
+    ) -> Result<()> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        for raw_line in content.lines() {
+            let line = raw_line.trim_end_matches('\r');
+            if line.is_empty() || !seen.insert(line.to_string()) {
+                continue;
+            }
 
-    let mut destination_file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(destination)
-        .with_context(|| format!("failed to open {}", destination.display()))?;
+            let ts = serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value.get("ts").and_then(serde_json::Value::as_i64));
+            merged.push(HistoryLine {
+                ts,
+                line: line.to_string(),
+                order: merged.len(),
+            });
+        }
 
-    let destination_len = destination_file
-        .metadata()
-        .with_context(|| format!("failed to inspect {}", destination.display()))?
-        .len();
-    if destination_len > 0 {
-        destination_file
-            .write_all(b"\n")
-            .with_context(|| format!("failed to append separator to {}", destination.display()))?;
+        Ok(())
     }
 
-    destination_file.write_all(&content).with_context(|| {
-        format!(
-            "failed to append {} to {}",
-            source.display(),
-            destination.display()
-        )
-    })
+    let mut merged = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    if destination.exists() {
+        load_history_lines(destination, &mut merged, &mut seen)?;
+    }
+    load_history_lines(source, &mut merged, &mut seen)?;
+
+    merged.sort_by(|left, right| match (left.ts, right.ts) {
+        (Some(left_ts), Some(right_ts)) => {
+            left_ts.cmp(&right_ts).then(left.order.cmp(&right.order))
+        }
+        _ => left.order.cmp(&right.order),
+    });
+
+    let mut content = String::new();
+    for (index, entry) in merged.iter().enumerate() {
+        if index > 0 {
+            content.push('\n');
+        }
+        content.push_str(&entry.line);
+    }
+
+    fs::write(destination, content)
+        .with_context(|| format!("failed to write merged history {}", destination.display()))
 }
 
 fn ensure_symlink_to_shared(
