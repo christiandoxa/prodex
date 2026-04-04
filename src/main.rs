@@ -5224,13 +5224,15 @@ fn runtime_proxy_claude_picker_model_descriptor(
 ) -> Option<&'static RuntimeProxyResponsesModelDescriptor> {
     let normalized = picker_model.trim();
     let without_extended_context = normalized.strip_suffix("[1m]").unwrap_or(normalized);
-    runtime_proxy_responses_model_descriptors()
-        .iter()
-        .find(|descriptor| {
-            descriptor
-                .claude_picker_model
-                .is_some_and(|value| value.eq_ignore_ascii_case(without_extended_context))
-        })
+    runtime_proxy_responses_model_descriptor(without_extended_context).or_else(|| {
+        runtime_proxy_responses_model_descriptors()
+            .iter()
+            .find(|descriptor| {
+                descriptor
+                    .claude_picker_model
+                    .is_some_and(|value| value.eq_ignore_ascii_case(without_extended_context))
+            })
+    })
 }
 
 fn runtime_proxy_responses_model_descriptor(
@@ -5296,7 +5298,7 @@ fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
 
 fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
     runtime_proxy_responses_model_descriptor(target_model)
-        .and_then(|descriptor| descriptor.claude_picker_model)
+        .map(|descriptor| descriptor.id)
         .unwrap_or(target_model)
         .to_string()
 }
@@ -5335,20 +5337,22 @@ fn runtime_proxy_claude_custom_model_option_env(
 fn runtime_proxy_claude_additional_model_option_entries() -> Vec<serde_json::Value> {
     runtime_proxy_responses_model_descriptors()
         .iter()
-        .filter_map(|descriptor| {
-            descriptor.claude_picker_model.map(|picker_model| {
-                let supported_effort_levels =
-                    runtime_proxy_responses_model_supported_effort_levels(descriptor.id);
-                serde_json::json!({
-                    "value": picker_model,
-                    "label": descriptor.id,
-                    "description": descriptor.description,
-                    "supportsEffort": true,
-                    "supportedEffortLevels": supported_effort_levels,
-                })
+        .map(|descriptor| {
+            let supported_effort_levels =
+                runtime_proxy_responses_model_supported_effort_levels(descriptor.id);
+            serde_json::json!({
+                "value": descriptor.id,
+                "label": descriptor.id,
+                "description": descriptor.description,
+                "supportsEffort": true,
+                "supportedEffortLevels": supported_effort_levels,
             })
         })
         .collect()
+}
+
+fn runtime_proxy_claude_managed_model_option_value(value: &str) -> bool {
+    runtime_proxy_claude_picker_model_descriptor(value).is_some()
 }
 
 fn runtime_proxy_claude_config_dir(codex_home: &Path) -> PathBuf {
@@ -5418,11 +5422,7 @@ fn ensure_runtime_proxy_claude_launch_config(
     {
         for entry in existing {
             let existing_value = entry.get("value").and_then(serde_json::Value::as_str);
-            if existing_value.is_some_and(|value| {
-                additional_model_options.iter().any(|managed| {
-                    managed.get("value").and_then(serde_json::Value::as_str) == Some(value)
-                })
-            }) {
+            if existing_value.is_some_and(runtime_proxy_claude_managed_model_option_value) {
                 continue;
             }
             additional_model_options.push(entry.clone());
@@ -20324,17 +20324,35 @@ mod claude_model_selector_tests {
     use super::*;
 
     #[test]
-    fn claude_picker_models_use_current_versioned_placeholders_for_primary_gpt_models() {
-        let gpt_54 = runtime_proxy_responses_model_descriptor("gpt-5.4")
-            .and_then(|descriptor| descriptor.claude_picker_model);
-        let gpt_54_mini = runtime_proxy_responses_model_descriptor("gpt-5.4-mini")
-            .and_then(|descriptor| descriptor.claude_picker_model);
-        let gpt_53_codex = runtime_proxy_responses_model_descriptor("gpt-5.3-codex")
-            .and_then(|descriptor| descriptor.claude_picker_model);
+    fn claude_picker_uses_gpt_model_ids_for_active_selection() {
+        assert_eq!(runtime_proxy_claude_picker_model("gpt-5.4"), "gpt-5.4");
+        assert_eq!(
+            runtime_proxy_claude_picker_model("gpt-5.4-mini"),
+            "gpt-5.4-mini"
+        );
+        assert_eq!(
+            runtime_proxy_claude_picker_model("gpt-5.3-codex"),
+            "gpt-5.3-codex"
+        );
+    }
 
-        assert_eq!(gpt_54, Some("claude-opus-4-6"));
-        assert_eq!(gpt_54_mini, Some("claude-haiku-4-5"));
-        assert_eq!(gpt_53_codex, Some("claude-sonnet-4-6"));
+    #[test]
+    fn claude_picker_descriptor_still_accepts_legacy_native_placeholders() {
+        assert_eq!(
+            runtime_proxy_claude_picker_model_descriptor("claude-opus-4-6")
+                .map(|descriptor| descriptor.id),
+            Some("gpt-5.4")
+        );
+        assert_eq!(
+            runtime_proxy_claude_picker_model_descriptor("claude-haiku-4-5")
+                .map(|descriptor| descriptor.id),
+            Some("gpt-5.4-mini")
+        );
+        assert_eq!(
+            runtime_proxy_claude_picker_model_descriptor("claude-sonnet-4-6")
+                .map(|descriptor| descriptor.id),
+            Some("gpt-5.3-codex")
+        );
     }
 
     #[test]
@@ -20365,7 +20383,7 @@ mod claude_model_selector_tests {
 
         assert_eq!(
             gpt_54.get("value").and_then(serde_json::Value::as_str),
-            Some("claude-opus-4-6")
+            Some("gpt-5.4")
         );
         assert_eq!(
             gpt_54.get("supportsEffort"),
@@ -20375,5 +20393,16 @@ mod claude_model_selector_tests {
             gpt_54.get("supportedEffortLevels"),
             Some(&serde_json::json!(["low", "medium", "high", "max"]))
         );
+    }
+
+    #[test]
+    fn claude_managed_model_option_value_recognizes_current_and_legacy_entries() {
+        assert!(runtime_proxy_claude_managed_model_option_value("gpt-5.4"));
+        assert!(runtime_proxy_claude_managed_model_option_value(
+            "claude-opus-4-6"
+        ));
+        assert!(!runtime_proxy_claude_managed_model_option_value(
+            "custom-provider/model"
+        ));
     }
 }
