@@ -48,11 +48,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.112`:
+The current local version in this repo is `0.2.113`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.112
-cargo install prodex --force --version 0.2.112
+npm install -g @christiandoxa/prodex@0.2.113
+cargo install prodex --force --version 0.2.113
 ```
 
 If you want to switch from a Cargo-installed binary to npm:
@@ -114,7 +114,7 @@ Use this path when you want Claude Code to be the front end while Prodex still r
 - Prodex also seeds Claude's picker with the full Prodex GPT catalog
 - Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
 - alias-backed GPT entries reuse Claude's native alias picker values so the picker and confirmation text stay aligned
-- additional GPT entries use Claude-native placeholder IDs where needed so Claude can still expose its native effort controls
+- additional GPT entries stay on GPT model ids so the selected model banner keeps GPT naming while Claude can still expose effort controls
 - use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
 - use `PRODEX_CLAUDE_MODEL` to force a specific upstream Responses model
 - use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream reasoning tier
