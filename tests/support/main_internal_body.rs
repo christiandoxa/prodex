@@ -18908,7 +18908,7 @@ fn runtime_proxy_lane_classifies_anthropic_messages_as_responses() {
 }
 
 #[test]
-fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir() {
+fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir() {
     let temp_dir = TestDir::new();
     let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
     let config_dir = temp_dir.path.join("claude-config");
@@ -18935,6 +18935,24 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
     assert_eq!(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_AUTH_TOKEN")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some(PRODEX_CLAUDE_PROXY_API_KEY.to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "CLAUDE_CODE_USE_FOUNDRY")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("1".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_FOUNDRY_BASE_URL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("http://127.0.0.1:43123".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_FOUNDRY_API_KEY")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some(PRODEX_CLAUDE_PROXY_API_KEY.to_string())
     );
@@ -18980,6 +18998,24 @@ fn runtime_proxy_claude_launch_env_uses_auth_token_mode_with_profile_config_dir(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+            "ANTHROPIC_BEDROCK_BASE_URL",
+            "ANTHROPIC_VERTEX_BASE_URL",
+            "ANTHROPIC_FOUNDRY_BASE_URL",
+            "ANTHROPIC_AWS_BASE_URL",
+            "ANTHROPIC_FOUNDRY_RESOURCE",
+            "ANTHROPIC_VERTEX_PROJECT_ID",
+            "ANTHROPIC_AWS_WORKSPACE_ID",
+            "CLOUD_ML_REGION",
+            "ANTHROPIC_FOUNDRY_API_KEY",
+            "ANTHROPIC_AWS_API_KEY",
+            "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+            "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+            "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+            "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
             "ANTHROPIC_DEFAULT_OPUS_MODEL",
             "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
             "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
@@ -19065,11 +19101,30 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("gpt-5.4".to_string())
+        Some("opus".to_string())
     );
     assert!(env
         .iter()
         .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+}
+
+#[test]
+fn runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_value() {
+    let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5.4");
+    let temp_dir = TestDir::new();
+    let env = runtime_proxy_claude_launch_env(
+        "127.0.0.1:43124"
+            .parse()
+            .expect("listen address should parse"),
+        &temp_dir.path.join("claude-config"),
+        &temp_dir.path.join("codex-home"),
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("opus".to_string())
+    );
 }
 
 #[test]
@@ -19149,11 +19204,9 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
     let additional_model_options = config["additionalModelOptionsCache"]
         .as_array()
         .expect("additional model options cache should be an array");
-    assert_eq!(additional_model_options.len(), 9);
-    assert!(additional_model_options.iter().any(|entry| {
+    assert_eq!(additional_model_options.len(), 6);
+    assert!(!additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
-            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
-            && entry.get("supportedEffortLevels") == Some(&serde_json::json!(["low", "medium", "high", "max"]))
     }));
     assert!(additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.2-codex")
@@ -19233,9 +19286,12 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("custom-provider/model")
     }));
     assert!(additional_model_options.iter().any(|entry| {
-        entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
-            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
+            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
             && entry.get("supportedEffortLevels") == Some(&serde_json::json!(["low", "medium", "high", "max"]))
+    }));
+    assert!(!additional_model_options.iter().any(|entry| {
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
     }));
     assert!(!additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-opus-4-6")

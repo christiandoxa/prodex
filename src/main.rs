@@ -5065,12 +5065,10 @@ fn runtime_proxy_claude_launch_env(
     codex_home: &Path,
 ) -> Vec<(&'static str, OsString)> {
     let target_model = runtime_proxy_claude_launch_model(codex_home);
+    let base_url = format!("http://{listen_addr}");
     let mut env = vec![
         ("CLAUDE_CONFIG_DIR", OsString::from(config_dir.as_os_str())),
-        (
-            "ANTHROPIC_BASE_URL",
-            OsString::from(format!("http://{listen_addr}")),
-        ),
+        ("ANTHROPIC_BASE_URL", OsString::from(base_url.as_str())),
         (
             "ANTHROPIC_AUTH_TOKEN",
             OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
@@ -5080,6 +5078,14 @@ fn runtime_proxy_claude_launch_env(
             OsString::from(runtime_proxy_claude_picker_model(&target_model)),
         ),
     ];
+    if runtime_proxy_claude_use_foundry_compat() {
+        env.push(("CLAUDE_CODE_USE_FOUNDRY", OsString::from("1")));
+        env.push(("ANTHROPIC_FOUNDRY_BASE_URL", OsString::from(base_url)));
+        env.push((
+            "ANTHROPIC_FOUNDRY_API_KEY",
+            OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
+        ));
+    }
     env.extend(runtime_proxy_claude_pinned_alias_env());
     env.extend(runtime_proxy_claude_custom_model_option_env(&target_model));
     env
@@ -5090,6 +5096,24 @@ fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
         "ANTHROPIC_API_KEY",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "ANTHROPIC_BEDROCK_BASE_URL",
+        "ANTHROPIC_VERTEX_BASE_URL",
+        "ANTHROPIC_FOUNDRY_BASE_URL",
+        "ANTHROPIC_AWS_BASE_URL",
+        "ANTHROPIC_FOUNDRY_RESOURCE",
+        "ANTHROPIC_VERTEX_PROJECT_ID",
+        "ANTHROPIC_AWS_WORKSPACE_ID",
+        "CLOUD_ML_REGION",
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        "ANTHROPIC_AWS_API_KEY",
+        "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+        "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+        "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+        "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
         "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
@@ -5231,6 +5255,12 @@ fn runtime_proxy_claude_picker_model_descriptor(
                 descriptor
                     .claude_picker_model
                     .is_some_and(|value| value.eq_ignore_ascii_case(without_extended_context))
+                    || descriptor
+                        .claude_alias
+                        .is_some_and(|alias| {
+                            runtime_proxy_claude_alias_picker_value(alias)
+                                .eq_ignore_ascii_case(without_extended_context)
+                        })
             })
     })
 }
@@ -5275,6 +5305,18 @@ fn runtime_proxy_responses_model_supports_xhigh(model_id: &str) -> bool {
         })
 }
 
+fn runtime_proxy_claude_use_foundry_compat() -> bool {
+    true
+}
+
+fn runtime_proxy_claude_alias_picker_value(alias: RuntimeProxyClaudeModelAlias) -> &'static str {
+    match alias {
+        RuntimeProxyClaudeModelAlias::Opus => "opus",
+        RuntimeProxyClaudeModelAlias::Sonnet => "sonnet",
+        RuntimeProxyClaudeModelAlias::Haiku => "haiku",
+    }
+}
+
 fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
     let mut env = Vec::new();
     for alias in [
@@ -5286,7 +5328,7 @@ fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
         let (model_key, name_key, description_key, caps_key) =
             runtime_proxy_claude_alias_env_keys(alias);
         env.push((model_key, OsString::from(descriptor.id)));
-        env.push((name_key, OsString::from(descriptor.display_name)));
+        env.push((name_key, OsString::from(descriptor.id)));
         env.push((description_key, OsString::from(descriptor.description)));
         env.push((
             caps_key,
@@ -5298,7 +5340,16 @@ fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
 
 fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
     runtime_proxy_responses_model_descriptor(target_model)
-        .map(|descriptor| descriptor.id)
+        .map(|descriptor| {
+            if runtime_proxy_claude_use_foundry_compat() {
+                descriptor
+                    .claude_alias
+                    .map(runtime_proxy_claude_alias_picker_value)
+                    .unwrap_or(descriptor.id)
+            } else {
+                descriptor.id
+            }
+        })
         .unwrap_or(target_model)
         .to_string()
 }
@@ -5337,6 +5388,9 @@ fn runtime_proxy_claude_custom_model_option_env(
 fn runtime_proxy_claude_additional_model_option_entries() -> Vec<serde_json::Value> {
     runtime_proxy_responses_model_descriptors()
         .iter()
+        .filter(|descriptor| {
+            !(runtime_proxy_claude_use_foundry_compat() && descriptor.claude_alias.is_some())
+        })
         .map(|descriptor| {
             let supported_effort_levels =
                 runtime_proxy_responses_model_supported_effort_levels(descriptor.id);
@@ -20324,20 +20378,28 @@ mod claude_model_selector_tests {
     use super::*;
 
     #[test]
-    fn claude_picker_uses_gpt_model_ids_for_active_selection() {
-        assert_eq!(runtime_proxy_claude_picker_model("gpt-5.4"), "gpt-5.4");
-        assert_eq!(
-            runtime_proxy_claude_picker_model("gpt-5.4-mini"),
-            "gpt-5.4-mini"
-        );
-        assert_eq!(
-            runtime_proxy_claude_picker_model("gpt-5.3-codex"),
-            "gpt-5.3-codex"
-        );
+    fn claude_picker_uses_builtin_aliases_for_primary_gpt_models() {
+        assert_eq!(runtime_proxy_claude_picker_model("gpt-5.4"), "opus");
+        assert_eq!(runtime_proxy_claude_picker_model("gpt-5.4-mini"), "haiku");
+        assert_eq!(runtime_proxy_claude_picker_model("gpt-5.3-codex"), "sonnet");
+        assert_eq!(runtime_proxy_claude_picker_model("gpt-5.2"), "gpt-5.2");
     }
 
     #[test]
-    fn claude_picker_descriptor_still_accepts_legacy_native_placeholders() {
+    fn claude_picker_descriptor_accepts_aliases_and_legacy_native_placeholders() {
+        assert_eq!(
+            runtime_proxy_claude_picker_model_descriptor("opus").map(|descriptor| descriptor.id),
+            Some("gpt-5.4")
+        );
+        assert_eq!(
+            runtime_proxy_claude_picker_model_descriptor("sonnet")
+                .map(|descriptor| descriptor.id),
+            Some("gpt-5.3-codex")
+        );
+        assert_eq!(
+            runtime_proxy_claude_picker_model_descriptor("haiku").map(|descriptor| descriptor.id),
+            Some("gpt-5.4-mini")
+        );
         assert_eq!(
             runtime_proxy_claude_picker_model_descriptor("claude-opus-4-6")
                 .map(|descriptor| descriptor.id),
@@ -20375,22 +20437,27 @@ mod claude_model_selector_tests {
     }
 
     #[test]
-    fn claude_additional_model_options_cache_carries_supported_effort_levels() {
-        let gpt_54 = runtime_proxy_claude_additional_model_option_entries()
+    fn claude_additional_model_options_cache_omits_alias_backed_primary_gpt_entries() {
+        let entries = runtime_proxy_claude_additional_model_option_entries();
+        assert!(!entries.iter().any(|entry| {
+            entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+        }));
+
+        let gpt_52 = entries
             .into_iter()
-            .find(|entry| entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4"))
-            .expect("gpt-5.4 model option should exist");
+            .find(|entry| entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.2"))
+            .expect("gpt-5.2 model option should exist");
 
         assert_eq!(
-            gpt_54.get("value").and_then(serde_json::Value::as_str),
-            Some("gpt-5.4")
+            gpt_52.get("value").and_then(serde_json::Value::as_str),
+            Some("gpt-5.2")
         );
         assert_eq!(
-            gpt_54.get("supportsEffort"),
+            gpt_52.get("supportsEffort"),
             Some(&serde_json::Value::Bool(true))
         );
         assert_eq!(
-            gpt_54.get("supportedEffortLevels"),
+            gpt_52.get("supportedEffortLevels"),
             Some(&serde_json::json!(["low", "medium", "high", "max"]))
         );
     }
