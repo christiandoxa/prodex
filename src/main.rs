@@ -5249,6 +5249,16 @@ fn runtime_proxy_responses_model_capabilities(model_id: &str) -> &'static str {
     }
 }
 
+fn runtime_proxy_responses_model_supported_effort_levels(
+    model_id: &str,
+) -> &'static [&'static str] {
+    if runtime_proxy_responses_model_supports_xhigh(model_id) {
+        &["low", "medium", "high", "max"]
+    } else {
+        &["low", "medium", "high"]
+    }
+}
+
 fn runtime_proxy_responses_model_supports_xhigh(model_id: &str) -> bool {
     runtime_proxy_responses_model_descriptor(model_id)
         .map(|descriptor| descriptor.supports_xhigh)
@@ -5327,10 +5337,14 @@ fn runtime_proxy_claude_additional_model_option_entries() -> Vec<serde_json::Val
         .iter()
         .filter_map(|descriptor| {
             descriptor.claude_picker_model.map(|picker_model| {
+                let supported_effort_levels =
+                    runtime_proxy_responses_model_supported_effort_levels(descriptor.id);
                 serde_json::json!({
                     "value": picker_model,
                     "label": descriptor.id,
                     "description": descriptor.description,
+                    "supportsEffort": true,
+                    "supportedEffortLevels": supported_effort_levels,
                 })
             })
         })
@@ -6539,11 +6553,14 @@ fn runtime_proxy_anthropic_models_list() -> serde_json::Value {
 }
 
 fn runtime_proxy_anthropic_model_descriptor(model_id: &str) -> serde_json::Value {
+    let supported_effort_levels = runtime_proxy_responses_model_supported_effort_levels(model_id);
     serde_json::json!({
         "type": "model",
         "id": model_id,
         "display_name": runtime_proxy_anthropic_model_display_name(model_id),
         "created_at": RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT,
+        "supportsEffort": true,
+        "supportedEffortLevels": supported_effort_levels,
     })
 }
 
@@ -6554,7 +6571,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.4",
             description: "Latest frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Opus),
-            claude_picker_model: Some("opus"),
+            claude_picker_model: Some("claude-opus-4-6"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6562,7 +6579,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.4 Mini",
             description: "Smaller frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Haiku),
-            claude_picker_model: Some("haiku"),
+            claude_picker_model: Some("claude-haiku-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -6570,7 +6587,7 @@ fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResponse
             display_name: "GPT-5.3 Codex",
             description: "Frontier Codex-optimized agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Sonnet),
-            claude_picker_model: Some("sonnet"),
+            claude_picker_model: Some("claude-sonnet-4-6"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -20300,4 +20317,63 @@ fn ensure_runtime_rotation_proxy_endpoint(
     let registry = wait_for_runtime_broker_ready(paths, &broker_key, &instance_token)?;
     activate_runtime_broker_profile(&registry, current_profile)?;
     runtime_proxy_endpoint_from_registry(paths, &broker_key, &registry)
+}
+
+#[cfg(test)]
+mod claude_model_selector_tests {
+    use super::*;
+
+    #[test]
+    fn claude_picker_models_use_current_versioned_placeholders_for_primary_gpt_models() {
+        let gpt_54 = runtime_proxy_responses_model_descriptor("gpt-5.4")
+            .and_then(|descriptor| descriptor.claude_picker_model);
+        let gpt_54_mini = runtime_proxy_responses_model_descriptor("gpt-5.4-mini")
+            .and_then(|descriptor| descriptor.claude_picker_model);
+        let gpt_53_codex = runtime_proxy_responses_model_descriptor("gpt-5.3-codex")
+            .and_then(|descriptor| descriptor.claude_picker_model);
+
+        assert_eq!(gpt_54, Some("claude-opus-4-6"));
+        assert_eq!(gpt_54_mini, Some("claude-haiku-4-5"));
+        assert_eq!(gpt_53_codex, Some("claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn anthropic_model_descriptor_advertises_max_effort_for_xhigh_models() {
+        let gpt_54 = runtime_proxy_anthropic_model_descriptor("gpt-5.4");
+        let gpt_5 = runtime_proxy_anthropic_model_descriptor("gpt-5");
+
+        assert_eq!(
+            gpt_54.get("supportsEffort"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            gpt_54.get("supportedEffortLevels"),
+            Some(&serde_json::json!(["low", "medium", "high", "max"]))
+        );
+        assert_eq!(
+            gpt_5.get("supportedEffortLevels"),
+            Some(&serde_json::json!(["low", "medium", "high"]))
+        );
+    }
+
+    #[test]
+    fn claude_additional_model_options_cache_carries_supported_effort_levels() {
+        let gpt_54 = runtime_proxy_claude_additional_model_option_entries()
+            .into_iter()
+            .find(|entry| entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4"))
+            .expect("gpt-5.4 model option should exist");
+
+        assert_eq!(
+            gpt_54.get("value").and_then(serde_json::Value::as_str),
+            Some("claude-opus-4-6")
+        );
+        assert_eq!(
+            gpt_54.get("supportsEffort"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            gpt_54.get("supportedEffortLevels"),
+            Some(&serde_json::json!(["low", "medium", "high", "max"]))
+        );
+    }
 }

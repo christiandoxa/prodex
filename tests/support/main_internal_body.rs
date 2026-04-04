@@ -19075,7 +19075,7 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("opus".to_string())
+        Some("claude-opus-4-6".to_string())
     );
     assert!(env
         .iter()
@@ -19161,8 +19161,9 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
         .expect("additional model options cache should be an array");
     assert_eq!(additional_model_options.len(), 9);
     assert!(additional_model_options.iter().any(|entry| {
-        entry.get("value").and_then(serde_json::Value::as_str) == Some("opus")
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-opus-4-6")
             && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+            && entry.get("supportedEffortLevels") == Some(&serde_json::json!(["low", "medium", "high", "max"]))
     }));
     assert!(additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-sonnet-4-5")
@@ -19237,8 +19238,9 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("custom-provider/model")
     }));
     assert!(additional_model_options.iter().any(|entry| {
-        entry.get("value").and_then(serde_json::Value::as_str) == Some("opus")
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("claude-opus-4-6")
             && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+            && entry.get("supportedEffortLevels") == Some(&serde_json::json!(["low", "medium", "high", "max"]))
     }));
     let other_project_key = other_project.to_string_lossy().to_string();
     let cwd_key = cwd.to_string_lossy().to_string();
