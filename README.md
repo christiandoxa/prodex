@@ -14,6 +14,7 @@ One OpenAI profile pool for Codex CLI and Claude Code.
 It keeps each profile isolated, checks quota before launch, and rotates to another ready account before a request or stream is committed.
 
 Use `prodex` when Codex CLI is your front end. Use `prodex claude` when Claude Code is your front end. The account pool, profile isolation, quota checks, and continuation routing stay in Prodex either way.
+Managed profiles also share persisted Codex state such as prompt history and session resumes, so cross-profile CLI state stays aligned.
 
 ## Requirements
 
@@ -47,11 +48,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.111`:
+The current local version in this repo is `0.2.112`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.111
-cargo install prodex --force --version 0.2.111
+npm install -g @christiandoxa/prodex@0.2.112
+cargo install prodex --force --version 0.2.112
 ```
 
 If you want to switch from a Cargo-installed binary to npm:
