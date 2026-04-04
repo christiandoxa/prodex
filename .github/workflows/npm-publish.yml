@@ -22,12 +22,14 @@ jobs:
             runs-on: ubuntu-latest
             artifact-name: x86_64-unknown-linux-gnu
             binary-name: prodex
-            use-cross: false
+            use-cross: true
+            max-glibc: GLIBC_2.23
           - target: aarch64-unknown-linux-gnu
             runs-on: ubuntu-latest
             artifact-name: aarch64-unknown-linux-gnu
             binary-name: prodex
             use-cross: true
+            max-glibc: GLIBC_2.23
           - target: x86_64-apple-darwin
             runs-on: macos-15-intel
             artifact-name: x86_64-apple-darwin
@@ -70,6 +72,25 @@ jobs:
             cross build --release --locked --target "${{ matrix.target }}"
           else
             cargo build --release --locked --target "${{ matrix.target }}"
+          fi
+
+      - name: Verify Linux GLIBC baseline
+        if: ${{ contains(matrix.target, 'unknown-linux-gnu') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
+          versions="$(readelf --version-info "${binary}" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu || true)"
+          if [ -z "${versions}" ]; then
+            echo "failed to detect GLIBC symbol versions for ${binary}" >&2
+            exit 1
+          fi
+          max_required="$(printf '%s\n' "${versions}" | tail -n1)"
+          echo "detected GLIBC requirements for ${binary}:"
+          printf '%s\n' "${versions}"
+          if [ "$(printf '%s\n%s\n' "${max_required}" "${{ matrix.max-glibc }}" | sort -V | tail -n1)" != "${{ matrix.max-glibc }}" ]; then
+            echo "binary requires ${max_required}, which exceeds allowed baseline ${{ matrix.max-glibc }}" >&2
+            exit 1
           fi
 
       - name: Prepare binary artifact
