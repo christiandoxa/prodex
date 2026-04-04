@@ -11557,11 +11557,7 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec![
-            "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string()
-        ]
+        vec!["main-account".to_string(), "second-account".to_string()]
     );
 
     let persisted = wait_for_state(&paths, |state| {
@@ -14171,16 +14167,21 @@ fn runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_bef
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec![
-            "main-account".to_string(),
-            "second-account".to_string(),
-            "second-account".to_string()
-        ]
+        vec!["main-account".to_string(), "second-account".to_string()]
     );
     assert_eq!(
         backend.websocket_requests().len(),
-        4,
-        "expected initial request, quota-blocked continuation, previous_response retry, and fresh fallback"
+        3,
+        "expected initial request, quota-blocked continuation, and fresh fallback"
+    );
+    assert_eq!(
+        backend
+            .websocket_requests()
+            .iter()
+            .filter(|request| request.contains("\"previous_response_id\":\"resp-main\""))
+            .count(),
+        1,
+        "fresh fallback should not resend the old previous_response_id to another profile"
     );
 
     let persisted = wait_for_state(&paths, |state| {

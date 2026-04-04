@@ -10840,6 +10840,42 @@ fn proxy_runtime_websocket_text_message(
                                     ),
                                 );
                             }
+                            if previous_response_id.is_some()
+                                && trusted_previous_response_affinity
+                                && !previous_response_fresh_fallback_used
+                                && !request_requires_previous_response_affinity
+                                && let Some(fresh_request_text) =
+                                    runtime_request_text_without_previous_response_id(&request_text)
+                            {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                request_text = fresh_request_text;
+                                handshake_request =
+                                    runtime_request_without_turn_state_header(&handshake_request);
+                                previous_response_id = None;
+                                request_turn_state = None;
+                                previous_response_fresh_fallback_used = true;
+                                saw_previous_response_not_found = false;
+                                previous_response_retry_candidate = None;
+                                previous_response_retry_index = 0;
+                                candidate_turn_state_retry_profile = None;
+                                candidate_turn_state_retry_value = None;
+                                trusted_previous_response_affinity = false;
+                                bound_profile = None;
+                                session_profile = None;
+                                pinned_profile = None;
+                                turn_state_profile = None;
+                                websocket_reuse_fresh_retry_profiles.clear();
+                                excluded_profiles.clear();
+                                last_failure = None;
+                                selection_started_at = Instant::now();
+                                selection_attempts = 0;
+                                continue;
+                            }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                             continue;
@@ -11168,6 +11204,42 @@ fn proxy_runtime_websocket_text_message(
                                     ),
                                 );
                             }
+                            if previous_response_id.is_some()
+                                && trusted_previous_response_affinity
+                                && !previous_response_fresh_fallback_used
+                                && !request_requires_previous_response_affinity
+                                && let Some(fresh_request_text) =
+                                    runtime_request_text_without_previous_response_id(&request_text)
+                            {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                request_text = fresh_request_text;
+                                handshake_request =
+                                    runtime_request_without_turn_state_header(&handshake_request);
+                                previous_response_id = None;
+                                request_turn_state = None;
+                                previous_response_fresh_fallback_used = true;
+                                saw_previous_response_not_found = false;
+                                previous_response_retry_candidate = None;
+                                previous_response_retry_index = 0;
+                                candidate_turn_state_retry_profile = None;
+                                candidate_turn_state_retry_value = None;
+                                trusted_previous_response_affinity = false;
+                                bound_profile = None;
+                                session_profile = None;
+                                pinned_profile = None;
+                                turn_state_profile = None;
+                                websocket_reuse_fresh_retry_profiles.clear();
+                                excluded_profiles.clear();
+                                last_failure = None;
+                                selection_started_at = Instant::now();
+                                selection_attempts = 0;
+                                continue;
+                            }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                             continue;
@@ -11429,6 +11501,42 @@ fn proxy_runtime_websocket_text_message(
                             "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name}"
                         ),
                     );
+                }
+                if previous_response_id.is_some()
+                    && trusted_previous_response_affinity
+                    && !previous_response_fresh_fallback_used
+                    && !request_requires_previous_response_affinity
+                    && let Some(fresh_request_text) =
+                        runtime_request_text_without_previous_response_id(&request_text)
+                {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked"
+                        ),
+                    );
+                    request_text = fresh_request_text;
+                    handshake_request =
+                        runtime_request_without_turn_state_header(&handshake_request);
+                    previous_response_id = None;
+                    request_turn_state = None;
+                    previous_response_fresh_fallback_used = true;
+                    saw_previous_response_not_found = false;
+                    previous_response_retry_candidate = None;
+                    previous_response_retry_index = 0;
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                    trusted_previous_response_affinity = false;
+                    bound_profile = None;
+                    session_profile = None;
+                    pinned_profile = None;
+                    turn_state_profile = None;
+                    websocket_reuse_fresh_retry_profiles.clear();
+                    excluded_profiles.clear();
+                    last_failure = None;
+                    selection_started_at = Instant::now();
+                    selection_attempts = 0;
+                    continue;
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
@@ -13465,6 +13573,39 @@ fn proxy_runtime_responses_request(
                                     ),
                                 );
                             }
+                            if previous_response_id.is_some()
+                                && trusted_previous_response_affinity
+                                && !previous_response_fresh_fallback_used
+                                && !request_requires_previous_response_affinity
+                                && let Some(fresh_request) =
+                                    runtime_request_without_previous_response_affinity(&request)
+                            {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                request = fresh_request;
+                                previous_response_id = None;
+                                request_turn_state = None;
+                                previous_response_fresh_fallback_used = true;
+                                saw_previous_response_not_found = false;
+                                previous_response_retry_candidate = None;
+                                previous_response_retry_index = 0;
+                                candidate_turn_state_retry_profile = None;
+                                candidate_turn_state_retry_value = None;
+                                trusted_previous_response_affinity = false;
+                                bound_profile = None;
+                                pinned_profile = None;
+                                turn_state_profile = None;
+                                session_profile = None;
+                                excluded_profiles.clear();
+                                last_failure = None;
+                                selection_started_at = Instant::now();
+                                selection_attempts = 0;
+                                continue;
+                            }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
                             continue;
@@ -13799,6 +13940,39 @@ fn proxy_runtime_responses_request(
                                     ),
                                 );
                             }
+                            if previous_response_id.is_some()
+                                && trusted_previous_response_affinity
+                                && !previous_response_fresh_fallback_used
+                                && !request_requires_previous_response_affinity
+                                && let Some(fresh_request) =
+                                    runtime_request_without_previous_response_affinity(&request)
+                            {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                request = fresh_request;
+                                previous_response_id = None;
+                                request_turn_state = None;
+                                previous_response_fresh_fallback_used = true;
+                                saw_previous_response_not_found = false;
+                                previous_response_retry_candidate = None;
+                                previous_response_retry_index = 0;
+                                candidate_turn_state_retry_profile = None;
+                                candidate_turn_state_retry_value = None;
+                                trusted_previous_response_affinity = false;
+                                bound_profile = None;
+                                pinned_profile = None;
+                                turn_state_profile = None;
+                                session_profile = None;
+                                excluded_profiles.clear();
+                                last_failure = None;
+                                selection_started_at = Instant::now();
+                                selection_attempts = 0;
+                                continue;
+                            }
                             excluded_profiles.insert(profile_name);
                             last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
                             continue;
@@ -14070,6 +14244,39 @@ fn proxy_runtime_responses_request(
                             "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name}"
                         ),
                     );
+                }
+                if previous_response_id.is_some()
+                    && trusted_previous_response_affinity
+                    && !previous_response_fresh_fallback_used
+                    && !request_requires_previous_response_affinity
+                    && let Some(fresh_request) =
+                        runtime_request_without_previous_response_affinity(&request)
+                {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked"
+                        ),
+                    );
+                    request = fresh_request;
+                    previous_response_id = None;
+                    request_turn_state = None;
+                    previous_response_fresh_fallback_used = true;
+                    saw_previous_response_not_found = false;
+                    previous_response_retry_candidate = None;
+                    previous_response_retry_index = 0;
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                    trusted_previous_response_affinity = false;
+                    bound_profile = None;
+                    pinned_profile = None;
+                    turn_state_profile = None;
+                    session_profile = None;
+                    excluded_profiles.clear();
+                    last_failure = None;
+                    selection_started_at = Instant::now();
+                    selection_attempts = 0;
+                    continue;
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
