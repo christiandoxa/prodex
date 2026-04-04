@@ -5255,12 +5255,10 @@ fn runtime_proxy_claude_picker_model_descriptor(
                 descriptor
                     .claude_picker_model
                     .is_some_and(|value| value.eq_ignore_ascii_case(without_extended_context))
-                    || descriptor
-                        .claude_alias
-                        .is_some_and(|alias| {
-                            runtime_proxy_claude_alias_picker_value(alias)
-                                .eq_ignore_ascii_case(without_extended_context)
-                        })
+                    || descriptor.claude_alias.is_some_and(|alias| {
+                        runtime_proxy_claude_alias_picker_value(alias)
+                            .eq_ignore_ascii_case(without_extended_context)
+                    })
             })
     })
 }
@@ -20392,8 +20390,7 @@ mod claude_model_selector_tests {
             Some("gpt-5.4")
         );
         assert_eq!(
-            runtime_proxy_claude_picker_model_descriptor("sonnet")
-                .map(|descriptor| descriptor.id),
+            runtime_proxy_claude_picker_model_descriptor("sonnet").map(|descriptor| descriptor.id),
             Some("gpt-5.3-codex")
         );
         assert_eq!(
