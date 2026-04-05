@@ -224,6 +224,9 @@ const CLI_PROFILE_AFTER_HELP: &str = "\
 Examples:
   prodex profile list
   prodex profile add main --activate
+  prodex profile export
+  prodex profile export backup.json
+  prodex profile import backup.json
   prodex profile import-current main
   prodex profile remove main";
 const CLI_LOGIN_AFTER_HELP: &str = "\
@@ -2887,6 +2890,10 @@ enum Commands {
 enum ProfileCommands {
     /// Add a profile entry and optionally seed it from another CODEX_HOME.
     Add(AddProfileArgs),
+    /// Export one or more profiles, including their auth.json access tokens.
+    Export(ExportProfileArgs),
+    /// Import profiles from a bundle created by `prodex profile export`.
+    Import(ImportProfileArgs),
     /// Copy the current shared Prodex CODEX_HOME into a new managed profile and activate it.
     ImportCurrent(ImportCurrentArgs),
     /// List configured profiles and show which one is active.
@@ -2913,6 +2920,29 @@ struct AddProfileArgs {
     /// Make the new profile active after creation.
     #[arg(long)]
     activate: bool,
+}
+
+#[derive(Args, Debug)]
+struct ExportProfileArgs {
+    /// Export only the named profile. Repeat to export multiple profiles. Defaults to all profiles.
+    #[arg(short, long, value_name = "NAME")]
+    profile: Vec<String>,
+    /// Write the export bundle to this path. Defaults to a timestamped JSON file in the current directory.
+    #[arg(value_name = "PATH")]
+    output: Option<PathBuf>,
+    /// Protect the export bundle with a password.
+    #[arg(long, conflicts_with = "no_password")]
+    password_protect: bool,
+    /// Export without password protection and skip the interactive prompt.
+    #[arg(long)]
+    no_password: bool,
+}
+
+#[derive(Args, Debug)]
+struct ImportProfileArgs {
+    /// Path to a profile export bundle created by `prodex profile export`.
+    #[arg(value_name = "PATH")]
+    path: PathBuf,
 }
 
 #[derive(Args, Debug)]
@@ -4015,6 +4045,8 @@ fn rewrite_cli_args_as_run(args: &[OsString]) -> Vec<OsString> {
 fn handle_profile_command(command: ProfileCommands) -> Result<()> {
     match command {
         ProfileCommands::Add(args) => handle_add_profile(args),
+        ProfileCommands::Export(args) => handle_export_profiles(args),
+        ProfileCommands::Import(args) => handle_import_profiles(args),
         ProfileCommands::ImportCurrent(args) => handle_import_current_profile(args),
         ProfileCommands::List => handle_list_profiles(),
         ProfileCommands::Remove(args) => handle_remove_profile(args),

@@ -74,6 +74,7 @@ prodex login --profile second
 
 ```bash
 prodex profile list
+prodex profile export
 prodex quota --all
 prodex info
 ```
@@ -83,6 +84,16 @@ prodex info
 ```bash
 prodex quota --all --once
 ```
+
+Backup or move profiles:
+
+```bash
+prodex profile export
+prodex profile export backup.json
+prodex profile import backup.json
+```
+
+`prodex profile export` exports all configured profiles by default and asks whether the bundle should use optional password protection.
 
 ## 3. Run Codex CLI with `prodex`
 

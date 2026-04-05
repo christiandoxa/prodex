@@ -81,9 +81,20 @@ Check the pool:
 
 ```bash
 prodex profile list
+prodex profile export
 prodex quota --all
 prodex info
 ```
+
+Move profiles to another machine or backup the current pool:
+
+```bash
+prodex profile export
+prodex profile export backup.json
+prodex profile import backup.json
+```
+
+`prodex profile export` includes each selected profile's `auth.json`. By default it exports every configured profile and asks whether the bundle should be password-protected.
 
 ## Use `prodex` for Codex CLI
 
@@ -129,6 +140,8 @@ PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -
 
 ```bash
 prodex profile list
+prodex profile export
+prodex profile import backup.json
 prodex use --profile main
 prodex current
 prodex quota --all
