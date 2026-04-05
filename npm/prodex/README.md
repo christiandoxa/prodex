@@ -2,19 +2,14 @@
 
 [![CI](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml/badge.svg)](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml)
 
-One OpenAI profile pool for Codex CLI and Claude Code.
+`prodex` manages multiple isolated Codex profiles and lets Codex CLI or Claude Code run on top of the same OpenAI account pool.
 
-`prodex` gives you two entry points backed by the same OpenAI account pool:
+It is built for a simple setup:
 
-| Use case | Command |
-| --- | --- |
-| Run Codex CLI through Prodex | `prodex` or `prodex run` |
-| Run Claude Code through Prodex | `prodex claude` |
-
-It keeps each profile isolated, checks quota before launch, and rotates to another ready account before a request or stream is committed.
-
-Use `prodex` when Codex CLI is your front end. Use `prodex claude` when Claude Code is your front end. The account pool, profile isolation, quota checks, and continuation routing stay in Prodex either way.
-Managed profiles also share persisted Codex state such as prompt history and session resumes, so cross-profile CLI state stays aligned.
+- each account gets its own profile
+- quota is checked before launch
+- fresh work can move to another ready profile
+- existing continuations stay on the profile that already owns them
 
 ## Requirements
 
@@ -62,95 +57,116 @@ cargo uninstall prodex
 npm install -g @christiandoxa/prodex
 ```
 
-## Start
+## Quick Setup
 
-Import your current login:
+If your shared Codex home already contains a login:
 
 ```bash
 prodex profile import-current main
 ```
 
-Or create a profile through the normal Codex login flow:
+Or create a profile through the normal login flow:
 
 ```bash
 prodex login
 prodex login --device-auth
 ```
 
+If you want to name the profile first:
+
+```bash
+prodex profile add second
+prodex login --profile second
+```
+
 Check the pool:
 
 ```bash
 prodex profile list
-prodex profile export
 prodex quota --all
 prodex info
 ```
 
-Move profiles to another machine or backup the current pool:
-
-```bash
-prodex profile export
-prodex profile export backup.json
-prodex profile import backup.json
-```
-
-`prodex profile export` includes each selected profile's `auth.json`. By default it exports every configured profile and asks whether the bundle should be password-protected.
-
-## Use `prodex` for Codex CLI
-
-`prodex` without a subcommand is shorthand for `prodex run`.
+Run Codex CLI or Claude Code through Prodex:
 
 ```bash
 prodex
-prodex run --profile second
+prodex exec "review this repo"
+prodex claude -- -p "summarize this repo"
+```
+
+`prodex` without a subcommand is shorthand for `prodex run`.
+
+## Important Commands
+
+### Profile And Login
+
+```bash
+prodex profile list
+prodex profile add second
+prodex profile import-current main
+prodex login
+prodex login --profile second
+prodex login --device-auth
+prodex use --profile main
+prodex current
+prodex logout --profile main
+prodex profile remove second
+```
+
+### Run With Codex CLI
+
+```bash
+prodex
+prodex run
+prodex run --profile main
+prodex exec "review this repo"
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
-Use this path when you want Codex CLI itself to be the front end. Prodex handles profile selection, quota preflight, continuation affinity, and safe pre-commit rotation across your OpenAI-backed profiles.
-
-## Use `prodex claude` for Claude Code
+### Run With Claude Code
 
 ```bash
 prodex claude -- -p "summarize this repo"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
-Use this path when you want Claude Code to be the front end while Prodex still routes requests through the same OpenAI-backed profile pool.
-
-- `prodex claude` runs Claude Code through a local Anthropic-compatible proxy
-- Claude Code state is isolated per profile in `CLAUDE_CONFIG_DIR`
-- the initial Claude model follows the shared Codex `config.toml` model when available
-- Claude's native `opus`, `sonnet`, and `haiku` picker entries are pinned to representative GPT models
-- Prodex also seeds Claude's picker with the full Prodex GPT catalog
-- Claude `max` effort maps to OpenAI `xhigh` when the selected GPT model supports it
-- alias-backed GPT entries reuse Claude's native alias picker values so the picker and confirmation text stay aligned
-- additional GPT entries stay on GPT model ids so the selected model banner keeps GPT naming while Claude can still expose effort controls
-- use `PRODEX_CLAUDE_BIN` if `claude` is not on `PATH`
-- use `PRODEX_CLAUDE_MODEL` to force a specific upstream Responses model
-- use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream reasoning tier
-
-Example:
+### Export And Import Profiles
 
 ```bash
-PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -- -p "hello"
+prodex profile export
+prodex profile export backup.json
+prodex profile export --profile main --profile second backup.json
+prodex profile import backup.json
 ```
 
-## Common Commands
+`prodex profile export` includes each exported profile's `auth.json`. By default it exports every configured profile and asks whether the bundle should be password-protected.
+
+### Quota, Status, And Debugging
 
 ```bash
-prodex profile list
-prodex profile export
-prodex profile import backup.json
-prodex use --profile main
-prodex current
 prodex quota --all
 prodex quota --all --once
+prodex quota --profile main --detail
 prodex info
 prodex doctor
+prodex doctor --quota
 prodex doctor --runtime
 ```
 
+If a runtime session looks stalled, inspect the latest runtime log:
+
+```bash
+prodex doctor --runtime
+tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
+```
+
+## Notes
+
+- Managed profiles share persisted Codex state through Prodex-owned shared storage.
+- `prodex quota --all` refreshes live by default. Use `--once` for a one-shot snapshot.
+
 ## More
 
-For a slightly longer walkthrough, see [QUICKSTART.md](https://github.com/christiandoxa/prodex/blob/main/QUICKSTART.md).
+For a longer walkthrough, see [QUICKSTART.md](https://github.com/christiandoxa/prodex/blob/main/QUICKSTART.md).
