@@ -71,7 +71,7 @@ async function stageMainPackage(version, outputDir) {
   const packageDir = path.join(outputDir, "packages", packageSlug("@christiandoxa/prodex"));
   await ensureDir(path.join(packageDir, "lib"));
   await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
-  await copyRepoFile("npm/prodex/README.md", path.join(packageDir, "README.md"));
+  await copyRepoFile("README.md", path.join(packageDir, "README.md"));
   await copyRepoFile("npm/prodex/prodex", path.join(packageDir, "prodex"));
   await copyRepoFile("npm/prodex/lib/codex-shim.cjs", path.join(packageDir, "lib", "codex-shim.cjs"));
   await fs.chmod(path.join(packageDir, "prodex"), 0o755);
