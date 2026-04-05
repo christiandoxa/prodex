@@ -178,6 +178,8 @@ const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY: usize = 2;
 const RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES: usize = 512 * 1024;
+const RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS: u64 = if cfg!(test) { 2 } else { 10 };
+const RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS: u64 = if cfg!(test) { 40 } else { 1_000 };
 const RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
@@ -818,6 +820,8 @@ fn schedule_runtime_continuation_journal_save(
     }
     let queue = runtime_continuation_journal_save_queue();
     let journal_path = runtime_continuation_journal_file_path(&paths);
+    let queued_at = Instant::now();
+    let ready_at = queued_at + runtime_continuation_journal_save_debounce(reason);
     let mut pending = queue
         .pending
         .lock()
@@ -830,7 +834,8 @@ fn schedule_runtime_continuation_journal_save(
             log_path: shared.log_path.clone(),
             reason: reason.to_string(),
             saved_at: Local::now().timestamp(),
-            queued_at: Instant::now(),
+            queued_at,
+            ready_at,
         },
     );
     let backlog = pending.len().saturating_sub(1);
@@ -839,8 +844,10 @@ fn schedule_runtime_continuation_journal_save(
     runtime_proxy_log(
         shared,
         format!(
-            "continuation_journal_save_queued reason={} backlog={}",
-            reason, backlog
+            "continuation_journal_save_queued reason={} backlog={} ready_in_ms={}",
+            reason,
+            backlog,
+            ready_at.saturating_duration_since(queued_at).as_millis()
         ),
     );
     if runtime_proxy_queue_pressure_active(0, backlog, 0) {
@@ -953,7 +960,18 @@ fn runtime_continuation_journal_save_worker_loop(queue: Arc<RuntimeContinuationJ
                     .wait(pending)
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
-            std::mem::take(&mut *pending)
+            loop {
+                match runtime_take_due_scheduled_jobs(&mut pending, Instant::now()) {
+                    RuntimeDueJobs::Due(jobs) => break jobs,
+                    RuntimeDueJobs::Wait(wait_for) => {
+                        let (next_pending, _) = queue
+                            .wake
+                            .wait_timeout(pending, wait_for)
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        pending = next_pending;
+                    }
+                }
+            }
         };
 
         for (_, job) in jobs {
@@ -986,11 +1004,8 @@ fn runtime_continuation_journal_save_worker_loop(queue: Arc<RuntimeContinuationJ
 fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
     [
         "response_ids:",
-        "response_touch:",
         "turn_state:",
-        "turn_state_touch:",
         "session_id:",
-        "session_touch:",
         "compact_lineage:",
         "compact_lineage_release:",
     ]
@@ -998,8 +1013,33 @@ fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool
     .any(|prefix| reason.starts_with(prefix))
 }
 
+fn runtime_hot_continuation_state_reason(reason: &str) -> bool {
+    [
+        "response_ids:",
+        "response_touch:",
+        "turn_state:",
+        "turn_state_touch:",
+        "session_id:",
+        "session_touch:",
+        "compact_lineage:",
+        "compact_lineage_release:",
+        "compact_session_touch:",
+        "compact_turn_state_touch:",
+    ]
+    .into_iter()
+    .any(|prefix| reason.starts_with(prefix))
+}
+
 fn runtime_state_save_debounce(reason: &str) -> Duration {
-    if reason.starts_with("session_id:") {
+    if runtime_hot_continuation_state_reason(reason) {
+        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS)
+    } else {
+        Duration::ZERO
+    }
+}
+
+fn runtime_continuation_journal_save_debounce(reason: &str) -> Duration {
+    if runtime_hot_continuation_state_reason(reason) {
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS)
     } else {
         Duration::ZERO
@@ -3407,6 +3447,58 @@ struct RuntimeContinuationJournalSaveJob {
     reason: String,
     saved_at: i64,
     queued_at: Instant,
+    ready_at: Instant,
+}
+
+trait RuntimeScheduledSaveJob {
+    fn ready_at(&self) -> Instant;
+}
+
+impl RuntimeScheduledSaveJob for RuntimeStateSaveJob {
+    fn ready_at(&self) -> Instant {
+        self.ready_at
+    }
+}
+
+impl RuntimeScheduledSaveJob for RuntimeContinuationJournalSaveJob {
+    fn ready_at(&self) -> Instant {
+        self.ready_at
+    }
+}
+
+enum RuntimeDueJobs<K, J> {
+    Due(BTreeMap<K, J>),
+    Wait(Duration),
+}
+
+fn runtime_take_due_scheduled_jobs<K, J>(
+    pending: &mut BTreeMap<K, J>,
+    now: Instant,
+) -> RuntimeDueJobs<K, J>
+where
+    K: Ord + Clone,
+    J: RuntimeScheduledSaveJob,
+{
+    let next_ready_at = pending
+        .values()
+        .map(RuntimeScheduledSaveJob::ready_at)
+        .min()
+        .expect("scheduled save jobs should be present");
+    if next_ready_at > now {
+        return RuntimeDueJobs::Wait(next_ready_at.saturating_duration_since(now));
+    }
+
+    let due_keys = pending
+        .iter()
+        .filter_map(|(key, job)| (job.ready_at() <= now).then_some(key.clone()))
+        .collect::<Vec<_>>();
+    let mut due = BTreeMap::new();
+    for key in due_keys {
+        if let Some(job) = pending.remove(&key) {
+            due.insert(key, job);
+        }
+    }
+    RuntimeDueJobs::Due(due)
 }
 
 #[derive(Debug)]
@@ -3884,6 +3976,13 @@ enum RuntimePrefetchChunk {
     Data(Vec<u8>),
     End,
     Error(io::ErrorKind, String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RuntimePrefetchSendOutcome {
+    Sent { wait_ms: u128, retries: usize },
+    Disconnected,
+    TimedOut { message: String },
 }
 
 #[derive(Default)]
@@ -6157,13 +6256,15 @@ fn start_runtime_rotation_proxy(
                 recovered_from_backup: false,
             },
         );
-    let persisted_backoffs =
+    let mut persisted_backoffs =
         load_runtime_profile_backoffs_with_recovery(paths, &restored_state.profiles).unwrap_or(
             RecoveredLoad {
                 value: RuntimeProfileBackoffs::default(),
                 recovered_from_backup: false,
             },
         );
+    let startup_now = Local::now().timestamp();
+    runtime_soften_persisted_backoffs_for_startup(&mut persisted_backoffs.value, startup_now);
     let persisted_profile_scores_count = persisted_profile_scores.value.len();
     let persisted_usage_snapshots_count = persisted_usage_snapshots.value.len();
     let persisted_response_binding_count = restored_continuations.response_profile_bindings.len();
@@ -6176,7 +6277,7 @@ fn start_runtime_rotation_proxy(
     let expired_usage_snapshot_count = persisted_usage_snapshots
         .value
         .values()
-        .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, Local::now().timestamp()))
+        .filter(|snapshot| !runtime_usage_snapshot_is_usable(snapshot, startup_now))
         .count();
     let restored_global_scores_count = persisted_profile_scores
         .value
@@ -9828,6 +9929,19 @@ fn runtime_quota_soft_affinity_rejection_reason(
     }
 }
 
+fn runtime_quota_source_requires_live_probe_for_fast_path(
+    route_kind: RuntimeRouteKind,
+    source: Option<RuntimeQuotaSource>,
+) -> bool {
+    matches!(
+        (route_kind, source),
+        (
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket,
+            Some(RuntimeQuotaSource::PersistedSnapshot),
+        )
+    )
+}
+
 fn runtime_profile_quota_summary_for_route(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -10234,6 +10348,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         circuit_open_until,
         inflight_count,
         health_score,
+        performance_score,
         auth_failure_active,
     ) = {
         let mut runtime = shared
@@ -10262,16 +10377,26 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             ),
             runtime_profile_inflight_count(&runtime, &runtime.current_profile),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now, route_kind),
+            runtime_profile_route_performance_score(
+                &runtime.profile_health,
+                &runtime.current_profile,
+                now,
+                route_kind,
+            ),
             runtime_profile_auth_failure_active(&runtime, &runtime.current_profile, now),
         )
     };
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
+    let stale_persisted_quota =
+        runtime_quota_source_requires_live_probe_for_fast_path(route_kind, quota_source);
 
     if auth_failure_active
         || in_selection_backoff
         || circuit_open_until.is_some()
         || health_score > 0
+        || performance_score > 0
+        || stale_persisted_quota
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
         || quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
     {
@@ -10283,6 +10408,10 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             "route_circuit_open"
         } else if health_score > 0 {
             "profile_health"
+        } else if performance_score > 0 {
+            "profile_performance"
+        } else if stale_persisted_quota {
+            "stale_persisted_quota"
         } else if quota_summary.route_band > RuntimeQuotaPressureBand::Healthy {
             runtime_quota_pressure_band_reason(quota_summary.route_band)
         } else {
@@ -10291,12 +10420,13 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_current route={} profile={} reason={} inflight={} health={} soft_limit={} circuit_until={} quota_source={} {}",
+                "selection_skip_current route={} profile={} reason={} inflight={} health={} performance={} soft_limit={} circuit_until={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 current_profile,
                 reason,
                 inflight_count,
                 health_score,
+                performance_score,
                 RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
                 circuit_open_until.unwrap_or_default(),
                 quota_source
@@ -10322,11 +10452,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     runtime_proxy_log(
         shared,
         format!(
-            "selection_keep_current route={} profile={} inflight={} health={} quota_source={} {}",
+            "selection_keep_current route={} profile={} inflight={} health={} performance={} quota_source={} {}",
             runtime_route_kind_label(route_kind),
             current_profile,
             inflight_count,
             health_score,
+            performance_score,
             quota_source
                 .map(runtime_quota_source_label)
                 .unwrap_or("unknown"),
@@ -10338,11 +10469,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
+                "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} performance={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 current_profile,
                 inflight_count,
                 health_score,
+                performance_score,
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -15522,6 +15654,34 @@ fn runtime_continuation_store_snapshot(runtime: &RuntimeRotationState) -> Runtim
     }
 }
 
+fn runtime_soften_persisted_backoff_map_for_startup(
+    backoffs: &mut BTreeMap<String, i64>,
+    now: i64,
+    max_future_seconds: i64,
+) {
+    let max_until = now.saturating_add(max_future_seconds.max(0));
+    backoffs.retain(|_, until| {
+        if *until <= now {
+            return false;
+        }
+        *until = (*until).min(max_until);
+        true
+    });
+}
+
+fn runtime_soften_persisted_backoffs_for_startup(backoffs: &mut RuntimeProfileBackoffs, now: i64) {
+    runtime_soften_persisted_backoff_map_for_startup(
+        &mut backoffs.transport_backoff_until,
+        now,
+        RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,
+    );
+    runtime_soften_persisted_backoff_map_for_startup(
+        &mut backoffs.route_circuit_open_until,
+        now,
+        RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
+    );
+}
+
 const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
 const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
 const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
@@ -17530,6 +17690,47 @@ fn runtime_prefetch_terminal_error(
         .clone()
 }
 
+async fn runtime_prefetch_send_with_wait(
+    sender: &SyncSender<RuntimePrefetchChunk>,
+    chunk: Vec<u8>,
+) -> RuntimePrefetchSendOutcome {
+    let started_at = Instant::now();
+    let retry_delay = Duration::from_millis(runtime_proxy_prefetch_backpressure_retry_ms());
+    let timeout = Duration::from_millis(runtime_proxy_prefetch_backpressure_timeout_ms());
+    let mut pending = RuntimePrefetchChunk::Data(chunk);
+    let mut retries = 0;
+    loop {
+        match sender.try_send(pending) {
+            Ok(()) => {
+                return RuntimePrefetchSendOutcome::Sent {
+                    wait_ms: started_at.elapsed().as_millis(),
+                    retries,
+                };
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                return RuntimePrefetchSendOutcome::Disconnected;
+            }
+            Err(TrySendError::Full(returned)) => {
+                if started_at.elapsed() >= timeout {
+                    return RuntimePrefetchSendOutcome::TimedOut {
+                        message: format!(
+                            "runtime prefetch backlog exceeded bounded capacity ({})",
+                            RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY
+                        ),
+                    };
+                }
+                pending = returned;
+                retries = retries.saturating_add(1);
+                let remaining = timeout.saturating_sub(started_at.elapsed());
+                let sleep_for = retry_delay.min(remaining);
+                if !sleep_for.is_zero() {
+                    tokio::time::sleep(sleep_for).await;
+                }
+            }
+        }
+    }
+}
+
 async fn runtime_prefetch_response_chunks(
     mut response: reqwest::Response,
     sender: SyncSender<RuntimePrefetchChunk>,
@@ -17586,13 +17787,19 @@ async fn runtime_prefetch_response_chunks(
                     ));
                     break;
                 }
-                match sender.try_send(RuntimePrefetchChunk::Data(chunk.to_vec())) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) => {
-                        let message = format!(
-                            "runtime prefetch backlog exceeded bounded capacity ({})",
-                            RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY
-                        );
+                let chunk_bytes = chunk.len();
+                match runtime_prefetch_send_with_wait(&sender, chunk.to_vec()).await {
+                    RuntimePrefetchSendOutcome::Sent { wait_ms, retries } => {
+                        if retries > 0 {
+                            runtime_proxy_log_to_path(
+                                &log_path,
+                                &format!(
+                                    "request={request_id} transport=http prefetch_backpressure_recovered bytes={chunk_bytes} retries={retries} wait_ms={wait_ms}",
+                                ),
+                            );
+                        }
+                    }
+                    RuntimePrefetchSendOutcome::TimedOut { message } => {
                         runtime_prefetch_set_terminal_error(
                             &shared,
                             io::ErrorKind::WouldBlock,
@@ -17601,18 +17808,13 @@ async fn runtime_prefetch_response_chunks(
                         runtime_proxy_log_to_path(
                             &log_path,
                             &format!(
-                                "request={request_id} transport=http prefetch_backpressure_abort bytes={} capacity={} error={message}",
-                                chunk.len(),
+                                "request={request_id} transport=http prefetch_backpressure_timeout bytes={chunk_bytes} capacity={} error={message}",
                                 RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY,
                             ),
                         );
-                        let _ = sender.try_send(RuntimePrefetchChunk::Error(
-                            io::ErrorKind::WouldBlock,
-                            message,
-                        ));
                         break;
                     }
-                    Err(TrySendError::Disconnected(_)) => {
+                    RuntimePrefetchSendOutcome::Disconnected => {
                         runtime_proxy_log_to_path(
                             &log_path,
                             &format!(

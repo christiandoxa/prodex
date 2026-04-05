@@ -78,6 +78,20 @@ pub(super) fn runtime_proxy_sse_lookahead_timeout_ms() -> u64 {
     )
 }
 
+pub(super) fn runtime_proxy_prefetch_backpressure_retry_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS",
+        RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS,
+    )
+}
+
+pub(super) fn runtime_proxy_prefetch_backpressure_timeout_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS",
+        RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS,
+    )
+}
+
 pub(super) fn runtime_proxy_websocket_connect_timeout_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",

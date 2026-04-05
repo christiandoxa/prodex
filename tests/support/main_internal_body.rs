@@ -2281,7 +2281,7 @@ fn runtime_proxy_default_active_limit_scales_with_long_lived_streams() {
 }
 
 #[test]
-fn runtime_state_save_debounce_only_applies_to_binding_updates() {
+fn runtime_state_save_debounce_applies_to_hot_continuation_updates() {
     assert_eq!(
         runtime_state_save_debounce("profile_commit:main"),
         Duration::ZERO
@@ -2290,9 +2290,112 @@ fn runtime_state_save_debounce_only_applies_to_binding_updates() {
         runtime_state_save_debounce("session_id:main") > Duration::ZERO,
         "session id saves should be debounced"
     );
+    assert!(
+        runtime_state_save_debounce("response_ids:main") > Duration::ZERO,
+        "response id saves should be debounced"
+    );
+    assert!(
+        runtime_state_save_debounce("compact_session_touch:session-main") > Duration::ZERO,
+        "compact lineage touches should be debounced"
+    );
+}
+
+#[test]
+fn runtime_state_save_reason_only_journals_owner_changes() {
+    assert!(runtime_state_save_reason_requires_continuation_journal("response_ids:main"));
+    assert!(runtime_state_save_reason_requires_continuation_journal("turn_state:turn-main"));
+    assert!(runtime_state_save_reason_requires_continuation_journal("session_id:session-main"));
+    assert!(runtime_state_save_reason_requires_continuation_journal("compact_lineage:main"));
+    assert!(!runtime_state_save_reason_requires_continuation_journal("response_touch:main"));
+    assert!(!runtime_state_save_reason_requires_continuation_journal("turn_state_touch:main"));
+    assert!(!runtime_state_save_reason_requires_continuation_journal("session_touch:main"));
+    assert!(!runtime_state_save_reason_requires_continuation_journal("compact_session_touch:main"));
+}
+
+#[derive(Debug)]
+struct TestScheduledJob {
+    ready_at: Instant,
+}
+
+impl RuntimeScheduledSaveJob for TestScheduledJob {
+    fn ready_at(&self) -> Instant {
+        self.ready_at
+    }
+}
+
+#[test]
+fn runtime_take_due_scheduled_jobs_waits_for_future_entries() {
+    let now = Instant::now();
+    let mut pending = BTreeMap::from([(
+        "later".to_string(),
+        TestScheduledJob {
+            ready_at: now + Duration::from_millis(25),
+        },
+    )]);
+
+    match runtime_take_due_scheduled_jobs(&mut pending, now) {
+        RuntimeDueJobs::Wait(wait_for) => {
+            assert!(wait_for >= Duration::from_millis(20));
+            assert_eq!(pending.len(), 1);
+        }
+        RuntimeDueJobs::Due(_) => panic!("future work should not be returned early"),
+    }
+}
+
+#[test]
+fn runtime_take_due_scheduled_jobs_returns_only_ready_entries() {
+    let now = Instant::now();
+    let mut pending = BTreeMap::from([
+        (
+            "due".to_string(),
+            TestScheduledJob { ready_at: now },
+        ),
+        (
+            "later".to_string(),
+            TestScheduledJob {
+                ready_at: now + Duration::from_millis(50),
+            },
+        ),
+    ]);
+
+    match runtime_take_due_scheduled_jobs(&mut pending, now) {
+        RuntimeDueJobs::Due(due) => {
+            assert_eq!(due.len(), 1);
+            assert!(due.contains_key("due"));
+            assert_eq!(pending.len(), 1);
+            assert!(pending.contains_key("later"));
+        }
+        RuntimeDueJobs::Wait(_) => panic!("ready work should be returned immediately"),
+    }
+}
+
+#[test]
+fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() {
+    let now = Local::now().timestamp();
+    let mut backoffs = RuntimeProfileBackoffs {
+        retry_backoff_until: BTreeMap::from([("retry".to_string(), now + 60)]),
+        transport_backoff_until: BTreeMap::from([
+            ("expired".to_string(), now - 1),
+            ("transport".to_string(), now + 60),
+        ]),
+        route_circuit_open_until: BTreeMap::from([
+            ("expired".to_string(), now - 1),
+            ("circuit".to_string(), now + 60),
+        ]),
+    };
+
+    runtime_soften_persisted_backoffs_for_startup(&mut backoffs, now);
+
+    assert_eq!(backoffs.retry_backoff_until.get("retry"), Some(&(now + 60)));
+    assert!(!backoffs.transport_backoff_until.contains_key("expired"));
     assert_eq!(
-        runtime_state_save_debounce("response_ids:main"),
-        Duration::ZERO
+        backoffs.transport_backoff_until.get("transport"),
+        Some(&now.saturating_add(RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS))
+    );
+    assert!(!backoffs.route_circuit_open_until.contains_key("expired"));
+    assert_eq!(
+        backoffs.route_circuit_open_until.get("circuit"),
+        Some(&now.saturating_add(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS))
     );
 }
 
@@ -6370,6 +6473,202 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
         )
         .expect("candidate lookup should succeed"),
         None
+    );
+}
+
+#[test]
+fn optimistic_current_candidate_skips_route_performance_penalty() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: now,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage_with_main_windows(90, 18_000, 90, 604_800)),
+            },
+        )]),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_route_performance_key("main", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: 4,
+                updated_at: now,
+            },
+        )]),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("candidate lookup should succeed"),
+        None
+    );
+}
+
+#[test]
+fn optimistic_current_candidate_requires_live_quota_for_responses_fast_path() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 85,
+                five_hour_reset_at: Local::now().timestamp() + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 90,
+                weekly_reset_at: Local::now().timestamp() + 86_400,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("responses candidate lookup should succeed"),
+        None
+    );
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Websocket,
+        )
+        .expect("websocket candidate lookup should succeed"),
+        None
+    );
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Standard,
+        )
+        .expect("standard candidate lookup should succeed"),
+        Some("main".to_string())
     );
 }
 
@@ -13273,6 +13572,67 @@ fn extract_runtime_response_ids_accepts_top_level_response_fields() {
         extract_runtime_response_ids_from_value(&realtime_object),
         vec!["resp-realtime".to_string()]
     );
+}
+
+#[test]
+fn runtime_prefetch_send_with_wait_recovers_after_short_backpressure() {
+    let _timeout_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS", "50");
+    let _retry_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS", "1");
+    let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(1);
+    sender
+        .try_send(RuntimePrefetchChunk::Data(vec![1]))
+        .expect("initial queue fill should succeed");
+    let async_runtime = TokioRuntimeBuilder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("async runtime");
+    let drain = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(10));
+        let first = receiver
+            .recv_timeout(Duration::from_millis(200))
+            .expect("first chunk should drain");
+        let second = receiver
+            .recv_timeout(Duration::from_millis(200))
+            .expect("second chunk should arrive after backpressure clears");
+        (first, second)
+    });
+
+    let outcome = async_runtime.block_on(runtime_prefetch_send_with_wait(&sender, vec![2, 3]));
+    assert!(matches!(
+        outcome,
+        RuntimePrefetchSendOutcome::Sent { retries, .. } if retries > 0
+    ));
+
+    let (first, second) = drain.join().expect("drain thread should succeed");
+    assert!(matches!(first, RuntimePrefetchChunk::Data(data) if data == vec![1]));
+    assert!(matches!(second, RuntimePrefetchChunk::Data(data) if data == vec![2, 3]));
+}
+
+#[test]
+fn runtime_prefetch_send_with_wait_times_out_when_backpressure_persists() {
+    let _timeout_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS", "5");
+    let _retry_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS", "1");
+    let (sender, _receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(1);
+    sender
+        .try_send(RuntimePrefetchChunk::Data(vec![1]))
+        .expect("initial queue fill should succeed");
+    let async_runtime = TokioRuntimeBuilder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("async runtime");
+
+    let outcome = async_runtime.block_on(runtime_prefetch_send_with_wait(&sender, vec![2, 3]));
+    assert!(matches!(
+        outcome,
+        RuntimePrefetchSendOutcome::TimedOut { message }
+        if message.contains("bounded capacity")
+    ));
 }
 
 #[test]
