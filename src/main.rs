@@ -6114,7 +6114,7 @@ fn should_enable_runtime_rotation_proxy(
     let Some(selected_profile) = state.profiles.get(selected_profile_name) else {
         return false;
     };
-    if !read_auth_summary(&selected_profile.codex_home).quota_compatible {
+    if !selected_profile.codex_home.exists() {
         return false;
     }
 
@@ -6122,9 +6122,8 @@ fn should_enable_runtime_rotation_proxy(
         .profiles
         .values()
         .filter(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
-        .take(2)
-        .count()
-        > 1
+        .next()
+        .is_some()
 }
 
 fn runtime_proxy_codex_args(
@@ -9937,7 +9936,7 @@ fn runtime_quota_source_requires_live_probe_for_fast_path(
         (route_kind, source),
         (
             RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket,
-            Some(RuntimeQuotaSource::PersistedSnapshot),
+            None | Some(RuntimeQuotaSource::PersistedSnapshot),
         )
     )
 }
@@ -10344,6 +10343,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     let (
         current_profile,
         codex_home,
+        has_alternative_quota_compatible_profile,
         in_selection_backoff,
         circuit_open_until,
         inflight_count,
@@ -10368,6 +10368,10 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         (
             runtime.current_profile.clone(),
             profile.codex_home.clone(),
+            runtime.state.profiles.iter().any(|(name, profile)| {
+                name != &runtime.current_profile
+                    && read_auth_summary(&profile.codex_home).quota_compatible
+            }),
             runtime_profile_in_selection_backoff(&runtime, &runtime.current_profile, now),
             runtime_profile_route_circuit_open_until(
                 &runtime,
@@ -10388,15 +10392,15 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     };
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
-    let stale_persisted_quota =
-        runtime_quota_source_requires_live_probe_for_fast_path(route_kind, quota_source);
+    let live_quota_probe_required = has_alternative_quota_compatible_profile
+        && runtime_quota_source_requires_live_probe_for_fast_path(route_kind, quota_source);
 
     if auth_failure_active
         || in_selection_backoff
         || circuit_open_until.is_some()
         || health_score > 0
         || performance_score > 0
-        || stale_persisted_quota
+        || live_quota_probe_required
         || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
         || quota_summary.route_band > RuntimeQuotaPressureBand::Healthy
     {
@@ -10410,8 +10414,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
             "profile_health"
         } else if performance_score > 0 {
             "profile_performance"
-        } else if stale_persisted_quota {
-            "stale_persisted_quota"
+        } else if live_quota_probe_required {
+            if matches!(quota_source, Some(RuntimeQuotaSource::PersistedSnapshot)) {
+                "stale_persisted_quota"
+            } else {
+                "quota_probe_unavailable"
+            }
         } else if quota_summary.route_band > RuntimeQuotaPressureBand::Healthy {
             runtime_quota_pressure_band_reason(quota_summary.route_band)
         } else {
