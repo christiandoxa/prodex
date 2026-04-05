@@ -78,6 +78,7 @@ mod prodex_impl {
         }
 
         include!("support/main_internal_body.rs");
+        include!("support/claude_model_selector_body.rs");
 
         #[test]
         fn runtime_profile_usage_auth_cache_entry_matches_detects_auth_json_changes() {
