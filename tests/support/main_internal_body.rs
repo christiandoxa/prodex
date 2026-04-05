@@ -11667,6 +11667,13 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let startup_usage_accounts =
+        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
+    assert_eq!(
+        startup_usage_accounts,
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
     let response = Client::builder()
         .build()
         .expect("client")
