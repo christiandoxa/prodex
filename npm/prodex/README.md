@@ -48,11 +48,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.114`:
+The current local version in this repo is `0.2.115`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.114
-cargo install prodex --force --version 0.2.114
+npm install -g @christiandoxa/prodex@0.2.115
+cargo install prodex --force --version 0.2.115
 ```
 
 If you want to switch from a Cargo-installed binary to npm:
@@ -81,9 +81,20 @@ Check the pool:
 
 ```bash
 prodex profile list
+prodex profile export
 prodex quota --all
 prodex info
 ```
+
+Move profiles to another machine or backup the current pool:
+
+```bash
+prodex profile export
+prodex profile export backup.json
+prodex profile import backup.json
+```
+
+`prodex profile export` includes each selected profile's `auth.json`. By default it exports every configured profile and asks whether the bundle should be password-protected.
 
 ## Use `prodex` for Codex CLI
 
@@ -129,6 +140,8 @@ PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -
 
 ```bash
 prodex profile list
+prodex profile export
+prodex profile import backup.json
 prodex use --profile main
 prodex current
 prodex quota --all
