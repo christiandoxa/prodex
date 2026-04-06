@@ -2961,10 +2961,15 @@ fn quota_reports_include_pool_summary_lines() {
         .expect("weekly snapshot")
         .reset_at;
 
+    assert!(output.contains("Available:"));
+    assert!(output.contains("2 profile"));
+    assert!(output.contains("Unavailable:"));
+    assert!(output.contains("1 profile"));
     assert!(output.contains("5h remaining pool:"));
     assert!(output.contains("Weekly remaining pool:"));
     assert!(output.contains(&format_info_pool_remaining(135, 2, Some(five_hour_reset))));
     assert!(output.contains(&format_info_pool_remaining(135, 2, Some(weekly_reset))));
+    assert!(output.contains("\n\nPROFILE"));
 }
 
 #[test]
@@ -3008,7 +3013,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         },
     ];
 
-    let output = render_quota_reports_with_line_limit(&reports, false, Some(13));
+    let output = render_quota_reports_with_line_limit(&reports, false, Some(16));
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));
@@ -3059,7 +3064,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
     ];
 
     let window =
-        render_quota_reports_window_with_layout(&reports, false, Some(13), 100, 1, true);
+        render_quota_reports_window_with_layout(&reports, false, Some(16), 100, 1, true);
 
     assert_eq!(window.start_profile, 1);
     assert_eq!(window.total_profiles, 4);

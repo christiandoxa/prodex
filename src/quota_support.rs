@@ -196,6 +196,8 @@ struct QuotaReportColumnWidths {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct QuotaPoolAggregate {
+    available_profiles: usize,
+    unavailable_profiles: usize,
     profiles_with_data: usize,
     five_hour_pool_remaining: i64,
     weekly_pool_remaining: i64,
@@ -383,8 +385,12 @@ pub(crate) fn render_quota_reports_window_with_layout(
         plan_w = column_widths.plan,
         main_w = column_widths.remaining,
     );
+    let has_pool_summary = !pool_summary.is_empty();
     let mut output = vec![section_header_with_width("Quota Overview", total_width)];
     output.extend(pool_summary);
+    if has_pool_summary {
+        output.push(String::new());
+    }
     output.push(header.clone());
     output.push("-".repeat(text_width(&header)));
     let total_profiles = sections.len();
@@ -449,16 +455,20 @@ fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
 
     for report in reports {
         if !report.auth.quota_compatible {
+            aggregate.unavailable_profiles += 1;
             continue;
         }
 
         let Ok(usage) = &report.result else {
+            aggregate.unavailable_profiles += 1;
             continue;
         };
         let Some((five_hour, weekly)) = info_main_window_snapshots(usage) else {
+            aggregate.unavailable_profiles += 1;
             continue;
         };
 
+        aggregate.available_profiles += 1;
         aggregate.profiles_with_data += 1;
         aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
         aggregate.weekly_pool_remaining += weekly.remaining_percent;
@@ -488,6 +498,14 @@ fn render_quota_pool_summary_lines(
     total_width: usize,
 ) -> Vec<String> {
     let fields = vec![
+        (
+            "Available".to_string(),
+            format!("{} profile", aggregate.available_profiles),
+        ),
+        (
+            "Unavailable".to_string(),
+            format!("{} profile", aggregate.unavailable_profiles),
+        ),
         (
             "5h remaining pool".to_string(),
             format_info_pool_remaining(
