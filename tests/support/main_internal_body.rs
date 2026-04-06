@@ -3019,7 +3019,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
     assert!(output.contains("ready-late"));
     assert!(!output.contains("blocked"));
     assert!(!output.contains("error"));
-    assert!(output.contains("showing top 2 of 4 profiles"));
+    assert!(output.contains("\n\nshowing top 2 of 4 profiles"));
 }
 
 #[test]
@@ -3076,7 +3076,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
     assert!(!window.output.contains("ready-early"));
     assert!(window
         .output
-        .contains("press Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)"));
+        .contains("\n\npress Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)"));
 }
 
 #[test]

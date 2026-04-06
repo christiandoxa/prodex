@@ -420,16 +420,17 @@ pub(crate) fn render_quota_reports_window_with_layout(
                 let first_visible = start_profile.saturating_add(1);
                 let last_visible = start_profile.saturating_add(shown_profiles);
                 format!(
-                    "  press Up/Down to scroll profiles ({first_visible}-{last_visible} of {total_profiles}; {hidden_before} above, {hidden_after} below)"
+                    "press Up/Down to scroll profiles ({first_visible}-{last_visible} of {total_profiles}; {hidden_before} above, {hidden_after} below)"
                 )
             } else {
                 format!(
-                    "  showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
+                    "showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
                 )
             };
             if remaining == 0 && !output.is_empty() {
                 output.pop();
             }
+            output.push(String::new());
             output.push(notice);
         }
     } else {
