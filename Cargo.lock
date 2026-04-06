@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.2.119"
+version = "0.2.120"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
