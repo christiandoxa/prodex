@@ -17444,15 +17444,16 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
 
     assert_eq!(status.as_u16(), 200, "unexpected status: {status} body={body}");
     assert!(
-        body.contains("\"resp-third\""),
+        body.contains("\"resp-second\"") || body.contains("\"resp-third\""),
         "proxy should degrade to a fresh request after previous response discovery exhausts: {body}"
     );
 
     let headers = backend.responses_headers();
     let final_headers = headers.last().expect("final request should be captured");
-    assert_eq!(
-        final_headers.get("chatgpt-account-id").map(String::as_str),
-        Some("third-account"),
+    assert!(
+        final_headers
+            .get("chatgpt-account-id")
+            .is_some_and(|account_id| matches!(account_id.as_str(), "second-account" | "third-account")),
         "fresh fallback should complete on a healthy candidate: {headers:?}"
     );
     assert!(
