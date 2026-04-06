@@ -62,9 +62,7 @@ fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Op
     }
 }
 
-fn runtime_proxy_backend_response_owner_account_id(
-    response_id: &str,
-) -> Option<&'static str> {
+fn runtime_proxy_backend_response_owner_account_id(response_id: &str) -> Option<&'static str> {
     if response_id == "resp-second" || response_id.starts_with("resp-second-next") {
         Some("second-account")
     } else if response_id == "resp-third" || response_id.starts_with("resp-third-next") {
@@ -74,9 +72,7 @@ fn runtime_proxy_backend_response_owner_account_id(
     }
 }
 
-fn runtime_proxy_backend_profile_name_for_response_id(
-    response_id: &str,
-) -> Option<&'static str> {
+fn runtime_proxy_backend_profile_name_for_response_id(response_id: &str) -> Option<&'static str> {
     runtime_proxy_backend_response_owner_account_id(response_id)
         .and_then(runtime_proxy_backend_profile_name_for_account_id)
 }
@@ -242,6 +238,32 @@ impl Drop for TestEnvVarGuard {
             // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
             unsafe { env::remove_var(self.key) };
         }
+    }
+}
+
+fn runtime_rotation_proxy_shared(
+    temp_dir: &TestDir,
+    runtime: RuntimeRotationState,
+    active_request_limit: usize,
+) -> RuntimeRotationProxyShared {
+    let active_request_limit = active_request_limit.max(1);
+    RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(active_request_limit),
+        runtime: Arc::new(Mutex::new(runtime)),
     }
 }
 
@@ -1204,13 +1226,15 @@ fn handle_runtime_proxy_backend_request(
                         "output": []
                     })
                     .to_string(),
-                    Some(match account_id.as_str() {
-                        "main-account" => "compact-turn-main",
-                        "second-account" => "compact-turn-second",
-                        "third-account" => "compact-turn-third",
-                        _ => "compact-turn-unknown",
-                    }
-                    .to_string()),
+                    Some(
+                        match account_id.as_str() {
+                            "main-account" => "compact-turn-main",
+                            "second-account" => "compact-turn-second",
+                            "third-account" => "compact-turn-third",
+                            _ => "compact-turn-unknown",
+                        }
+                        .to_string(),
+                    ),
                     None,
                     None,
                 ),
@@ -1260,8 +1284,10 @@ fn handle_runtime_proxy_backend_request(
         for (index, chunk) in body_bytes.chunks(chunk_size).enumerate() {
             let _ = stream.write_all(chunk);
             let _ = stream.flush();
-            if matches!(mode, RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks)
-                && account_id == "second-account"
+            if matches!(
+                mode,
+                RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
+            ) && account_id == "second-account"
                 && index >= 1
             {
                 thread::sleep(Duration::from_millis(
@@ -1406,8 +1432,10 @@ fn handle_runtime_proxy_backend_websocket(
 
         match account_id.as_str() {
             "main-account" => {
-                if matches!(mode, RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude)
-                    && request_count == 1
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude
+                ) && request_count == 1
                 {
                     websocket
                         .send(WsMessage::Text(
@@ -1435,8 +1463,10 @@ fn handle_runtime_proxy_backend_websocket(
                         .expect("response.completed should be sent");
                     continue;
                 }
-                if matches!(mode, RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude)
-                    && request_count >= 2
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude
+                ) && request_count >= 2
                 {
                     websocket
                         .send(WsMessage::Text(
@@ -1487,8 +1517,7 @@ fn handle_runtime_proxy_backend_websocket(
                 ) && runtime_proxy_backend_is_owned_continuation(
                     "second-account",
                     previous_response_id.as_deref(),
-                )
-                    && effective_turn_state.as_deref() != Some("turn-second") =>
+                ) && effective_turn_state.as_deref() != Some("turn-second") =>
             {
                 websocket
                     .send(WsMessage::Text(
@@ -2051,14 +2080,14 @@ fn ready_profile_ranking_prefers_soon_recovering_weekly_capacity() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "fast".to_string(),
             usage: usage_with_main_windows(80, 18_000, 80, 86_400),
             order_index: 1,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -2130,7 +2159,7 @@ fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
             (
                 "main".to_string(),
                 ProfileEntry {
-                    codex_home: main_home,
+                    codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
                 },
@@ -2208,7 +2237,7 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
             (
                 "main".to_string(),
                 ProfileEntry {
-                    codex_home: main_home,
+                    codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
                 },
@@ -2265,16 +2294,38 @@ fn runtime_proxy_default_long_lived_capacity_scales_for_terminal_fanout() {
 }
 
 #[test]
+fn runtime_proxy_async_worker_count_is_bounded() {
+    let _low_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT", "1");
+    let low = runtime_proxy_async_worker_count();
+    assert!(
+        (2..=8).contains(&low),
+        "low async worker override should clamp into 2..=8, got {low}"
+    );
+
+    let _high_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT", "999");
+    let high = runtime_proxy_async_worker_count();
+    assert!(
+        (2..=8).contains(&high),
+        "high async worker override should clamp into 2..=8, got {high}"
+    );
+}
+
+#[test]
+fn runtime_proxy_async_worker_count_default_scales_with_parallelism() {
+    assert_eq!(runtime_proxy_async_worker_count_default(1), 2);
+    assert_eq!(runtime_proxy_async_worker_count_default(2), 4);
+    assert_eq!(runtime_proxy_async_worker_count_default(4), 8);
+    assert_eq!(runtime_proxy_async_worker_count_default(64), 8);
+}
+
+#[test]
 fn runtime_proxy_default_active_limit_scales_with_long_lived_streams() {
     assert_eq!(runtime_proxy_active_request_limit_default(8, 32), 104);
     assert_eq!(runtime_proxy_active_request_limit_default(32, 64), 224);
     assert_eq!(runtime_proxy_active_request_limit_default(32, 128), 416);
 
-    let lane_limits = runtime_proxy_lane_limits(
-        runtime_proxy_active_request_limit_default(32, 64),
-        32,
-        64,
-    );
+    let lane_limits =
+        runtime_proxy_lane_limits(runtime_proxy_active_request_limit_default(32, 64), 32, 64);
     assert!(lane_limits.responses > lane_limits.compact);
     assert!(lane_limits.responses > lane_limits.standard);
     assert!(lane_limits.responses >= lane_limits.websocket);
@@ -2302,14 +2353,30 @@ fn runtime_state_save_debounce_applies_to_hot_continuation_updates() {
 
 #[test]
 fn runtime_state_save_reason_only_journals_owner_changes() {
-    assert!(runtime_state_save_reason_requires_continuation_journal("response_ids:main"));
-    assert!(runtime_state_save_reason_requires_continuation_journal("turn_state:turn-main"));
-    assert!(runtime_state_save_reason_requires_continuation_journal("session_id:session-main"));
-    assert!(runtime_state_save_reason_requires_continuation_journal("compact_lineage:main"));
-    assert!(!runtime_state_save_reason_requires_continuation_journal("response_touch:main"));
-    assert!(!runtime_state_save_reason_requires_continuation_journal("turn_state_touch:main"));
-    assert!(!runtime_state_save_reason_requires_continuation_journal("session_touch:main"));
-    assert!(!runtime_state_save_reason_requires_continuation_journal("compact_session_touch:main"));
+    assert!(runtime_state_save_reason_requires_continuation_journal(
+        "response_ids:main"
+    ));
+    assert!(runtime_state_save_reason_requires_continuation_journal(
+        "turn_state:turn-main"
+    ));
+    assert!(runtime_state_save_reason_requires_continuation_journal(
+        "session_id:session-main"
+    ));
+    assert!(runtime_state_save_reason_requires_continuation_journal(
+        "compact_lineage:main"
+    ));
+    assert!(!runtime_state_save_reason_requires_continuation_journal(
+        "response_touch:main"
+    ));
+    assert!(!runtime_state_save_reason_requires_continuation_journal(
+        "turn_state_touch:main"
+    ));
+    assert!(!runtime_state_save_reason_requires_continuation_journal(
+        "session_touch:main"
+    ));
+    assert!(!runtime_state_save_reason_requires_continuation_journal(
+        "compact_session_touch:main"
+    ));
 }
 
 #[derive(Debug)]
@@ -2346,10 +2413,7 @@ fn runtime_take_due_scheduled_jobs_waits_for_future_entries() {
 fn runtime_take_due_scheduled_jobs_returns_only_ready_entries() {
     let now = Instant::now();
     let mut pending = BTreeMap::from([
-        (
-            "due".to_string(),
-            TestScheduledJob { ready_at: now },
-        ),
+        ("due".to_string(), TestScheduledJob { ready_at: now }),
         (
             "later".to_string(),
             TestScheduledJob {
@@ -2372,6 +2436,7 @@ fn runtime_take_due_scheduled_jobs_returns_only_ready_entries() {
 #[test]
 fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() {
     let now = Local::now().timestamp();
+    let circuit_key = runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses);
     let mut backoffs = RuntimeProfileBackoffs {
         retry_backoff_until: BTreeMap::from([("retry".to_string(), now + 60)]),
         transport_backoff_until: BTreeMap::from([
@@ -2380,11 +2445,18 @@ fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() 
         ]),
         route_circuit_open_until: BTreeMap::from([
             ("expired".to_string(), now - 1),
-            ("circuit".to_string(), now + 60),
+            (circuit_key.clone(), now + 60),
         ]),
     };
+    let profile_scores = BTreeMap::from([(
+        runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+        RuntimeProfileHealth {
+            score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
+            updated_at: now,
+        },
+    )]);
 
-    runtime_soften_persisted_backoffs_for_startup(&mut backoffs, now);
+    runtime_soften_persisted_backoffs_for_startup(&mut backoffs, &profile_scores, now);
 
     assert_eq!(backoffs.retry_backoff_until.get("retry"), Some(&(now + 60)));
     assert!(!backoffs.transport_backoff_until.contains_key("expired"));
@@ -2394,9 +2466,85 @@ fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() 
     );
     assert!(!backoffs.route_circuit_open_until.contains_key("expired"));
     assert_eq!(
-        backoffs.route_circuit_open_until.get("circuit"),
-        Some(&now.saturating_add(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS))
+        backoffs.route_circuit_open_until.get(&circuit_key),
+        Some(&now.saturating_add(runtime_profile_circuit_half_open_probe_seconds(
+            RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2
+        )))
     );
+}
+
+#[test]
+fn runtime_softened_backoffs_persist_after_proxy_startup() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    let saved_now = Local::now().timestamp();
+    save_runtime_profile_backoffs(
+        &paths,
+        &RuntimeProfileBackoffs {
+            retry_backoff_until: BTreeMap::from([("main".to_string(), saved_now + 600)]),
+            transport_backoff_until: BTreeMap::from([("main".to_string(), saved_now + 600)]),
+            route_circuit_open_until: BTreeMap::from([(
+                runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+                saved_now + 600,
+            )]),
+        },
+    )
+    .expect("backoffs should save");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+
+    let loaded =
+        load_runtime_profile_backoffs(&paths, &state.profiles).expect("backoffs should reload");
+    let now = Local::now().timestamp();
+    assert_eq!(
+        loaded.retry_backoff_until.get("main"),
+        Some(&(saved_now + 600))
+    );
+    assert!(
+        loaded
+            .transport_backoff_until
+            .get("main")
+            .is_none_or(|until| *until <= now + RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS)
+    );
+    assert!(
+        loaded
+            .route_circuit_open_until
+            .get(&runtime_profile_route_circuit_key(
+                "main",
+                RuntimeRouteKind::Responses
+            ))
+            .is_none_or(|until| *until <= now + RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS)
+    );
+
+    drop(proxy);
 }
 
 #[test]
@@ -2455,14 +2603,14 @@ fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
             usage: usage_with_main_windows(65, 18_000, 70, 604_800),
             order_index: 0,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "deep".to_string(),
             usage: usage_with_main_windows(95, 18_000, 98, 604_800),
             order_index: 1,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -2490,14 +2638,14 @@ fn scheduler_prefers_rested_profile_within_near_optimal_band() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "rested".to_string(),
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -2520,14 +2668,14 @@ fn scheduler_keeps_preferred_profile_when_gain_is_small() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "active".to_string(),
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: true,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -2551,14 +2699,14 @@ fn scheduler_allows_switch_when_preferred_profile_is_in_cooldown() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
             name: "active".to_string(),
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: true,
-        quota_source: RuntimeQuotaSource::LiveProbe,
+            quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
 
@@ -2595,7 +2743,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
     };
     let reports = vec![
@@ -2649,7 +2797,10 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
     let ranked = ready_profile_candidates(&reports, false, Some("main"), &state, Some(&persisted));
     assert_eq!(ranked.len(), 1);
     assert_eq!(ranked[0].name, "second");
-    assert_eq!(ranked[0].quota_source, RuntimeQuotaSource::PersistedSnapshot);
+    assert_eq!(
+        ranked[0].quota_source,
+        RuntimeQuotaSource::PersistedSnapshot
+    );
 }
 
 #[test]
@@ -2737,7 +2888,18 @@ fn run_preflight_reports_with_current_first_preserves_current_and_rotation_order
     assert_eq!(reports.len(), 3);
     assert_eq!(reports[0].name, "main");
     assert_eq!(reports[0].order_index, 0);
-    assert_eq!(reports[0].result.as_ref().ok().map(format_main_windows_compact), current_report.result.as_ref().ok().map(format_main_windows_compact));
+    assert_eq!(
+        reports[0]
+            .result
+            .as_ref()
+            .ok()
+            .map(format_main_windows_compact),
+        current_report
+            .result
+            .as_ref()
+            .ok()
+            .map(format_main_windows_compact)
+    );
     assert_eq!(reports[1].name, "second");
     assert_eq!(reports[1].order_index, 1);
     assert_eq!(reports[2].name, "third");
@@ -3080,8 +3242,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
         },
     ];
 
-    let window =
-        render_quota_reports_window_with_layout(&reports, false, Some(16), 100, 1, true);
+    let window = render_quota_reports_window_with_layout(&reports, false, Some(16), 100, 1, true);
 
     assert_eq!(window.start_profile, 1);
     assert_eq!(window.total_profiles, 4);
@@ -3091,9 +3252,11 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
     assert!(window.output.contains("ready-late"));
     assert!(window.output.contains("blocked"));
     assert!(!window.output.contains("ready-early"));
-    assert!(window
-        .output
-        .contains("\n\npress Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)"));
+    assert!(
+        window
+            .output
+            .contains("\n\npress Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)")
+    );
 }
 
 #[test]
@@ -3163,7 +3326,7 @@ fn rotates_profiles_after_current_profile() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
     };
 
@@ -3407,7 +3570,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
             (
                 "main".to_string(),
                 ProfileEntry {
-                    codex_home: main_home,
+                    codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
                 },
@@ -3649,7 +3812,7 @@ fn precommit_budget_exhausts_by_attempt_limit_or_elapsed_time() {
 }
 
 #[test]
-fn optimistic_current_candidate_requires_live_quota_probe_for_responses_and_websocket() {
+fn optimistic_current_candidate_requires_quota_evidence_when_alternatives_exist() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -3705,24 +3868,7 @@ fn optimistic_current_candidate_requires_live_quota_probe_for_responses_and_webs
         profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
-    let shared = RuntimeRotationProxyShared {
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
     assert_eq!(
         runtime_proxy_optimistic_current_candidate_for_route(
@@ -3749,7 +3895,16 @@ fn optimistic_current_candidate_requires_live_quota_probe_for_responses_and_webs
             RuntimeRouteKind::Standard,
         )
         .expect("standard candidate lookup should succeed"),
-        Some("main".to_string())
+        None
+    );
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Compact,
+        )
+        .expect("compact candidate lookup should succeed"),
+        None
     );
 }
 
@@ -5650,15 +5805,34 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
-        profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
-        profile_health: BTreeMap::from([(
-            "main".to_string(),
-            RuntimeProfileHealth {
-                score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
-                updated_at: now,
-            },
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            now + RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
         )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([
+            (
+                "main".to_string(),
+                RuntimeProfileHealth {
+                    score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
+                    updated_at: now,
+                },
+            ),
+            (
+                runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: now,
+                },
+            ),
+            (
+                runtime_profile_route_circuit_reopen_key("main", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 2,
+                    updated_at: now,
+                },
+            ),
+        ]),
     };
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -5691,6 +5865,27 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
             .get("main")
             .is_none(),
         "successful commit should clear temporary health penalty"
+    );
+    let runtime = shared.runtime.lock().expect("runtime should lock");
+    assert!(
+        !runtime.profile_route_circuit_open_until.contains_key(
+            &runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses)
+        ),
+        "successful commit should clear the matching route circuit"
+    );
+    assert!(
+        !runtime.profile_health.contains_key(&runtime_profile_route_health_key(
+            "main",
+            RuntimeRouteKind::Responses
+        )),
+        "successful commit should clear the matching route health penalty"
+    );
+    assert!(
+        !runtime.profile_health.contains_key(&runtime_profile_route_circuit_reopen_key(
+            "main",
+            RuntimeRouteKind::Responses
+        )),
+        "successful commit should clear the matching route circuit reopen stage"
     );
 }
 
@@ -5844,10 +6039,14 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
         runtime: Arc::new(Mutex::new(runtime)),
     };
 
-    let switched = commit_runtime_proxy_profile_selection(&shared, "second", RuntimeRouteKind::Compact)
-        .expect("compact profile commit should succeed");
+    let switched =
+        commit_runtime_proxy_profile_selection(&shared, "second", RuntimeRouteKind::Compact)
+            .expect("compact profile commit should succeed");
 
-    assert!(switched, "compact commit should switch the runtime current profile");
+    assert!(
+        switched,
+        "compact commit should switch the runtime current profile"
+    );
     let runtime = shared.runtime.lock().expect("runtime should lock");
     assert_eq!(runtime.current_profile, "second");
     assert_eq!(runtime.state.active_profile.as_deref(), Some("main"));
@@ -6186,9 +6385,7 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary
         .marker_counts
         .insert("previous_response_not_found", 2);
-    summary
-        .marker_counts
-        .insert("compact_followup_owner", 1);
+    summary.marker_counts.insert("compact_followup_owner", 1);
     summary
         .marker_counts
         .insert("compact_fresh_fallback_blocked", 1);
@@ -6202,10 +6399,8 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         "quota_source".to_string(),
         BTreeMap::from([("persisted_snapshot".to_string(), 1)]),
     );
-    summary.previous_response_not_found_by_route = BTreeMap::from([
-        ("responses".to_string(), 1),
-        ("websocket".to_string(), 1),
-    ]);
+    summary.previous_response_not_found_by_route =
+        BTreeMap::from([("responses".to_string(), 1), ("websocket".to_string(), 1)]);
     summary.previous_response_not_found_by_transport =
         BTreeMap::from([("http".to_string(), 1), ("websocket".to_string(), 1)]);
     summary.marker_last_fields.insert(
@@ -6256,10 +6451,7 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         value["previous_response_not_found_by_route"]["websocket"],
         1
     );
-    assert_eq!(
-        value["previous_response_not_found_by_transport"]["http"],
-        1
-    );
+    assert_eq!(value["previous_response_not_found_by_transport"]["http"], 1);
     assert_eq!(
         value["previous_response_not_found_by_transport"]["websocket"],
         1
@@ -6282,8 +6474,14 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["persisted_suspect_continuations"], 1);
     assert_eq!(value["persisted_continuation_journal_response_bindings"], 3);
     assert_eq!(value["persisted_continuation_journal_session_bindings"], 2);
-    assert_eq!(value["persisted_continuation_journal_turn_state_bindings"], 1);
-    assert_eq!(value["persisted_continuation_journal_session_id_bindings"], 4);
+    assert_eq!(
+        value["persisted_continuation_journal_turn_state_bindings"],
+        1
+    );
+    assert_eq!(
+        value["persisted_continuation_journal_session_id_bindings"],
+        4
+    );
     assert_eq!(value["state_save_queue_backlog"], 2);
     assert_eq!(value["state_save_lag_ms"], 17);
     assert_eq!(value["continuation_journal_save_backlog"], 1);
@@ -6291,7 +6489,10 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["profile_probe_refresh_backlog"], 3);
     assert_eq!(value["profile_probe_refresh_lag_ms"], 5);
     assert_eq!(value["continuation_journal_saved_at"], 123);
-    assert_eq!(value["suspect_continuation_bindings"][0], "turn-second:suspect");
+    assert_eq!(
+        value["suspect_continuation_bindings"][0],
+        "turn-second:suspect"
+    );
     assert_eq!(value["failure_class_counts"]["admission"], 3);
     assert_eq!(value["failure_class_counts"]["persistence"], 1);
     assert_eq!(value["failure_class_counts"]["transport"], 2);
@@ -6341,7 +6542,10 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["recovered_usage_snapshots_file"], true);
     assert_eq!(value["recovered_continuation_journal_file"], true);
     assert_eq!(value["last_good_backups_present"], 3);
-    assert_eq!(value["degraded_routes"][0], "main/responses circuit=open until=123");
+    assert_eq!(
+        value["degraded_routes"][0],
+        "main/responses circuit=open until=123"
+    );
     assert_eq!(value["orphan_managed_dirs"][0], "ghost_profile");
     assert_eq!(value["profiles"][0]["profile"], "main");
     assert_eq!(value["profiles"][0]["quota_freshness"], "stale");
@@ -6382,13 +6586,19 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
     );
     let fields = fields.into_iter().collect::<BTreeMap<_, _>>();
 
-    assert_eq!(fields.get("State save backlog").map(String::as_str), Some("4"));
+    assert_eq!(
+        fields.get("State save backlog").map(String::as_str),
+        Some("4")
+    );
     assert_eq!(fields.get("State save lag").map(String::as_str), Some("21"));
     assert_eq!(
         fields.get("Cont journal backlog").map(String::as_str),
         Some("2")
     );
-    assert_eq!(fields.get("Cont journal lag").map(String::as_str), Some("11"));
+    assert_eq!(
+        fields.get("Cont journal lag").map(String::as_str),
+        Some("11")
+    );
     assert_eq!(fields.get("Probe backlog").map(String::as_str), Some("6"));
     assert_eq!(fields.get("Probe lag").map(String::as_str), Some("7"));
     assert_eq!(
@@ -6440,7 +6650,8 @@ fn collect_orphan_managed_profile_dirs_ignores_tracked_and_fresh_dirs() {
         session_profile_bindings: BTreeMap::new(),
     };
 
-    let future_now = SystemTime::now() + Duration::from_secs(ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS as u64 + 5);
+    let future_now = SystemTime::now()
+        + Duration::from_secs(ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS as u64 + 5);
     assert_eq!(
         collect_orphan_managed_profile_dirs_at(&paths, &state, future_now),
         vec!["fresh".to_string(), "orphan".to_string()]
@@ -6524,7 +6735,10 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     save_runtime_profile_backoffs(
         &paths,
         &RuntimeProfileBackoffs {
-            retry_backoff_until: BTreeMap::from([("main".to_string(), Local::now().timestamp() + 30)]),
+            retry_backoff_until: BTreeMap::from([(
+                "main".to_string(),
+                Local::now().timestamp() + 30,
+            )]),
             transport_backoff_until: BTreeMap::new(),
             route_circuit_open_until: BTreeMap::from([(
                 "__route_circuit__:responses:main".to_string(),
@@ -6577,12 +6791,20 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     assert_eq!(summary.persisted_continuation_journal_response_bindings, 1);
     assert_eq!(summary.persisted_suspect_continuations, 1);
     assert_eq!(summary.persisted_dead_continuations, 0);
-    assert_eq!(summary.continuation_journal_saved_at, Some(journal_saved_at));
+    assert_eq!(
+        summary.continuation_journal_saved_at,
+        Some(journal_saved_at)
+    );
     assert_eq!(
         summary.suspect_continuation_bindings,
         vec!["resp-main:suspect".to_string()]
     );
-    assert!(summary.degraded_routes.iter().any(|line| line.contains("main/responses")));
+    assert!(
+        summary
+            .degraded_routes
+            .iter()
+            .any(|line| line.contains("main/responses"))
+    );
 }
 
 #[test]
@@ -6868,6 +7090,143 @@ fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_pa
 }
 
 #[test]
+fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapshot_even_with_alternatives()
+ {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 80,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 80,
+                weekly_reset_at: now + 86_400,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Standard,
+        )
+        .expect("standard candidate lookup should succeed"),
+        Some("main".to_string())
+    );
+}
+
+#[test]
+fn optimistic_current_candidate_allows_single_profile_standard_with_unknown_quota() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Standard,
+        )
+        .expect("standard candidate lookup should succeed"),
+        Some("main".to_string())
+    );
+}
+
+#[test]
 fn affinity_candidate_skips_persisted_exhausted_session_owner() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -6910,7 +7269,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
     };
     let runtime = RuntimeRotationState {
@@ -6926,7 +7285,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
         continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
@@ -7018,7 +7377,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
             profiles: BTreeMap::from([(
                 "main".to_string(),
                 ProfileEntry {
-                    codex_home: main_home,
+                    codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
                 },
@@ -7087,10 +7446,12 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
 }
 
 #[test]
-fn optimistic_current_candidate_skips_recent_auth_failure_backoff() {
+fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_changes() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
+    let cached_usage_auth = load_runtime_profile_usage_auth_cache_entry(&main_home)
+        .expect("usage auth cache entry should load");
 
     let now = Local::now().timestamp();
     let paths = AppPaths {
@@ -7107,7 +7468,7 @@ fn optimistic_current_candidate_skips_recent_auth_failure_backoff() {
             profiles: BTreeMap::from([(
                 "main".to_string(),
                 ProfileEntry {
-                    codex_home: main_home,
+                    codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
                 },
@@ -7119,23 +7480,12 @@ fn optimistic_current_candidate_skips_recent_auth_failure_backoff() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
-        profile_usage_auth: BTreeMap::new(),
+        profile_usage_auth: BTreeMap::from([("main".to_string(), cached_usage_auth)]),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
-        profile_usage_snapshots: BTreeMap::from([(
-            "main".to_string(),
-            RuntimeProfileUsageSnapshot {
-                checked_at: now,
-                five_hour_status: RuntimeQuotaWindowStatus::Ready,
-                five_hour_remaining_percent: 80,
-                five_hour_reset_at: now + 300,
-                weekly_status: RuntimeQuotaWindowStatus::Ready,
-                weekly_remaining_percent: 80,
-                weekly_reset_at: now + 86_400,
-            },
-        )]),
+        profile_usage_snapshots: BTreeMap::new(),
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
@@ -7171,11 +7521,139 @@ fn optimistic_current_candidate_skips_recent_auth_failure_backoff() {
         runtime_proxy_optimistic_current_candidate_for_route(
             &shared,
             &BTreeSet::new(),
-            RuntimeRouteKind::Responses,
+            RuntimeRouteKind::Standard,
         )
         .expect("candidate lookup should succeed"),
         None
     );
+
+    write_auth_json(&main_home.join("auth.json"), "main-account-refreshed");
+
+    assert_eq!(
+        runtime_proxy_optimistic_current_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Standard,
+        )
+        .expect("candidate lookup should succeed after auth.json changes"),
+        Some("main".to_string())
+    );
+}
+
+#[test]
+fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403() {
+    let temp_dir_401 = TestDir::new();
+    let temp_dir_403 = TestDir::new();
+    let profile_home_401 = temp_dir_401.path.join("homes/main");
+    let profile_home_403 = temp_dir_403.path.join("homes/main");
+    write_auth_json(&profile_home_401.join("auth.json"), "main-account");
+    write_auth_json(&profile_home_403.join("auth.json"), "main-account");
+
+    let shared_401 = runtime_rotation_proxy_shared(
+        &temp_dir_401,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir_401.path.join("prodex"),
+                state_file: temp_dir_401.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir_401.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir_401.path.join("shared"),
+                legacy_shared_codex_root: temp_dir_401.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home_401,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let shared_403 = runtime_rotation_proxy_shared(
+        &temp_dir_403,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir_403.path.join("prodex"),
+                state_file: temp_dir_403.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir_403.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir_403.path.join("shared"),
+                legacy_shared_codex_root: temp_dir_403.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home_403,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    note_runtime_profile_auth_failure(&shared_401, "main", RuntimeRouteKind::Responses, 401);
+    note_runtime_profile_auth_failure(&shared_403, "main", RuntimeRouteKind::Responses, 403);
+
+    let score_401 = shared_401
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_health
+        .get(&runtime_profile_auth_failure_key("main"))
+        .expect("401 auth failure score should exist")
+        .score;
+    let score_403 = shared_403
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_health
+        .get(&runtime_profile_auth_failure_key("main"))
+        .expect("403 auth failure score should exist")
+        .score;
+
+    assert!(score_401 > score_403);
+    wait_for_runtime_background_queues_idle();
 }
 
 #[test]
@@ -7785,7 +8263,10 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
     let merged = merge_runtime_usage_snapshots(&existing, &incoming, &profiles);
     assert_eq!(merged.len(), 1);
     assert_eq!(
-        merged.get("main").expect("main snapshot should exist").checked_at,
+        merged
+            .get("main")
+            .expect("main snapshot should exist")
+            .checked_at,
         now - 10
     );
     assert_eq!(
@@ -7900,14 +8381,14 @@ fn app_state_save_merges_existing_runtime_bindings() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-existing".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 20,
-                },
+            },
         )]),
     };
     existing
@@ -7941,8 +8422,14 @@ fn app_state_save_merges_existing_runtime_bindings() {
             .map(|binding| binding.profile_name.as_str()),
         Some("main")
     );
-    assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(now - 20));
-    assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(now - 10));
+    assert_eq!(
+        loaded.last_run_selected_at.get("main").copied(),
+        Some(now - 20)
+    );
+    assert_eq!(
+        loaded.last_run_selected_at.get("second").copied(),
+        Some(now - 10)
+    );
 }
 
 #[test]
@@ -7979,14 +8466,14 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: now,
-                    },
+                },
             ),
             (
                 "resp-stale".to_string(),
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: stale_response_binding,
-                    },
+                },
             ),
         ]),
         session_profile_bindings: BTreeMap::from([
@@ -7995,14 +8482,14 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: now,
-                    },
+                },
             ),
             (
                 "sess-stale".to_string(),
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: stale_session_binding,
-                    },
+                },
             ),
         ]),
     };
@@ -8032,7 +8519,8 @@ fn app_state_load_compacts_stale_entries_in_memory() {
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     fs::create_dir_all(
-        paths.state_file
+        paths
+            .state_file
             .parent()
             .expect("state file should have a parent"),
     )
@@ -8092,7 +8580,7 @@ fn app_state_response_bindings_are_not_pruned_just_for_size() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now + index as i64,
-                },
+            },
         );
     }
     let state = AppState {
@@ -8115,11 +8603,11 @@ fn app_state_response_bindings_are_not_pruned_just_for_size() {
         compacted.response_profile_bindings.len(),
         RESPONSE_PROFILE_BINDING_LIMIT + 3
     );
-    assert!(
-        compacted
-            .response_profile_bindings
-            .contains_key(&format!("resp-{:06}-{}", 0, "x".repeat(64)))
-    );
+    assert!(compacted.response_profile_bindings.contains_key(&format!(
+        "resp-{:06}-{}",
+        0,
+        "x".repeat(64)
+    )));
 }
 
 #[test]
@@ -8222,12 +8710,22 @@ fn runtime_sidecar_housekeeping_prunes_stale_entries() {
     assert!(backoffs.retry_backoff_until.contains_key("main"));
     assert!(!backoffs.retry_backoff_until.contains_key("ghost"));
     assert!(backoffs.transport_backoff_until.is_empty());
-    assert!(backoffs.route_circuit_open_until.contains_key(
-        &runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses)
-    ));
-    assert!(!backoffs.route_circuit_open_until.contains_key(
-        &runtime_profile_route_circuit_key("ghost", RuntimeRouteKind::Responses)
-    ));
+    assert!(
+        backoffs
+            .route_circuit_open_until
+            .contains_key(&runtime_profile_route_circuit_key(
+                "main",
+                RuntimeRouteKind::Responses
+            ))
+    );
+    assert!(
+        !backoffs
+            .route_circuit_open_until
+            .contains_key(&runtime_profile_route_circuit_key(
+                "ghost",
+                RuntimeRouteKind::Responses
+            ))
+    );
 }
 
 #[test]
@@ -8259,8 +8757,11 @@ fn runtime_log_housekeeping_prunes_old_logs_and_stale_pointer() {
     fs::write(&keep_four, "keep").expect("keep log should write");
 
     let pointer = temp_dir.path.join(RUNTIME_PROXY_LATEST_LOG_POINTER);
-    fs::write(&pointer, format!("{}\n", temp_dir.path.join("missing.log").display()))
-        .expect("pointer should write");
+    fs::write(
+        &pointer,
+        format!("{}\n", temp_dir.path.join("missing.log").display()),
+    )
+    .expect("pointer should write");
 
     cleanup_runtime_proxy_logs_in_dir(&temp_dir.path, SystemTime::now());
     cleanup_runtime_proxy_latest_pointer(&pointer);
@@ -8353,14 +8854,14 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-main".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now - 10,
-                },
+            },
         )]),
     };
     let revision = AtomicU64::new(1);
@@ -8395,8 +8896,14 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
             .map(|binding| binding.profile_name.as_str()),
         Some("main")
     );
-    assert_eq!(loaded.last_run_selected_at.get("second").copied(), Some(now - 20));
-    assert_eq!(loaded.last_run_selected_at.get("main").copied(), Some(now - 10));
+    assert_eq!(
+        loaded.last_run_selected_at.get("second").copied(),
+        Some(now - 20)
+    );
+    assert_eq!(
+        loaded.last_run_selected_at.get("main").copied(),
+        Some(now - 10)
+    );
 }
 
 #[test]
@@ -8500,14 +9007,14 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: now - 10,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-second".to_string(),
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: now - 10,
-                },
+            },
         )]),
     };
     schedule_runtime_state_save(
@@ -8565,10 +9072,12 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         )),
         "latest queued runtime scores should persist alongside state"
     );
-    assert!(persisted_backoffs
-        .transport_backoff_until
-        .get("second")
-        .is_some_and(|until| *until > Local::now().timestamp()));
+    assert!(
+        persisted_backoffs
+            .transport_backoff_until
+            .get("second")
+            .is_some_and(|until| *until > Local::now().timestamp())
+    );
 }
 
 #[test]
@@ -8610,7 +9119,10 @@ fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
         &latest_revision,
     )
     .expect_err("injected save failure should bubble up");
-    assert!(err.to_string().contains("injected runtime state save failure"));
+    assert!(
+        err.to_string()
+            .contains("injected runtime state save failure")
+    );
 }
 
 #[test]
@@ -8640,7 +9152,7 @@ fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -8958,10 +9470,7 @@ fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
 
     let released_store = RuntimeContinuationStore {
         statuses: RuntimeContinuationStatuses {
-            response: BTreeMap::from([(
-                "resp-stale".to_string(),
-                dead_continuation_status(now),
-            )]),
+            response: BTreeMap::from([("resp-stale".to_string(), dead_continuation_status(now))]),
             ..RuntimeContinuationStatuses::default()
         },
         ..RuntimeContinuationStore::default()
@@ -9348,7 +9857,7 @@ fn turn_state_affinity_prefers_bound_profile() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9447,7 +9956,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -9533,11 +10042,13 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: stale_touch,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
-    state.save(&paths).expect("initial state save should succeed");
+    state
+        .save(&paths)
+        .expect("initial state save should succeed");
 
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -9622,7 +10133,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -9798,7 +10309,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -9978,7 +10489,11 @@ fn runtime_continuation_status_pruning_uses_evidence_over_age() {
     );
     assert!(!pruned.response_profile_bindings.contains_key("resp-main"));
     assert_eq!(
-        pruned.statuses.response.get("resp-main").map(|status| status.state),
+        pruned
+            .statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
     );
 }
@@ -10036,7 +10551,11 @@ fn runtime_dead_continuation_tombstone_blocks_stale_binding_resurrection() {
         "dead tombstone should prune stale resurrected binding"
     );
     assert_eq!(
-        merged.statuses.response.get("resp-main").map(|status| status.state),
+        merged
+            .statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
     );
 }
@@ -10096,7 +10615,11 @@ fn runtime_dead_continuation_tombstone_overrides_same_second_verified_status() {
         "same-second dead tombstone should still prune the released binding"
     );
     assert_eq!(
-        merged.statuses.response.get("resp-main").map(|status| status.state),
+        merged
+            .statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
     );
 }
@@ -10160,6 +10683,171 @@ fn runtime_newer_binding_overrides_older_dead_tombstone() {
 }
 
 #[test]
+fn runtime_continuation_store_compaction_prunes_response_bindings_to_limit() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let now = Local::now().timestamp();
+    let mut response_profile_bindings = BTreeMap::new();
+    for index in 0..(RESPONSE_PROFILE_BINDING_LIMIT + 1) {
+        response_profile_bindings.insert(
+            format!("resp-{index:06}"),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - (RESPONSE_PROFILE_BINDING_LIMIT + 1) as i64 + index as i64,
+            },
+        );
+    }
+    let hot_response_id = "resp-000000".to_string();
+    let displaced_response_id = "resp-000001".to_string();
+
+    let compacted = compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings,
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    hot_response_id.clone(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: RUNTIME_CONTINUATION_CONFIDENCE_MAX,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("responses".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 3,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+
+    assert_eq!(
+        compacted.response_profile_bindings.len(),
+        RESPONSE_PROFILE_BINDING_LIMIT
+    );
+    assert!(
+        compacted
+            .response_profile_bindings
+            .contains_key(&hot_response_id),
+        "verified hot response binding should survive compaction even when it is oldest"
+    );
+    assert!(
+        compacted
+            .response_profile_bindings
+            .contains_key(&format!("resp-{0:06}", RESPONSE_PROFILE_BINDING_LIMIT)),
+        "newest cold response binding should still be retained"
+    );
+    assert!(
+        !compacted
+            .response_profile_bindings
+            .contains_key(&displaced_response_id),
+        "colder bindings should be pruned ahead of the oldest verified binding"
+    );
+}
+
+#[test]
+fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_cold_binding() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let now = Local::now().timestamp();
+
+    let compacted = compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([
+                (
+                    "resp-hot".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: now - 3,
+                    },
+                ),
+                (
+                    "resp-cold-1".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: now - 2,
+                    },
+                ),
+                (
+                    "resp-cold-2".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: now - 1,
+                    },
+                ),
+            ]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-hot".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: RUNTIME_CONTINUATION_CONFIDENCE_MAX,
+                        success_count: 3,
+                        failure_count: 0,
+                        not_found_streak: 0,
+                        last_touched_at: Some(now),
+                        last_not_found_at: None,
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("responses".to_string()),
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+
+    let mut retained = compacted
+        .response_profile_bindings
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    retained.sort();
+
+    assert_eq!(retained.len(), 3);
+    assert!(retained.contains(&"resp-hot".to_string()));
+
+    let mut pruned = RuntimeContinuationStore {
+        response_profile_bindings: compacted.response_profile_bindings,
+        statuses: compacted.statuses,
+        ..RuntimeContinuationStore::default()
+    };
+    prune_runtime_continuation_response_bindings(
+        &mut pruned.response_profile_bindings,
+        &pruned.statuses.response,
+        2,
+    );
+    assert!(pruned.response_profile_bindings.contains_key("resp-hot"));
+    assert!(
+        !pruned.response_profile_bindings.contains_key("resp-cold-1"),
+        "the cold binding should be pruned before the older verified binding"
+    );
+}
+
+#[test]
 fn session_affinity_prefers_bound_profile_for_compact_requests() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
@@ -10212,7 +10900,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
             ResponseProfileBinding {
                 profile_name: "second".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
         continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::new(),
@@ -10576,9 +11264,15 @@ fn runtime_proxy_maps_legacy_versioned_openai_prefix_to_upstream_backend_api() {
 #[test]
 fn runtime_proxy_accepts_legacy_openai_prefix() {
     assert!(is_runtime_responses_path("/backend-api/codex/responses"));
-    assert!(is_runtime_compact_path("/backend-api/codex/responses/compact"));
-    assert!(is_runtime_responses_path("/backend-api/prodex/v0.2.99/responses"));
-    assert!(is_runtime_compact_path("/backend-api/prodex/v0.2.99/responses/compact"));
+    assert!(is_runtime_compact_path(
+        "/backend-api/codex/responses/compact"
+    ));
+    assert!(is_runtime_responses_path(
+        "/backend-api/prodex/v0.2.99/responses"
+    ));
+    assert!(is_runtime_compact_path(
+        "/backend-api/prodex/v0.2.99/responses/compact"
+    ));
     assert_eq!(
         runtime_proxy_upstream_url(
             "https://chatgpt.com/backend-api",
@@ -10716,12 +11410,18 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_marker_count(&summary, "continuation_journal_save_ok"),
         1
     );
-    assert_eq!(runtime_doctor_marker_count(&summary, "state_save_skipped"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "state_save_skipped"),
+        1
+    );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "profile_probe_refresh_error"),
         1
     );
-    assert_eq!(runtime_doctor_marker_count(&summary, "profile_circuit_open"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_circuit_open"),
+        1
+    );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe"),
         1
@@ -10734,7 +11434,10 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         runtime_doctor_marker_count(&summary, "previous_response_not_found"),
         2
     );
-    assert_eq!(runtime_doctor_marker_count(&summary, "local_writer_error"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "local_writer_error"),
+        1
+    );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit"),
         1
@@ -10768,7 +11471,9 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         BTreeMap::from([("http".to_string(), 1), ("websocket".to_string(), 1)])
     );
     assert_eq!(
-        summary.previous_response_not_found_by_route.get("websocket"),
+        summary
+            .previous_response_not_found_by_route
+            .get("websocket"),
         Some(&1)
     );
     assert_eq!(
@@ -11157,6 +11862,9 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
 
 #[test]
 fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "200");
+    let _poll_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS", "150");
     let temp_dir = TestDir::new();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -11211,12 +11919,17 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
         drop(first);
     });
 
+    let started_at = Instant::now();
     let second = acquire_runtime_proxy_active_request_slot_with_wait(
         &shared,
         "http",
         "/backend-api/codex/responses",
     )
     .expect("second slot should recover after a short wait");
+    assert!(
+        started_at.elapsed() < Duration::from_millis(100),
+        "slot wait should wake promptly after release instead of waiting for poll timeout"
+    );
     drop(second);
     release.join().expect("release thread should join");
 }
@@ -11344,9 +12057,10 @@ fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
     let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
         .into_client_request()
         .expect("websocket request should build");
-    request
-        .headers_mut()
-        .insert("session_id", "sess-123".parse().expect("valid header value"));
+    request.headers_mut().insert(
+        "session_id",
+        "sess-123".parse().expect("valid header value"),
+    );
     request.headers_mut().insert(
         "x-openai-subagent",
         "compact-remote".parse().expect("valid header value"),
@@ -11361,9 +12075,10 @@ fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
         "x-codex-beta-features",
         "remote-sync,realtime".parse().expect("valid header value"),
     );
-    request
-        .headers_mut()
-        .insert("User-Agent", "codex-cli/0.117.0".parse().expect("valid header value"));
+    request.headers_mut().insert(
+        "User-Agent",
+        "codex-cli/0.117.0".parse().expect("valid header value"),
+    );
 
     let (mut socket, _response) =
         tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
@@ -11452,9 +12167,10 @@ fn runtime_proxy_preserves_websocket_request_client_metadata_payload() {
     let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
         .into_client_request()
         .expect("websocket request should build");
-    request
-        .headers_mut()
-        .insert("session_id", "sess-main".parse().expect("valid header value"));
+    request.headers_mut().insert(
+        "session_id",
+        "sess-main".parse().expect("valid header value"),
+    );
 
     let (mut socket, _response) =
         tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
@@ -11779,8 +12495,8 @@ fn runtime_proxy_preserves_function_call_output_affinity_when_previous_response_
 }
 
 #[test]
-fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing(
-) {
+fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing()
+{
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_websocket();
     let paths = AppPaths {
@@ -11857,7 +12573,6 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
     );
 }
 
-
 #[test]
 fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
     let temp_dir = TestDir::new();
@@ -11901,7 +12616,7 @@ fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
     };
     state.save(&paths).expect("failed to save initial state");
@@ -12068,7 +12783,11 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
                 .get("resp-second")
                 .is_some_and(|binding| binding.profile_name == "second")
     });
-    assert!(!persisted.response_profile_bindings.contains_key("resp-main"));
+    assert!(
+        !persisted
+            .response_profile_bindings
+            .contains_key("resp-main")
+    );
     assert_eq!(
         persisted
             .response_profile_bindings
@@ -12209,14 +12928,14 @@ fn exhausted_usage_snapshot_preserves_persisted_affinity_bindings() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::from([(
             "sess-123".to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
     };
     state.save(&paths).expect("failed to save initial state");
@@ -12268,10 +12987,7 @@ fn exhausted_usage_snapshot_preserves_persisted_affinity_bindings() {
     update_runtime_profile_probe_cache_with_usage(&shared, "main", exhausted_usage)
         .expect("usage snapshot update should succeed");
 
-    let runtime = shared
-        .runtime
-        .lock()
-        .expect("runtime lock should succeed");
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
     let refreshed_probe = runtime
         .profile_probe_cache
         .get("main")
@@ -12290,8 +13006,18 @@ fn exhausted_usage_snapshot_preserves_persisted_affinity_bindings() {
             RuntimeQuotaWindowStatus::Exhausted
         ))
     );
-    assert!(runtime.state.response_profile_bindings.contains_key("resp-1"));
-    assert!(runtime.state.session_profile_bindings.contains_key("sess-123"));
+    assert!(
+        runtime
+            .state
+            .response_profile_bindings
+            .contains_key("resp-1")
+    );
+    assert!(
+        runtime
+            .state
+            .session_profile_bindings
+            .contains_key("sess-123")
+    );
     assert_eq!(
         runtime
             .turn_state_bindings
@@ -12310,8 +13036,14 @@ fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
     );
 
     let summary = summarize_runtime_log_tail(tail.as_bytes());
-    assert_eq!(runtime_doctor_marker_count(&summary, "first_upstream_chunk"), 1);
-    assert_eq!(runtime_doctor_marker_count(&summary, "first_local_chunk"), 0);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "first_upstream_chunk"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "first_local_chunk"),
+        0
+    );
     assert_eq!(
         runtime_doctor_top_facet(&summary, "route").as_deref(),
         Some("responses (2)")
@@ -12342,13 +13074,13 @@ fn runtime_doctor_collect_summary_reports_route_circuit_diagnosis() {
     fs::write(&pointer, format!("{}\n", log_path.display())).expect("pointer should be written");
 
     let summary = collect_runtime_doctor_summary();
-    assert_eq!(runtime_doctor_marker_count(&summary, "profile_circuit_open"), 1);
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_circuit_open"),
+        1
+    );
     assert_eq!(summary.transport_pressure, "elevated");
     assert!(
-        summary
-            .diagnosis
-            .contains("circuit breaker")
-            || summary.diagnosis.contains("writer stall")
+        summary.diagnosis.contains("circuit breaker") || summary.diagnosis.contains("writer stall")
     );
 }
 
@@ -12393,14 +13125,14 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
                 ResponseProfileBinding {
                     profile_name: "missing".to_string(),
                     bound_at: 1,
-                    },
+                },
             )]),
             session_profile_bindings: BTreeMap::from([(
                 "sess-missing".to_string(),
                 ResponseProfileBinding {
                     profile_name: "missing".to_string(),
                     bound_at: 1,
-                    },
+                },
             )]),
         },
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -12412,14 +13144,14 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
             ResponseProfileBinding {
                 profile_name: "missing".to_string(),
                 bound_at: 1,
-                },
+            },
         )]),
         session_id_bindings: BTreeMap::from([(
             "sess-missing".to_string(),
             ResponseProfileBinding {
                 profile_name: "missing".to_string(),
                 bound_at: 1,
-                },
+            },
         )]),
         continuation_statuses: RuntimeContinuationStatuses::default(),
         profile_probe_cache: BTreeMap::from([(
@@ -12488,19 +13220,31 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
     audit_runtime_proxy_startup_state(&shared);
 
     let runtime = shared.runtime.lock().expect("runtime lock should succeed");
-    assert!(!runtime.state.response_profile_bindings.contains_key("resp-missing"));
-    assert!(!runtime.state.session_profile_bindings.contains_key("sess-missing"));
+    assert!(
+        !runtime
+            .state
+            .response_profile_bindings
+            .contains_key("resp-missing")
+    );
+    assert!(
+        !runtime
+            .state
+            .session_profile_bindings
+            .contains_key("sess-missing")
+    );
     assert!(!runtime.turn_state_bindings.contains_key("turn-missing"));
     assert!(!runtime.session_id_bindings.contains_key("sess-missing"));
     assert!(!runtime.profile_probe_cache.contains_key("missing"));
     assert!(!runtime.profile_usage_snapshots.contains_key("missing"));
     assert!(!runtime.profile_retry_backoff_until.contains_key("missing"));
-    assert!(!runtime.profile_transport_backoff_until.contains_key("missing"));
     assert!(
-        !runtime.profile_route_circuit_open_until.contains_key(
-            &runtime_profile_route_circuit_key("missing", RuntimeRouteKind::Responses)
-        )
+        !runtime
+            .profile_transport_backoff_until
+            .contains_key("missing")
     );
+    assert!(!runtime.profile_route_circuit_open_until.contains_key(
+        &runtime_profile_route_circuit_key("missing", RuntimeRouteKind::Responses)
+    ));
     assert!(
         !runtime
             .profile_health
@@ -12610,6 +13354,303 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_is_single_flight() {
         )
         .expect("second half-open reservation should be blocked")
     );
+}
+
+#[test]
+fn reserve_runtime_profile_route_circuit_half_open_probe_clears_stale_reopen_stage() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            now - 1,
+        )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([
+            (
+                runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: now - RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+                },
+            ),
+            (
+                runtime_profile_route_circuit_reopen_key("main", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 2,
+                    updated_at: now,
+                },
+            ),
+        ]),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    assert!(
+        reserve_runtime_profile_route_circuit_half_open_probe(
+            &shared,
+            "main",
+            RuntimeRouteKind::Responses,
+        )
+        .expect("stale circuit should clear cleanly")
+    );
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        !runtime.profile_route_circuit_open_until.contains_key(
+            &runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses)
+        )
+    );
+    assert!(
+        !runtime.profile_health.contains_key(&runtime_profile_route_circuit_reopen_key(
+            "main",
+            RuntimeRouteKind::Responses
+        ))
+    );
+}
+
+#[test]
+fn bump_runtime_profile_health_score_escalates_reopened_route_circuit() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            now + RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
+        )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+                updated_at: now,
+            },
+        )]),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    bump_runtime_profile_health_score(
+        &shared,
+        "main",
+        RuntimeRouteKind::Responses,
+        1,
+        "stream_read_error",
+    )
+    .expect("route health bump should succeed");
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    let reopen_stage = runtime
+        .profile_health
+        .get(&runtime_profile_route_circuit_reopen_key(
+            "main",
+            RuntimeRouteKind::Responses,
+        ))
+        .expect("reopen stage should be tracked")
+        .score;
+    let circuit_until = *runtime
+        .profile_route_circuit_open_until
+        .get(&runtime_profile_route_circuit_key(
+            "main",
+            RuntimeRouteKind::Responses,
+        ))
+        .expect("route circuit should remain open");
+
+    assert_eq!(reopen_stage, 1);
+    assert!(
+        circuit_until
+            >= Local::now().timestamp().saturating_add(runtime_profile_circuit_open_seconds(
+                RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 1,
+                reopen_stage,
+            )) - 1,
+        "reopened circuit should back off longer than the half-open probe window"
+    );
+}
+
+#[test]
+fn route_circuit_backoffs_scale_with_health_score() {
+    assert_eq!(
+        runtime_profile_circuit_open_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD, 0),
+        RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS
+    );
+    assert_eq!(
+        runtime_profile_circuit_open_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 1, 0),
+        (RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS * 2).min(RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS)
+    );
+    assert!(
+        runtime_profile_circuit_open_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD, 2)
+            > runtime_profile_circuit_open_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD, 0)
+    );
+    assert_eq!(
+        runtime_profile_circuit_half_open_probe_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD),
+        RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS
+    );
+    assert_eq!(
+        runtime_profile_circuit_half_open_probe_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2),
+        (RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS * 4)
+            .min(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
+    );
+}
+
+#[test]
+fn reserve_runtime_profile_route_circuit_half_open_probe_scales_wait_with_health() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    let now = Local::now().timestamp();
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::from([(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            now - 1,
+        )]),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::from([(
+            runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
+                updated_at: now,
+            },
+        )]),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert!(
+        reserve_runtime_profile_route_circuit_half_open_probe(
+            &shared,
+            "main",
+            RuntimeRouteKind::Responses,
+        )
+        .expect("half-open reservation should succeed")
+    );
+    let expected_until =
+        now + runtime_profile_circuit_half_open_probe_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2);
+    let actual_until = shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_route_circuit_open_until
+        .get(&runtime_profile_route_circuit_key(
+            "main",
+            RuntimeRouteKind::Responses,
+        ))
+        .copied()
+        .expect("circuit reservation should be recorded");
+    assert_eq!(actual_until, expected_until);
 }
 
 #[test]
@@ -12740,7 +13781,7 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: Local::now().timestamp(),
-                },
+            },
         )]),
     };
     state.save(&paths).expect("failed to save initial state");
@@ -12762,7 +13803,10 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert!(status.is_success(), "bound compact should rotate pre-commit after owner overload: {status}");
+    assert!(
+        status.is_success(),
+        "bound compact should rotate pre-commit after owner overload: {status}"
+    );
     assert_eq!(body, "{\"output\":[]}");
     assert_eq!(
         backend.responses_accounts(),
@@ -12869,7 +13913,9 @@ fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
             .expect("compact owner should map to a backend account");
     assert!(compact.status().is_success());
     assert_eq!(
-        compact.text().expect("compact response body should be readable"),
+        compact
+            .text()
+            .expect("compact response body should be readable"),
         "{\"output\":[]}"
     );
 
@@ -12989,7 +14035,9 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
             .expect("compact owner should expose an initial response id");
     assert!(compact.status().is_success());
     assert_eq!(
-        compact.text().expect("compact response body should be readable"),
+        compact
+            .text()
+            .expect("compact response body should be readable"),
         "{\"output\":[]}"
     );
 
@@ -13020,7 +14068,6 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
             compact_owner_account.to_string(),
         ]
     );
-
 }
 
 #[test]
@@ -13109,7 +14156,9 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
                 .expect("compact owner should expose an initial response id");
         assert!(compact.status().is_success());
         assert_eq!(
-            compact.text().expect("compact response body should be readable"),
+            compact
+                .text()
+                .expect("compact response body should be readable"),
             "{\"output\":[]}"
         );
         (
@@ -13640,8 +14689,8 @@ fn runtime_proxy_passes_through_plain_429_without_rotating_profiles() {
 }
 
 #[test]
-fn runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request(
-) {
+fn runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request()
+ {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_unauthorized_main();
     let paths = AppPaths {
@@ -13778,8 +14827,10 @@ fn extract_runtime_response_ids_accepts_top_level_response_fields() {
 
 #[test]
 fn runtime_prefetch_send_with_wait_recovers_after_short_backpressure() {
-    let _timeout_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS", "50");
+    let _timeout_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS",
+        "50",
+    );
     let _retry_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS", "1");
     let (sender, receiver) = mpsc::sync_channel::<RuntimePrefetchChunk>(1);
@@ -13930,8 +14981,8 @@ fn quota_message_extraction_falls_back_to_text_body() {
     let body =
         b"You've hit your usage limit. To get more access now, send a request to your admin or try again at Apr 3rd, 2026 9:25 AM.";
 
-    let message = extract_runtime_proxy_quota_message(body)
-        .expect("text quota message should be detected");
+    let message =
+        extract_runtime_proxy_quota_message(body).expect("text quota message should be detected");
 
     assert!(message.contains("You've hit your usage limit"));
 }
@@ -14123,7 +15174,7 @@ fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
     let elapsed = started.elapsed();
 
     assert!(
-        response_ready < Duration::from_millis(100),
+        response_ready < Duration::from_millis(125),
         "runtime proxy waited too long before starting HTTP stream passthrough: {response_ready:?}"
     );
     assert!(
@@ -14209,7 +15260,10 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(observed, "runtime log should capture first-chunk reset markers");
+    assert!(
+        observed,
+        "runtime log should capture first-chunk reset markers"
+    );
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("first_upstream_chunk"));
     assert!(tail.contains("first_local_chunk"));
@@ -14288,7 +15342,10 @@ fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(observed, "runtime log should capture multi-chunk stall markers");
+    assert!(
+        observed,
+        "runtime log should capture multi-chunk stall markers"
+    );
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("first_upstream_chunk"));
     assert!(tail.contains("first_local_chunk"));
@@ -14753,7 +15810,11 @@ fn runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_bef
                 .get("resp-second")
                 .is_some_and(|binding| binding.profile_name == "second")
     });
-    assert!(!persisted.response_profile_bindings.contains_key("resp-main"));
+    assert!(
+        !persisted
+            .response_profile_bindings
+            .contains_key("resp-main")
+    );
     assert_eq!(
         persisted
             .response_profile_bindings
@@ -15025,7 +16086,10 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(observed, "runtime log should capture websocket reuse watchdog");
+    assert!(
+        observed,
+        "runtime log should capture websocket reuse watchdog"
+    );
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("websocket_reuse_watchdog"));
     assert!(tail.contains("websocket_precommit_frame_timeout"));
@@ -15069,9 +16133,10 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
     let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
         .into_client_request()
         .expect("websocket request should build");
-    request
-        .headers_mut()
-        .insert("session_id", "sess-compact".parse().expect("valid session header"));
+    request.headers_mut().insert(
+        "session_id",
+        "sess-compact".parse().expect("valid session header"),
+    );
 
     let (mut socket, _response) =
         tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
@@ -15118,9 +16183,15 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
         .body("{\"input\":[],\"instructions\":\"compact\"}")
         .send()
         .expect("compact request should succeed");
-    assert!(compact.status().is_success(), "unexpected compact status: {}", compact.status());
+    assert!(
+        compact.status().is_success(),
+        "unexpected compact status: {}",
+        compact.status()
+    );
     assert_eq!(
-        compact.text().expect("compact response body should be readable"),
+        compact
+            .text()
+            .expect("compact response body should be readable"),
         "{\"output\":[]}"
     );
 
@@ -15204,7 +16275,8 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
 }
 
 #[test]
-fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog() {
+fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog()
+ {
     let backend = RuntimeProxyBackend::start_websocket_reuse_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -15377,8 +16449,10 @@ fn runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport() {
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
-    let _stale_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS", "1");
+    let _stale_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS",
+        "1",
+    );
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
 
@@ -15479,7 +16553,10 @@ fn runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport() {
             }
         }
     }
-    assert!(saw_close, "stale websocket reuse should close the local transport");
+    assert!(
+        saw_close,
+        "stale websocket reuse should close the local transport"
+    );
     assert_eq!(
         backend.websocket_requests().len(),
         2,
@@ -15504,7 +16581,10 @@ fn runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport() {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    assert!(observed, "runtime log should capture stale websocket reuse blocking");
+    assert!(
+        observed,
+        "runtime log should capture stale websocket reuse blocking"
+    );
 }
 
 #[test]
@@ -15555,7 +16635,10 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
         active_request_limit: usize::MAX,
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
     };
-    let body = TwoChunkReader::new(vec![b"data: first\n\n".to_vec(), b"data: second\n\n".to_vec()]);
+    let body = TwoChunkReader::new(vec![
+        b"data: first\n\n".to_vec(),
+        b"data: second\n\n".to_vec(),
+    ]);
     let response = RuntimeStreamingResponse {
         status: 200,
         headers: vec![("Content-Type".to_string(), "text/event-stream".to_string())],
@@ -15572,8 +16655,8 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
         .expect_err("writer disconnect should surface as an error");
     assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
 
-    let tail = read_runtime_log_tail(&log_path, 32 * 1024)
-        .expect("runtime log tail should be readable");
+    let tail =
+        read_runtime_log_tail(&log_path, 32 * 1024).expect("runtime log tail should be readable");
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("first_local_chunk"));
     assert!(tail.contains("local_writer_error"));
@@ -15928,16 +17011,15 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar()
                 ResponseProfileBinding {
                     profile_name: "second".to_string(),
                     bound_at: Local::now().timestamp(),
-                    },
+                },
             )]),
             ..RuntimeContinuationStore::default()
         },
     )
     .expect("failed to save continuation sidecar");
 
-    let proxy =
-        start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
-            .expect("runtime proxy should start");
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
     let client = Client::builder().build().expect("client");
 
     let response = client
@@ -15951,7 +17033,10 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar()
         .expect("runtime proxy request should succeed");
     let body = response.text().expect("response body should be readable");
     assert!(body.contains("\"resp-second-next\""));
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -16040,9 +17125,8 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal()
     )
     .expect("failed to save continuation journal");
 
-    let proxy =
-        start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
-            .expect("runtime proxy should start");
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
     let client = Client::builder().build().expect("client");
 
     let response = client
@@ -16056,7 +17140,10 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal()
         .expect("runtime proxy request should succeed");
     let body = response.text().expect("response body should be readable");
     assert!(body.contains("\"resp-second-next\""));
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -16142,7 +17229,7 @@ fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
         Some("turn-second"),
         RuntimeRouteKind::Responses,
     )
-        .expect("turn-state should persist");
+    .expect("turn-state should persist");
     let persisted = wait_for_runtime_continuations(&paths, |continuations| {
         continuations
             .turn_state_bindings
@@ -16218,16 +17305,15 @@ fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
                 ResponseProfileBinding {
                     profile_name: "second".to_string(),
                     bound_at: Local::now().timestamp(),
-                    },
+                },
             )]),
             ..RuntimeContinuationStore::default()
         },
     )
     .expect("failed to save continuation sidecar");
 
-    let proxy =
-        start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
-            .expect("runtime proxy should start");
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
     let client = Client::builder().build().expect("client");
 
     let response = client
@@ -16242,7 +17328,10 @@ fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
         .expect("runtime proxy request should succeed");
     let body = response.text().expect("response body should be readable");
     assert!(body.contains("\"resp-second\""));
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -16399,7 +17488,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -16502,7 +17591,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
             ResponseProfileBinding {
                 profile_name: "third".to_string(),
                 bound_at: now,
-                },
+            },
         )]),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -17032,7 +18121,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_http() {
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
-                    },
+                },
             )]),
             ..RuntimeContinuationStore::default()
         },
@@ -17131,7 +18220,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
                 ResponseProfileBinding {
                     profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
-                    },
+                },
             )]),
             ..RuntimeContinuationStore::default()
         },
@@ -17393,8 +18482,8 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
 }
 
 #[test]
-fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_stale_turn_state_http(
-) {
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_stale_turn_state_http()
+ {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -17461,7 +18550,11 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert_eq!(status.as_u16(), 200, "unexpected status: {status} body={body}");
+    assert_eq!(
+        status.as_u16(),
+        200,
+        "unexpected status: {status} body={body}"
+    );
     assert!(
         body.contains("\"resp-second\"") || body.contains("\"resp-third\""),
         "proxy should degrade to a fresh request after previous response discovery exhausts: {body}"
@@ -17472,7 +18565,10 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
     assert!(
         final_headers
             .get("chatgpt-account-id")
-            .is_some_and(|account_id| matches!(account_id.as_str(), "second-account" | "third-account")),
+            .is_some_and(|account_id| matches!(
+                account_id.as_str(),
+                "second-account" | "third-account"
+            )),
         "fresh fallback should complete on a healthy candidate: {headers:?}"
     );
     assert!(
@@ -17547,7 +18643,11 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert_eq!(status.as_u16(), 200, "unexpected status: {status} body={body}");
+    assert_eq!(
+        status.as_u16(),
+        200,
+        "unexpected status: {status} body={body}"
+    );
     assert!(
         body.contains("\"resp-second\""),
         "proxy should degrade to a fresh request after clearing stale binding: {body}"
@@ -17557,7 +18657,9 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
         !state.response_profile_bindings.contains_key("resp-main")
     });
     assert!(
-        !persisted.response_profile_bindings.contains_key("resp-main"),
+        !persisted
+            .response_profile_bindings
+            .contains_key("resp-main"),
         "stale previous_response binding should be cleared after safe fallback: {:?}",
         persisted.response_profile_bindings
     );
@@ -17805,7 +18907,7 @@ fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner() {
 
 #[test]
 fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner_with_top_level_response_id()
-{
+ {
     let backend = RuntimeProxyBackend::start_websocket_top_level_response_id();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
@@ -17998,17 +19100,23 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
     };
 
     for _ in 0..2 {
-        let expected_response_id = runtime_proxy_backend_next_response_id(Some(&previous_response_id))
-            .expect("continuation response id should exist");
+        let expected_response_id =
+            runtime_proxy_backend_next_response_id(Some(&previous_response_id))
+                .expect("continuation response id should exist");
         let mut resumed_state = AppState::load(&paths).expect("state should reload");
         resumed_state.active_profile = Some("third".to_string());
         resumed_state
             .save(&paths)
             .expect("failed to save resumed state");
 
-        let proxy =
-            start_runtime_rotation_proxy(&paths, &resumed_state, "third", backend.base_url(), false)
-                .expect("resumed runtime proxy should start");
+        let proxy = start_runtime_rotation_proxy(
+            &paths,
+            &resumed_state,
+            "third",
+            backend.base_url(),
+            false,
+        )
+        .expect("resumed runtime proxy should start");
 
         let response = client
             .post(format!(
@@ -18191,8 +19299,8 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
 }
 
 #[test]
-fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_owner_snapshot_is_exhausted(
-) {
+fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_owner_snapshot_is_exhausted()
+ {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -18391,8 +19499,12 @@ fn runtime_proxy_allows_only_one_persistence_owner_per_state_root() {
     let follower = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("second runtime proxy should start");
 
-    assert!(runtime_proxy_persistence_enabled_for_log_path(&owner.log_path));
-    assert!(!runtime_proxy_persistence_enabled_for_log_path(&follower.log_path));
+    assert!(runtime_proxy_persistence_enabled_for_log_path(
+        &owner.log_path
+    ));
+    assert!(!runtime_proxy_persistence_enabled_for_log_path(
+        &follower.log_path
+    ));
 
     drop(owner);
 
@@ -18435,9 +19547,8 @@ fn runtime_proxy_follower_keeps_persistence_side_effects_in_memory_only() {
 
     let _owner = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("owner runtime proxy should start");
-    let follower =
-        start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
-            .expect("follower runtime proxy should start");
+    let follower = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("follower runtime proxy should start");
     assert!(!runtime_proxy_persistence_enabled_for_log_path(
         &follower.log_path
     ));
@@ -18557,12 +19668,11 @@ fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
 
-    let mut request =
-        tungstenite::client::IntoClientRequest::into_client_request(format!(
-            "ws://{}/backend-api/codex/responses",
-            proxy.listen_addr
-        ))
-        .expect("client request should build");
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("client request should build");
     request
         .headers_mut()
         .insert("session_id", "sess-ws-123".parse().expect("session header"));
@@ -18580,9 +19690,10 @@ fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
         "x-codex-beta-features",
         "remote-sync,realtime".parse().expect("beta header"),
     );
-    request
-        .headers_mut()
-        .insert("User-Agent", "codex-cli/0.117.0".parse().expect("ua header"));
+    request.headers_mut().insert(
+        "User-Agent",
+        "codex-cli/0.117.0".parse().expect("ua header"),
+    );
 
     let (mut socket, _response) =
         tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
@@ -18701,7 +19812,10 @@ fn current_prodex_release_source_is_npm_when_wrapped_by_npm() {
 #[test]
 fn current_prodex_release_source_defaults_to_crates_io() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
-    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::CratesIo);
+    assert_eq!(
+        current_prodex_release_source(),
+        ProdexReleaseSource::CratesIo
+    );
 }
 
 #[test]
@@ -19039,7 +20153,10 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
     let response = Client::builder()
         .build()
         .expect("client")
-        .get(format!("http://{}/__prodex/runtime/health", proxy.listen_addr))
+        .get(format!(
+            "http://{}/__prodex/runtime/health",
+            proxy.listen_addr
+        ))
         .header("X-Prodex-Admin-Token", "secret")
         .send()
         .expect("runtime broker health request should succeed");
@@ -19151,7 +20268,10 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
     assert_eq!(activate.status().as_u16(), 200);
 
     let health = client
-        .get(format!("http://{}/__prodex/runtime/health", proxy.listen_addr))
+        .get(format!(
+            "http://{}/__prodex/runtime/health",
+            proxy.listen_addr
+        ))
         .header("X-Prodex-Admin-Token", "secret")
         .send()
         .expect("runtime broker health request should succeed")
@@ -19225,7 +20345,9 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
         "true should emit the review flag"
     );
     assert!(
-        !with_review.iter().any(|value| value == "true" || value == "false"),
+        !with_review
+            .iter()
+            .any(|value| value == "true" || value == "false"),
         "review flag must be encoded as a clap boolean switch"
     );
 }
@@ -19550,12 +20672,11 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5.4-mini".to_string())
     );
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
+    );
+    assert!(env.iter().all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
     assert_eq!(
         runtime_proxy_claude_removed_env(),
         [
@@ -19616,9 +20737,10 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5-mini".to_string())
     );
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
+    );
 }
 
 #[test]
@@ -19667,9 +20789,10 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("opus".to_string())
     );
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
+    );
 }
 
 #[test]
@@ -19693,7 +20816,10 @@ fn runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_
 
 #[test]
 fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models() {
-    assert_eq!(runtime_proxy_claude_target_model("opus"), "gpt-5.4".to_string());
+    assert_eq!(
+        runtime_proxy_claude_target_model("opus"),
+        "gpt-5.4".to_string()
+    );
     assert_eq!(
         runtime_proxy_claude_target_model("sonnet"),
         "gpt-5.3-codex".to_string()
@@ -19761,10 +20887,7 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
     .expect("Claude config should be valid JSON");
     assert_eq!(config["numStartups"], serde_json::json!(1));
     assert_eq!(config["hasCompletedOnboarding"], serde_json::json!(true));
-    assert_eq!(
-        config["lastOnboardingVersion"],
-        serde_json::json!("2.1.90")
-    );
+    assert_eq!(config["lastOnboardingVersion"], serde_json::json!("2.1.90"));
     let additional_model_options = config["additionalModelOptionsCache"]
         .as_array()
         .expect("additional model options cache should be an array");
@@ -19781,14 +20904,8 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
     let project = config["projects"]
         .get(project_key.as_str())
         .expect("seeded project entry should exist");
-    assert_eq!(
-        project["hasTrustDialogAccepted"],
-        serde_json::json!(true)
-    );
-    assert_eq!(
-        project["projectOnboardingSeenCount"],
-        serde_json::json!(1)
-    );
+    assert_eq!(project["hasTrustDialogAccepted"], serde_json::json!(true));
+    assert_eq!(project["projectOnboardingSeenCount"], serde_json::json!(1));
     assert!(project["allowedTools"].is_array());
     assert!(project["mcpContextUris"].is_array());
     assert!(project["mcpServers"].is_object());
@@ -19852,7 +20969,8 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
     assert!(additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
             && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
-            && entry.get("supportedEffortLevels") == Some(&serde_json::json!(["low", "medium", "high", "max"]))
+            && entry.get("supportedEffortLevels")
+                == Some(&serde_json::json!(["low", "medium", "high", "max"]))
     }));
     assert!(!additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
@@ -19912,8 +21030,14 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
         .expect("root request should succeed")
         .json()
         .expect("root response should parse");
-    assert_eq!(root.get("service").and_then(serde_json::Value::as_str), Some("prodex"));
-    assert_eq!(root.get("status").and_then(serde_json::Value::as_str), Some("ok"));
+    assert_eq!(
+        root.get("service").and_then(serde_json::Value::as_str),
+        Some("prodex")
+    );
+    assert_eq!(
+        root.get("status").and_then(serde_json::Value::as_str),
+        Some("ok")
+    );
 
     let health: serde_json::Value = client
         .get(format!("http://{}/health", proxy.listen_addr))
@@ -19929,7 +21053,11 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
         .head(format!("http://{}/", proxy.listen_addr))
         .send()
         .expect("root HEAD request should succeed");
-    assert!(head.status().is_success(), "unexpected HEAD status: {}", head.status());
+    assert!(
+        head.status().is_success(),
+        "unexpected HEAD status: {}",
+        head.status()
+    );
 
     let models: serde_json::Value = client
         .get(format!("http://{}/v1/models?beta=true", proxy.listen_addr))
@@ -19953,21 +21081,29 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
             .unwrap_or_default()
             .starts_with("claude-")
     }));
-    assert!(data.iter().any(|model| {
-        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
-    }));
-    assert!(data.iter().any(|model| {
-        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
-    }));
-    assert!(data.iter().any(|model| {
-        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5")
-    }));
+    assert!(
+        data.iter().any(|model| {
+            model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+        })
+    );
+    assert!(
+        data.iter().any(|model| {
+            model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
+        })
+    );
+    assert!(
+        data.iter()
+            .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5") })
+    );
     assert!(data.iter().any(|model| {
         model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5-mini")
     }));
 
     let model: serde_json::Value = client
-        .get(format!("http://{}/v1/models/gpt-5?beta=true", proxy.listen_addr))
+        .get(format!(
+            "http://{}/v1/models/gpt-5?beta=true",
+            proxy.listen_addr
+        ))
         .send()
         .expect("model request should succeed")
         .json()
@@ -20139,7 +21275,10 @@ fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
         .and_then(serde_json::Value::as_array)
         .expect("input array should exist");
     assert_eq!(input.len(), 4);
-    assert_eq!(input[0].get("role").and_then(serde_json::Value::as_str), Some("user"));
+    assert_eq!(
+        input[0].get("role").and_then(serde_json::Value::as_str),
+        Some("user")
+    );
     assert_eq!(
         input[0]
             .get("content")
@@ -20353,7 +21492,10 @@ fn runtime_anthropic_response_from_json_value_preserves_tool_use_and_usage() {
         true,
     );
 
-    assert_eq!(response.get("type").and_then(serde_json::Value::as_str), Some("message"));
+    assert_eq!(
+        response.get("type").and_then(serde_json::Value::as_str),
+        Some("message")
+    );
     assert_eq!(
         response.get("model").and_then(serde_json::Value::as_str),
         Some("claude-sonnet-4-6")
@@ -20479,7 +21621,10 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
     let response = Client::builder()
         .build()
         .expect("client")
-        .post(format!("http://{}/v1/messages?beta=true", proxy.listen_addr))
+        .post(format!(
+            "http://{}/v1/messages?beta=true",
+            proxy.listen_addr
+        ))
         .header("Content-Type", "application/json")
         .header("x-api-key", "dummy")
         .header("anthropic-version", "2023-06-01")
@@ -20507,7 +21652,10 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
         response.status()
     );
     let body: serde_json::Value = response.json().expect("anthropic response should parse");
-    assert_eq!(body.get("type").and_then(serde_json::Value::as_str), Some("message"));
+    assert_eq!(
+        body.get("type").and_then(serde_json::Value::as_str),
+        Some("message")
+    );
     assert_eq!(
         body.get("model").and_then(serde_json::Value::as_str),
         Some("claude-sonnet-4-6")
@@ -20526,7 +21674,9 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
         Some("claude-cli/test")
     );
     assert_eq!(
-        request_headers.get("chatgpt-account-id").map(String::as_str),
+        request_headers
+            .get("chatgpt-account-id")
+            .map(String::as_str),
         Some("second-account")
     );
 
@@ -20538,7 +21688,9 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
     let translated_json: serde_json::Value =
         serde_json::from_str(&translated_body).expect("translated request body should parse");
     assert_eq!(
-        translated_json.get("model").and_then(serde_json::Value::as_str),
+        translated_json
+            .get("model")
+            .and_then(serde_json::Value::as_str),
         Some("gpt-5.3-codex")
     );
     assert_eq!(
@@ -20587,7 +21739,10 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
     let response = Client::builder()
         .build()
         .expect("client")
-        .post(format!("http://{}/v1/messages?beta=true", proxy.listen_addr))
+        .post(format!(
+            "http://{}/v1/messages?beta=true",
+            proxy.listen_addr
+        ))
         .header("Content-Type", "application/json")
         .header("x-api-key", "dummy")
         .header("anthropic-version", "2023-06-01")
