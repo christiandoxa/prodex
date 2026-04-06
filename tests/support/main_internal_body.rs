@@ -17815,6 +17815,13 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
     };
     let owner_account = runtime_proxy_backend_account_id_for_profile_name(owner_profile)
         .expect("owner profile should map to a backend account");
+    let seed_accounts = backend.responses_accounts();
+    let seed_request_count = seed_accounts.len();
+    assert_eq!(
+        seed_accounts.last().map(String::as_str),
+        Some(owner_account),
+        "seed request should commit on the discovered session owner: {seed_accounts:?}"
+    );
 
     let persisted = wait_for_state(&paths, |state| {
         state
@@ -17831,14 +17838,25 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
     );
 
     let mut resumed_state = AppState::load(&paths).expect("state should reload");
-    resumed_state.active_profile = Some("third".to_string());
+    let resumed_current_profile = if owner_profile == "second" {
+        "third"
+    } else {
+        "second"
+    };
+    resumed_state.active_profile = Some(resumed_current_profile.to_string());
     resumed_state
         .save(&paths)
         .expect("failed to save resumed state");
 
     let resumed_proxy =
-        start_runtime_rotation_proxy(&paths, &resumed_state, "third", backend.base_url(), false)
-            .expect("resumed runtime proxy should start");
+        start_runtime_rotation_proxy(
+            &paths,
+            &resumed_state,
+            resumed_current_profile,
+            backend.base_url(),
+            false,
+        )
+        .expect("resumed runtime proxy should start");
 
     let compact = client
         .post(format!(
@@ -17857,13 +17875,11 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
             .expect("compact response body should be readable"),
         "{\"output\":[]}"
     );
+    let resumed_accounts = backend.responses_accounts();
     assert_eq!(
-        backend.responses_accounts(),
-        vec![
-            "main-account".to_string(),
-            owner_account.to_string(),
-            owner_account.to_string(),
-        ]
+        resumed_accounts[seed_request_count..].to_vec(),
+        vec![owner_account.to_string()],
+        "compact follow-up should reuse the persisted session owner even after restart on a different current profile: {resumed_accounts:?}"
     );
 }
 
