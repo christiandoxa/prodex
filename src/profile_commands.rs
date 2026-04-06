@@ -825,10 +825,10 @@ fn encrypt_profile_export_payload(
     let payload_json =
         serde_json::to_vec(payload).context("failed to serialize profile export payload")?;
     let mut salt = [0_u8; PROFILE_EXPORT_SALT_BYTES];
-    getrandom::getrandom(&mut salt)
+    getrandom::fill(&mut salt)
         .map_err(|err| anyhow::anyhow!("failed to generate export salt: {err}"))?;
     let mut nonce = [0_u8; PROFILE_EXPORT_NONCE_BYTES];
-    getrandom::getrandom(&mut nonce)
+    getrandom::fill(&mut nonce)
         .map_err(|err| anyhow::anyhow!("failed to generate export nonce: {err}"))?;
     let key = derive_profile_export_key(password, &salt, PROFILE_EXPORT_PBKDF2_ITERATIONS);
     let cipher =
