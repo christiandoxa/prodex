@@ -2755,6 +2755,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "ready-late".to_string(),
@@ -2764,6 +2765,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "error".to_string(),
@@ -2773,6 +2775,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 quota_compatible: true,
             },
             result: Err("boom".to_string()),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "ready-early".to_string(),
@@ -2782,6 +2785,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            fetched_at: 1_700_000_000,
         },
     ];
 
@@ -2923,6 +2927,7 @@ fn all_quota_watch_output_omits_watch_header_on_load_error() {
 fn quota_reports_include_pool_summary_lines() {
     let alpha = usage_with_main_windows(90, 7_200, 95, 172_800);
     let beta = usage_with_main_windows(45, 1_800, 40, 86_400);
+    let last_update = 1_700_000_123;
     let reports = vec![
         QuotaReport {
             name: "alpha".to_string(),
@@ -2932,6 +2937,7 @@ fn quota_reports_include_pool_summary_lines() {
                 quota_compatible: true,
             },
             result: Ok(alpha.clone()),
+            fetched_at: 1_700_000_100,
         },
         QuotaReport {
             name: "beta".to_string(),
@@ -2941,6 +2947,7 @@ fn quota_reports_include_pool_summary_lines() {
                 quota_compatible: true,
             },
             result: Ok(beta.clone()),
+            fetched_at: last_update,
         },
         QuotaReport {
             name: "api".to_string(),
@@ -2950,6 +2957,7 @@ fn quota_reports_include_pool_summary_lines() {
                 quota_compatible: false,
             },
             result: Err("auth mode is not quota-compatible".to_string()),
+            fetched_at: 1_700_000_090,
         },
     ];
 
@@ -2962,9 +2970,10 @@ fn quota_reports_include_pool_summary_lines() {
         .reset_at;
 
     assert!(output.contains("Available:"));
-    assert!(output.contains("2 profile"));
-    assert!(output.contains("Unavailable:"));
-    assert!(output.contains("1 profile"));
+    assert!(output.contains("2/3 profile"));
+    assert!(output.contains("Last Updated:"));
+    assert!(output.contains(&format_precise_reset_time(Some(last_update))));
+    assert!(!output.contains("Unavailable:"));
     assert!(output.contains("5h remaining pool:"));
     assert!(output.contains("Weekly remaining pool:"));
     assert!(output.contains(&format_info_pool_remaining(135, 2, Some(five_hour_reset))));
@@ -2983,6 +2992,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "ready-late".to_string(),
@@ -2992,6 +3002,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "error".to_string(),
@@ -3001,6 +3012,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 quota_compatible: true,
             },
             result: Err("boom".to_string()),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "ready-early".to_string(),
@@ -3010,6 +3022,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            fetched_at: 1_700_000_000,
         },
     ];
 
@@ -3033,6 +3046,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "ready-late".to_string(),
@@ -3042,6 +3056,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "error".to_string(),
@@ -3051,6 +3066,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 quota_compatible: true,
             },
             result: Err("boom".to_string()),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "ready-early".to_string(),
@@ -3060,6 +3076,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            fetched_at: 1_700_000_000,
         },
     ];
 
@@ -3090,6 +3107,7 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            fetched_at: 1_700_000_000,
         },
         QuotaReport {
             name: "blocked".to_string(),
@@ -3099,6 +3117,7 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
                 quota_compatible: true,
             },
             result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            fetched_at: 1_700_000_000,
         },
     ];
 

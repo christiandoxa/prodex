@@ -23,6 +23,7 @@ pub(crate) struct QuotaReport {
     pub(crate) active: bool,
     pub(crate) auth: AuthSummary,
     pub(crate) result: std::result::Result<UsageResponse, String>,
+    pub(crate) fetched_at: i64,
 }
 
 #[derive(Debug)]
@@ -69,11 +70,17 @@ pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) ->
         .collect();
     let base_url = base_url.map(str::to_owned);
 
-    map_parallel(jobs, |job| QuotaReport {
-        name: job.name,
-        active: job.active,
-        auth: read_auth_summary(&job.codex_home),
-        result: fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string()),
+    map_parallel(jobs, |job| {
+        let auth = read_auth_summary(&job.codex_home);
+        let result =
+            fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string());
+        QuotaReport {
+            name: job.name,
+            active: job.active,
+            auth,
+            result,
+            fetched_at: Local::now().timestamp(),
+        }
     })
 }
 
@@ -196,13 +203,14 @@ struct QuotaReportColumnWidths {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct QuotaPoolAggregate {
+    total_profiles: usize,
     available_profiles: usize,
-    unavailable_profiles: usize,
     profiles_with_data: usize,
     five_hour_pool_remaining: i64,
     weekly_pool_remaining: i64,
     earliest_five_hour_reset_at: Option<i64>,
     earliest_weekly_reset_at: Option<i64>,
+    last_updated_at: Option<i64>,
 }
 
 #[allow(dead_code)]
@@ -452,20 +460,25 @@ pub(crate) fn render_quota_reports_window_with_layout(
 }
 
 fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
-    let mut aggregate = QuotaPoolAggregate::default();
+    let mut aggregate = QuotaPoolAggregate {
+        total_profiles: reports.len(),
+        ..QuotaPoolAggregate::default()
+    };
 
     for report in reports {
+        aggregate.last_updated_at = Some(
+            aggregate
+                .last_updated_at
+                .map_or(report.fetched_at, |current| current.max(report.fetched_at)),
+        );
         if !report.auth.quota_compatible {
-            aggregate.unavailable_profiles += 1;
             continue;
         }
 
         let Ok(usage) = &report.result else {
-            aggregate.unavailable_profiles += 1;
             continue;
         };
         let Some((five_hour, weekly)) = info_main_window_snapshots(usage) else {
-            aggregate.unavailable_profiles += 1;
             continue;
         };
 
@@ -501,11 +514,14 @@ fn render_quota_pool_summary_lines(
     let fields = vec![
         (
             "Available".to_string(),
-            format!("{} profile", aggregate.available_profiles),
+            format!(
+                "{}/{} profile",
+                aggregate.available_profiles, aggregate.total_profiles
+            ),
         ),
         (
-            "Unavailable".to_string(),
-            format!("{} profile", aggregate.unavailable_profiles),
+            "Last Updated".to_string(),
+            format_quota_snapshot_time(aggregate.last_updated_at),
         ),
         (
             "5h remaining pool".to_string(),
@@ -840,18 +856,18 @@ pub(crate) fn window_label(seconds: Option<i64>) -> String {
 }
 
 pub(crate) fn format_reset_time(epoch: Option<i64>) -> String {
-    let Some(epoch) = epoch else {
-        return "-".to_string();
-    };
-
-    Local
-        .timestamp_opt(epoch, 0)
-        .single()
-        .map(|dt| dt.format("%Y-%m-%d %H:%M %Z").to_string())
-        .unwrap_or_else(|| epoch.to_string())
+    format_local_epoch(epoch, "%Y-%m-%d %H:%M %:z")
 }
 
 pub(crate) fn format_precise_reset_time(epoch: Option<i64>) -> String {
+    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S %:z")
+}
+
+fn format_quota_snapshot_time(epoch: Option<i64>) -> String {
+    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S %:z")
+}
+
+fn format_local_epoch(epoch: Option<i64>, pattern: &str) -> String {
     let Some(epoch) = epoch else {
         return "-".to_string();
     };
@@ -859,7 +875,7 @@ pub(crate) fn format_precise_reset_time(epoch: Option<i64>) -> String {
     Local
         .timestamp_opt(epoch, 0)
         .single()
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S %Z").to_string())
+        .map(|dt| dt.format(pattern).to_string())
         .unwrap_or_else(|| epoch.to_string())
 }
 
