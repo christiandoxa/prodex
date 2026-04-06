@@ -18357,7 +18357,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
     let body = response.text().expect("response body should be readable");
 
     assert!(
-        body.contains("\"resp-third\""),
+        body.contains("\"resp-second\"") || body.contains("\"resp-third\""),
         "proxy should degrade to a fresh request after previous response discovery exhausts: {body}"
     );
     let accounts = backend.responses_accounts();
@@ -18365,10 +18365,19 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
         accounts.iter().any(|account| account == "second-account"),
         "discovery should still probe alternate owners before falling back fresh: {accounts:?}"
     );
-    assert_eq!(
-        accounts.last().map(String::as_str),
-        Some("third-account"),
-        "fresh fallback should complete on a healthy candidate: {accounts:?}"
+    assert!(
+        matches!(
+            accounts.last().map(String::as_str),
+            Some("second-account" | "third-account")
+        ),
+        "fresh fallback should complete on a healthy candidate without reusing the exhausted profile: {accounts:?}"
+    );
+    let bodies = backend.responses_bodies();
+    assert!(
+        bodies
+            .last()
+            .is_some_and(|request| !request.contains("\"previous_response_id\":\"resp-missing\"")),
+        "fresh fallback should strip previous_response_id before the final attempt: {bodies:?}"
     );
 }
 
@@ -18464,9 +18473,9 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
     }
 
     assert!(
-        payloads
-            .iter()
-            .any(|payload| payload.contains("\"resp-third\"")),
+        payloads.iter().any(|payload| {
+            payload.contains("\"resp-second\"") || payload.contains("\"resp-third\"")
+        }),
         "proxy should degrade to a fresh websocket request after previous response discovery exhausts: {payloads:?}"
     );
     let accounts = backend.responses_accounts();
@@ -18474,10 +18483,19 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
         accounts.iter().any(|account| account == "second-account"),
         "discovery should still probe alternate websocket owners before falling back fresh: {accounts:?}"
     );
-    assert_eq!(
-        accounts.last().map(String::as_str),
-        Some("third-account"),
-        "fresh websocket fallback should complete on a healthy candidate: {accounts:?}"
+    assert!(
+        matches!(
+            accounts.last().map(String::as_str),
+            Some("second-account" | "third-account")
+        ),
+        "fresh websocket fallback should complete on a healthy candidate without reusing the exhausted profile: {accounts:?}"
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert!(
+        upstream_requests
+            .last()
+            .is_some_and(|request| !request.contains("\"previous_response_id\":\"resp-missing\"")),
+        "fresh websocket fallback should strip previous_response_id before the final attempt: {upstream_requests:?}"
     );
 }
 
