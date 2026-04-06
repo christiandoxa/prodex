@@ -85,6 +85,7 @@ jobs:
               --skip runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
               --skip runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
               --skip runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate \
+              --skip runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request \
               --skip runtime_proxy_broker_health_endpoint_reports_registered_metadata \
               --skip runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
               --skip runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
@@ -112,6 +113,7 @@ jobs:
             runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
             runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
             runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate \
+            runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request \
             runtime_proxy_broker_health_endpoint_reports_registered_metadata \
             runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
             runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
