@@ -39,6 +39,7 @@ jobs:
           # Keep env-mutating tests out of the shared process so the rest of the
           # suite can use libtest's default parallelism.
           cargo test --test main_internal -- \
+            --skip prepare_managed_codex_home_does_not_reseed_populated_legacy_history_every_run \
             --skip prepare_managed_codex_home_does_not_reseed_populated_legacy_sessions_every_run \
             --skip runtime_fault_injection_consumes_budget \
             --skip remove_profile_deletes_managed_home_by_default \
@@ -64,6 +65,11 @@ jobs:
             --skip runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog \
             --skip runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
             --skip runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
+            --skip runtime_proxy_translates_anthropic_messages_to_responses_and_back \
+            --skip runtime_prefetch_send_with_wait_recovers_after_short_backpressure \
+            --skip translate_runtime_anthropic_messages_request_keeps_max_effort_at_high_for_legacy_model \
+            --skip translate_runtime_anthropic_messages_request_maps_max_effort_to_xhigh_for_supported_model \
+            --skip translate_runtime_anthropic_messages_request_maps_tools_and_tool_results \
             --skip prodex_update_command_prefers_cargo_for_native_installations \
             --skip prodex_update_command_prefers_npm_for_npm_installations \
             --skip current_prodex_release_source_is_npm_when_wrapped_by_npm \
@@ -77,6 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           for test_name in \
+            prepare_managed_codex_home_does_not_reseed_populated_legacy_history_every_run \
             prepare_managed_codex_home_does_not_reseed_populated_legacy_sessions_every_run \
             runtime_fault_injection_consumes_budget \
             remove_profile_deletes_managed_home_by_default \
@@ -102,6 +109,11 @@ jobs:
             runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog \
             runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
             runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
+            runtime_proxy_translates_anthropic_messages_to_responses_and_back \
+            runtime_prefetch_send_with_wait_recovers_after_short_backpressure \
+            translate_runtime_anthropic_messages_request_keeps_max_effort_at_high_for_legacy_model \
+            translate_runtime_anthropic_messages_request_maps_max_effort_to_xhigh_for_supported_model \
+            translate_runtime_anthropic_messages_request_maps_tools_and_tool_results \
             prodex_update_command_prefers_cargo_for_native_installations \
             prodex_update_command_prefers_npm_for_npm_installations \
             current_prodex_release_source_is_npm_when_wrapped_by_npm \
