@@ -926,24 +926,16 @@ pub(crate) fn quota_watch_enabled(args: &QuotaArgs) -> bool {
 
 pub(crate) fn render_profile_quota_watch_output(
     profile_name: &str,
-    updated: &str,
+    _updated: &str,
     usage_result: std::result::Result<UsageResponse, String>,
 ) -> String {
-    let header = render_panel(
-        "Quota Watch",
-        &[
-            ("Profile".to_string(), profile_name.to_string()),
-            ("Updated".to_string(), updated.to_string()),
-        ],
-    );
-    let body = match usage_result {
+    match usage_result {
         Ok(usage) => render_profile_quota(profile_name, &usage),
         Err(err) => render_panel(
-            "Quota Watch",
+            &format!("Quota {profile_name}"),
             &[("Error".to_string(), first_line_of_error(&err))],
         ),
-    };
-    format!("{header}\n\n{body}")
+    }
 }
 
 #[allow(dead_code)]
@@ -988,18 +980,11 @@ fn render_all_quota_watch_snapshot(
 ) -> String {
     match snapshot {
         AllQuotaWatchSnapshot::Reports {
-            updated,
-            profile_count,
+            updated: _updated,
+            profile_count: _profile_count,
             reports,
         } => {
-            let header = render_panel(
-                "Quota Watch",
-                &[
-                    ("Profiles".to_string(), profile_count.to_string()),
-                    ("Updated".to_string(), updated.to_string()),
-                ],
-            );
-            let available_report_lines = quota_watch_available_report_lines(&header);
+            let available_report_lines = quota_watch_available_report_lines("");
             let window = render_quota_reports_window_with_layout(
                 reports,
                 detail,
@@ -1008,21 +993,18 @@ fn render_all_quota_watch_snapshot(
                 scroll_offset,
                 true,
             );
-            format!("{header}\n\n{}", window.output)
+            window.output
         }
-        AllQuotaWatchSnapshot::Empty { updated } => render_panel(
-            "Quota Watch",
-            &[
-                ("Updated".to_string(), updated.to_string()),
-                ("Error".to_string(), "No profiles configured".to_string()),
-            ],
+        AllQuotaWatchSnapshot::Empty { updated: _updated } => render_panel(
+            "Quota",
+            &[("Error".to_string(), "No profiles configured".to_string())],
         ),
-        AllQuotaWatchSnapshot::Error { updated, message } => render_panel(
-            "Quota Watch",
-            &[
-                ("Updated".to_string(), updated.to_string()),
-                ("Error".to_string(), first_line_of_error(message)),
-            ],
+        AllQuotaWatchSnapshot::Error {
+            updated: _updated,
+            message,
+        } => render_panel(
+            "Quota",
+            &[("Error".to_string(), first_line_of_error(message))],
         ),
     }
 }

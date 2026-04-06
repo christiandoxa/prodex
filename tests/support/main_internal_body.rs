@@ -2888,24 +2888,22 @@ fn bare_prodex_accepts_run_options_before_codex_args() {
 }
 
 #[test]
-fn profile_quota_watch_output_contains_header_and_snapshot_body() {
+fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
     let output = render_profile_quota_watch_output(
         "main",
         "2026-03-22 10:00:00 WIB",
         Ok(usage_with_main_windows(63, 18_000, 12, 604_800)),
     );
 
-    assert!(output.contains("Quota Watch"));
-    assert!(output.contains("Profile"));
-    assert!(output.contains("main"));
-    assert!(output.contains("Updated"));
-    assert!(output.contains("2026-03-22 10:00:00 WIB"));
     assert!(output.contains("Quota main"));
+    assert!(!output.contains("Quota Watch"));
+    assert!(!output.contains("Updated"));
+    assert!(!output.contains("2026-03-22 10:00:00 WIB"));
     assert!(!output.ends_with('\n'));
 }
 
 #[test]
-fn all_quota_watch_output_preserves_updated_on_load_error() {
+fn all_quota_watch_output_omits_watch_header_on_load_error() {
     let output = render_all_quota_watch_output(
         "2026-03-22 10:00:00 WIB",
         Err("load failed".to_string()),
@@ -2913,9 +2911,10 @@ fn all_quota_watch_output_preserves_updated_on_load_error() {
         false,
     );
 
-    assert!(output.contains("Quota Watch"));
-    assert!(output.contains("Updated"));
-    assert!(output.contains("2026-03-22 10:00:00 WIB"));
+    assert!(output.contains("Quota"));
+    assert!(!output.contains("Quota Watch"));
+    assert!(!output.contains("Updated"));
+    assert!(!output.contains("2026-03-22 10:00:00 WIB"));
     assert!(output.contains("load failed"));
     assert!(!output.ends_with('\n'));
 }
