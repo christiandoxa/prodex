@@ -45,7 +45,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run auto-rotate integration tests
-        run: cargo test -q --test auto_rotate
+        run: cargo test --test auto_rotate
 
   profile-commands-internal:
     runs-on: ubuntu-latest
@@ -63,7 +63,7 @@ jobs:
 
       - name: Run profile command internal tests
         run: |
-          cargo test -q --lib profile_commands_internal_tests:: -- --test-threads=1
+          cargo test --lib profile_commands_internal_tests:: -- --test-threads=1
 
   main-internal-core:
     runs-on: ubuntu-latest
@@ -82,7 +82,7 @@ jobs:
       - name: Run main internal tests without runtime proxy shard
         run: |
           set -euo pipefail
-          cargo test -q --lib main_internal_tests:: -- --skip runtime_proxy_ --test-threads=1
+          cargo test --lib main_internal_tests:: -- --skip runtime_proxy_ --test-threads=1
 
   main-internal-runtime-proxy:
     runs-on: ubuntu-latest
@@ -101,7 +101,7 @@ jobs:
       - name: Run runtime proxy internal test shard
         run: |
           set -euo pipefail
-          cargo test -q --lib main_internal_tests::runtime_proxy_ -- --test-threads=1
+          cargo test --lib main_internal_tests::runtime_proxy_ -- --test-threads=1
 
   runtime-stress:
     runs-on: ubuntu-latest
@@ -200,7 +200,7 @@ jobs:
             runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
             runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error
           do
-            cargo test -q --lib "main_internal_tests::${test_name}" -- --test-threads=1
+            cargo test --lib "main_internal_tests::${test_name}" -- --test-threads=1
           done
 
       - name: Rerun continuation-heavy tests
