@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  fmt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -30,13 +30,60 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+  auto-rotate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
       - name: Run auto-rotate integration tests
         run: cargo test -q --test auto_rotate
 
-      - name: Run main integration tests
+  main-internal-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run main integration tests without runtime proxy shard
         run: |
           set -euo pipefail
-          cargo test -q --test main_internal -- --test-threads=1
+          cargo test -q --test main_internal -- --skip runtime_proxy_ --test-threads=1
+
+  main-internal-runtime-proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run runtime proxy integration shard
+        run: |
+          set -euo pipefail
+          cargo test -q --test main_internal runtime_proxy_ -- --test-threads=1
 
   runtime-stress:
     runs-on: ubuntu-latest
@@ -48,8 +95,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
