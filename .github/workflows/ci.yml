@@ -62,7 +62,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run profile command internal tests
-        run: cargo test -q --lib profile_commands_internal_tests:: -- --test-threads=1
+        run: |
+          cargo test -q --lib profile_commands_internal_tests:: -- --test-threads=1
 
   main-internal-core:
     runs-on: ubuntu-latest
