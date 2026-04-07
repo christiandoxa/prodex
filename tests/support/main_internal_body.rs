@@ -2686,6 +2686,109 @@ fn runtime_softened_backoffs_persist_after_proxy_startup() {
 }
 
 #[test]
+fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    create_codex_home_if_missing(&profile_home).expect("profile home should be created");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    let now = Local::now().timestamp();
+    let transport_key = runtime_profile_transport_backoff_key("main", RuntimeRouteKind::Responses);
+    fs::write(
+        runtime_backoffs_file_path(&paths),
+        format!(
+            concat!(
+                "{{\n",
+                "  \"retry_backoff_until\": {{\"main\": {}}},\n",
+                "  \"transport_backoff_until\": {{\"{}\": {}}}\n",
+                "}}\n"
+            ),
+            now + 600,
+            transport_key,
+            now + 300,
+        ),
+    )
+    .expect("legacy raw runtime backoffs should be written");
+
+    let runtime = RuntimeRotationState {
+        paths: paths.clone(),
+        state: state.clone(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    schedule_runtime_state_save(
+        &shared,
+        state.clone(),
+        runtime_continuation_store_from_app_state(&state),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        RuntimeProfileBackoffs::default(),
+        paths.clone(),
+        "legacy_backoffs",
+    );
+    wait_for_runtime_background_queues_idle();
+
+    let log =
+        fs::read_to_string(&shared.log_path).expect("runtime state save log should be readable");
+    assert!(
+        log.contains("state_save_ok"),
+        "legacy backoffs should not break runtime saves: {log}"
+    );
+    assert!(
+        !log.contains("state_save_error"),
+        "legacy backoffs should not emit state save errors: {log}"
+    );
+
+    let loaded =
+        load_runtime_profile_backoffs(&paths, &state.profiles).expect("backoffs should reload");
+    assert_eq!(loaded.retry_backoff_until.get("main"), Some(&(now + 600)));
+    assert_eq!(
+        loaded.transport_backoff_until.get(&transport_key),
+        Some(&(now + 300))
+    );
+    assert!(
+        loaded.route_circuit_open_until.is_empty(),
+        "missing legacy route circuit data should default to empty"
+    );
+}
+
+#[test]
 fn runtime_fault_injection_consumes_budget() {
     let _guard = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", "2");
 
@@ -3776,6 +3879,211 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
         )
         .expect("candidate selection should succeed"),
         Some("second".to_string())
+    );
+}
+
+#[test]
+fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    create_codex_home_if_missing(&profile_home).expect("profile home should be created");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    remember_runtime_successful_previous_response_owner(
+        &shared,
+        "main",
+        Some("resp-1"),
+        RuntimeRouteKind::Websocket,
+    )
+    .expect("first verification should succeed");
+    wait_for_runtime_background_queues_idle();
+
+    let first_log =
+        fs::read_to_string(&shared.log_path).expect("runtime log should be readable after first bind");
+    let binding_marker = "binding previous_response_owner profile=main response_id=resp-1";
+    let first_binding_count = first_log.matches(binding_marker).count();
+    let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
+    assert_eq!(first_binding_count, 1, "first bind should be persisted once: {first_log}");
+    assert_eq!(first_revision, 1, "first bind should persist once: {first_log}");
+
+    remember_runtime_successful_previous_response_owner(
+        &shared,
+        "main",
+        Some("resp-1"),
+        RuntimeRouteKind::Websocket,
+    )
+    .expect("duplicate verification should succeed");
+    remember_runtime_successful_previous_response_owner(
+        &shared,
+        "main",
+        Some("resp-1"),
+        RuntimeRouteKind::Websocket,
+    )
+    .expect("second duplicate verification should succeed");
+    wait_for_runtime_background_queues_idle();
+
+    let second_log = fs::read_to_string(&shared.log_path)
+        .expect("runtime log should be readable after duplicate binds");
+    assert_eq!(
+        second_log.matches(binding_marker).count(),
+        first_binding_count,
+        "duplicate verifies should not re-log identical owner bindings: {second_log}"
+    );
+    assert_eq!(
+        shared.state_save_revision.load(Ordering::SeqCst),
+        first_revision,
+        "duplicate verifies should not requeue persistence: {second_log}"
+    );
+}
+
+#[test]
+fn previous_response_owner_profile_changes_still_persist() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    create_codex_home_if_missing(&main_home).expect("main profile home should be created");
+    create_codex_home_if_missing(&second_home).expect("second profile home should be created");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("state should save");
+
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    remember_runtime_successful_previous_response_owner(
+        &shared,
+        "main",
+        Some("resp-2"),
+        RuntimeRouteKind::Websocket,
+    )
+    .expect("first owner verification should succeed");
+    wait_for_runtime_background_queues_idle();
+    let initial_log =
+        fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let initial_revision = shared.state_save_revision.load(Ordering::SeqCst);
+    assert_eq!(initial_revision, 1, "first owner save should persist once: {initial_log}");
+
+    remember_runtime_successful_previous_response_owner(
+        &shared,
+        "second",
+        Some("resp-2"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("owner change verification should succeed");
+    wait_for_runtime_background_queues_idle();
+
+    let updated_log =
+        fs::read_to_string(&shared.log_path).expect("runtime log should be readable after rebinding");
+    assert!(
+        updated_log.contains("binding previous_response_owner profile=second response_id=resp-2"),
+        "owner changes should still be logged and persisted: {updated_log}"
+    );
+    assert_eq!(
+        shared.state_save_revision.load(Ordering::SeqCst),
+        initial_revision + 1,
+        "owner changes should queue a fresh persistence update: {updated_log}"
+    );
+
+    let runtime = shared
+        .runtime
+        .lock()
+        .expect("runtime state should remain lockable");
+    assert_eq!(
+        runtime
+            .state
+            .response_profile_bindings
+            .get("resp-2")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
     );
 }
 
@@ -9491,8 +9799,53 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 "second",
                 RuntimeRouteKind::Responses,
             ))
-            .is_some_and(|until| *until > Local::now().timestamp())
+        .is_some_and(|until| *until > Local::now().timestamp())
     );
+}
+
+#[test]
+fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+
+    let now = Local::now().timestamp();
+    let legacy_backup = serde_json::json!({
+        "retry_backoff_until": {
+            "main": now + 600
+        },
+        "transport_backoff_until": {}
+    });
+    fs::write(
+        runtime_backoffs_last_good_file_path(&paths),
+        serde_json::to_string_pretty(&legacy_backup)
+            .expect("legacy backup should serialize cleanly"),
+    )
+    .expect("legacy backup should be writable");
+    fs::write(&runtime_backoffs_file_path(&paths), "{ not valid json")
+        .expect("broken primary backoffs should be writable");
+
+    let loaded = load_runtime_profile_backoffs_with_recovery(&paths, &profiles)
+        .expect("legacy backup recovery should succeed");
+
+    assert!(loaded.recovered_from_backup);
+    assert_eq!(loaded.value.retry_backoff_until.get("main"), Some(&(now + 600)));
+    assert!(loaded.value.transport_backoff_until.is_empty());
+    assert!(loaded.value.route_circuit_open_until.is_empty());
 }
 
 #[test]

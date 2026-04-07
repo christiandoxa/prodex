@@ -1240,6 +1240,7 @@ fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool
 fn runtime_hot_continuation_state_reason(reason: &str) -> bool {
     [
         "response_ids:",
+        "previous_response_owner:",
         "response_touch:",
         "turn_state:",
         "turn_state_touch:",
@@ -4098,8 +4099,11 @@ struct RuntimeProfileUsageSnapshot {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RuntimeProfileBackoffs {
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     retry_backoff_until: BTreeMap<String, i64>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     transport_backoff_until: BTreeMap<String, i64>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     route_circuit_open_until: BTreeMap<String, i64>,
 }
 
@@ -8871,6 +8875,31 @@ fn runtime_mark_continuation_status_touched(
     runtime_continuation_status_touches(status, now)
 }
 
+fn runtime_continuation_status_should_refresh_verified(
+    statuses: &RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+    verified_route: Option<RuntimeRouteKind>,
+) -> bool {
+    let Some(status) = runtime_continuation_status_map(statuses, kind).get(key) else {
+        return true;
+    };
+
+    if status.state != RuntimeContinuationBindingLifecycle::Verified {
+        return true;
+    }
+
+    let verified_route_label = verified_route.map(runtime_route_kind_label);
+    if status.last_verified_route.as_deref() != verified_route_label {
+        return true;
+    }
+
+    status
+        .last_verified_at
+        .is_none_or(|last_verified_at| runtime_binding_touch_should_persist(last_verified_at, now))
+}
+
 fn runtime_mark_continuation_status_verified(
     statuses: &mut RuntimeContinuationStatuses,
     kind: RuntimeContinuationBindingKind,
@@ -9914,28 +9943,49 @@ fn remember_runtime_response_ids(
         changed =
             clear_runtime_previous_response_negative_cache(&mut runtime, response_id, profile_name)
                 || changed;
-        let should_update = runtime
-            .state
-            .response_profile_bindings
-            .get(response_id)
-            .is_none_or(|binding| binding.profile_name != profile_name);
-        if should_update {
-            runtime.state.response_profile_bindings.insert(
-                response_id.clone(),
-                ResponseProfileBinding {
-                    profile_name: profile_name.to_string(),
-                    bound_at,
-                },
-            );
-            changed = true;
+        let should_refresh_binding =
+            match runtime.state.response_profile_bindings.get_mut(response_id) {
+                Some(binding) if binding.profile_name == profile_name => {
+                    if binding.bound_at < bound_at {
+                        binding.bound_at = bound_at;
+                    }
+                    false
+                }
+                Some(binding) => {
+                    binding.profile_name = profile_name.to_string();
+                    binding.bound_at = bound_at;
+                    changed = true;
+                    true
+                }
+                None => {
+                    runtime.state.response_profile_bindings.insert(
+                        response_id.clone(),
+                        ResponseProfileBinding {
+                            profile_name: profile_name.to_string(),
+                            bound_at,
+                        },
+                    );
+                    changed = true;
+                    true
+                }
+            };
+        if should_refresh_binding
+            || runtime_continuation_status_should_refresh_verified(
+                &runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::Response,
+                response_id,
+                bound_at,
+                Some(verified_route),
+            )
+        {
+            changed = runtime_mark_continuation_status_verified(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::Response,
+                response_id,
+                bound_at,
+                Some(verified_route),
+            ) || changed;
         }
-        changed = runtime_mark_continuation_status_verified(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::Response,
-            response_id,
-            bound_at,
-            Some(verified_route),
-        ) || changed;
     }
     if changed {
         prune_profile_bindings(
@@ -9985,28 +10035,52 @@ fn remember_runtime_successful_previous_response_owner(
         previous_response_id,
         profile_name,
     );
-    let should_update = runtime
+    let should_refresh_binding = match runtime
         .state
         .response_profile_bindings
-        .get(previous_response_id)
-        .is_none_or(|binding| binding.profile_name != profile_name || binding.bound_at < bound_at);
-    if should_update {
-        runtime.state.response_profile_bindings.insert(
-            previous_response_id.to_string(),
-            ResponseProfileBinding {
-                profile_name: profile_name.to_string(),
-                bound_at,
-            },
-        );
-        changed = true;
+        .get_mut(previous_response_id)
+    {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+            false
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            changed = true;
+            true
+        }
+        None => {
+            runtime.state.response_profile_bindings.insert(
+                previous_response_id.to_string(),
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+            true
+        }
+    };
+    if should_refresh_binding
+        || runtime_continuation_status_should_refresh_verified(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::Response,
+            previous_response_id,
+            bound_at,
+            Some(verified_route),
+        )
+    {
+        changed = runtime_mark_continuation_status_verified(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::Response,
+            previous_response_id,
+            bound_at,
+            Some(verified_route),
+        ) || changed;
     }
-    changed = runtime_mark_continuation_status_verified(
-        &mut runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::Response,
-        previous_response_id,
-        bound_at,
-        Some(verified_route),
-    ) || changed;
     if changed {
         prune_profile_bindings(
             &mut runtime.state.response_profile_bindings,
