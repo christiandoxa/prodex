@@ -14152,6 +14152,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_scales_wait_with_health
         runtime: Arc::new(Mutex::new(runtime)),
     };
 
+    let reservation_started_at = Local::now().timestamp();
     assert!(
         reserve_runtime_profile_route_circuit_half_open_probe(
             &shared,
@@ -14160,10 +14161,10 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_scales_wait_with_health
         )
         .expect("half-open reservation should succeed")
     );
-    let expected_until = now
-        + runtime_profile_circuit_half_open_probe_seconds(
-            RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
-        );
+    let reservation_finished_at = Local::now().timestamp();
+    let probe_seconds = runtime_profile_circuit_half_open_probe_seconds(
+        RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
+    );
     let actual_until = shared
         .runtime
         .lock()
@@ -14175,7 +14176,13 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_scales_wait_with_health
         ))
         .copied()
         .expect("circuit reservation should be recorded");
-    assert_eq!(actual_until, expected_until);
+    assert!(
+        actual_until >= reservation_started_at.saturating_add(probe_seconds)
+            && actual_until <= reservation_finished_at.saturating_add(probe_seconds),
+        "actual_until={actual_until} should fall within reservation window {}..={}",
+        reservation_started_at.saturating_add(probe_seconds),
+        reservation_finished_at.saturating_add(probe_seconds),
+    );
 }
 
 #[test]
