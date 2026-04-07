@@ -1123,3 +1123,7 @@ fn write_secret_text_file(path: &Path, content: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../tests/support/profile_commands_internal_harness.rs"]
+mod profile_commands_internal_tests;

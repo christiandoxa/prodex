@@ -47,6 +47,23 @@ jobs:
       - name: Run auto-rotate integration tests
         run: cargo test -q --test auto_rotate
 
+  profile-commands-internal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run profile command internal tests
+        run: cargo test -q --lib profile_commands_internal_tests:: -- --test-threads=1
+
   main-internal-core:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -61,10 +78,10 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run main integration tests without runtime proxy shard
+      - name: Run main internal tests without runtime proxy shard
         run: |
           set -euo pipefail
-          cargo test -q --test main_internal -- --skip runtime_proxy_ --test-threads=1
+          cargo test -q --lib main_internal_tests:: -- --skip runtime_proxy_ --test-threads=1
 
   main-internal-runtime-proxy:
     runs-on: ubuntu-latest
@@ -80,10 +97,10 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run runtime proxy integration shard
+      - name: Run runtime proxy internal test shard
         run: |
           set -euo pipefail
-          cargo test -q --test main_internal runtime_proxy_ -- --test-threads=1
+          cargo test -q --lib main_internal_tests::runtime_proxy_ -- --test-threads=1
 
   runtime-stress:
     runs-on: ubuntu-latest
@@ -109,7 +126,7 @@ jobs:
           # runtime_proxy_ can use libtest's default parallelism.
           for iteration in 1; do
             echo "runtime_proxy_ stress iteration ${iteration}"
-            cargo test --test main_internal runtime_proxy_ -- \
+            cargo test --lib main_internal_tests::runtime_proxy_ -- \
               --skip runtime_proxy_persists_previous_response_affinity_across_restart \
               --skip runtime_proxy_persists_session_affinity_across_restart_for_compact \
               --skip runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir \
@@ -165,7 +182,7 @@ jobs:
             runtime_proxy_keeps_previous_response_affinity_for_http_requests \
             runtime_proxy_keeps_previous_response_affinity_for_websocket_requests
           do
-            cargo test -q --test main_internal "${test_name}" -- --test-threads=1
+            cargo test -q --lib "main_internal_tests::${test_name}" -- --test-threads=1
           done
 
       - name: Rerun continuation-heavy tests
@@ -173,8 +190,8 @@ jobs:
           set -euo pipefail
           for iteration in 1 2; do
             echo "continuation-heavy iteration ${iteration}"
-            cargo test --test main_internal runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
-            cargo test --test main_internal runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
-            cargo test --test main_internal runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
-            cargo test --test main_internal runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
+            cargo test --lib main_internal_tests::runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
+            cargo test --lib main_internal_tests::runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
+            cargo test --lib main_internal_tests::runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
+            cargo test --lib main_internal_tests::runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
           done
