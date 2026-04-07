@@ -208,6 +208,18 @@ fn sorted_backend_usage_accounts(backend: &RuntimeProxyBackend) -> Vec<String> {
     usage_accounts
 }
 
+fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapshot {
+    RuntimeProfileUsageSnapshot {
+        checked_at: now - (RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS + 1),
+        five_hour_status: RuntimeQuotaWindowStatus::Critical,
+        five_hour_remaining_percent: 1,
+        five_hour_reset_at: now + 300,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 70,
+        weekly_reset_at: now + 86_400,
+    }
+}
+
 impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
@@ -13680,6 +13692,194 @@ fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owne
 }
 
 #[test]
+fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_http_requests() {
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "main".to_string(),
+            stale_critical_runtime_usage_snapshot(now),
+        )]),
+    )
+    .expect("failed to seed stale runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let before_request = backend.responses_accounts().len();
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+
+    let request_accounts = backend.responses_accounts()[before_request..].to_vec();
+    assert!(
+        !request_accounts.is_empty(),
+        "stale critical-floor snapshot should still make a fresh request"
+    );
+    assert_eq!(
+        request_accounts.last().map(String::as_str),
+        Some("second-account"),
+        "stale critical-floor snapshot should finish on the fallback profile: {request_accounts:?}"
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "stale critical-floor snapshot should not surface usage limit: {body}"
+    );
+}
+
+#[test]
+fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_http_requests() {
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let client = Client::builder().build().expect("client");
+    {
+        let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("runtime proxy should start");
+        wait_for_runtime_background_queues_idle();
+        let before_first_request = backend.responses_accounts().len();
+
+        let response = client
+            .post(format!(
+                "http://{}/backend-api/codex/responses",
+                proxy.listen_addr
+            ))
+            .header("Content-Type", "application/json")
+            .body("{\"input\":[]}")
+            .send()
+            .expect("runtime proxy request should succeed");
+        let body = response.text().expect("response body should be readable");
+        let first_request_accounts = backend.responses_accounts()[before_first_request..].to_vec();
+        assert_eq!(
+            first_request_accounts.last().map(String::as_str),
+            Some("second-account"),
+            "initial quota-limited request should finish on the fallback profile: {first_request_accounts:?}"
+        );
+        assert!(
+            !body.contains("You've hit your usage limit"),
+            "quota-limited request should not surface usage limit: {body}"
+        );
+    }
+
+    state.save(&paths).expect("failed to restore active profile");
+    wait_for_runtime_background_queues_idle();
+    let before_second_request = backend.responses_accounts().len();
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("replacement runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("replacement runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+
+    let second_request_accounts = backend.responses_accounts()[before_second_request..].to_vec();
+    assert_eq!(
+        second_request_accounts,
+        vec!["second-account".to_string()],
+        "quarantined profile should not be reused for a follow-up fresh request: {second_request_accounts:?}"
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "quarantined profile should not surface usage limit after restart: {body}"
+    );
+}
+
+#[test]
 fn runtime_proxy_releases_quota_blocked_compact_session_affinity_and_rotates() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_usage_limit_message();
@@ -20808,6 +21008,297 @@ fn runtime_proxy_releases_previous_response_affinity_for_websocket_requests_when
     assert_eq!(
         backend.responses_accounts(),
         vec!["second-account".to_string()]
+    );
+}
+
+#[test]
+fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests(
+) {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "main".to_string(),
+            stale_critical_runtime_usage_snapshot(now),
+        )]),
+    )
+    .expect("failed to seed stale runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let before_request = backend.responses_accounts().len();
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for stale-snapshot fallback payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    let request_accounts = backend.responses_accounts()[before_request..].to_vec();
+    assert!(
+        !request_accounts.is_empty(),
+        "stale critical-floor snapshot should still make a fresh websocket request"
+    );
+    assert_eq!(
+        request_accounts.last().map(String::as_str),
+        Some("second-account"),
+        "stale critical-floor snapshot should finish on the fallback websocket profile: {request_accounts:?}"
+    );
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "stale critical-floor snapshot should still complete on the fallback profile: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("You've hit your usage limit")),
+        "stale critical-floor snapshot should not surface usage limit: {payloads:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_websocket_requests(
+) {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    {
+        let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+            .expect("runtime proxy should start");
+        wait_for_runtime_background_queues_idle();
+        let before_first_request = backend.responses_accounts().len();
+
+        let (mut socket, _response) = ws_connect(format!(
+            "ws://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .expect("runtime proxy websocket handshake should succeed");
+        set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+        socket
+            .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+            .expect("first runtime proxy websocket request should be sent");
+
+        let mut first_payloads = Vec::new();
+        loop {
+            match socket.read() {
+                Ok(WsMessage::Text(text)) => {
+                    let text = text.to_string();
+                    let done = is_runtime_terminal_event(&text);
+                    first_payloads.push(text);
+                    if done {
+                        break;
+                    }
+                }
+                Ok(WsMessage::Ping(payload)) => {
+                    socket
+                        .send(WsMessage::Pong(payload))
+                        .expect("pong should be sent");
+                }
+                Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+                Ok(WsMessage::Close(_))
+                | Err(WsError::ConnectionClosed)
+                | Err(WsError::AlreadyClosed) => break,
+                Err(err) => {
+                    panic!(
+                        "runtime proxy websocket failed while waiting for initial quota-limit payloads: {err}; payloads={first_payloads:?}"
+                    );
+                }
+                Ok(other) => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+
+        let first_request_accounts = backend.responses_accounts()[before_first_request..].to_vec();
+        assert_eq!(
+            first_request_accounts.last().map(String::as_str),
+            Some("second-account"),
+            "initial quota-limited websocket request should finish on the fallback profile: {first_request_accounts:?}"
+        );
+        assert!(
+            !first_payloads
+                .iter()
+                .any(|payload| payload.contains("You've hit your usage limit")),
+            "quota-limited websocket request should not surface usage limit: {first_payloads:?}"
+        );
+    }
+
+    state.save(&paths).expect("failed to restore active profile");
+    wait_for_runtime_background_queues_idle();
+    let before_second_request = backend.responses_accounts().len();
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("replacement runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("replacement runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("replacement runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "replacement runtime proxy websocket failed while waiting for payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    let second_request_accounts = backend.responses_accounts()[before_second_request..].to_vec();
+    assert_eq!(
+        second_request_accounts,
+        vec!["second-account".to_string()],
+        "quarantined profile should not be reused for a follow-up websocket request: {second_request_accounts:?}"
+    );
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "quarantined profile should still complete on the fallback websocket profile: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("You've hit your usage limit")),
+        "quarantined profile should not surface usage limit after restart: {payloads:?}"
     );
 }
 

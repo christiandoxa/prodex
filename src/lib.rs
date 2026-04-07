@@ -144,8 +144,14 @@ const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 3
 const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
 const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
 const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 = if cfg!(test) { 300 } else { 1800 };
+const RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS: i64 = if cfg!(test) { 10 } else { 300 };
 const RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT: usize = 3;
 const RUNTIME_STARTUP_PROBE_WARM_LIMIT: usize = 3;
+const RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT: usize = if cfg!(test) {
+    RUNTIME_STARTUP_PROBE_WARM_LIMIT
+} else {
+    1
+};
 const RUNTIME_STATE_SAVE_DEBOUNCE_MS: u64 = if cfg!(test) { 5 } else { 150 };
 const RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD: usize = 8;
 const RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD: usize = 8;
@@ -1337,6 +1343,51 @@ fn runtime_profiles_needing_startup_probe_refresh(
         .collect()
 }
 
+fn run_runtime_probe_jobs_inline(
+    shared: &RuntimeRotationProxyShared,
+    jobs: Vec<(String, PathBuf)>,
+    context: &str,
+) {
+    if jobs.is_empty() {
+        return;
+    }
+    let upstream_base_url = match shared.runtime.lock() {
+        Ok(runtime) => runtime.upstream_base_url.clone(),
+        Err(_) => return,
+    };
+    let probe_reports = map_parallel(jobs, |(profile_name, codex_home)| {
+        let auth = read_auth_summary(&codex_home);
+        let result = if auth.quota_compatible {
+            fetch_usage(&codex_home, Some(upstream_base_url.as_str()))
+                .map_err(|err| err.to_string())
+        } else {
+            Err("auth mode is not quota-compatible".to_string())
+        };
+        (profile_name, auth, result)
+    });
+    for (profile_name, auth, result) in probe_reports {
+        let apply_result =
+            apply_runtime_profile_probe_result(shared, &profile_name, auth, result.clone());
+        match result {
+            Ok(_) => runtime_proxy_log(
+                shared,
+                if let Err(err) = apply_result {
+                    format!(
+                        "{context}_error profile={} error=state_update:{err:#}",
+                        profile_name
+                    )
+                } else {
+                    format!("{context}_ok profile={profile_name}")
+                },
+            ),
+            Err(err) => runtime_proxy_log(
+                shared,
+                format!("{context}_error profile={} error={err}", profile_name),
+            ),
+        }
+    }
+}
+
 fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProxyShared) {
     if runtime_proxy_pressure_mode_active(shared) {
         runtime_proxy_log(
@@ -1379,73 +1430,56 @@ fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProxyShared) {
         return;
     }
 
-    if cfg!(test) {
+    let sync_limit = runtime_startup_sync_probe_warm_limit();
+    let sync_count = if cfg!(test) {
+        refresh_jobs.len()
+    } else {
+        sync_limit.min(refresh_jobs.len())
+    };
+    if sync_count > 0 {
+        let sync_jobs = refresh_jobs
+            .iter()
+            .take(sync_count)
+            .cloned()
+            .collect::<Vec<_>>();
         runtime_proxy_log(
             shared,
             format!(
                 "startup_probe_warmup sync={} profiles={}",
-                refresh_jobs.len(),
-                refresh_jobs
+                sync_jobs.len(),
+                sync_jobs
                     .iter()
                     .map(|(profile_name, _)| profile_name.as_str())
                     .collect::<Vec<_>>()
                     .join(",")
             ),
         );
-        let upstream_base_url = match shared.runtime.lock() {
-            Ok(runtime) => runtime.upstream_base_url.clone(),
-            Err(_) => return,
-        };
-        let probe_reports = map_parallel(refresh_jobs, |(profile_name, codex_home)| {
-            let auth = read_auth_summary(&codex_home);
-            let result = if auth.quota_compatible {
-                fetch_usage(&codex_home, Some(upstream_base_url.as_str()))
-                    .map_err(|err| err.to_string())
-            } else {
-                Err("auth mode is not quota-compatible".to_string())
-            };
-            (profile_name, auth, result)
-        });
-        for (profile_name, auth, result) in probe_reports {
-            let apply_result =
-                apply_runtime_profile_probe_result(shared, &profile_name, auth, result.clone());
-            match result {
-                Ok(_) => runtime_proxy_log(
-                    shared,
-                    if let Err(err) = apply_result {
-                        format!(
-                            "startup_probe_warmup_error profile={} error=state_update:{err:#}",
-                            profile_name
-                        )
-                    } else {
-                        format!("startup_probe_warmup_ok profile={profile_name}")
-                    },
-                ),
-                Err(err) => runtime_proxy_log(
-                    shared,
-                    format!(
-                        "startup_probe_warmup_error profile={} error={err}",
-                        profile_name
-                    ),
-                ),
-            }
-        }
-        return;
+        run_runtime_probe_jobs_inline(shared, sync_jobs, "startup_probe_warmup");
     }
 
+    if cfg!(test) {
+        return;
+    }
+    let async_jobs = refresh_jobs
+        .into_iter()
+        .skip(sync_count)
+        .collect::<Vec<_>>();
+    if async_jobs.is_empty() {
+        return;
+    }
     runtime_proxy_log(
         shared,
         format!(
             "startup_probe_warmup queued={} profiles={}",
-            refresh_jobs.len(),
-            refresh_jobs
+            async_jobs.len(),
+            async_jobs
                 .iter()
                 .map(|(profile_name, _)| profile_name.as_str())
                 .collect::<Vec<_>>()
                 .join(",")
         ),
     );
-    for (profile_name, codex_home) in refresh_jobs {
+    for (profile_name, codex_home) in async_jobs {
         schedule_runtime_probe_refresh(shared, &profile_name, &codex_home);
     }
 }
@@ -1477,6 +1511,30 @@ fn apply_runtime_profile_probe_result(
     let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
     let quota_summary =
         runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
+    let blocking_reset_at =
+        runtime_quota_summary_blocking_reset_at(quota_summary, RuntimeRouteKind::Responses)
+            .filter(|reset_at| *reset_at > now);
+    let quarantine_until =
+        runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Responses).map(
+            |_| {
+                blocking_reset_at.unwrap_or_else(|| {
+                    now.saturating_add(RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS)
+                })
+            },
+        );
+    let mut quarantine_applied = None;
+    if let Some(until) = quarantine_until {
+        let next_until = runtime
+            .profile_retry_backoff_until
+            .get(profile_name)
+            .copied()
+            .unwrap_or(until)
+            .max(until);
+        runtime
+            .profile_retry_backoff_until
+            .insert(profile_name.to_string(), next_until);
+        quarantine_applied = Some(next_until);
+    }
     runtime
         .profile_usage_snapshots
         .insert(profile_name.to_string(), snapshot);
@@ -1487,6 +1545,21 @@ fn apply_runtime_profile_probe_result(
                 "quota_probe_exhausted profile={profile_name} reason=usage_snapshot_exhausted {}",
                 runtime_quota_summary_log_fields(quota_summary)
             ),
+        );
+    }
+    if let Some(until) = quarantine_applied {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message=probe_snapshot",
+                runtime_route_kind_label(RuntimeRouteKind::Responses),
+                until,
+                blocking_reset_at.unwrap_or(i64::MAX),
+            ),
+        );
+        runtime_proxy_log(
+            shared,
+            format!("profile_retry_backoff profile={profile_name} until={until}"),
         );
     }
     schedule_runtime_state_save_from_runtime(
@@ -6713,6 +6786,11 @@ fn start_runtime_rotation_proxy(
         &runtime_external_session_id_bindings(&restored_continuations.session_id_bindings),
         &restored_state.profiles,
     );
+    let restored_runtime_session_id_bindings = merge_profile_bindings(
+        &restored_continuations.session_id_bindings,
+        &restored_continuations.session_profile_bindings,
+        &restored_state.profiles,
+    );
     restored_state.response_profile_bindings =
         restored_continuations.response_profile_bindings.clone();
     restored_state.session_profile_bindings = restored_session_id_bindings.clone();
@@ -6748,7 +6826,7 @@ fn start_runtime_rotation_proxy(
     let persisted_response_binding_count = restored_continuations.response_profile_bindings.len();
     let persisted_session_binding_count = restored_continuations.session_profile_bindings.len();
     let persisted_turn_state_binding_count = restored_continuations.turn_state_bindings.len();
-    let persisted_session_id_binding_count = restored_session_id_bindings.len();
+    let persisted_session_id_binding_count = restored_runtime_session_id_bindings.len();
     let persisted_retry_backoffs_count = persisted_backoffs.value.retry_backoff_until.len();
     let persisted_transport_backoffs_count = persisted_backoffs.value.transport_backoff_until.len();
     let persisted_route_circuit_count = persisted_backoffs.value.route_circuit_open_until.len();
@@ -6801,7 +6879,7 @@ fn start_runtime_rotation_proxy(
             current_profile: current_profile.to_string(),
             profile_usage_auth: load_runtime_profile_usage_auth_cache(&restored_state),
             turn_state_bindings: restored_continuations.turn_state_bindings.clone(),
-            session_id_bindings: restored_session_id_bindings,
+            session_id_bindings: restored_runtime_session_id_bindings,
             continuation_statuses: restored_continuations.statuses.clone(),
             profile_probe_cache: BTreeMap::new(),
             profile_usage_snapshots: persisted_usage_snapshots.value,
@@ -10276,6 +10354,96 @@ fn runtime_proxy_allows_direct_current_profile_fallback(
         && !saw_upstream_failure
 }
 
+fn runtime_profile_codex_home(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<Option<PathBuf>> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .map(|profile| profile.codex_home.clone()))
+}
+
+fn runtime_has_alternative_quota_compatible_profile(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<bool> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime.state.profiles.iter().any(|(name, profile)| {
+        name != profile_name && read_auth_summary(&profile.codex_home).quota_compatible
+    }))
+}
+
+fn refresh_runtime_profile_quota_inline(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    context: &str,
+) -> Result<()> {
+    let Some(codex_home) = runtime_profile_codex_home(shared, profile_name)? else {
+        return Ok(());
+    };
+    runtime_proxy_log(shared, format!("{context}_start profile={profile_name}"));
+    run_runtime_probe_jobs_inline(
+        shared,
+        vec![(profile_name.to_string(), codex_home)],
+        context,
+    );
+    Ok(())
+}
+
+fn runtime_quota_summary_requires_precommit_live_probe(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
+        && (matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Critical)
+            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Critical)
+            || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
+            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown))
+}
+
+fn runtime_quota_summary_requires_live_source_after_probe(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
+        && (matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
+            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown))
+}
+
+fn ensure_runtime_profile_precommit_quota_ready(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    context: &str,
+) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
+    let (mut quota_summary, mut quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+    if runtime_quota_summary_requires_precommit_live_probe(quota_summary, quota_source, route_kind)
+    {
+        refresh_runtime_profile_quota_inline(shared, profile_name, context)?;
+        (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+    }
+    Ok((quota_summary, quota_source))
+}
+
 fn runtime_proxy_direct_current_fallback_profile(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
@@ -10321,6 +10489,44 @@ fn runtime_proxy_direct_current_fallback_profile(
     )? {
         return Ok(None);
     }
+    if matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) {
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, &profile_name, route_kind)?;
+        if quota_source.is_none()
+            || runtime_quota_summary_requires_live_source_after_probe(
+                quota_summary,
+                quota_source,
+                route_kind,
+            )
+            || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    profile_name,
+                    runtime_quota_precommit_guard_reason(quota_summary, route_kind).unwrap_or_else(
+                        || {
+                            runtime_quota_soft_affinity_rejection_reason(
+                                quota_summary,
+                                quota_source,
+                                route_kind,
+                            )
+                        }
+                    ),
+                    quota_source
+                        .map(runtime_quota_source_label)
+                        .unwrap_or("unknown"),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            return Ok(None);
+        }
+    }
     Ok(Some(profile_name))
 }
 
@@ -10340,21 +10546,26 @@ fn runtime_quota_window_usable_for_auto_rotate(status: RuntimeQuotaWindowStatus)
 fn runtime_quota_summary_allows_soft_affinity(
     summary: RuntimeQuotaSummary,
     source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
 ) -> bool {
     source.is_some()
         && runtime_quota_window_usable_for_auto_rotate(summary.five_hour.status)
         && runtime_quota_window_usable_for_auto_rotate(summary.weekly.status)
+        && runtime_quota_precommit_guard_reason(summary, route_kind).is_none()
 }
 
 fn runtime_quota_soft_affinity_rejection_reason(
     summary: RuntimeQuotaSummary,
     source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
 ) -> &'static str {
     if source.is_none()
         || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
         || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown)
     {
         "quota_windows_unavailable"
+    } else if let Some(reason) = runtime_quota_precommit_guard_reason(summary, route_kind) {
+        reason
     } else if matches!(
         summary.five_hour.status,
         RuntimeQuotaWindowStatus::Exhausted
@@ -10535,17 +10746,30 @@ fn runtime_quota_blocked_affinity_is_releasable(
     true
 }
 
-fn runtime_quota_window_precommit_guard(window: RuntimeQuotaWindowSummary) -> bool {
+fn runtime_quota_precommit_floor_percent(route_kind: RuntimeRouteKind) -> i64 {
+    match route_kind {
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => {
+            runtime_proxy_responses_quota_critical_floor_percent()
+        }
+        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 1,
+    }
+}
+
+fn runtime_quota_window_precommit_guard(
+    window: RuntimeQuotaWindowSummary,
+    floor_percent: i64,
+) -> bool {
     matches!(
         window.status,
         RuntimeQuotaWindowStatus::Critical | RuntimeQuotaWindowStatus::Exhausted
-    ) && window.remaining_percent <= 1
+    ) && window.remaining_percent <= floor_percent
 }
 
 fn runtime_quota_precommit_guard_reason(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,
 ) -> Option<&'static str> {
+    let floor_percent = runtime_quota_precommit_floor_percent(route_kind);
     if summary.route_band == RuntimeQuotaPressureBand::Exhausted {
         return Some("quota_exhausted_before_send");
     }
@@ -10553,8 +10777,8 @@ fn runtime_quota_precommit_guard_reason(
     if matches!(
         route_kind,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && (runtime_quota_window_precommit_guard(summary.five_hour)
-        || runtime_quota_window_precommit_guard(summary.weekly))
+    ) && (runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
+        || runtime_quota_window_precommit_guard(summary.weekly, floor_percent))
     {
         return Some("quota_critical_floor_before_send");
     }
@@ -10594,7 +10818,7 @@ fn select_runtime_response_candidate_for_route(
             route_kind,
             RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
         ) && quota_source.is_none();
-        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source, route_kind)
             || compact_followup_owner_without_probe
         {
             return Ok(Some(profile_name.to_string()));
@@ -10605,7 +10829,11 @@ fn select_runtime_response_candidate_for_route(
                 "selection_skip_affinity route={} affinity=compact_followup profile={} reason={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 profile_name,
-                runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source),
+                runtime_quota_soft_affinity_rejection_reason(
+                    quota_summary,
+                    quota_source,
+                    route_kind,
+                ),
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -10640,7 +10868,9 @@ fn select_runtime_response_candidate_for_route(
         }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical
+            && runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_none()
+        {
             return Ok(Some(profile_name.to_string()));
         }
         runtime_proxy_log(
@@ -10673,7 +10903,9 @@ fn select_runtime_response_candidate_for_route(
         }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical {
+        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical
+            && runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_none()
+        {
             return Ok(Some(profile_name.to_string()));
         }
         runtime_proxy_log(
@@ -10719,7 +10951,7 @@ fn select_runtime_response_candidate_for_route(
         let websocket_reuse_current_profile = route_kind == RuntimeRouteKind::Websocket
             && quota_source.is_none()
             && runtime_proxy_current_profile(shared)? == profile_name;
-        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source, route_kind)
             || compact_session_owner_without_probe
             || websocket_reuse_current_profile
         {
@@ -10731,7 +10963,11 @@ fn select_runtime_response_candidate_for_route(
                 "selection_skip_affinity route={} affinity=session profile={} reason={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 profile_name,
-                runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source),
+                runtime_quota_soft_affinity_rejection_reason(
+                    quota_summary,
+                    quota_source,
+                    route_kind,
+                ),
                 quota_source
                     .map(runtime_quota_source_label)
                     .unwrap_or("unknown"),
@@ -10834,14 +11070,18 @@ fn next_runtime_previous_response_candidate(
         }
         let (quota_summary, quota_source) =
             runtime_profile_quota_summary_for_route(shared, &name, route_kind)?;
-        if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
+            || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
+        {
             runtime_proxy_log(
                 shared,
                 format!(
                     "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason={} quota_source={} {}",
                     runtime_route_kind_label(route_kind),
                     name,
-                    runtime_quota_pressure_band_reason(quota_summary.route_band),
+                    runtime_quota_precommit_guard_reason(quota_summary, route_kind).unwrap_or_else(
+                        || runtime_quota_pressure_band_reason(quota_summary.route_band)
+                    ),
                     quota_source
                         .map(runtime_quota_source_label)
                         .unwrap_or("unknown"),
@@ -12304,13 +12544,20 @@ fn proxy_runtime_websocket_text_message(
                 profile_name,
                 payload,
             } => {
+                let quota_message =
+                    extract_runtime_proxy_quota_message_from_websocket_payload(&payload);
                 runtime_proxy_log(
                     shared,
                     format!(
                         "request={request_id} websocket_session={session_id} quota_blocked profile={profile_name}"
                     ),
                 );
-                mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                mark_runtime_profile_quota_quarantine(
+                    shared,
+                    &profile_name,
+                    RuntimeRouteKind::Websocket,
+                    quota_message.as_deref(),
+                )?;
                 if !runtime_quota_blocked_affinity_is_releasable(
                     RuntimeRouteKind::Websocket,
                     &profile_name,
@@ -12323,6 +12570,12 @@ fn proxy_runtime_websocket_text_message(
                     trusted_previous_response_affinity,
                     request_requires_previous_response_affinity,
                 ) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} upstream_usage_limit_passthrough route=websocket profile={profile_name} reason=hard_affinity"
+                        ),
+                    );
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                     return Ok(());
                 }
@@ -12725,11 +12978,69 @@ fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
-    let request_previous_response_id = runtime_request_previous_response_id(handshake_request);
-    let request_session_id = runtime_request_session_id(handshake_request);
+    let request_previous_response_id = runtime_request_previous_response_id(handshake_request)
+        .or_else(|| runtime_request_previous_response_id_from_text(request_text));
+    let request_session_id = runtime_request_session_id(handshake_request)
+        .or_else(|| runtime_request_session_id_from_text(request_text));
     let request_turn_state = runtime_request_turn_state(handshake_request);
-    let (quota_summary, quota_source) =
+    let (initial_quota_summary, initial_quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
+    if (request_previous_response_id.is_some()
+        || request_session_id.is_some()
+        || request_turn_state.is_some())
+        && matches!(
+            initial_quota_source,
+            Some(RuntimeQuotaSource::PersistedSnapshot)
+        )
+        && let Some(reason) =
+            runtime_quota_precommit_guard_reason(initial_quota_summary, RuntimeRouteKind::Websocket)
+    {
+        websocket_session.close();
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason={reason} quota_source={} {}",
+                initial_quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(initial_quota_summary),
+            ),
+        );
+        return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+            reason,
+        });
+    }
+    let has_alternative_quota_profile =
+        runtime_has_alternative_quota_compatible_profile(shared, profile_name)?;
+    let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Websocket,
+        "websocket_precommit_reprobe",
+    )?;
+    if runtime_quota_summary_requires_live_source_after_probe(
+        quota_summary,
+        quota_source,
+        RuntimeRouteKind::Websocket,
+    ) && has_alternative_quota_profile
+    {
+        websocket_session.close();
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason=quota_windows_unavailable_after_reprobe quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+            reason: "quota_windows_unavailable_after_reprobe",
+        });
+    }
     if let Some(reason) =
         runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Websocket)
     {
@@ -13706,7 +14017,11 @@ fn proxy_runtime_standard_request(
         )?;
         let preferred_is_session = session_profile.as_deref() == Some(preferred_profile.as_str());
         let preferred_profile_usable = if preferred_is_session {
-            runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source)
+            runtime_quota_summary_allows_soft_affinity(
+                quota_summary,
+                quota_source,
+                RuntimeRouteKind::Standard,
+            )
         } else {
             quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted
         };
@@ -13728,7 +14043,11 @@ fn proxy_runtime_standard_request(
                     },
                     preferred_profile,
                     if preferred_is_session {
-                        runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source)
+                        runtime_quota_soft_affinity_rejection_reason(
+                            quota_summary,
+                            quota_source,
+                            RuntimeRouteKind::Standard,
+                        )
                     } else {
                         runtime_quota_pressure_band_reason(quota_summary.route_band)
                     },
@@ -15592,7 +15911,14 @@ fn proxy_runtime_responses_request(
                         "request={request_id} transport=http quota_blocked profile={profile_name}"
                     ),
                 );
-                mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                let quota_message =
+                    extract_runtime_proxy_quota_message_from_response_reply(&response);
+                mark_runtime_profile_quota_quarantine(
+                    shared,
+                    &profile_name,
+                    RuntimeRouteKind::Responses,
+                    quota_message.as_deref(),
+                )?;
                 if !runtime_quota_blocked_affinity_is_releasable(
                     RuntimeRouteKind::Responses,
                     &profile_name,
@@ -15605,6 +15931,12 @@ fn proxy_runtime_responses_request(
                     trusted_previous_response_affinity,
                     request_requires_previous_response_affinity,
                 ) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http upstream_usage_limit_passthrough route=responses profile={profile_name} reason=hard_affinity"
+                        ),
+                    );
                     return Ok(response);
                 }
                 let released_affinity = release_runtime_quota_blocked_affinity(
@@ -15873,8 +16205,64 @@ fn attempt_runtime_responses_request(
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
     let request_session_id = runtime_request_session_id(request);
-    let (quota_summary, quota_source) =
+    let request_previous_response_id = runtime_request_previous_response_id(request);
+    let request_turn_state = runtime_request_turn_state(request);
+    let (initial_quota_summary, initial_quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Responses)?;
+    if (request_previous_response_id.is_some()
+        || request_session_id.is_some()
+        || request_turn_state.is_some())
+        && matches!(
+            initial_quota_source,
+            Some(RuntimeQuotaSource::PersistedSnapshot)
+        )
+        && let Some(reason) =
+            runtime_quota_precommit_guard_reason(initial_quota_summary, RuntimeRouteKind::Responses)
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses reason={reason} quota_source={} {}",
+                initial_quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(initial_quota_summary),
+            ),
+        );
+        return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+            reason,
+        });
+    }
+    let has_alternative_quota_profile =
+        runtime_has_alternative_quota_compatible_profile(shared, profile_name)?;
+    let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Responses,
+        "responses_precommit_reprobe",
+    )?;
+    if runtime_quota_summary_requires_live_source_after_probe(
+        quota_summary,
+        quota_source,
+        RuntimeRouteKind::Responses,
+    ) && has_alternative_quota_profile
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses reason=quota_windows_unavailable_after_reprobe quota_source={} {}",
+                quota_source
+                    .map(runtime_quota_source_label)
+                    .unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(quota_summary),
+            ),
+        );
+        return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+            reason: "quota_windows_unavailable_after_reprobe",
+        });
+    }
     if let Some(reason) =
         runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Responses)
     {
@@ -15995,11 +16383,11 @@ fn next_runtime_response_candidate_for_route(
         include_code_review,
         upstream_base_url,
         cached_reports,
-        cached_usage_snapshots,
+        mut cached_usage_snapshots,
         profile_usage_auth,
-        retry_backoff_until,
-        transport_backoff_until,
-        route_circuit_open_until,
+        mut retry_backoff_until,
+        mut transport_backoff_until,
+        mut route_circuit_open_until,
         profile_inflight,
         profile_health,
     ) = {
@@ -16181,32 +16569,24 @@ fn next_runtime_response_candidate_for_route(
             }
         });
 
-        let mut runtime = shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        let mut usage_snapshot_changed = false;
         for report in &fresh_reports {
-            runtime.profile_probe_cache.insert(
-                report.name.clone(),
-                RuntimeProfileProbeCacheEntry {
-                    checked_at: now,
-                    auth: report.auth.clone(),
-                    result: report.result.clone(),
-                },
-            );
-            if let Ok(usage) = report.result.as_ref() {
-                runtime.profile_usage_snapshots.insert(
-                    report.name.clone(),
-                    runtime_profile_usage_snapshot_from_usage(usage),
-                );
-                usage_snapshot_changed = true;
-            }
+            apply_runtime_profile_probe_result(
+                shared,
+                &report.name,
+                report.auth.clone(),
+                report.result.clone(),
+            )?;
         }
-        if usage_snapshot_changed {
-            schedule_runtime_state_save_from_runtime(shared, &runtime, "usage_snapshot:sync_probe");
+        {
+            let runtime = shared
+                .runtime
+                .lock()
+                .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+            cached_usage_snapshots = runtime.profile_usage_snapshots.clone();
+            retry_backoff_until = runtime.profile_retry_backoff_until.clone();
+            transport_backoff_until = runtime.profile_transport_backoff_until.clone();
+            route_circuit_open_until = runtime.profile_route_circuit_open_until.clone();
         }
-        drop(runtime);
 
         for fresh_report in fresh_reports {
             if let Some(existing) = reports
@@ -16917,6 +17297,19 @@ fn runtime_quota_summary_for_route(
     }
 }
 
+fn runtime_quota_summary_blocking_reset_at(
+    summary: RuntimeQuotaSummary,
+    route_kind: RuntimeRouteKind,
+) -> Option<i64> {
+    let floor_percent = runtime_quota_precommit_floor_percent(route_kind);
+    [summary.five_hour, summary.weekly]
+        .into_iter()
+        .filter(|window| runtime_quota_window_precommit_guard(*window, floor_percent))
+        .map(|window| window.reset_at)
+        .filter(|reset_at| *reset_at != i64::MAX)
+        .max()
+}
+
 fn runtime_profile_usage_snapshot_from_usage(usage: &UsageResponse) -> RuntimeProfileUsageSnapshot {
     let five_hour = runtime_quota_window_summary(usage, "5h");
     let weekly = runtime_quota_window_summary(usage, "weekly");
@@ -16968,6 +17361,199 @@ fn runtime_quota_summary_from_usage_snapshot(
         weekly,
         route_band,
     }
+}
+
+fn runtime_profile_usage_snapshot_hold_active(
+    snapshot: &RuntimeProfileUsageSnapshot,
+    now: i64,
+) -> bool {
+    [
+        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
+        (snapshot.weekly_status, snapshot.weekly_reset_at),
+    ]
+    .into_iter()
+    .any(|(status, reset_at)| {
+        matches!(status, RuntimeQuotaWindowStatus::Exhausted)
+            && reset_at != i64::MAX
+            && reset_at > now
+    })
+}
+
+fn runtime_profile_usage_snapshot_hold_expired(
+    snapshot: &RuntimeProfileUsageSnapshot,
+    now: i64,
+) -> bool {
+    [
+        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
+        (snapshot.weekly_status, snapshot.weekly_reset_at),
+    ]
+    .into_iter()
+    .any(|(status, reset_at)| {
+        matches!(status, RuntimeQuotaWindowStatus::Exhausted)
+            && reset_at != i64::MAX
+            && reset_at <= now
+    })
+}
+
+fn runtime_proxy_quota_reset_at_from_message(message: &str) -> Option<i64> {
+    let marker = message.to_ascii_lowercase().find("try again at ")?;
+    let candidate = message
+        .get(marker + "try again at ".len()..)?
+        .trim()
+        .trim_end_matches('.');
+    let now = Local::now();
+    if let Some((time_text, meridiem)) = candidate
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .get(..2)
+        .and_then(|parts| {
+            if parts.len() == 2 {
+                Some((parts[0], parts[1]))
+            } else {
+                None
+            }
+        })
+        && let Ok(time) =
+            chrono::NaiveTime::parse_from_str(&format!("{time_text} {meridiem}"), "%I:%M %p")
+    {
+        let mut naive = now.date_naive().and_time(time);
+        let mut parsed = Local
+            .from_local_datetime(&naive)
+            .single()
+            .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+        if parsed.timestamp() <= now.timestamp() {
+            naive = naive.checked_add_signed(chrono::Duration::days(1))?;
+            parsed = Local
+                .from_local_datetime(&naive)
+                .single()
+                .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+        }
+        return Some(parsed.timestamp());
+    }
+    let mut parts = candidate
+        .split_whitespace()
+        .map(|part| part.to_string())
+        .collect::<Vec<_>>();
+    if parts.len() < 5 {
+        return None;
+    }
+    let day_digits = parts[1]
+        .trim_end_matches(',')
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if day_digits.is_empty() {
+        return None;
+    }
+    parts[1] = format!("{day_digits},");
+    let normalized = parts[..5].join(" ");
+    let naive = chrono::NaiveDateTime::parse_from_str(&normalized, "%b %d, %Y %I:%M %p").ok()?;
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .or_else(|| Local.from_local_datetime(&naive).earliest())
+        .map(|datetime| datetime.timestamp())
+}
+
+fn runtime_profile_known_quota_reset_at(
+    runtime: &RuntimeRotationState,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> Option<i64> {
+    let now = Local::now().timestamp();
+    runtime
+        .profile_probe_cache
+        .get(profile_name)
+        .and_then(|entry| entry.result.as_ref().ok())
+        .map(|usage| runtime_quota_summary_for_route(usage, route_kind))
+        .and_then(|summary| runtime_quota_summary_blocking_reset_at(summary, route_kind))
+        .filter(|reset_at| *reset_at > now)
+        .or_else(|| {
+            runtime
+                .profile_usage_snapshots
+                .get(profile_name)
+                .and_then(|snapshot| {
+                    runtime_quota_summary_blocking_reset_at(
+                        runtime_quota_summary_from_usage_snapshot(snapshot, route_kind),
+                        route_kind,
+                    )
+                })
+                .filter(|reset_at| *reset_at > now)
+        })
+}
+
+fn mark_runtime_profile_quota_quarantine(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    quota_message: Option<&str>,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    prune_runtime_profile_selection_backoff(&mut runtime, now);
+    let resolved_reset_at = quota_message
+        .and_then(runtime_proxy_quota_reset_at_from_message)
+        .or_else(|| runtime_profile_known_quota_reset_at(&runtime, profile_name, route_kind))
+        .filter(|reset_at| *reset_at > now);
+    let until = resolved_reset_at
+        .unwrap_or_else(|| now.saturating_add(RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS));
+    runtime.profile_probe_cache.remove(profile_name);
+    let snapshot = runtime
+        .profile_usage_snapshots
+        .entry(profile_name.to_string())
+        .or_insert(RuntimeProfileUsageSnapshot {
+            checked_at: now,
+            five_hour_status: RuntimeQuotaWindowStatus::Unknown,
+            five_hour_remaining_percent: 0,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeQuotaWindowStatus::Unknown,
+            weekly_remaining_percent: 0,
+            weekly_reset_at: i64::MAX,
+        });
+    snapshot.checked_at = now;
+    snapshot.five_hour_status = RuntimeQuotaWindowStatus::Exhausted;
+    snapshot.five_hour_remaining_percent = 0;
+    snapshot.five_hour_reset_at = if snapshot.five_hour_reset_at == i64::MAX {
+        until
+    } else {
+        snapshot.five_hour_reset_at.max(until)
+    };
+    snapshot.weekly_status = RuntimeQuotaWindowStatus::Exhausted;
+    snapshot.weekly_remaining_percent = 0;
+    snapshot.weekly_reset_at = if snapshot.weekly_reset_at == i64::MAX {
+        until
+    } else {
+        snapshot.weekly_reset_at.max(until)
+    };
+    runtime
+        .profile_retry_backoff_until
+        .entry(profile_name.to_string())
+        .and_modify(|current| *current = (*current).max(until))
+        .or_insert(until);
+    schedule_runtime_state_save_from_runtime(
+        shared,
+        &runtime,
+        &format!("profile_retry_backoff:{profile_name}"),
+    );
+    drop(runtime);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message={}",
+            runtime_route_kind_label(route_kind),
+            until,
+            resolved_reset_at.unwrap_or(i64::MAX),
+            quota_message.unwrap_or("-"),
+        ),
+    );
+    runtime_proxy_log(
+        shared,
+        format!("profile_retry_backoff profile={profile_name} until={until}"),
+    );
+    Ok(())
 }
 
 fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {
@@ -17254,6 +17840,12 @@ fn runtime_quota_source_label(source: RuntimeQuotaSource) -> &'static str {
 }
 
 fn runtime_usage_snapshot_is_usable(snapshot: &RuntimeProfileUsageSnapshot, now: i64) -> bool {
+    if runtime_profile_usage_snapshot_hold_active(snapshot, now) {
+        return true;
+    }
+    if runtime_profile_usage_snapshot_hold_expired(snapshot, now) {
+        return false;
+    }
     now.saturating_sub(snapshot.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS
 }
 
@@ -21199,6 +21791,27 @@ fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
     }
 
     extract_runtime_proxy_quota_message_from_text(&String::from_utf8_lossy(body))
+}
+
+fn extract_runtime_proxy_quota_message_from_response_reply(
+    response: &RuntimeResponsesReply,
+) -> Option<String> {
+    match response {
+        RuntimeResponsesReply::Buffered(parts) => extract_runtime_proxy_quota_message(&parts.body),
+        RuntimeResponsesReply::Streaming(_) => None,
+    }
+}
+
+fn extract_runtime_proxy_quota_message_from_websocket_payload(
+    payload: &RuntimeWebsocketErrorPayload,
+) -> Option<String> {
+    match payload {
+        RuntimeWebsocketErrorPayload::Text(text) => {
+            extract_runtime_proxy_quota_message_from_text(text)
+        }
+        RuntimeWebsocketErrorPayload::Binary(bytes) => extract_runtime_proxy_quota_message(bytes),
+        RuntimeWebsocketErrorPayload::Empty => None,
+    }
 }
 
 fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<String> {

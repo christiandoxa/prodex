@@ -390,6 +390,22 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             runtime_doctor_marker_count(summary, "precommit_budget_exhausted").to_string(),
         ),
         (
+            "Responses pre-send skips".to_string(),
+            runtime_doctor_marker_count(summary, "responses_pre_send_skip").to_string(),
+        ),
+        (
+            "Websocket pre-send skips".to_string(),
+            runtime_doctor_marker_count(summary, "websocket_pre_send_skip").to_string(),
+        ),
+        (
+            "Quota critical floor pre-send".to_string(),
+            runtime_doctor_marker_count(summary, "quota_critical_floor_before_send").to_string(),
+        ),
+        (
+            "Upstream usage-limit passthrough".to_string(),
+            runtime_doctor_marker_count(summary, "upstream_usage_limit_passthrough").to_string(),
+        ),
+        (
             "Retry backoff".to_string(),
             runtime_doctor_marker_count(summary, "profile_retry_backoff").to_string(),
         ),
@@ -667,6 +683,15 @@ pub(crate) fn runtime_doctor_marker_count(
     summary.marker_counts.get(marker).copied().unwrap_or(0)
 }
 
+fn runtime_doctor_facet_count(summary: &RuntimeDoctorSummary, facet: &str, value: &str) -> usize {
+    summary
+        .facet_counts
+        .get(facet)
+        .and_then(|counts| counts.get(value))
+        .copied()
+        .unwrap_or(0)
+}
+
 fn runtime_doctor_marker_last_field<'a>(
     summary: &'a RuntimeDoctorSummary,
     marker: &str,
@@ -754,6 +779,10 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "profile_latency",
                 "profile_bad_pairing",
                 "profile_probe_refresh_error",
+                "responses_pre_send_skip",
+                "websocket_pre_send_skip",
+                "quota_critical_floor_before_send",
+                "upstream_usage_limit_passthrough",
             ],
         ),
         (
@@ -821,6 +850,17 @@ fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
                     "lag_ms",
                 )
             });
+    // Count quota-floor pre-send skips via the reason facet so the doctor keeps
+    // exposing the hardening signal even though the runtime logs it as a reason,
+    // not as a standalone marker.
+    let quota_floor_before_send_count =
+        runtime_doctor_facet_count(summary, "reason", "quota_critical_floor_before_send");
+    if quota_floor_before_send_count > 0 {
+        *summary
+            .marker_counts
+            .entry("quota_critical_floor_before_send")
+            .or_insert(0) += quota_floor_before_send_count;
+    }
     summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
 }
 
@@ -1282,6 +1322,12 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped.".to_string()
         } else if runtime_doctor_marker_count(&summary, "precommit_budget_exhausted") > 0 {
             "Recent candidate selection exhausted before commit.".to_string()
+        } else if runtime_doctor_marker_count(&summary, "upstream_usage_limit_passthrough") > 0
+            || runtime_doctor_marker_count(&summary, "responses_pre_send_skip") > 0
+            || runtime_doctor_marker_count(&summary, "websocket_pre_send_skip") > 0
+            || runtime_doctor_marker_count(&summary, "quota_critical_floor_before_send") > 0
+        {
+            "Recent quota hardening skipped near-exhausted sends or passed through upstream usage-limit responses.".to_string()
         } else if runtime_doctor_marker_count(&summary, "stream_read_error") > 0 {
             "Recent upstream stream read failure detected after commit.".to_string()
         } else if runtime_doctor_marker_count(&summary, "local_writer_error") > 0 {
@@ -1465,7 +1511,11 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "selection_pick",
         "selection_skip_current",
         "selection_skip_affinity",
+        "responses_pre_send_skip",
+        "websocket_pre_send_skip",
         "quota_release_profile_affinity",
+        "quota_critical_floor_before_send",
+        "upstream_usage_limit_passthrough",
         "websocket_reuse_skip_quota_exhausted",
         "websocket_reuse_watchdog",
         "websocket_precommit_frame_timeout",

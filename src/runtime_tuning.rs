@@ -14,6 +14,14 @@ fn timeout_override_ms(env_key: &str, default_ms: u64) -> u64 {
         .unwrap_or(default_ms)
 }
 
+fn percent_override(env_key: &str, default_value: i64) -> i64 {
+    env::var(env_key)
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default_value)
+}
+
 pub(super) fn usize_override(env_key: &str, default_value: usize) -> usize {
     env::var(env_key)
         .ok()
@@ -188,6 +196,18 @@ pub(super) fn runtime_proxy_long_lived_queue_wait_poll_ms() -> u64 {
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS",
         RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS,
     )
+}
+
+pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
+    percent_override("PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT", 2).clamp(1, 10)
+}
+
+pub(super) fn runtime_startup_sync_probe_warm_limit() -> usize {
+    usize_override(
+        "PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT",
+        RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
+    )
+    .min(RUNTIME_STARTUP_PROBE_WARM_LIMIT)
 }
 
 pub(super) fn toml_string_literal(value: &str) -> String {
