@@ -12206,11 +12206,15 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         body: br#"{"input":[]}"#.to_vec(),
     };
 
-    match attempt_runtime_responses_request(1, &request, &shared, "main", None, false)
+    match attempt_runtime_responses_request(1, &request, &shared, "main", None)
         .expect("responses attempt should succeed")
     {
-        RuntimeResponsesAttempt::LocalSelectionBlocked { profile_name } => {
+        RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name,
+            reason,
+        } => {
             assert_eq!(profile_name, "main");
+            assert_eq!(reason, "quota_exhausted_before_send");
         }
         _ => panic!("expected exhausted pre-send responses skip"),
     }
@@ -13541,6 +13545,133 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
             .get("resp-main")
             .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owner_snapshot_hits_critical_floor(
+) {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let now = Local::now().timestamp();
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-main".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 1,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("responses".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Critical,
+                five_hour_remaining_percent: 1,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 70,
+                weekly_reset_at: now + 86_400,
+            },
+        )]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-main\",\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert!(
+        body.contains("\"resp-second\""),
+        "unexpected HTTP critical-floor fallback body: {body}"
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "critical-floor owner should be blocked before surfacing usage limit: {body}"
+    );
+    assert!(
+        !body.contains("\"previous_response_not_found\""),
+        "previous_response fallback should stay pre-commit: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
     );
 }
 
@@ -20334,20 +20465,18 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
 }
 
 #[test]
-fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_owner_snapshot_is_exhausted()
- {
+fn runtime_proxy_releases_previous_response_affinity_for_websocket_requests_when_owner_snapshot_is_exhausted()
+{
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
-    let third_home = temp_dir.path.join("homes/third");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     write_auth_json(&second_home.join("auth.json"), "second-account");
-    write_auth_json(&third_home.join("auth.json"), "third-account");
 
     let now = Local::now().timestamp();
     let state = AppState {
-        active_profile: Some("third".to_string()),
+        active_profile: Some("second".to_string()),
         profiles: BTreeMap::from([
             (
                 "main".to_string(),
@@ -20363,14 +20492,6 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_ow
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                },
-            ),
-            (
-                "third".to_string(),
-                ProfileEntry {
-                    codex_home: third_home,
-                    managed: true,
-                    email: Some("third@example.com".to_string()),
                 },
             ),
         ]),
@@ -20391,15 +20512,15 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_ow
         &paths,
         &RuntimeContinuationStore {
             response_profile_bindings: BTreeMap::from([(
-                "resp-second".to_string(),
+                "resp-main".to_string(),
                 ResponseProfileBinding {
-                    profile_name: "second".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: now,
                 },
             )]),
             statuses: RuntimeContinuationStatuses {
                 response: BTreeMap::from([(
-                    "resp-second".to_string(),
+                    "resp-main".to_string(),
                     RuntimeContinuationBindingStatus {
                         state: RuntimeContinuationBindingLifecycle::Verified,
                         confidence: 1,
@@ -20421,7 +20542,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_ow
     save_runtime_usage_snapshots(
         &paths,
         &BTreeMap::from([(
-            "second".to_string(),
+            "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
                 five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
@@ -20435,7 +20556,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_ow
     )
     .expect("failed to save runtime usage snapshots");
 
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
 
     let (mut socket, _response) = ws_connect(format!(
@@ -20446,7 +20567,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_ow
     set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
     socket
         .send(WsMessage::Text(
-            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+            "{\"previous_response_id\":\"resp-main\",\"input\":[]}"
                 .to_string()
                 .into(),
         ))
@@ -20484,14 +20605,208 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests_when_ow
     assert!(
         payloads
             .iter()
-            .any(|payload| payload.contains("\"resp-second-next\"")),
-        "unexpected websocket payloads for exhausted owner continuation: {payloads:?}"
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads for exhausted owner fresh fallback: {payloads:?}"
     );
     assert!(
         !payloads
             .iter()
             .any(|payload| payload.contains("\"previous_response_not_found\"")),
-        "continuation should stay on the exhausted owner instead of degrading into previous_response_not_found: {payloads:?}"
+        "previous_response fallback should stay pre-commit: {payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        !state.response_profile_bindings.contains_key("resp-main")
+            && state
+                .response_profile_bindings
+                .get("resp-second")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert!(!persisted.response_profile_bindings.contains_key("resp-main"));
+    assert_eq!(
+        persisted
+            .response_profile_bindings
+            .get("resp-second")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .statuses
+            .response
+            .get("resp-main")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+    });
+    assert_eq!(
+        continuations
+            .statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn runtime_proxy_releases_previous_response_affinity_for_websocket_requests_when_owner_snapshot_hits_critical_floor()
+{
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-main".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 1,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("websocket".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Critical,
+                five_hour_remaining_percent: 1,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 80,
+                weekly_reset_at: now + 86_400,
+            },
+        )]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-main\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for critical-floor fallback payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads for critical-floor fallback: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("You've hit your usage limit")),
+        "critical-floor owner should be blocked before surfacing usage limit: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "previous_response fallback should stay pre-commit: {payloads:?}"
     );
     assert_eq!(
         backend.responses_accounts(),
