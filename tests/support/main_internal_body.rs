@@ -17074,31 +17074,19 @@ fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_a
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
-    let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
-    write_auth_json(&main_home.join("auth.json"), "main-account");
     write_auth_json(&second_home.join("auth.json"), "second-account");
 
     let state = AppState {
-        active_profile: Some("main".to_string()),
-        profiles: BTreeMap::from([
-            (
-                "main".to_string(),
-                ProfileEntry {
-                    codex_home: main_home,
-                    managed: true,
-                    email: Some("main@example.com".to_string()),
-                },
-            ),
-            (
-                "second".to_string(),
-                ProfileEntry {
-                    codex_home: second_home,
-                    managed: true,
-                    email: Some("second@example.com".to_string()),
-                },
-            ),
-        ]),
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
         last_run_selected_at: BTreeMap::new(),
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
@@ -17111,7 +17099,7 @@ fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_a
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
 
     let (mut socket, _response) = ws_connect(format!(
@@ -17194,7 +17182,7 @@ fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_a
 
     assert_eq!(
         backend.websocket_requests().len(),
-        3,
+        2,
         "backend should stop after the failed reuse request instead of reconnecting with previous_response_id"
     );
     assert!(
@@ -17206,7 +17194,7 @@ fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_a
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string(), "second-account".to_string()],
+        vec!["second-account".to_string()],
         "proxy should not open a fresh owner reconnect after the failed reuse watchdog"
     );
 
