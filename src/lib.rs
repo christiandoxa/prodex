@@ -3626,6 +3626,8 @@ struct RuntimeBrokerArgs {
     instance_token: String,
     #[arg(long)]
     admin_token: String,
+    #[arg(long)]
+    listen_addr: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6539,12 +6541,13 @@ fn prepare_runtime_launch(request: RuntimeLaunchRequest<'_>) -> Result<PreparedR
 fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let proxy = start_runtime_rotation_proxy(
+    let proxy = start_runtime_rotation_proxy_with_listen_addr(
         &paths,
         &state,
         &args.current_profile,
         args.upstream_base_url.clone(),
         args.include_code_review,
+        args.listen_addr.as_deref(),
     )?;
     if proxy.owner_lock.is_none() {
         return Ok(());
@@ -6774,6 +6777,7 @@ fn runtime_proxy_codex_args_with_mount_path(
     args
 }
 
+#[cfg(test)]
 fn start_runtime_rotation_proxy(
     paths: &AppPaths,
     state: &AppState,
@@ -6781,15 +6785,65 @@ fn start_runtime_rotation_proxy(
     upstream_base_url: String,
     include_code_review: bool,
 ) -> Result<RuntimeRotationProxy> {
-    let server = Arc::new(
-        TinyServer::http("127.0.0.1:0")
-            .map_err(|err| anyhow::anyhow!("failed to bind runtime auto-rotate proxy: {err}"))?,
-    );
-    let listen_addr = server
-        .server_addr()
-        .to_ip()
-        .context("runtime auto-rotate proxy did not expose a TCP listen address")?;
+    start_runtime_rotation_proxy_with_listen_addr(
+        paths,
+        state,
+        current_profile,
+        upstream_base_url,
+        include_code_review,
+        None,
+    )
+}
+
+fn start_runtime_rotation_proxy_with_listen_addr(
+    paths: &AppPaths,
+    state: &AppState,
+    current_profile: &str,
+    upstream_base_url: String,
+    include_code_review: bool,
+    preferred_listen_addr: Option<&str>,
+) -> Result<RuntimeRotationProxy> {
     let log_path = initialize_runtime_proxy_log_path();
+    let (server, listen_addr) = match preferred_listen_addr {
+        Some(preferred) => match TinyServer::http(preferred) {
+            Ok(server) => {
+                let server = Arc::new(server);
+                let listen_addr = server.server_addr().to_ip().with_context(|| {
+                    format!(
+                        "runtime auto-rotate proxy did not expose a TCP listen address after binding {preferred}"
+                    )
+                })?;
+                (server, listen_addr)
+            }
+            Err(err) => {
+                runtime_proxy_log_to_path(
+                    &log_path,
+                    &format!(
+                        "runtime proxy preferred_listen_addr_unavailable requested={preferred} error={err}"
+                    ),
+                );
+                let server = Arc::new(TinyServer::http("127.0.0.1:0").map_err(|fallback_err| {
+                    anyhow::anyhow!(
+                        "failed to bind runtime auto-rotate proxy on {preferred}: {err}; fallback bind also failed: {fallback_err}"
+                    )
+                })?);
+                let listen_addr = server.server_addr().to_ip().context(
+                    "runtime auto-rotate proxy did not expose a TCP listen address after fallback bind",
+                )?;
+                (server, listen_addr)
+            }
+        },
+        None => {
+            let server = Arc::new(TinyServer::http("127.0.0.1:0").map_err(|err| {
+                anyhow::anyhow!("failed to bind runtime auto-rotate proxy: {err}")
+            })?);
+            let listen_addr = server
+                .server_addr()
+                .to_ip()
+                .context("runtime auto-rotate proxy did not expose a TCP listen address")?;
+            (server, listen_addr)
+        }
+    };
     let owner_lock = try_acquire_runtime_owner_lock(paths)?;
     let persistence_enabled = owner_lock.is_some();
     let async_worker_count = runtime_proxy_async_worker_count();
@@ -22981,6 +23035,7 @@ fn runtime_broker_process_args(
     broker_key: &str,
     instance_token: &str,
     admin_token: &str,
+    listen_addr: Option<&str>,
 ) -> Vec<OsString> {
     let mut args = vec![
         OsString::from("__runtime-broker"),
@@ -23000,6 +23055,10 @@ fn runtime_broker_process_args(
         OsString::from("--admin-token"),
         OsString::from(admin_token),
     ]);
+    if let Some(listen_addr) = listen_addr {
+        args.push(OsString::from("--listen-addr"));
+        args.push(OsString::from(listen_addr));
+    }
     args
 }
 
@@ -23191,6 +23250,7 @@ fn spawn_runtime_broker_process(
     broker_key: &str,
     instance_token: &str,
     admin_token: &str,
+    listen_addr: Option<&str>,
 ) -> Result<()> {
     let current_exe = env::current_exe().context("failed to locate current prodex binary")?;
     Command::new(current_exe)
@@ -23201,6 +23261,7 @@ fn spawn_runtime_broker_process(
             broker_key,
             instance_token,
             admin_token,
+            listen_addr,
         ))
         .env("PRODEX_HOME", &paths.root)
         .stdin(Stdio::null())
@@ -23209,6 +23270,17 @@ fn spawn_runtime_broker_process(
         .spawn()
         .context("failed to spawn runtime broker process")?;
     Ok(())
+}
+
+fn preferred_runtime_broker_listen_addr(
+    paths: &AppPaths,
+    broker_key: &str,
+) -> Result<Option<String>> {
+    Ok(
+        load_runtime_broker_registry(paths, broker_key)?.and_then(|registry| {
+            (!runtime_process_pid_alive(registry.pid)).then_some(registry.listen_addr)
+        }),
+    )
 }
 
 fn ensure_runtime_rotation_proxy_endpoint(
@@ -23220,6 +23292,7 @@ fn ensure_runtime_rotation_proxy_endpoint(
     let broker_key = runtime_broker_key(upstream_base_url, include_code_review);
     let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
     let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
+    let preferred_listen_addr = preferred_runtime_broker_listen_addr(paths, &broker_key)?;
 
     if let Some(existing) = wait_for_existing_runtime_broker_recovery_or_exit(
         paths,
@@ -23268,6 +23341,7 @@ fn ensure_runtime_rotation_proxy_endpoint(
         &broker_key,
         &instance_token,
         &admin_token,
+        preferred_listen_addr.as_deref(),
     )?;
     let registry = wait_for_runtime_broker_ready(paths, &broker_key, &instance_token)?;
     activate_runtime_broker_profile(&registry, current_profile)?;

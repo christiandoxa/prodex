@@ -22754,6 +22754,7 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
         "broker-key",
         "instance",
         "admin",
+        None,
     );
     let without_review: Vec<String> = without_review
         .into_iter()
@@ -22773,6 +22774,7 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
         "broker-key",
         "instance",
         "admin",
+        Some("127.0.0.1:33475"),
     );
     let with_review: Vec<String> = with_review
         .into_iter()
@@ -22790,6 +22792,117 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
             .any(|value| value == "true" || value == "false"),
         "review flag must be encoded as a clap boolean switch"
     );
+    assert!(
+        with_review
+            .windows(2)
+            .any(|pair| pair == ["--listen-addr", "127.0.0.1:33475"]),
+        "listen addr should be forwarded when requested"
+    );
+}
+
+#[test]
+fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "reuse-port-test";
+    save_runtime_broker_registry(
+        &paths,
+        broker_key,
+        &RuntimeBrokerRegistry {
+            pid: 999_999_999,
+            listen_addr: "127.0.0.1:33475".to_string(),
+            started_at: Local::now().timestamp(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            instance_token: "dead-instance".to_string(),
+            admin_token: "secret".to_string(),
+            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        },
+    )
+    .expect("dead broker registry should save");
+
+    assert_eq!(
+        preferred_runtime_broker_listen_addr(&paths, broker_key)
+            .expect("dead broker port lookup should succeed"),
+        Some("127.0.0.1:33475".to_string())
+    );
+
+    save_runtime_broker_registry(
+        &paths,
+        broker_key,
+        &RuntimeBrokerRegistry {
+            pid: std::process::id(),
+            listen_addr: "127.0.0.1:33475".to_string(),
+            started_at: Local::now().timestamp(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            instance_token: "live-instance".to_string(),
+            admin_token: "secret".to_string(),
+            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        },
+    )
+    .expect("live broker registry should save");
+
+    assert_eq!(
+        preferred_runtime_broker_listen_addr(&paths, broker_key)
+            .expect("live broker port lookup should succeed"),
+        None
+    );
+}
+
+#[test]
+fn runtime_rotation_proxy_can_bind_a_requested_listen_addr() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let probe = TcpListener::bind("127.0.0.1:0").expect("probe socket should bind");
+    let requested_addr = probe
+        .local_addr()
+        .expect("probe socket should expose requested addr");
+    drop(probe);
+
+    let proxy = start_runtime_rotation_proxy_with_listen_addr(
+        &paths,
+        &state,
+        "main",
+        backend.base_url(),
+        false,
+        Some(&requested_addr.to_string()),
+    )
+    .expect("runtime proxy should bind requested listen addr");
+
+    assert_eq!(proxy.listen_addr, requested_addr);
 }
 
 #[test]
