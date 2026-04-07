@@ -16553,6 +16553,17 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime pointer should exist");
     let log_path = PathBuf::from(log_path.trim());
+    wait_for_runtime_background_queues_idle();
+    let startup_usage_accounts =
+        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account", "third-account"]);
+    assert_eq!(
+        startup_usage_accounts,
+        vec![
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "third-account".to_string(),
+        ]
+    );
 
     let (mut socket, _response) = ws_connect(format!(
         "ws://{}/backend-api/codex/responses",
