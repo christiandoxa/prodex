@@ -147,6 +147,7 @@ prodex current
 ## 6. Debug the runtime
 
 ```bash
+prodex cleanup
 prodex doctor
 prodex doctor --quota
 prodex doctor --runtime
@@ -158,6 +159,8 @@ If a runtime session looks stalled, inspect the latest proxy log:
 prodex doctor --runtime
 tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 ```
+
+Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, dead broker artifacts, and old orphaned managed profile homes that are no longer tracked.
 
 Useful markers:
 

@@ -287,6 +287,9 @@ Examples:
   prodex doctor --quota
   prodex doctor --runtime
   prodex doctor --runtime --json";
+const CLI_CLEANUP_AFTER_HELP: &str = "\
+Examples:
+  prodex cleanup";
 const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "sessions",
     "archived_sessions",
@@ -3400,6 +3403,11 @@ enum Commands {
     )]
     Doctor(DoctorArgs),
     #[command(
+        about = "Remove stale local runtime logs, temp homes, dead broker artifacts, and orphaned managed homes.",
+        after_help = CLI_CLEANUP_AFTER_HELP
+    )]
+    Cleanup,
+    #[command(
         trailing_var_arg = true,
         about = "Run codex login inside a selected or auto-created profile.",
         after_help = CLI_LOGIN_AFTER_HELP
@@ -4625,6 +4633,7 @@ fn run() -> Result<()> {
         Commands::Current => handle_current_profile(),
         Commands::Info(args) => handle_info(args),
         Commands::Doctor(args) => handle_doctor(args),
+        Commands::Cleanup => handle_cleanup(),
         Commands::Login(args) => handle_codex_login(args),
         Commands::Logout(selector) => handle_codex_logout(selector),
         Commands::Quota(args) => handle_quota(args),
@@ -4670,6 +4679,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "current"
             | "info"
             | "doctor"
+            | "cleanup"
             | "login"
             | "logout"
             | "quota"
@@ -5615,6 +5625,55 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         print_panel(&format!("Profile {}", report.summary.name), &fields);
     }
 
+    Ok(())
+}
+
+fn handle_cleanup() -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let runtime_log_dir = runtime_proxy_log_dir();
+    let summary = perform_prodex_cleanup(&paths, &state)?;
+
+    let fields = vec![
+        ("Prodex root".to_string(), paths.root.display().to_string()),
+        (
+            "Runtime logs".to_string(),
+            format!(
+                "{} removed from {}",
+                summary.runtime_logs_removed,
+                runtime_log_dir.display()
+            ),
+        ),
+        (
+            "Runtime pointer".to_string(),
+            if summary.stale_runtime_log_pointer_removed > 0 {
+                "removed stale latest-pointer file".to_string()
+            } else {
+                "clean".to_string()
+            },
+        ),
+        (
+            "Temp login homes".to_string(),
+            summary.stale_login_dirs_removed.to_string(),
+        ),
+        (
+            "Orphan managed homes".to_string(),
+            summary.orphan_managed_profile_dirs_removed.to_string(),
+        ),
+        (
+            "Dead broker leases".to_string(),
+            summary.dead_runtime_broker_leases_removed.to_string(),
+        ),
+        (
+            "Dead broker registries".to_string(),
+            summary.dead_runtime_broker_registries_removed.to_string(),
+        ),
+        (
+            "Total removed".to_string(),
+            summary.total_removed().to_string(),
+        ),
+    ];
+    print_panel("Cleanup", &fields);
     Ok(())
 }
 
@@ -14047,7 +14106,12 @@ fn runtime_response_event_type(payload: &str) -> Option<String> {
 fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "response.created" | "response.in_progress" | "response.queued"
+        "response.created"
+            | "response.in_progress"
+            | "response.queued"
+            | "response.output_item.added"
+            | "response.content_part.added"
+            | "response.reasoning_summary_part.added"
     )
 }
 

@@ -150,6 +150,7 @@ prodex quota --all
 prodex quota --all --once
 prodex quota --profile main --detail
 prodex info
+prodex cleanup
 prodex doctor
 prodex doctor --quota
 prodex doctor --runtime
@@ -161,6 +162,8 @@ If a runtime session looks stalled, inspect the latest runtime log:
 prodex doctor --runtime
 tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 ```
+
+Use `prodex cleanup` to remove stale local runtime logs, temp login homes, dead broker leases and registries, plus old orphaned managed profile homes that are no longer tracked in state.
 
 ## Notes
 

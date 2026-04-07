@@ -488,6 +488,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyCompactOverloaded,
     HttpOnlyUsageLimitMessage,
+    HttpOnlyDelayedQuotaAfterOutputItemAdded,
     HttpOnlyPlain429,
     Websocket,
     WebsocketDelayedQuotaAfterPrelude,
@@ -542,6 +543,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_usage_limit_message() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
+    }
+
+    fn start_http_delayed_quota_after_output_item_added() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyDelayedQuotaAfterOutputItemAdded)
     }
 
     fn start_http_plain_429() -> Self {
@@ -909,8 +914,26 @@ fn handle_runtime_proxy_backend_request(
                     )
                 }
                 "main-account" => {
-                    let body = if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
-                    {
+                    let body = if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyDelayedQuotaAfterOutputItemAdded
+                    ) {
+                        concat!(
+                            "event: response.created\r\n",
+                            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-main\"}}\r\n",
+                            "\r\n",
+                            "event: response.in_progress\r\n",
+                            "data: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"resp-main\"}}\r\n",
+                            "\r\n",
+                            "event: response.output_item.added\r\n",
+                            "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"id\":\"msg-main\"}}\r\n",
+                            "\r\n",
+                            "event: response.failed\r\n",
+                            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
+                            "\r\n"
+                        )
+                        .to_string()
+                    } else if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) {
                         concat!(
                             "event: response.failed\r\n",
                             "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
@@ -1584,6 +1607,19 @@ fn handle_runtime_proxy_backend_websocket(
                             .into(),
                         ))
                         .expect("response.in_progress should be sent");
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.output_item.added",
+                                "item": {
+                                    "type": "message",
+                                    "id": "msg-main"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.output_item.added should be sent");
                     websocket
                         .send(WsMessage::Text(
                             serde_json::json!({
@@ -3277,6 +3313,12 @@ fn bare_prodex_with_codex_args_defaults_to_run_command() {
         args.codex_args,
         vec![OsString::from("exec"), OsString::from("review this repo")]
     );
+}
+
+#[test]
+fn cleanup_command_does_not_default_to_run() {
+    let command = parse_cli_command_from(["prodex", "cleanup"]).expect("cleanup command");
+    assert!(matches!(command, Commands::Cleanup));
 }
 
 #[test]
@@ -9517,6 +9559,143 @@ fn stale_login_dir_housekeeping_removes_old_temp_login_homes() {
 }
 
 #[test]
+fn perform_prodex_cleanup_removes_safe_local_artifacts() {
+    let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should exist");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+
+    for index in 0..=RUNTIME_PROXY_LOG_RETENTION_COUNT {
+        let path = runtime_log_dir.join(format!(
+            "{RUNTIME_PROXY_LOG_FILE_PREFIX}-cleanup-{index}.log"
+        ));
+        fs::write(path, "log").expect("runtime log should write");
+    }
+    let pointer = runtime_log_dir.join(RUNTIME_PROXY_LATEST_LOG_POINTER);
+    fs::write(
+        &pointer,
+        format!("{}\n", runtime_log_dir.join("missing.log").display()),
+    )
+    .expect("pointer should write");
+
+    let stale_login = paths.root.join(".login-123-1-0");
+    fs::create_dir_all(&stale_login).expect("stale login dir should exist");
+
+    let tracked = paths.managed_profiles_root.join("tracked");
+    fs::create_dir_all(&tracked).expect("tracked dir should exist");
+    fs::write(tracked.join("auth.json"), "{}").expect("tracked auth should be written");
+
+    let orphan = paths.managed_profiles_root.join("orphan");
+    fs::create_dir_all(&orphan).expect("orphan dir should exist");
+    fs::write(orphan.join("auth.json"), "{}").expect("orphan auth should be written");
+
+    let state = AppState {
+        active_profile: Some("tracked".to_string()),
+        profiles: BTreeMap::from([(
+            "tracked".to_string(),
+            ProfileEntry {
+                codex_home: tracked.clone(),
+                managed: true,
+                email: Some("tracked@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let stale_broker_key = "cleanup-stale";
+    save_runtime_broker_registry(
+        &paths,
+        stale_broker_key,
+        &RuntimeBrokerRegistry {
+            pid: 999_999_999,
+            listen_addr: "127.0.0.1:1".to_string(),
+            started_at: 1,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "tracked".to_string(),
+            instance_token: "stale-instance".to_string(),
+            admin_token: "stale-admin".to_string(),
+            openai_mount_path: None,
+        },
+    )
+    .expect("stale runtime broker registry should save");
+    let stale_lease_dir = runtime_broker_lease_dir(&paths, stale_broker_key);
+    fs::create_dir_all(&stale_lease_dir).expect("stale lease dir should exist");
+    let stale_lease = stale_lease_dir.join("999999999-stale.lease");
+    let live_lease = stale_lease_dir.join(format!("{}-live.lease", std::process::id()));
+    fs::write(&stale_lease, "stale").expect("stale lease should write");
+    fs::write(&live_lease, "live").expect("live lease should write");
+
+    let lease_only_key = "cleanup-lease-only";
+    let lease_only_dir = runtime_broker_lease_dir(&paths, lease_only_key);
+    fs::create_dir_all(&lease_only_dir).expect("lease-only dir should exist");
+    let lease_only_stale = lease_only_dir.join("999999998-stale.lease");
+    fs::write(&lease_only_stale, "stale").expect("lease-only stale lease should write");
+
+    let future_offset_seconds = (ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS
+        .max(PROD_EX_TMP_LOGIN_RETENTION_SECONDS)
+        + 5) as u64;
+    let simulated_now = SystemTime::now()
+        .checked_add(Duration::from_secs(future_offset_seconds))
+        .expect("simulated clock should be valid");
+    let summary =
+        perform_prodex_cleanup_at(&paths, &state, &runtime_log_dir, &pointer, simulated_now)
+            .expect("cleanup should succeed");
+
+    let log_count = RUNTIME_PROXY_LOG_RETENTION_COUNT + 1;
+    let expected_runtime_logs_removed =
+        if future_offset_seconds as i64 >= RUNTIME_PROXY_LOG_RETENTION_SECONDS {
+            log_count
+        } else {
+            1
+        };
+    assert_eq!(summary.runtime_logs_removed, expected_runtime_logs_removed);
+    assert_eq!(summary.stale_runtime_log_pointer_removed, 1);
+    assert_eq!(summary.stale_login_dirs_removed, 1);
+    assert_eq!(summary.orphan_managed_profile_dirs_removed, 1);
+    assert_eq!(summary.dead_runtime_broker_leases_removed, 2);
+    assert_eq!(summary.dead_runtime_broker_registries_removed, 1);
+    assert_eq!(
+        summary.total_removed(),
+        expected_runtime_logs_removed + 6
+    );
+
+    assert!(!pointer.exists(), "stale runtime pointer should be removed");
+    assert!(!stale_login.exists(), "stale login dir should be removed");
+    assert!(!orphan.exists(), "orphan managed dir should be removed");
+    assert!(tracked.exists(), "tracked managed dir should remain");
+    assert_eq!(
+        prodex_runtime_log_paths_in_dir(&runtime_log_dir).len(),
+        log_count.saturating_sub(expected_runtime_logs_removed)
+    );
+    assert!(
+        !runtime_broker_registry_file_path(&paths, stale_broker_key).exists(),
+        "stale runtime broker registry should be removed"
+    );
+    assert!(
+        !runtime_broker_registry_last_good_file_path(&paths, stale_broker_key).exists(),
+        "stale runtime broker registry backup should be removed"
+    );
+    assert!(!stale_lease.exists(), "dead lease should be removed");
+    assert!(
+        !lease_only_stale.exists(),
+        "dead lease without registry should be removed"
+    );
+    assert!(live_lease.exists(), "live lease should remain");
+}
+
+#[test]
 fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
     let temp_dir = TestDir::new();
     let now = Local::now().timestamp();
@@ -13409,6 +13588,76 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
     let body = response.text().expect("response body should be readable");
 
     assert!(body.contains("\"response.created\""));
+    assert!(!body.contains("You've hit your usage limit"));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_retries_usage_limited_response_after_output_item_added_on_another_profile() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_delayed_quota_after_output_item_added();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let body = response.text().expect("response body should be readable");
+
+    assert!(body.contains("\"resp-second\""));
     assert!(!body.contains("You've hit your usage limit"));
     assert_eq!(
         backend.responses_accounts(),
