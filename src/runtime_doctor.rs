@@ -60,6 +60,7 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
                         "route": route.route,
                         "circuit_state": route.circuit_state,
                         "circuit_until": route.circuit_until,
+                        "transport_backoff_until": route.transport_backoff_until,
                         "health_score": route.health_score,
                         "bad_pairing_score": route.bad_pairing_score,
                         "performance_score": route.performance_score,
@@ -759,6 +760,8 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
             "transport",
             &[
                 "upstream_connect_timeout",
+                "upstream_connect_dns_error",
+                "upstream_tls_handshake_error",
                 "upstream_connect_error",
                 "stream_read_error",
                 "local_writer_error",
@@ -901,6 +904,12 @@ fn runtime_doctor_profile_summaries(
                     .route_circuit_open_until
                     .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
                     .copied(),
+                transport_backoff_until: runtime_profile_transport_backoff_until_from_map(
+                    &backoffs.transport_backoff_until,
+                    profile_name,
+                    route_kind,
+                    now,
+                ),
                 health_score: runtime_profile_effective_health_score_from_map(
                     scores,
                     &runtime_profile_route_health_key(profile_name, route_kind),
@@ -934,7 +943,11 @@ fn runtime_doctor_profile_summaries(
             quota_freshness: runtime_doctor_quota_freshness_label(snapshot, now),
             quota_age_seconds,
             retry_backoff_until: backoffs.retry_backoff_until.get(profile_name).copied(),
-            transport_backoff_until: backoffs.transport_backoff_until.get(profile_name).copied(),
+            transport_backoff_until: runtime_profile_transport_backoff_max_until(
+                &backoffs.transport_backoff_until,
+                profile_name,
+                now,
+            ),
             routes,
         });
     }
@@ -1081,9 +1094,17 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
         }
     }
     for (profile_name, until) in &backoffs.value.transport_backoff_until {
-        degraded_routes.push(format!(
-            "{profile_name}/transport transport_backoff until={until}"
-        ));
+        if let Some((route, profile_name)) =
+            runtime_profile_transport_backoff_key_parts(profile_name)
+        {
+            degraded_routes.push(format!(
+                "{profile_name}/{route} transport_backoff until={until}"
+            ));
+        } else {
+            degraded_routes.push(format!(
+                "{profile_name}/transport transport_backoff until={until}"
+            ));
+        }
     }
     for (profile_name, until) in &backoffs.value.retry_backoff_until {
         degraded_routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
@@ -1157,6 +1178,8 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
     };
     summary.transport_pressure = if runtime_doctor_marker_count(&summary, "stream_read_error") > 0
         || runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
+        || runtime_doctor_marker_count(&summary, "upstream_connect_dns_error") > 0
+        || runtime_doctor_marker_count(&summary, "upstream_tls_handshake_error") > 0
         || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
         || runtime_doctor_marker_count(&summary, "profile_transport_backoff") > 0
         || runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0
@@ -1264,6 +1287,8 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         } else if runtime_doctor_marker_count(&summary, "local_writer_error") > 0 {
             "Recent local writer failure detected while forwarding an upstream stream.".to_string()
         } else if runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
+            || runtime_doctor_marker_count(&summary, "upstream_connect_dns_error") > 0
+            || runtime_doctor_marker_count(&summary, "upstream_tls_handshake_error") > 0
             || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
         {
             "Recent upstream connect failures detected.".to_string()
@@ -1419,6 +1444,8 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "runtime_proxy_queue_recovered",
         "profile_inflight_saturated",
         "upstream_connect_timeout",
+        "upstream_connect_dns_error",
+        "upstream_tls_handshake_error",
         "upstream_connect_error",
         "precommit_budget_exhausted",
         "profile_retry_backoff",

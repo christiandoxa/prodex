@@ -15,7 +15,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{self, Cursor, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -159,7 +159,6 @@ const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } el
 const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
 const RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY: u32 = 5;
-const RUNTIME_PROFILE_FORWARD_FAILURE_HEALTH_PENALTY: u32 = 3;
 const RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY: u32 = 2;
 const RUNTIME_PROFILE_LATENCY_PENALTY_MAX: u32 = 12;
 const RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE: u32 = 2;
@@ -172,6 +171,7 @@ const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
 const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 300_000 };
 const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 15_000 };
+const RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS: u64 = if cfg!(test) { 10 } else { 200 };
 const RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS: u64 =
     if cfg!(test) { 120 } else { 8_000 };
 const RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS: u64 =
@@ -180,6 +180,7 @@ const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY: usize = 2;
 const RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES: usize = 512 * 1024;
+const RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES: usize = 768 * 1024;
 const RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS: u64 = if cfg!(test) { 2 } else { 10 };
 const RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS: u64 = if cfg!(test) { 40 } else { 1_000 };
 const RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -195,6 +196,7 @@ const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS: i64 = if cfg!(test) { 5 
 const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD: u32 = 2;
 const RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS: i64 = if cfg!(test) { 5 } else { 120 };
 const RUNTIME_CONTINUATION_DEAD_GRACE_SECONDS: i64 = if cfg!(test) { 5 } else { 900 };
+const RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS: i64 = if cfg!(test) { 10 } else { 1_800 };
 const RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT: u32 = 2;
 const RUNTIME_CONTINUATION_CONFIDENCE_MAX: u32 = 8;
 const RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS: u32 = 2;
@@ -1336,6 +1338,13 @@ fn runtime_profiles_needing_startup_probe_refresh(
 }
 
 fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProxyShared) {
+    if runtime_proxy_pressure_mode_active(shared) {
+        runtime_proxy_log(
+            shared,
+            "startup_probe_warmup deferred reason=local_pressure",
+        );
+        return;
+    }
     let (state, current_profile, profile_probe_cache, profile_usage_snapshots) =
         match shared.runtime.lock() {
             Ok(runtime) => (
@@ -1722,6 +1731,32 @@ fn runtime_continuation_status_is_terminal(status: &RuntimeContinuationBindingSt
         || (status.state == RuntimeContinuationBindingLifecycle::Suspect
             && status.confidence == 0
             && status.failure_count > 0)
+}
+
+fn runtime_continuation_status_is_stale_verified(
+    status: &RuntimeContinuationBindingStatus,
+    now: i64,
+) -> bool {
+    status.state == RuntimeContinuationBindingLifecycle::Verified
+        && runtime_continuation_status_last_event_at(status).is_some_and(|last| {
+            now.saturating_sub(last) >= RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS
+        })
+}
+
+fn runtime_age_stale_verified_continuation_status(
+    statuses: &mut RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+) -> bool {
+    let Some(status) = runtime_continuation_status_map_mut(statuses, kind).get_mut(key) else {
+        return false;
+    };
+    if !runtime_continuation_status_is_stale_verified(status, now) {
+        return false;
+    }
+    status.state = RuntimeContinuationBindingLifecycle::Warm;
+    true
 }
 
 fn runtime_continuation_status_should_retain_with_binding(
@@ -2544,9 +2579,9 @@ fn compact_runtime_profile_backoffs(
     backoffs
         .retry_backoff_until
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    backoffs
-        .transport_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    backoffs.transport_backoff_until.retain(|key, until| {
+        runtime_profile_transport_backoff_key_matches_profiles(key, profiles) && *until > now
+    });
     backoffs
         .route_circuit_open_until
         .retain(|route_profile_key, _| {
@@ -2788,6 +2823,79 @@ fn runtime_profile_route_key_parts<'a>(key: &'a str, prefix: &str) -> Option<(&'
     Some((route, profile_name))
 }
 
+fn runtime_profile_transport_backoff_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_transport_backoff__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+fn runtime_profile_transport_backoff_key_parts<'a>(key: &'a str) -> Option<(&'a str, &'a str)> {
+    runtime_profile_route_key_parts(key, "__route_transport_backoff__:")
+}
+
+fn runtime_profile_transport_backoff_profile_name(key: &str) -> &str {
+    runtime_profile_transport_backoff_key_parts(key)
+        .map(|(_, profile_name)| profile_name)
+        .unwrap_or(key)
+}
+
+fn runtime_profile_transport_backoff_key_valid(
+    key: &str,
+    valid_profiles: &BTreeSet<String>,
+) -> bool {
+    runtime_profile_transport_backoff_key_parts(key)
+        .map(|(route, profile_name)| {
+            runtime_route_kind_from_label(route).is_some() && valid_profiles.contains(profile_name)
+        })
+        .unwrap_or_else(|| valid_profiles.contains(key))
+}
+
+fn runtime_profile_transport_backoff_key_matches_profiles(
+    key: &str,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> bool {
+    runtime_profile_transport_backoff_key_parts(key)
+        .map(|(route, profile_name)| {
+            runtime_route_kind_from_label(route).is_some() && profiles.contains_key(profile_name)
+        })
+        .unwrap_or_else(|| profiles.contains_key(key))
+}
+
+fn runtime_profile_transport_backoff_until_from_map(
+    transport_backoff_until: &BTreeMap<String, i64>,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> Option<i64> {
+    let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
+    [
+        transport_backoff_until.get(&route_key).copied(),
+        transport_backoff_until.get(profile_name).copied(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|until| *until > now)
+    .max()
+}
+
+fn runtime_profile_transport_backoff_max_until(
+    transport_backoff_until: &BTreeMap<String, i64>,
+    profile_name: &str,
+    now: i64,
+) -> Option<i64> {
+    transport_backoff_until
+        .iter()
+        .filter(|(key, until)| {
+            runtime_profile_transport_backoff_profile_name(key) == profile_name && **until > now
+        })
+        .map(|(_, until)| *until)
+        .max()
+}
+
 fn merge_runtime_profile_scores(
     existing: &BTreeMap<String, RuntimeProfileHealth>,
     incoming: &BTreeMap<String, RuntimeProfileHealth>,
@@ -2967,9 +3075,9 @@ fn merge_runtime_profile_backoffs(
     merged
         .retry_backoff_until
         .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    merged
-        .transport_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    merged.transport_backoff_until.retain(|key, until| {
+        runtime_profile_transport_backoff_key_matches_profiles(key, profiles) && *until > now
+    });
     merged
         .route_circuit_open_until
         .retain(|route_profile_key, _| {
@@ -4028,6 +4136,7 @@ struct RuntimeDoctorRouteSummary {
     route: String,
     circuit_state: String,
     circuit_until: Option<i64>,
+    transport_backoff_until: Option<i64>,
     health_score: u32,
     bad_pairing_score: u32,
     performance_score: u32,
@@ -4282,6 +4391,7 @@ enum RuntimePrefetchSendOutcome {
 #[derive(Default)]
 struct RuntimePrefetchSharedState {
     terminal_error: Mutex<Option<(io::ErrorKind, String)>>,
+    queued_bytes: AtomicUsize,
 }
 
 struct RuntimePrefetchStream {
@@ -4333,6 +4443,20 @@ enum RuntimeWebsocketConnectResult {
         turn_state: Option<String>,
     },
     QuotaBlocked(RuntimeWebsocketErrorPayload),
+}
+
+#[derive(Debug)]
+struct RuntimeWebsocketTcpConnectSuccess {
+    stream: TcpStream,
+    selected_addr: SocketAddr,
+    resolved_addrs: usize,
+    attempted_addrs: usize,
+}
+
+#[derive(Debug)]
+struct RuntimeWebsocketTcpAttemptResult {
+    addr: SocketAddr,
+    result: io::Result<TcpStream>,
 }
 
 #[derive(Debug, Clone)]
@@ -7238,7 +7362,7 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
     let stale_transport_backoffs = runtime
         .profile_transport_backoff_until
         .keys()
-        .filter(|profile_name| !valid_profiles.contains(*profile_name))
+        .filter(|key| !runtime_profile_transport_backoff_key_valid(key, &valid_profiles))
         .count();
     let stale_route_circuits = runtime
         .profile_route_circuit_open_until
@@ -7282,7 +7406,7 @@ fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
         .retain(|profile_name, _| valid_profiles.contains(profile_name));
     runtime
         .profile_transport_backoff_until
-        .retain(|profile_name, _| valid_profiles.contains(profile_name));
+        .retain(|key, _| runtime_profile_transport_backoff_key_valid(key, &valid_profiles));
     runtime
         .profile_route_circuit_open_until
         .retain(|key, _| valid_profiles.contains(runtime_profile_route_circuit_profile_name(key)));
@@ -8756,6 +8880,26 @@ fn runtime_touch_compact_lineage_binding(
     } else {
         RuntimeContinuationBindingKind::TurnState
     };
+    if runtime_age_stale_verified_continuation_status(
+        &mut runtime.continuation_statuses,
+        status_kind,
+        key,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity={} profile=- reason=continuation_stale key={key}",
+                if session_binding {
+                    "compact_session"
+                } else {
+                    "compact_turn_state"
+                }
+            ),
+        );
+        schedule_runtime_binding_touch_save(shared, runtime, &format!("continuation_stale:{key}"));
+        return None;
+    }
     if runtime_continuation_status_recently_suspect(
         &runtime.continuation_statuses,
         status_kind,
@@ -9030,6 +9174,27 @@ fn runtime_response_bound_profile(
         .get(previous_response_id)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if runtime_age_stale_verified_continuation_status(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::Response,
+        previous_response_id,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route={} affinity=previous_response profile={} reason=continuation_stale response_id={previous_response_id}",
+                runtime_route_kind_label(route_kind),
+                profile_name.as_deref().unwrap_or("-"),
+            ),
+        );
+        schedule_runtime_binding_touch_save(
+            shared,
+            &runtime,
+            &format!("continuation_stale:{previous_response_id}"),
+        );
+        return Ok(None);
+    }
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::Response,
@@ -9121,6 +9286,31 @@ fn runtime_turn_state_bound_profile(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
+    let profile_name = runtime
+        .turn_state_bindings
+        .get(turn_state)
+        .map(|binding| binding.profile_name.clone())
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if runtime_age_stale_verified_continuation_status(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::TurnState,
+        turn_state,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=responses affinity=turn_state profile={} reason=continuation_stale turn_state={turn_state}",
+                profile_name.as_deref().unwrap_or("-"),
+            ),
+        );
+        schedule_runtime_binding_touch_save(
+            shared,
+            &runtime,
+            &format!("continuation_stale:{turn_state}"),
+        );
+        return Ok(None);
+    }
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::TurnState,
@@ -9150,11 +9340,6 @@ fn runtime_turn_state_bound_profile(
         );
         return Ok(None);
     }
-    let profile_name = runtime
-        .turn_state_bindings
-        .get(turn_state)
-        .map(|binding| binding.profile_name.clone())
-        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
     let mut touched = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = runtime.turn_state_bindings.get_mut(turn_state)
@@ -9192,6 +9377,31 @@ fn runtime_session_bound_profile(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
+    let profile_name = runtime
+        .session_id_bindings
+        .get(session_id)
+        .map(|binding| binding.profile_name.clone())
+        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
+    if runtime_age_stale_verified_continuation_status(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::SessionId,
+        session_id,
+        now,
+    ) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity=session_id profile={} reason=continuation_stale session_id={session_id}",
+                profile_name.as_deref().unwrap_or("-"),
+            ),
+        );
+        schedule_runtime_binding_touch_save(
+            shared,
+            &runtime,
+            &format!("continuation_stale:{session_id}"),
+        );
+        return Ok(None);
+    }
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::SessionId,
@@ -9221,11 +9431,6 @@ fn runtime_session_bound_profile(
         );
         return Ok(None);
     }
-    let profile_name = runtime
-        .session_id_bindings
-        .get(session_id)
-        .map(|binding| binding.profile_name.clone())
-        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
     let mut touched = false;
     if let Some(profile_name) = profile_name.as_deref() {
         if let Some(binding) = runtime.session_id_bindings.get_mut(session_id)
@@ -10572,6 +10777,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
     let (
         current_profile,
         codex_home,
@@ -10604,7 +10810,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 name != &runtime.current_profile
                     && read_auth_summary(&profile.codex_home).quota_compatible
             }),
-            runtime_profile_in_selection_backoff(&runtime, &runtime.current_profile, now),
+            runtime_profile_in_selection_backoff(
+                &runtime,
+                &runtime.current_profile,
+                route_kind,
+                now,
+            ),
             runtime_profile_route_circuit_open_until(
                 &runtime,
                 &runtime.current_profile,
@@ -10629,6 +10840,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
     };
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let quota_evidence_required =
         has_alternative_quota_compatible_profile && quota_source.is_none();
     let live_quota_probe_required = has_alternative_quota_compatible_profile
@@ -10649,7 +10861,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
         || performance_score > 0
         || quota_evidence_required
         || live_quota_probe_required
-        || inflight_count >= RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT
+        || inflight_count >= inflight_soft_limit
         || quota_band_blocks_current
     {
         let reason = if auth_failure_active {
@@ -10685,7 +10897,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route(
                 inflight_count,
                 health_score,
                 performance_score,
-                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+                inflight_soft_limit,
                 circuit_open_until.unwrap_or_default(),
                 quota_source
                     .map(runtime_quota_source_label)
@@ -12301,7 +12513,9 @@ fn attempt_runtime_websocket_request(
                 profile_name,
                 turn_state_override,
             )? {
-                RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (
+                RuntimeWebsocketConnectResult::Connected {
+                    socket, turn_state, ..
+                } => (
                     socket,
                     turn_state,
                     Some(acquire_runtime_profile_inflight_guard(
@@ -12779,31 +12993,36 @@ fn connect_runtime_proxy_upstream_websocket(
     }
     let started_at = Instant::now();
     match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
-        Ok((socket, response)) => Ok(RuntimeWebsocketConnectResult::Connected {
-            socket,
-            turn_state: {
-                let turn_state = runtime_proxy_tungstenite_header_value(
-                    response.headers(),
-                    "x-codex-turn-state",
-                );
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=websocket upstream_connect_ok profile={profile_name} status={} turn_state={:?}",
-                        response.status().as_u16(),
-                        turn_state
-                    ),
-                );
-                note_runtime_profile_latency_observation(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    "connect",
-                    started_at.elapsed().as_millis() as u64,
-                );
-                turn_state
-            },
-        }),
+        Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
+            Ok(RuntimeWebsocketConnectResult::Connected {
+                socket,
+                turn_state: {
+                    let turn_state = runtime_proxy_tungstenite_header_value(
+                        response.headers(),
+                        "x-codex-turn-state",
+                    );
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=websocket upstream_connect_ok profile={profile_name} status={} addr={} resolved_addrs={} attempted_addrs={} turn_state={:?}",
+                            response.status().as_u16(),
+                            selected_addr,
+                            resolved_addrs,
+                            attempted_addrs,
+                            turn_state
+                        ),
+                    );
+                    note_runtime_profile_latency_observation(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Websocket,
+                        "connect",
+                        started_at.elapsed().as_millis() as u64,
+                    );
+                    turn_state
+                },
+            })
+        }
         Err(WsError::Http(response)) => {
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
@@ -12832,11 +13051,14 @@ fn connect_runtime_proxy_upstream_websocket(
             bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
         }
         Err(err) => {
-            runtime_proxy_log(
+            let failure_kind = runtime_transport_failure_kind_from_ws(&err);
+            log_runtime_upstream_connect_failure(
                 shared,
-                format!(
-                    "request={request_id} transport=websocket upstream_connect_error profile={profile_name} error={err}"
-                ),
+                request_id,
+                "websocket",
+                profile_name,
+                failure_kind,
+                &err,
             );
             let transport_error =
                 anyhow::anyhow!("failed to connect runtime websocket upstream: {err}");
@@ -12869,12 +13091,24 @@ fn connect_runtime_proxy_upstream_websocket_with_timeout(
     (
         RuntimeUpstreamWebSocket,
         tungstenite::handshake::client::Response,
+        SocketAddr,
+        usize,
+        usize,
     ),
     WsError,
 > {
     let stream = connect_runtime_proxy_upstream_tcp_stream(request.uri())?;
-    match client_tls_with_config(request, stream, None, None) {
-        Ok((socket, response)) => Ok((socket, response)),
+    let selected_addr = stream.selected_addr;
+    let resolved_addrs = stream.resolved_addrs;
+    let attempted_addrs = stream.attempted_addrs;
+    match client_tls_with_config(request, stream.stream, None, None) {
+        Ok((socket, response)) => Ok((
+            socket,
+            response,
+            selected_addr,
+            resolved_addrs,
+            attempted_addrs,
+        )),
         Err(WsHandshakeError::Failure(err)) => Err(err),
         Err(WsHandshakeError::Interrupted(_)) => {
             unreachable!("blocking upstream websocket handshake should not interrupt")
@@ -12882,9 +13116,56 @@ fn connect_runtime_proxy_upstream_websocket_with_timeout(
     }
 }
 
+fn runtime_interleave_socket_addrs(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let (mut primary, mut secondary): (VecDeque<_>, VecDeque<_>) =
+        addrs.into_iter().partition(|addr| addr.is_ipv6());
+    let prefer_ipv6 = primary.front().is_some();
+    if !prefer_ipv6 {
+        std::mem::swap(&mut primary, &mut secondary);
+    }
+
+    let mut ordered = Vec::with_capacity(primary.len().saturating_add(secondary.len()));
+    loop {
+        let mut progressed = false;
+        if let Some(addr) = primary.pop_front() {
+            ordered.push(addr);
+            progressed = true;
+        }
+        if let Some(addr) = secondary.pop_front() {
+            ordered.push(addr);
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
+    }
+    ordered
+}
+
+fn runtime_configure_upstream_tcp_stream(
+    stream: &TcpStream,
+    io_timeout: Duration,
+) -> io::Result<()> {
+    stream.set_nodelay(true)?;
+    stream.set_read_timeout(Some(io_timeout))?;
+    stream.set_write_timeout(Some(io_timeout))?;
+    Ok(())
+}
+
+fn runtime_launch_websocket_tcp_connect_attempt(
+    sender: mpsc::Sender<RuntimeWebsocketTcpAttemptResult>,
+    addr: SocketAddr,
+    connect_timeout: Duration,
+) {
+    thread::spawn(move || {
+        let result = TcpStream::connect_timeout(&addr, connect_timeout);
+        let _ = sender.send(RuntimeWebsocketTcpAttemptResult { addr, result });
+    });
+}
+
 fn connect_runtime_proxy_upstream_tcp_stream(
     uri: &tungstenite::http::Uri,
-) -> std::result::Result<TcpStream, WsError> {
+) -> std::result::Result<RuntimeWebsocketTcpConnectSuccess, WsError> {
     let host = uri.host().ok_or(WsError::Url(WsUrlError::NoHostName))?;
     let host = if host.starts_with('[') && host.ends_with(']') {
         &host[1..host.len() - 1]
@@ -12897,22 +13178,82 @@ fn connect_runtime_proxy_upstream_tcp_stream(
     });
     let connect_timeout = Duration::from_millis(runtime_proxy_websocket_connect_timeout_ms());
     let io_timeout = Duration::from_millis(runtime_proxy_websocket_precommit_progress_timeout_ms());
-    let addrs = (host, port).to_socket_addrs().map_err(WsError::Io)?;
+    let happy_eyeballs_delay =
+        Duration::from_millis(runtime_proxy_websocket_happy_eyeballs_delay_ms());
+    let addrs = runtime_interleave_socket_addrs(
+        (host, port)
+            .to_socket_addrs()
+            .map_err(WsError::Io)?
+            .collect(),
+    );
+    if addrs.is_empty() {
+        return Err(WsError::Url(WsUrlError::UnableToConnect(uri.to_string())));
+    }
 
-    for addr in addrs {
-        if let Ok(stream) = TcpStream::connect_timeout(&addr, connect_timeout) {
-            stream.set_nodelay(true).map_err(WsError::Io)?;
-            stream
-                .set_read_timeout(Some(io_timeout))
-                .map_err(WsError::Io)?;
-            stream
-                .set_write_timeout(Some(io_timeout))
-                .map_err(WsError::Io)?;
-            return Ok(stream);
+    let resolved_addrs = addrs.len();
+    let (sender, receiver) = mpsc::channel::<RuntimeWebsocketTcpAttemptResult>();
+    let mut next_index = 0usize;
+    let mut attempted_addrs = 0usize;
+    let mut in_flight = 0usize;
+    let mut last_error = None;
+
+    while next_index < addrs.len() || in_flight > 0 {
+        if in_flight == 0 && next_index < addrs.len() {
+            runtime_launch_websocket_tcp_connect_attempt(
+                sender.clone(),
+                addrs[next_index],
+                connect_timeout,
+            );
+            next_index += 1;
+            attempted_addrs += 1;
+            in_flight += 1;
+        }
+
+        let next = if in_flight == 1 && next_index < addrs.len() && !happy_eyeballs_delay.is_zero()
+        {
+            match receiver.recv_timeout(happy_eyeballs_delay) {
+                Ok(result) => Some(result),
+                Err(RecvTimeoutError::Timeout) => {
+                    runtime_launch_websocket_tcp_connect_attempt(
+                        sender.clone(),
+                        addrs[next_index],
+                        connect_timeout,
+                    );
+                    next_index += 1;
+                    attempted_addrs += 1;
+                    in_flight += 1;
+                    receiver.recv().ok()
+                }
+                Err(RecvTimeoutError::Disconnected) => None,
+            }
+        } else {
+            receiver.recv().ok()
+        };
+
+        let Some(result) = next else {
+            break;
+        };
+        in_flight = in_flight.saturating_sub(1);
+        match result.result {
+            Ok(stream) => {
+                runtime_configure_upstream_tcp_stream(&stream, io_timeout).map_err(WsError::Io)?;
+                return Ok(RuntimeWebsocketTcpConnectSuccess {
+                    stream,
+                    selected_addr: result.addr,
+                    resolved_addrs,
+                    attempted_addrs,
+                });
+            }
+            Err(err) => {
+                last_error = Some(err);
+            }
         }
     }
 
-    Err(WsError::Url(WsUrlError::UnableToConnect(uri.to_string())))
+    match last_error {
+        Some(err) => Err(WsError::Io(err)),
+        None => Err(WsError::Url(WsUrlError::UnableToConnect(uri.to_string()))),
+    }
 }
 
 fn send_runtime_proxy_websocket_error(
@@ -14961,6 +15302,8 @@ fn next_runtime_response_candidate_for_route(
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
         state,
         current_profile,
@@ -15090,9 +15433,14 @@ fn next_runtime_response_candidate_for_route(
                 now,
             )
         })
+        .filter(|candidate| {
+            runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
+                < inflight_soft_limit
+        })
         .map(|candidate| candidate.order_index)
         .min();
-    let should_sync_probe_cold_start = !cold_start_probe_jobs.is_empty()
+    let should_sync_probe_cold_start = !pressure_mode
+        && !cold_start_probe_jobs.is_empty()
         && (candidates.is_empty()
             || best_candidate_order_index.is_none()
             || best_candidate_order_index.is_some_and(|best_order_index| {
@@ -15100,6 +15448,16 @@ fn next_runtime_response_candidate_for_route(
                     .iter()
                     .any(|job| job.order_index < best_order_index)
             }));
+    if pressure_mode && !cold_start_probe_jobs.is_empty() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_sync_probe route={} reason=pressure_mode cold_start_jobs={}",
+                runtime_route_kind_label(route_kind),
+                cold_start_probe_jobs.len(),
+            ),
+        );
+    }
 
     if should_sync_probe_cold_start {
         let base_url = Some(upstream_base_url.clone());
@@ -15188,6 +15546,16 @@ fn next_runtime_response_candidate_for_route(
             schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
         }
     } else {
+        if pressure_mode && !cold_start_probe_jobs.is_empty() {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_sync_probe route={} reason=pressure_mode cold_start_profiles={}",
+                    runtime_route_kind_label(route_kind),
+                    cold_start_probe_jobs.len()
+                ),
+            );
+        }
         for job in cold_start_probe_jobs {
             schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
         }
@@ -15222,6 +15590,7 @@ fn next_runtime_response_candidate_for_route(
         )
     });
     for (index, candidate) in ready_candidates {
+        let inflight = runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight);
         if runtime_profile_auth_failure_active_with_auth_cache(
             &profile_health,
             &profile_usage_auth,
@@ -15234,7 +15603,7 @@ fn next_runtime_response_candidate_for_route(
                     "selection_skip_current route={} profile={} reason=auth_failure_backoff inflight={} health={} quota_source={} {}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
-                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    inflight,
                     runtime_profile_health_sort_key(
                         &candidate.name,
                         &profile_health,
@@ -15246,6 +15615,28 @@ fn next_runtime_response_candidate_for_route(
                         &candidate.usage,
                         route_kind
                     )),
+                ),
+            );
+            continue;
+        }
+        if inflight >= inflight_soft_limit {
+            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=profile_inflight_soft_limit inflight={} soft_limit={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    inflight,
+                    inflight_soft_limit,
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(quota_summary),
                 ),
             );
             continue;
@@ -15262,7 +15653,7 @@ fn next_runtime_response_candidate_for_route(
                     "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
-                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    inflight,
                     runtime_profile_health_sort_key(
                         &candidate.name,
                         &profile_health,
@@ -15282,7 +15673,7 @@ fn next_runtime_response_candidate_for_route(
                 "selection_pick route={} profile={} mode=ready inflight={} health={} order={} {}",
                 runtime_route_kind_label(route_kind),
                 candidate.name,
-                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                inflight,
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
                 index,
                 format!(
@@ -15471,13 +15862,16 @@ fn runtime_profile_in_retry_backoff(
 fn runtime_profile_in_transport_backoff(
     runtime: &RuntimeRotationState,
     profile_name: &str,
+    route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    runtime
-        .profile_transport_backoff_until
-        .get(profile_name)
-        .copied()
-        .is_some_and(|until| until > now)
+    runtime_profile_transport_backoff_until_from_map(
+        &runtime.profile_transport_backoff_until,
+        profile_name,
+        route_kind,
+        now,
+    )
+    .is_some()
 }
 
 fn runtime_profile_inflight_count(runtime: &RuntimeRotationState, profile_name: &str) -> usize {
@@ -15509,10 +15903,11 @@ fn runtime_profile_inflight_hard_limited_for_context(
 fn runtime_profile_in_selection_backoff(
     runtime: &RuntimeRotationState,
     profile_name: &str,
+    route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
     runtime_profile_in_retry_backoff(runtime, profile_name, now)
-        || runtime_profile_in_transport_backoff(runtime, profile_name, now)
+        || runtime_profile_in_transport_backoff(runtime, profile_name, route_kind, now)
 }
 
 fn runtime_profile_health_score(
@@ -15648,10 +16043,13 @@ fn runtime_profile_name_in_selection_backoff(
         .get(profile_name)
         .copied()
         .is_some_and(|until| until > now)
-        || transport_backoff_until
-            .get(profile_name)
-            .copied()
-            .is_some_and(|until| until > now)
+        || runtime_profile_transport_backoff_until_from_map(
+            transport_backoff_until,
+            profile_name,
+            route_kind,
+            now,
+        )
+        .is_some()
         || route_circuit_open_until
             .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
             .copied()
@@ -15670,10 +16068,12 @@ fn runtime_profile_backoff_sort_key(
         .get(profile_name)
         .copied()
         .filter(|until| *until > now);
-    let transport_until = transport_backoff_until
-        .get(profile_name)
-        .copied()
-        .filter(|until| *until > now);
+    let transport_until = runtime_profile_transport_backoff_until_from_map(
+        transport_backoff_until,
+        profile_name,
+        route_kind,
+        now,
+    );
     let circuit_until = route_circuit_open_until
         .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
         .copied()
@@ -15763,6 +16163,17 @@ fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static
         RuntimeRouteKind::Compact => "compact_http",
         RuntimeRouteKind::Websocket => "websocket_session",
         RuntimeRouteKind::Standard => "standard_http",
+    }
+}
+
+fn runtime_profile_inflight_soft_limit(route_kind: RuntimeRouteKind, pressure_mode: bool) -> usize {
+    let base = RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT.max(1);
+    if !pressure_mode {
+        return base;
+    }
+    match route_kind {
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => base.saturating_sub(1).max(1),
+        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => base.saturating_sub(2).max(1),
     }
 }
 
@@ -16541,19 +16952,185 @@ fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
     }
 }
 
-fn runtime_profile_transport_health_penalty(context: &str) -> u32 {
-    if context.contains("connect") || context.contains("handshake") || context.contains("timeout") {
-        RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY
-    } else if context.contains("stream_read") || context.contains("upstream_read") {
-        RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY
-    } else if context.contains("forward_response")
-        || context.contains("buffer_response")
-        || context.contains("prepare_success")
-        || context.contains("upstream_send")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeTransportFailureKind {
+    Dns,
+    ConnectTimeout,
+    ConnectRefused,
+    ConnectReset,
+    TlsHandshake,
+    ConnectionAborted,
+    BrokenPipe,
+    UnexpectedEof,
+    ReadTimeout,
+    UpstreamClosedBeforeCommit,
+    Other,
+}
+
+fn runtime_transport_failure_kind_label(kind: RuntimeTransportFailureKind) -> &'static str {
+    match kind {
+        RuntimeTransportFailureKind::Dns => "dns",
+        RuntimeTransportFailureKind::ConnectTimeout => "connect_timeout",
+        RuntimeTransportFailureKind::ConnectRefused => "connection_refused",
+        RuntimeTransportFailureKind::ConnectReset => "connection_reset",
+        RuntimeTransportFailureKind::TlsHandshake => "tls_handshake",
+        RuntimeTransportFailureKind::ConnectionAborted => "connection_aborted",
+        RuntimeTransportFailureKind::BrokenPipe => "broken_pipe",
+        RuntimeTransportFailureKind::UnexpectedEof => "unexpected_eof",
+        RuntimeTransportFailureKind::ReadTimeout => "read_timeout",
+        RuntimeTransportFailureKind::UpstreamClosedBeforeCommit => "upstream_closed_before_commit",
+        RuntimeTransportFailureKind::Other => "other",
+    }
+}
+
+fn runtime_upstream_connect_failure_marker(
+    failure_kind: Option<RuntimeTransportFailureKind>,
+) -> &'static str {
+    match failure_kind {
+        Some(RuntimeTransportFailureKind::ConnectTimeout)
+        | Some(RuntimeTransportFailureKind::ReadTimeout) => "upstream_connect_timeout",
+        Some(RuntimeTransportFailureKind::Dns) => "upstream_connect_dns_error",
+        Some(RuntimeTransportFailureKind::TlsHandshake) => "upstream_tls_handshake_error",
+        _ => "upstream_connect_error",
+    }
+}
+
+fn log_runtime_upstream_connect_failure(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    transport: &str,
+    profile_name: &str,
+    failure_kind: Option<RuntimeTransportFailureKind>,
+    error: &impl std::fmt::Display,
+) {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport={transport} {} profile={profile_name} class={} error={error}",
+            runtime_upstream_connect_failure_marker(failure_kind),
+            failure_kind
+                .map(runtime_transport_failure_kind_label)
+                .unwrap_or("unknown"),
+        ),
+    );
+}
+
+fn runtime_transport_failure_kind_from_message(
+    message: &str,
+) -> Option<RuntimeTransportFailureKind> {
+    let message = message.to_ascii_lowercase();
+    if message.contains("dns")
+        || message.contains("failed to lookup address information")
+        || message.contains("no such host")
+        || message.contains("name or service not known")
     {
-        RUNTIME_PROFILE_FORWARD_FAILURE_HEALTH_PENALTY
+        Some(RuntimeTransportFailureKind::Dns)
+    } else if message.contains("tls")
+        || message.contains("handshake")
+        || message.contains("certificate")
+    {
+        Some(RuntimeTransportFailureKind::TlsHandshake)
+    } else if message.contains("connection refused") {
+        Some(RuntimeTransportFailureKind::ConnectRefused)
+    } else if message.contains("timed out") || message.contains("timeout") {
+        Some(RuntimeTransportFailureKind::ConnectTimeout)
+    } else if message.contains("connection reset") {
+        Some(RuntimeTransportFailureKind::ConnectReset)
+    } else if message.contains("broken pipe") {
+        Some(RuntimeTransportFailureKind::BrokenPipe)
+    } else if message.contains("unexpected eof") {
+        Some(RuntimeTransportFailureKind::UnexpectedEof)
+    } else if message.contains("connection aborted") {
+        Some(RuntimeTransportFailureKind::ConnectionAborted)
+    } else if message.contains("stream closed before response.completed")
+        || message.contains("closed before response.completed")
+    {
+        Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit)
+    } else if message.contains("unable to connect") {
+        Some(RuntimeTransportFailureKind::Other)
     } else {
-        RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY
+        None
+    }
+}
+
+fn runtime_transport_failure_kind_from_io_error(
+    err: &io::Error,
+) -> Option<RuntimeTransportFailureKind> {
+    match err.kind() {
+        io::ErrorKind::TimedOut => Some(RuntimeTransportFailureKind::ConnectTimeout),
+        io::ErrorKind::ConnectionRefused => Some(RuntimeTransportFailureKind::ConnectRefused),
+        io::ErrorKind::ConnectionReset => Some(RuntimeTransportFailureKind::ConnectReset),
+        io::ErrorKind::ConnectionAborted => Some(RuntimeTransportFailureKind::ConnectionAborted),
+        io::ErrorKind::BrokenPipe => Some(RuntimeTransportFailureKind::BrokenPipe),
+        io::ErrorKind::UnexpectedEof => Some(RuntimeTransportFailureKind::UnexpectedEof),
+        _ => runtime_transport_failure_kind_from_message(&err.to_string()),
+    }
+}
+
+fn runtime_transport_failure_kind_from_reqwest(
+    err: &reqwest::Error,
+) -> Option<RuntimeTransportFailureKind> {
+    if err.is_timeout() {
+        return Some(RuntimeTransportFailureKind::ReadTimeout);
+    }
+    std::error::Error::source(err)
+        .and_then(|source| source.downcast_ref::<io::Error>())
+        .and_then(runtime_transport_failure_kind_from_io_error)
+        .or_else(|| runtime_transport_failure_kind_from_message(&err.to_string()))
+}
+
+fn runtime_transport_failure_kind_from_ws(err: &WsError) -> Option<RuntimeTransportFailureKind> {
+    match err {
+        WsError::Io(io) => runtime_transport_failure_kind_from_io_error(io),
+        WsError::Tls(_) => Some(RuntimeTransportFailureKind::TlsHandshake),
+        WsError::ConnectionClosed | WsError::AlreadyClosed => {
+            Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit)
+        }
+        _ => runtime_transport_failure_kind_from_message(&err.to_string()),
+    }
+}
+
+fn runtime_proxy_transport_failure_kind(
+    err: &anyhow::Error,
+) -> Option<RuntimeTransportFailureKind> {
+    for cause in err.chain() {
+        if let Some(reqwest_error) = cause.downcast_ref::<reqwest::Error>()
+            && let Some(kind) = runtime_transport_failure_kind_from_reqwest(reqwest_error)
+        {
+            return Some(kind);
+        }
+        if let Some(ws_error) = cause.downcast_ref::<WsError>()
+            && let Some(kind) = runtime_transport_failure_kind_from_ws(ws_error)
+        {
+            return Some(kind);
+        }
+        if let Some(io_error) = cause.downcast_ref::<io::Error>()
+            && let Some(kind) = runtime_transport_failure_kind_from_io_error(io_error)
+        {
+            return Some(kind);
+        }
+        if let Some(kind) = runtime_transport_failure_kind_from_message(&cause.to_string()) {
+            return Some(kind);
+        }
+    }
+    None
+}
+
+fn runtime_profile_transport_health_penalty(kind: RuntimeTransportFailureKind) -> u32 {
+    match kind {
+        RuntimeTransportFailureKind::Dns
+        | RuntimeTransportFailureKind::ConnectTimeout
+        | RuntimeTransportFailureKind::ConnectRefused
+        | RuntimeTransportFailureKind::ConnectReset
+        | RuntimeTransportFailureKind::TlsHandshake => {
+            RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY
+        }
+        RuntimeTransportFailureKind::BrokenPipe
+        | RuntimeTransportFailureKind::ConnectionAborted
+        | RuntimeTransportFailureKind::UnexpectedEof
+        | RuntimeTransportFailureKind::ReadTimeout
+        | RuntimeTransportFailureKind::UpstreamClosedBeforeCommit
+        | RuntimeTransportFailureKind::Other => RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
     }
 }
 
@@ -16800,6 +17377,7 @@ fn mark_runtime_profile_retry_backoff(
 fn mark_runtime_profile_transport_backoff(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
+    route_kind: RuntimeRouteKind,
     context: &str,
 ) -> Result<()> {
     let mut runtime = shared
@@ -16809,12 +17387,15 @@ fn mark_runtime_profile_transport_backoff(
     let now = Local::now().timestamp();
     prune_runtime_profile_selection_backoff(&mut runtime, now);
     runtime.profile_probe_cache.remove(profile_name);
-    let existing_remaining = runtime
-        .profile_transport_backoff_until
-        .get(profile_name)
-        .copied()
-        .unwrap_or(now)
-        .saturating_sub(now);
+    let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
+    let existing_remaining = runtime_profile_transport_backoff_until_from_map(
+        &runtime.profile_transport_backoff_until,
+        profile_name,
+        route_kind,
+        now,
+    )
+    .unwrap_or(now)
+    .saturating_sub(now);
     let next_backoff_seconds = if existing_remaining > 0 {
         existing_remaining.saturating_mul(2).clamp(
             RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,
@@ -16826,19 +17407,23 @@ fn mark_runtime_profile_transport_backoff(
     let until = now.saturating_add(next_backoff_seconds);
     runtime
         .profile_transport_backoff_until
-        .entry(profile_name.to_string())
+        .entry(route_key)
         .and_modify(|current| *current = (*current).max(until))
         .or_insert(until);
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!("profile_transport_backoff:{profile_name}"),
+        &format!(
+            "profile_transport_backoff:{profile_name}:{}",
+            runtime_route_kind_label(route_kind)
+        ),
     );
     drop(runtime);
     runtime_proxy_log(
         shared,
         format!(
-            "profile_transport_backoff profile={profile_name} until={until} seconds={next_backoff_seconds} context={context}"
+            "profile_transport_backoff profile={profile_name} route={} until={until} seconds={next_backoff_seconds} context={context}",
+            runtime_route_kind_label(route_kind)
         ),
     );
     Ok(())
@@ -16851,14 +17436,22 @@ fn note_runtime_profile_transport_failure(
     context: &str,
     err: &anyhow::Error,
 ) {
-    if !is_runtime_proxy_transport_failure(err) {
+    let Some(failure_kind) = runtime_proxy_transport_failure_kind(err) else {
         return;
-    }
+    };
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_transport_failure profile={profile_name} route={} class={} context={context}",
+            runtime_route_kind_label(route_kind),
+            runtime_transport_failure_kind_label(failure_kind),
+        ),
+    );
     let _ = bump_runtime_profile_health_score(
         shared,
         profile_name,
         route_kind,
-        runtime_profile_transport_health_penalty(context),
+        runtime_profile_transport_health_penalty(failure_kind),
         context,
     );
     let _ = bump_runtime_profile_bad_pairing_score(
@@ -16869,7 +17462,27 @@ fn note_runtime_profile_transport_failure(
         context,
     );
     note_runtime_profile_latency_failure(shared, profile_name, route_kind, context);
-    let _ = mark_runtime_profile_transport_backoff(shared, profile_name, context);
+    let _ = mark_runtime_profile_transport_backoff(shared, profile_name, route_kind, context);
+}
+
+fn clear_runtime_profile_transport_backoff_for_route(
+    runtime: &mut RuntimeRotationState,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    let mut changed = runtime
+        .profile_transport_backoff_until
+        .remove(&runtime_profile_transport_backoff_key(
+            profile_name,
+            route_kind,
+        ))
+        .is_some();
+    changed = runtime
+        .profile_transport_backoff_until
+        .remove(profile_name)
+        .is_some()
+        || changed;
+    changed
 }
 
 fn commit_runtime_proxy_profile_selection(
@@ -16889,10 +17502,8 @@ fn commit_runtime_proxy_profile_selection(
         .profile_retry_backoff_until
         .remove(profile_name)
         .is_some();
-    let cleared_transport_backoff = runtime
-        .profile_transport_backoff_until
-        .remove(profile_name)
-        .is_some();
+    let cleared_transport_backoff =
+        clear_runtime_profile_transport_backoff_for_route(&mut runtime, profile_name, route_kind);
     let cleared_route_circuit =
         clear_runtime_profile_circuit_for_route(&mut runtime, profile_name, route_kind);
     let cleared_health =
@@ -17050,15 +17661,26 @@ fn send_runtime_proxy_upstream_request(
     if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
         bail!("injected runtime upstream connect failure");
     }
-    let response = shared
+    let response = match shared
         .async_runtime
         .block_on(async move { upstream_request.send().await })
-        .with_context(|| {
-            format!(
+    {
+        Ok(response) => response,
+        Err(err) => {
+            log_runtime_upstream_connect_failure(
+                shared,
+                request_id,
+                "http",
+                profile_name,
+                runtime_transport_failure_kind_from_reqwest(&err),
+                &err,
+            );
+            return Err(anyhow::Error::new(err).context(format!(
                 "failed to proxy runtime request for profile '{}' to {}",
                 profile_name, upstream_url
-            )
-        })?;
+            )));
+        }
+    };
     runtime_proxy_log(
         shared,
         format!(
@@ -17155,15 +17777,26 @@ fn send_runtime_proxy_upstream_responses_request(
     if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
         bail!("injected runtime upstream connect failure");
     }
-    let response = shared
+    let response = match shared
         .async_runtime
         .block_on(async move { upstream_request.send().await })
-        .with_context(|| {
-            format!(
+    {
+        Ok(response) => response,
+        Err(err) => {
+            log_runtime_upstream_connect_failure(
+                shared,
+                request_id,
+                "http",
+                profile_name,
+                runtime_transport_failure_kind_from_reqwest(&err),
+                &err,
+            );
+            return Err(anyhow::Error::new(err).context(format!(
                 "failed to proxy runtime request for profile '{}' to {}",
                 profile_name, upstream_url
-            )
-        })?;
+            )));
+        }
+    };
     runtime_proxy_log(
         shared,
         format!(
@@ -17532,7 +18165,12 @@ impl Read for RuntimePrefetchReader {
                     .receiver
                     .recv_timeout(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms()))
                 {
-                    Ok(chunk) => Some(chunk),
+                    Ok(chunk) => {
+                        if let RuntimePrefetchChunk::Data(bytes) = &chunk {
+                            runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
+                        }
+                        Some(chunk)
+                    }
                     Err(RecvTimeoutError::Timeout) => {
                         self.finished = true;
                         return Err(io::Error::new(
@@ -17853,17 +18491,7 @@ fn runtime_proxy_tungstenite_header_value(
 }
 
 fn is_runtime_proxy_transport_failure(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let message = cause.to_string().to_ascii_lowercase();
-        message.contains("timed out")
-            || message.contains("timeout")
-            || message.contains("connection reset")
-            || message.contains("broken pipe")
-            || message.contains("unexpected eof")
-            || message.contains("connection aborted")
-            || message.contains("stream closed before response.completed")
-            || message.contains("closed before response.completed")
-    })
+    runtime_proxy_transport_failure_kind(err).is_some()
 }
 
 fn build_runtime_proxy_json_error_parts(
@@ -17989,10 +18617,15 @@ impl RuntimePrefetchStream {
         if let Some(chunk) = self.backlog.pop_front() {
             return Ok(chunk);
         }
-        self.receiver
+        let chunk = self
+            .receiver
             .as_ref()
             .expect("runtime prefetch receiver should remain available")
-            .recv_timeout(timeout)
+            .recv_timeout(timeout)?;
+        if let RuntimePrefetchChunk::Data(bytes) = &chunk {
+            runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
+        }
+        Ok(chunk)
     }
 
     fn push_backlog(&mut self, chunk: RuntimePrefetchChunk) {
@@ -18049,18 +18682,52 @@ fn runtime_prefetch_terminal_error(
         .clone()
 }
 
+fn runtime_prefetch_release_queued_bytes(shared: &RuntimePrefetchSharedState, bytes: usize) {
+    if bytes > 0 {
+        shared.queued_bytes.fetch_sub(bytes, Ordering::SeqCst);
+    }
+}
+
 async fn runtime_prefetch_send_with_wait(
     sender: &SyncSender<RuntimePrefetchChunk>,
+    shared: &RuntimePrefetchSharedState,
     chunk: Vec<u8>,
 ) -> RuntimePrefetchSendOutcome {
     let started_at = Instant::now();
     let retry_delay = Duration::from_millis(runtime_proxy_prefetch_backpressure_retry_ms());
     let timeout = Duration::from_millis(runtime_proxy_prefetch_backpressure_timeout_ms());
+    let buffered_limit = runtime_proxy_prefetch_max_buffered_bytes().max(1);
     let mut pending = RuntimePrefetchChunk::Data(chunk);
-    let mut retries = 0;
+    let mut retries = 0usize;
     loop {
+        let chunk_bytes = match &pending {
+            RuntimePrefetchChunk::Data(bytes) => bytes.len(),
+            RuntimePrefetchChunk::End | RuntimePrefetchChunk::Error(_, _) => 0,
+        };
+        let queued_bytes = shared.queued_bytes.load(Ordering::SeqCst);
+        if queued_bytes.saturating_add(chunk_bytes) > buffered_limit {
+            if started_at.elapsed() >= timeout {
+                return RuntimePrefetchSendOutcome::TimedOut {
+                    message: format!(
+                        "runtime prefetch buffered bytes exceeded safe limit ({} > {})",
+                        queued_bytes.saturating_add(chunk_bytes),
+                        buffered_limit
+                    ),
+                };
+            }
+            retries = retries.saturating_add(1);
+            let remaining = timeout.saturating_sub(started_at.elapsed());
+            let sleep_for = retry_delay.min(remaining);
+            if !sleep_for.is_zero() {
+                tokio::time::sleep(sleep_for).await;
+            }
+            continue;
+        }
         match sender.try_send(pending) {
             Ok(()) => {
+                if chunk_bytes > 0 {
+                    shared.queued_bytes.fetch_add(chunk_bytes, Ordering::SeqCst);
+                }
                 return RuntimePrefetchSendOutcome::Sent {
                     wait_ms: started_at.elapsed().as_millis(),
                     retries,
@@ -18147,7 +18814,7 @@ async fn runtime_prefetch_response_chunks(
                     break;
                 }
                 let chunk_bytes = chunk.len();
-                match runtime_prefetch_send_with_wait(&sender, chunk.to_vec()).await {
+                match runtime_prefetch_send_with_wait(&sender, &shared, chunk.to_vec()).await {
                     RuntimePrefetchSendOutcome::Sent { wait_ms, retries } => {
                         if retries > 0 {
                             runtime_proxy_log_to_path(
@@ -18421,19 +19088,16 @@ fn buffer_runtime_proxy_async_response_parts(
 }
 
 fn runtime_reqwest_error_kind(err: &reqwest::Error) -> io::ErrorKind {
-    let message = err.to_string().to_ascii_lowercase();
-    if err.is_timeout() || message.contains("timed out") || message.contains("timeout") {
-        io::ErrorKind::TimedOut
-    } else if message.contains("connection reset") {
-        io::ErrorKind::ConnectionReset
-    } else if message.contains("broken pipe") {
-        io::ErrorKind::BrokenPipe
-    } else if message.contains("connection aborted") {
-        io::ErrorKind::ConnectionAborted
-    } else if message.contains("unexpected eof") {
-        io::ErrorKind::UnexpectedEof
-    } else {
-        io::ErrorKind::Other
+    match runtime_transport_failure_kind_from_reqwest(err) {
+        Some(
+            RuntimeTransportFailureKind::ConnectTimeout | RuntimeTransportFailureKind::ReadTimeout,
+        ) => io::ErrorKind::TimedOut,
+        Some(RuntimeTransportFailureKind::ConnectRefused) => io::ErrorKind::ConnectionRefused,
+        Some(RuntimeTransportFailureKind::ConnectReset) => io::ErrorKind::ConnectionReset,
+        Some(RuntimeTransportFailureKind::ConnectionAborted) => io::ErrorKind::ConnectionAborted,
+        Some(RuntimeTransportFailureKind::BrokenPipe) => io::ErrorKind::BrokenPipe,
+        Some(RuntimeTransportFailureKind::UnexpectedEof) => io::ErrorKind::UnexpectedEof,
+        _ => io::ErrorKind::Other,
     }
 }
 

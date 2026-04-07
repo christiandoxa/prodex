@@ -92,10 +92,24 @@ pub(super) fn runtime_proxy_prefetch_backpressure_timeout_ms() -> u64 {
     )
 }
 
+pub(super) fn runtime_proxy_prefetch_max_buffered_bytes() -> usize {
+    usize_override(
+        "PRODEX_RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES",
+        RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES,
+    )
+}
+
 pub(super) fn runtime_proxy_websocket_connect_timeout_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
         RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS,
+    )
+}
+
+pub(super) fn runtime_proxy_websocket_happy_eyeballs_delay_ms() -> u64 {
+    timeout_override_ms(
+        "PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS",
+        RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS,
     )
 }
 
