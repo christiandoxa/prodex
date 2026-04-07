@@ -123,8 +123,9 @@ jobs:
           # The main test job already covers runtime_proxy_ once. Keep one extra focused
           # stress pass here, but leave the slow continuation-heavy cases to the dedicated
           # rerun step below so they are not paid twice in this loop as well. Keep the
-          # process-global and race-prone cases out of the shared process so the rest of
-          # runtime_proxy_ can use libtest's default parallelism.
+          # process-global and serial-sensitive quota/compact followup cases out of the
+          # shared process so the rest of runtime_proxy_ can use libtest's default
+          # parallelism.
           for iteration in 1; do
             echo "runtime_proxy_ stress iteration ${iteration}"
             cargo test --lib main_internal_tests::runtime_proxy_ -- \
@@ -153,7 +154,15 @@ jobs:
               --skip runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
               --skip runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
               --skip runtime_proxy_keeps_previous_response_affinity_for_http_requests \
-              --skip runtime_proxy_keeps_previous_response_affinity_for_websocket_requests
+              --skip runtime_proxy_keeps_previous_response_affinity_for_websocket_requests \
+              --skip runtime_proxy_restores_compact_followup_owner_across_restart \
+              --skip runtime_proxy_retries_overloaded_compact_on_another_profile \
+              --skip runtime_proxy_retries_quota_blocked_response_on_another_profile \
+              --skip runtime_proxy_reuses_compact_owner_for_followup_until_response_commits \
+              --skip runtime_proxy_retries_usage_limited_response_on_another_profile \
+              --skip runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback \
+              --skip runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
+              --skip runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error
           done
 
       - name: Run serialized runtime-sensitive stress tests
@@ -181,7 +190,15 @@ jobs:
             runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
             runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
             runtime_proxy_keeps_previous_response_affinity_for_http_requests \
-            runtime_proxy_keeps_previous_response_affinity_for_websocket_requests
+            runtime_proxy_keeps_previous_response_affinity_for_websocket_requests \
+            runtime_proxy_restores_compact_followup_owner_across_restart \
+            runtime_proxy_retries_overloaded_compact_on_another_profile \
+            runtime_proxy_retries_quota_blocked_response_on_another_profile \
+            runtime_proxy_reuses_compact_owner_for_followup_until_response_commits \
+            runtime_proxy_retries_usage_limited_response_on_another_profile \
+            runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback \
+            runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
+            runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error
           do
             cargo test -q --lib "main_internal_tests::${test_name}" -- --test-threads=1
           done
