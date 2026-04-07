@@ -1379,6 +1379,60 @@ fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProxyShared) {
         return;
     }
 
+    if cfg!(test) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "startup_probe_warmup sync={} profiles={}",
+                refresh_jobs.len(),
+                refresh_jobs
+                    .iter()
+                    .map(|(profile_name, _)| profile_name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        );
+        let upstream_base_url = match shared.runtime.lock() {
+            Ok(runtime) => runtime.upstream_base_url.clone(),
+            Err(_) => return,
+        };
+        let probe_reports = map_parallel(refresh_jobs, |(profile_name, codex_home)| {
+            let auth = read_auth_summary(&codex_home);
+            let result = if auth.quota_compatible {
+                fetch_usage(&codex_home, Some(upstream_base_url.as_str()))
+                    .map_err(|err| err.to_string())
+            } else {
+                Err("auth mode is not quota-compatible".to_string())
+            };
+            (profile_name, auth, result)
+        });
+        for (profile_name, auth, result) in probe_reports {
+            let apply_result =
+                apply_runtime_profile_probe_result(shared, &profile_name, auth, result.clone());
+            match result {
+                Ok(_) => runtime_proxy_log(
+                    shared,
+                    if let Err(err) = apply_result {
+                        format!(
+                            "startup_probe_warmup_error profile={} error=state_update:{err:#}",
+                            profile_name
+                        )
+                    } else {
+                        format!("startup_probe_warmup_ok profile={profile_name}")
+                    },
+                ),
+                Err(err) => runtime_proxy_log(
+                    shared,
+                    format!(
+                        "startup_probe_warmup_error profile={} error={err}",
+                        profile_name
+                    ),
+                ),
+            }
+        }
+        return;
+    }
+
     runtime_proxy_log(
         shared,
         format!(

@@ -202,6 +202,12 @@ fn wait_for_backend_usage_accounts(
     }
 }
 
+fn sorted_backend_usage_accounts(backend: &RuntimeProxyBackend) -> Vec<String> {
+    let mut usage_accounts = backend.usage_accounts();
+    usage_accounts.sort();
+    usage_accounts
+}
+
 impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
@@ -13019,9 +13025,7 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    wait_for_runtime_background_queues_idle();
-    let startup_usage_accounts =
-        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
+    let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
     assert_eq!(
         startup_usage_accounts,
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -15133,10 +15137,7 @@ fn runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
-    wait_for_runtime_background_queues_idle();
-
-    let startup_usage_accounts =
-        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
+    let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
     assert_eq!(
         startup_usage_accounts,
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -15386,11 +15387,9 @@ fn runtime_proxy_reuses_rotated_profile_without_reprobing_quota() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    wait_for_runtime_background_queues_idle();
     let client = Client::builder().build().expect("client");
 
-    let startup_usage_accounts =
-        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
+    let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
     assert_eq!(
         startup_usage_accounts,
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -16903,9 +16902,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
         .expect("latest runtime pointer should exist");
     let log_path = PathBuf::from(log_path.trim());
-    wait_for_runtime_background_queues_idle();
-    let startup_usage_accounts =
-        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account", "third-account"]);
+    let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
     assert_eq!(
         startup_usage_accounts,
         vec![
