@@ -11573,13 +11573,6 @@ fn proxy_runtime_websocket_text_message(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Websocket,
                             )?;
-                            let released_compact_lineage = release_runtime_compact_lineage(
-                                shared,
-                                &profile_name,
-                                request_session_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                "previous_response_not_found",
-                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -11609,7 +11602,6 @@ fn proxy_runtime_websocket_text_message(
                             if compact_followup_profile
                                 .as_ref()
                                 .is_some_and(|(owner, _)| owner == &profile_name)
-                                || released_compact_lineage
                             {
                                 compact_followup_profile = None;
                             }
@@ -11937,13 +11929,6 @@ fn proxy_runtime_websocket_text_message(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Websocket,
                             )?;
-                            let released_compact_lineage = release_runtime_compact_lineage(
-                                shared,
-                                &profile_name,
-                                request_session_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                "previous_response_not_found",
-                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -11973,7 +11958,6 @@ fn proxy_runtime_websocket_text_message(
                             if compact_followup_profile
                                 .as_ref()
                                 .is_some_and(|(owner, _)| owner == &profile_name)
-                                || released_compact_lineage
                             {
                                 compact_followup_profile = None;
                             }
@@ -12380,13 +12364,6 @@ fn proxy_runtime_websocket_text_message(
                     request_session_id.as_deref(),
                     RuntimeRouteKind::Websocket,
                 )?;
-                let released_compact_lineage = release_runtime_compact_lineage(
-                    shared,
-                    &profile_name,
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    "previous_response_not_found",
-                )?;
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -12415,7 +12392,6 @@ fn proxy_runtime_websocket_text_message(
                 if compact_followup_profile
                     .as_ref()
                     .is_some_and(|(owner, _)| owner == &profile_name)
-                    || released_compact_lineage
                 {
                     compact_followup_profile = None;
                 }
@@ -13404,6 +13380,7 @@ fn proxy_runtime_standard_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
     let request_session_id = runtime_request_session_id(request);
+    let request_turn_state = runtime_request_turn_state(request);
     let mut session_profile = request_session_id
         .as_deref()
         .map(|session_id| runtime_session_bound_profile(shared, session_id))
@@ -13487,11 +13464,33 @@ fn proxy_runtime_standard_request(
     }
 
     let current_profile = runtime_proxy_current_profile(shared)?;
-    let compact_owner_profile = session_profile
-        .clone()
+    let mut compact_followup_profile = runtime_compact_followup_bound_profile(
+        shared,
+        request_turn_state.as_deref(),
+        request_session_id.as_deref(),
+    )?;
+    if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_followup_owner profile={profile_name} source={source}"
+            ),
+        );
+    }
+    let initial_compact_affinity_profile = compact_followup_profile
+        .as_ref()
+        .map(|(profile_name, _)| profile_name.as_str())
+        .or(session_profile.as_deref());
+    let compact_owner_profile = compact_followup_profile
+        .as_ref()
+        .map(|(profile_name, _)| profile_name.clone())
+        .or(session_profile.clone())
         .unwrap_or_else(|| current_profile.clone());
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
-    if runtime_proxy_should_shed_fresh_compact_request(pressure_mode, session_profile.as_deref()) {
+    if runtime_proxy_should_shed_fresh_compact_request(
+        pressure_mode,
+        initial_compact_affinity_profile,
+    ) {
         runtime_proxy_log(
             shared,
             format!(
@@ -13515,7 +13514,7 @@ fn proxy_runtime_standard_request(
         if runtime_proxy_precommit_budget_exhausted(
             selection_started_at,
             selection_attempts,
-            session_profile.is_some(),
+            compact_followup_profile.is_some() || session_profile.is_some(),
             pressure_mode,
         ) {
             runtime_proxy_log(
@@ -13532,11 +13531,13 @@ fn proxy_runtime_standard_request(
                     "service_unavailable",
                     "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                 )),
-                None if session_profile.is_some() => Ok(build_runtime_proxy_json_error_response(
-                    503,
-                    "service_unavailable",
-                    runtime_proxy_local_selection_failure_message(),
-                )),
+                None if compact_followup_profile.is_some() || session_profile.is_some() => {
+                    Ok(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        runtime_proxy_local_selection_failure_message(),
+                    ))
+                }
                 None => match attempt_runtime_standard_request(
                     request_id,
                     request,
@@ -13545,7 +13546,9 @@ fn proxy_runtime_standard_request(
                     runtime_candidate_has_hard_affinity(
                         RuntimeRouteKind::Compact,
                         &compact_owner_profile,
-                        None,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
                         None,
                         None,
                         session_profile.as_deref(),
@@ -13579,7 +13582,9 @@ fn proxy_runtime_standard_request(
         let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             &excluded_profiles,
-            None,
+            compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
             None,
             None,
             session_profile.as_deref(),
@@ -13606,11 +13611,13 @@ fn proxy_runtime_standard_request(
                     "service_unavailable",
                     "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
                 )),
-                None if session_profile.is_some() => Ok(build_runtime_proxy_json_error_response(
-                    503,
-                    "service_unavailable",
-                    runtime_proxy_local_selection_failure_message(),
-                )),
+                None if compact_followup_profile.is_some() || session_profile.is_some() => {
+                    Ok(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        runtime_proxy_local_selection_failure_message(),
+                    ))
+                }
                 None => match attempt_runtime_standard_request(
                     request_id,
                     request,
@@ -13619,7 +13626,9 @@ fn proxy_runtime_standard_request(
                     runtime_candidate_has_hard_affinity(
                         RuntimeRouteKind::Compact,
                         &compact_owner_profile,
-                        None,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
                         None,
                         None,
                         session_profile.as_deref(),
@@ -13661,8 +13670,10 @@ fn proxy_runtime_standard_request(
                 excluded_profiles.len()
             ),
         );
-        let session_affinity_candidate =
-            session_profile.as_deref() == Some(candidate_name.as_str());
+        let session_affinity_candidate = compact_followup_profile
+            .as_ref()
+            .is_some_and(|(owner, _)| owner == &candidate_name)
+            || session_profile.as_deref() == Some(candidate_name.as_str());
         if runtime_profile_inflight_hard_limited_for_context(
             shared,
             &candidate_name,
@@ -13688,7 +13699,9 @@ fn proxy_runtime_standard_request(
             runtime_candidate_has_hard_affinity(
                 RuntimeRouteKind::Compact,
                 &candidate_name,
-                None,
+                compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
                 None,
                 None,
                 session_profile.as_deref(),
@@ -13737,10 +13750,19 @@ fn proxy_runtime_standard_request(
                     if session_profile.as_deref() == Some(profile_name.as_str()) {
                         session_profile = None;
                     }
+                    if compact_followup_profile
+                        .as_ref()
+                        .is_some_and(|(owner, _)| owner == &profile_name)
+                    {
+                        compact_followup_profile = None;
+                    }
                 }
                 let should_retry_same_profile = overload
                     && !conservative_overload_retried_profiles.contains(&profile_name)
-                    && (session_profile.as_deref() == Some(profile_name.as_str())
+                    && (compact_followup_profile
+                        .as_ref()
+                        .is_some_and(|(owner, _)| owner == &profile_name)
+                        || session_profile.as_deref() == Some(profile_name.as_str())
                         || current_profile == profile_name);
                 if should_retry_same_profile {
                     conservative_overload_retried_profiles.insert(profile_name.clone());
@@ -13764,7 +13786,9 @@ fn proxy_runtime_standard_request(
                     && runtime_candidate_has_hard_affinity(
                         RuntimeRouteKind::Compact,
                         &profile_name,
-                        None,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
                         None,
                         None,
                         session_profile.as_deref(),
@@ -14430,13 +14454,6 @@ fn proxy_runtime_responses_request(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Responses,
                             )?;
-                            let released_compact_lineage = release_runtime_compact_lineage(
-                                shared,
-                                &profile_name,
-                                request_session_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                "previous_response_not_found",
-                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -14466,7 +14483,6 @@ fn proxy_runtime_responses_request(
                             if compact_followup_profile
                                 .as_ref()
                                 .is_some_and(|(owner, _)| owner == &profile_name)
-                                || released_compact_lineage
                             {
                                 compact_followup_profile = None;
                             }
@@ -14797,13 +14813,6 @@ fn proxy_runtime_responses_request(
                                 request_session_id.as_deref(),
                                 RuntimeRouteKind::Responses,
                             )?;
-                            let released_compact_lineage = release_runtime_compact_lineage(
-                                shared,
-                                &profile_name,
-                                request_session_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                "previous_response_not_found",
-                            )?;
                             if released_affinity {
                                 runtime_proxy_log(
                                     shared,
@@ -14833,7 +14842,6 @@ fn proxy_runtime_responses_request(
                             if compact_followup_profile
                                 .as_ref()
                                 .is_some_and(|(owner, _)| owner == &profile_name)
-                                || released_compact_lineage
                             {
                                 compact_followup_profile = None;
                             }
@@ -15123,13 +15131,6 @@ fn proxy_runtime_responses_request(
                     request_session_id.as_deref(),
                     RuntimeRouteKind::Responses,
                 )?;
-                let released_compact_lineage = release_runtime_compact_lineage(
-                    shared,
-                    &profile_name,
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    "previous_response_not_found",
-                )?;
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -15158,7 +15159,6 @@ fn proxy_runtime_responses_request(
                 if compact_followup_profile
                     .as_ref()
                     .is_some_and(|(owner, _)| owner == &profile_name)
-                    || released_compact_lineage
                 {
                     compact_followup_profile = None;
                 }

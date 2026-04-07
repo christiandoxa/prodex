@@ -16857,6 +16857,216 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
 }
 
 #[test]
+fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fallback() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    let now = Local::now().timestamp();
+    let compact_key = runtime_compact_session_lineage_key("sess-compact");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-stale".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            session_id_bindings: BTreeMap::from([(
+                compact_key.clone(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-stale".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("websocket".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                session_id: BTreeMap::from([(
+                    compact_key.clone(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("compact".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to seed runtime continuations");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text(
+            "{\"session_id\":\"sess-compact\",\"previous_response_id\":\"resp-stale\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for fallback request")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-third\"")),
+        "previous_response fallback should complete on third-account: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "previous_response_not_found should stay pre-commit: {payloads:?}"
+    );
+
+    let persisted = wait_for_state(&paths, |state| state.active_profile.as_deref() == Some("third"));
+    assert_eq!(persisted.active_profile.as_deref(), Some("third"));
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .session_id_bindings
+            .get(&compact_key)
+            .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(
+        continuations
+            .session_id_bindings
+            .get(&compact_key)
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert_ne!(
+        continuations
+            .statuses
+            .session_id
+            .get(&compact_key)
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+
+    let resumed_compact = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-compact")
+        .body("{\"input\":[],\"instructions\":\"compact-again\"}")
+        .send()
+        .expect("second compact request should succeed");
+    let resumed_turn_state = resumed_compact
+        .headers()
+        .get("x-codex-turn-state")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .expect("second compact response should expose turn state");
+    assert_eq!(resumed_turn_state, "compact-turn-second");
+    assert!(resumed_compact.status().is_success());
+    assert_eq!(
+        resumed_compact
+            .text()
+            .expect("second compact response body should be readable"),
+        "{\"output\":[]}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "second-account".to_string(),
+            "third-account".to_string(),
+            "third-account".to_string(),
+            "second-account".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog()
  {
     let backend = RuntimeProxyBackend::start_websocket_reuse_previous_response_needs_turn_state();
