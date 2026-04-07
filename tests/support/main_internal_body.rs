@@ -763,6 +763,95 @@ fn handle_runtime_proxy_backend_request(
                 "HTTP/1.1 401 Unauthorized"
             };
             (status, "application/json", body, None, None, None)
+        } else if path.ends_with("/backend-api/status") {
+            responses_accounts
+                .lock()
+                .expect("responses_accounts poisoned")
+                .push(account_id.clone());
+            responses_headers
+                .lock()
+                .expect("responses_headers poisoned")
+                .push(captured_headers);
+            match (account_id.as_str(), mode) {
+                ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                    "HTTP/1.1 429 Too Many Requests",
+                    "application/json",
+                    serde_json::json!({
+                        "error": {
+                            "type": "usage_limit_reached",
+                            "message": "The usage limit has been reached",
+                        },
+                        "status": 429
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("main-account", RuntimeProxyBackendMode::HttpOnlyPlain429) => (
+                    "HTTP/1.1 429 Too Many Requests",
+                    "text/plain",
+                    "Too Many Requests".to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("main-account", RuntimeProxyBackendMode::HttpOnlyUnauthorizedMain) => (
+                    "HTTP/1.1 401 Unauthorized",
+                    "application/json",
+                    serde_json::json!({
+                        "error": "unauthorized"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("main-account", _) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "status": "ok",
+                        "account_id": "main-account"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("second-account", _) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "status": "ok",
+                        "account_id": "second-account"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("third-account", _) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "status": "ok",
+                        "account_id": "third-account"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                _ => (
+                    "HTTP/1.1 401 Unauthorized",
+                    "application/json",
+                    serde_json::json!({ "error": "unauthorized" }).to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+            }
         } else if path.ends_with("/backend-api/codex/responses") {
             responses_accounts
                 .lock()
@@ -12957,6 +13046,129 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
         state.active_profile.as_deref() == Some("second")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .get(format!("http://{}/backend-api/status", proxy.listen_addr))
+        .send()
+        .expect("runtime proxy standard request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert!(status.is_success(), "unexpected standard status: {status}");
+    assert!(body.contains("\"status\":\"ok\""));
+    assert!(body.contains("\"account_id\":\"second-account\""));
+    assert!(!body.contains("usage limit"));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
+fn runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_plain_429();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .get(format!("http://{}/backend-api/status", proxy.listen_addr))
+        .send()
+        .expect("runtime proxy standard request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body, "Too Many Requests");
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
 }
 
 #[test]

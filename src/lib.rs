@@ -13391,6 +13391,12 @@ fn proxy_runtime_standard_request(
         let preferred_profile = session_profile
             .clone()
             .unwrap_or_else(|| current_profile.clone());
+        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+        let selection_started_at = Instant::now();
+        let mut selection_attempts = 0usize;
+        let mut excluded_profiles = BTreeSet::new();
+        let mut last_failure = None;
+        let mut saw_inflight_saturation = false;
         let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route(
             shared,
             &preferred_profile,
@@ -13402,65 +13408,168 @@ fn proxy_runtime_standard_request(
         } else {
             quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted
         };
-        if preferred_profile_usable {
-            return proxy_runtime_standard_request_for_profile(
-                request_id,
-                request,
+        if !preferred_profile_usable {
+            runtime_proxy_log(
                 shared,
-                &preferred_profile,
+                format!(
+                    "request={request_id} transport=http {} profile={} reason={} quota_source={} {}",
+                    if preferred_is_session {
+                        format!(
+                            "selection_skip_affinity route={} affinity=session",
+                            runtime_route_kind_label(RuntimeRouteKind::Standard)
+                        )
+                    } else {
+                        format!(
+                            "selection_skip_current route={}",
+                            runtime_route_kind_label(RuntimeRouteKind::Standard)
+                        )
+                    },
+                    preferred_profile,
+                    if preferred_is_session {
+                        runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source)
+                    } else {
+                        runtime_quota_pressure_band_reason(quota_summary.route_band)
+                    },
+                    quota_source
+                        .map(runtime_quota_source_label)
+                        .unwrap_or("unknown"),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
             );
+            excluded_profiles.insert(preferred_profile.clone());
         }
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http {} profile={} reason={} quota_source={} {}",
-                if preferred_is_session {
+
+        loop {
+            if runtime_proxy_precommit_budget_exhausted(
+                selection_started_at,
+                selection_attempts,
+                session_profile.is_some(),
+                pressure_mode,
+            ) {
+                runtime_proxy_log(
+                    shared,
                     format!(
-                        "selection_skip_affinity route={} affinity=session",
-                        runtime_route_kind_label(RuntimeRouteKind::Standard)
-                    )
-                } else {
+                        "request={request_id} transport=http standard_precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
+                        selection_started_at.elapsed().as_millis()
+                    ),
+                );
+                return match last_failure {
+                    Some(response) => Ok(response),
+                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    )),
+                    None => Ok(build_runtime_proxy_text_response(
+                        503,
+                        runtime_proxy_local_selection_failure_message(),
+                    )),
+                };
+            }
+
+            let candidate_name = if excluded_profiles.is_empty() {
+                preferred_profile.clone()
+            } else if let Some(candidate_name) = select_runtime_response_candidate_for_route(
+                shared,
+                &excluded_profiles,
+                None,
+                None,
+                None,
+                None,
+                false,
+                None,
+                RuntimeRouteKind::Standard,
+            )? {
+                candidate_name
+            } else {
+                return match last_failure {
+                    Some(response) => Ok(response),
+                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+                    )),
+                    None => Ok(build_runtime_proxy_text_response(
+                        503,
+                        runtime_proxy_local_selection_failure_message(),
+                    )),
+                };
+            };
+            selection_attempts = selection_attempts.saturating_add(1);
+
+            if runtime_profile_inflight_hard_limited_for_context(
+                shared,
+                &candidate_name,
+                "standard_http",
+            )? {
+                runtime_proxy_log(
+                    shared,
                     format!(
-                        "selection_skip_current route={}",
-                        runtime_route_kind_label(RuntimeRouteKind::Standard)
-                    )
-                },
-                preferred_profile,
-                if preferred_is_session {
-                    runtime_quota_soft_affinity_rejection_reason(quota_summary, quota_source)
-                } else {
-                    runtime_quota_pressure_band_reason(quota_summary.route_band)
-                },
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-        let mut excluded_profiles = BTreeSet::from([preferred_profile]);
-        if let Some(candidate_name) = select_runtime_response_candidate_for_route(
-            shared,
-            &excluded_profiles,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            RuntimeRouteKind::Standard,
-        )? {
-            return proxy_runtime_standard_request_for_profile(
+                        "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}",
+                    ),
+                );
+                excluded_profiles.insert(candidate_name);
+                saw_inflight_saturation = true;
+                continue;
+            }
+
+            match attempt_runtime_noncompact_standard_request(
                 request_id,
                 request,
                 shared,
                 &candidate_name,
-            );
+            )? {
+                RuntimeStandardAttempt::Success {
+                    profile_name: _,
+                    response,
+                } => return Ok(response),
+                RuntimeStandardAttempt::RetryableFailure {
+                    profile_name,
+                    response,
+                    overload: _,
+                } => {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http standard_retryable_failure profile={profile_name}"
+                        ),
+                    );
+                    mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                    let released_affinity = release_runtime_quota_blocked_affinity(
+                        shared,
+                        &profile_name,
+                        None,
+                        None,
+                        request_session_id.as_deref(),
+                    )?;
+                    if session_profile.as_deref() == Some(profile_name.as_str()) {
+                        session_profile = None;
+                    }
+                    if released_affinity {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} route=standard"
+                            ),
+                        );
+                    }
+                    excluded_profiles.insert(profile_name);
+                    last_failure = Some(response);
+                }
+                RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=quota_exhausted_before_send"
+                        ),
+                    );
+                    if session_profile.as_deref() == Some(profile_name.as_str()) {
+                        session_profile = None;
+                    }
+                    excluded_profiles.insert(profile_name);
+                }
+            }
         }
-        excluded_profiles.clear();
-        return Ok(build_runtime_proxy_text_response(
-            503,
-            runtime_proxy_local_selection_failure_message(),
-        ));
     }
 
     let current_profile = runtime_proxy_current_profile(shared)?;
@@ -13845,12 +13954,13 @@ fn proxy_runtime_standard_request(
     }
 }
 
-fn proxy_runtime_standard_request_for_profile(
+fn attempt_runtime_noncompact_standard_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
-) -> Result<tiny_http::ResponseBox> {
+) -> Result<RuntimeStandardAttempt> {
+    let request_session_id = runtime_request_session_id(request);
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Standard)?;
     if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
@@ -13864,10 +13974,9 @@ fn proxy_runtime_standard_request_for_profile(
                 runtime_quota_summary_log_fields(quota_summary),
             ),
         );
-        return Ok(build_runtime_proxy_text_response(
-            503,
-            runtime_proxy_local_selection_failure_message(),
-        ));
+        return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
+            profile_name: profile_name.to_string(),
+        });
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
@@ -13883,12 +13992,6 @@ fn proxy_runtime_standard_request_for_profile(
                 );
                 err
             })?;
-    remember_runtime_session_id(
-        shared,
-        profile_name,
-        runtime_request_session_id(request).as_deref(),
-        RuntimeRouteKind::Standard,
-    )?;
     if request.path_and_query.ends_with("/backend-api/wham/usage") {
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
             .map_err(|err| {
@@ -13904,17 +14007,87 @@ fn proxy_runtime_standard_request_for_profile(
         if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
             update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
         }
-        return Ok(build_runtime_proxy_response_from_parts(parts));
-    }
-    forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
-        note_runtime_profile_transport_failure(
+        remember_runtime_session_id(
             shared,
             profile_name,
+            request_session_id.as_deref(),
             RuntimeRouteKind::Standard,
-            "standard_forward_response",
-            &err,
+        )?;
+        return Ok(RuntimeStandardAttempt::Success {
+            profile_name: profile_name.to_string(),
+            response: build_runtime_proxy_response_from_parts(parts),
+        });
+    }
+    if response.status().is_success() {
+        remember_runtime_session_id(
+            shared,
+            profile_name,
+            request_session_id.as_deref(),
+            RuntimeRouteKind::Standard,
+        )?;
+        let response =
+            forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    "standard_forward_response",
+                    &err,
+                );
+                err
+            })?;
+        return Ok(RuntimeStandardAttempt::Success {
+            profile_name: profile_name.to_string(),
+            response,
+        });
+    }
+
+    let status = response.status().as_u16();
+    let parts =
+        buffer_runtime_proxy_async_response_parts(shared, response, Vec::new()).map_err(|err| {
+            note_runtime_profile_transport_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Standard,
+                "standard_buffer_response",
+                &err,
+            );
+            err
+        })?;
+    let retryable_quota =
+        matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
+    if matches!(status, 403 | 429) && !retryable_quota {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http standard_quota_unclassified profile={profile_name} status={status} body_snippet={}",
+                runtime_proxy_body_snippet(&parts.body, 240),
+            ),
         );
-        err
+    }
+    let response = build_runtime_proxy_response_from_parts(parts);
+
+    if retryable_quota {
+        return Ok(RuntimeStandardAttempt::RetryableFailure {
+            profile_name: profile_name.to_string(),
+            response,
+            overload: false,
+        });
+    }
+
+    if matches!(status, 401 | 403) {
+        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
+    }
+
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        request_session_id.as_deref(),
+        RuntimeRouteKind::Standard,
+    )?;
+    Ok(RuntimeStandardAttempt::Success {
+        profile_name: profile_name.to_string(),
+        response,
     })
 }
 
