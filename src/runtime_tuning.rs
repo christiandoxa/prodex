@@ -191,13 +191,6 @@ pub(super) fn runtime_proxy_pressure_long_lived_queue_wait_budget_ms() -> u64 {
     )
 }
 
-pub(super) fn runtime_proxy_long_lived_queue_wait_poll_ms() -> u64 {
-    timeout_override_ms(
-        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS",
-        RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS,
-    )
-}
-
 pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
     percent_override("PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT", 2).clamp(1, 10)
 }

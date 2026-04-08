@@ -122,7 +122,6 @@ const RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS: i64 = if cfg!(test) { 1 } el
 const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
 const RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
 const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
-const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
 const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 25 } else { 200 };
 const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
     if cfg!(test) { 25 } else { 200 };
@@ -1291,11 +1290,9 @@ fn schedule_runtime_probe_refresh(
         .pending
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let reason = if pending.contains_key(&(state_file.clone(), profile_name.to_string())) {
-        "deduped"
-    } else {
-        "queued"
-    };
+    if pending.contains_key(&(state_file.clone(), profile_name.to_string())) {
+        return;
+    }
     let queued_at = Instant::now();
     pending.insert(
         (state_file.clone(), profile_name.to_string()),
@@ -1313,7 +1310,7 @@ fn schedule_runtime_probe_refresh(
     runtime_proxy_log(
         shared,
         format!(
-            "profile_probe_refresh_queued profile={profile_name} reason={reason} backlog={backlog}"
+            "profile_probe_refresh_queued profile={profile_name} reason=queued backlog={backlog}"
         ),
     );
     if runtime_proxy_queue_pressure_active(0, 0, backlog) {
@@ -1513,6 +1510,11 @@ fn apply_runtime_profile_probe_result(
     };
 
     let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let previous_snapshot = runtime.profile_usage_snapshots.get(profile_name).cloned();
+    let previous_retry_backoff = runtime
+        .profile_retry_backoff_until
+        .get(profile_name)
+        .copied();
     let quota_summary =
         runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
     let blocking_reset_at =
@@ -1539,6 +1541,13 @@ fn apply_runtime_profile_probe_result(
             .insert(profile_name.to_string(), next_until);
         quarantine_applied = Some(next_until);
     }
+    let snapshot_should_persist =
+        runtime_profile_usage_snapshot_should_persist(previous_snapshot.as_ref(), &snapshot, now);
+    let retry_backoff_changed = runtime
+        .profile_retry_backoff_until
+        .get(profile_name)
+        .copied()
+        != previous_retry_backoff;
     runtime
         .profile_usage_snapshots
         .insert(profile_name.to_string(), snapshot);
@@ -1551,7 +1560,9 @@ fn apply_runtime_profile_probe_result(
             ),
         );
     }
-    if let Some(until) = quarantine_applied {
+    if let Some(until) = quarantine_applied
+        && retry_backoff_changed
+    {
         runtime_proxy_log(
             shared,
             format!(
@@ -1566,12 +1577,39 @@ fn apply_runtime_profile_probe_result(
             format!("profile_retry_backoff profile={profile_name} until={until}"),
         );
     }
-    schedule_runtime_state_save_from_runtime(
-        shared,
-        &runtime,
-        &format!("usage_snapshot:{profile_name}"),
-    );
+    if snapshot_should_persist || retry_backoff_changed {
+        schedule_runtime_state_save_from_runtime(
+            shared,
+            &runtime,
+            &format!("usage_snapshot:{profile_name}"),
+        );
+    }
     Ok(())
+}
+
+fn runtime_profile_usage_snapshot_materially_matches(
+    previous: &RuntimeProfileUsageSnapshot,
+    next: &RuntimeProfileUsageSnapshot,
+) -> bool {
+    previous.five_hour_status == next.five_hour_status
+        && previous.five_hour_remaining_percent == next.five_hour_remaining_percent
+        && previous.five_hour_reset_at == next.five_hour_reset_at
+        && previous.weekly_status == next.weekly_status
+        && previous.weekly_remaining_percent == next.weekly_remaining_percent
+        && previous.weekly_reset_at == next.weekly_reset_at
+}
+
+fn runtime_profile_usage_snapshot_should_persist(
+    previous: Option<&RuntimeProfileUsageSnapshot>,
+    next: &RuntimeProfileUsageSnapshot,
+    now: i64,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+
+    !runtime_profile_usage_snapshot_materially_matches(previous, next)
+        || runtime_binding_touch_should_persist(previous.checked_at, now)
 }
 
 fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
@@ -4559,6 +4597,10 @@ enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
     },
+    Overloaded {
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    },
     LocalSelectionBlocked {
         profile_name: String,
         reason: &'static str,
@@ -4586,6 +4628,7 @@ enum RuntimeWebsocketConnectResult {
         turn_state: Option<String>,
     },
     QuotaBlocked(RuntimeWebsocketErrorPayload),
+    Overloaded(RuntimeWebsocketErrorPayload),
 }
 
 #[derive(Debug)]
@@ -4607,6 +4650,29 @@ enum RuntimeWebsocketErrorPayload {
     Text(String),
     Binary(Vec<u8>),
     Empty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeWebsocketRetryInspectionKind {
+    QuotaBlocked,
+    Overloaded,
+    PreviousResponseNotFound,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeInspectedWebsocketTextFrame {
+    event_type: Option<String>,
+    turn_state: Option<String>,
+    response_ids: Vec<String>,
+    retry_kind: Option<RuntimeWebsocketRetryInspectionKind>,
+    precommit_hold: bool,
+    terminal_event: bool,
+}
+
+#[derive(Debug)]
+struct RuntimeBufferedWebsocketTextFrame {
+    text: String,
+    response_ids: Vec<String>,
 }
 
 fn runtime_proxy_log(shared: &RuntimeRotationProxyShared, message: impl AsRef<str>) {
@@ -7087,7 +7153,15 @@ fn start_runtime_rotation_proxy_with_listen_addr(
                     receiver.recv_timeout(Duration::from_millis(200))
                 };
                 match request {
-                    Ok(request) => handle_runtime_rotation_proxy_request(request, &shared),
+                    Ok(request) => {
+                        let (mutex, condvar) = &*shared.lane_admission.wait;
+                        let _guard = mutex
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        condvar.notify_all();
+                        drop(_guard);
+                        handle_runtime_rotation_proxy_request(request, &shared);
+                    }
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
@@ -7851,7 +7925,6 @@ where
     } else {
         runtime_proxy_long_lived_queue_wait_budget_ms()
     });
-    let poll = Duration::from_millis(runtime_proxy_long_lived_queue_wait_poll_ms().max(1));
     let mut waited = false;
     loop {
         match try_enqueue(item) {
@@ -7884,14 +7957,40 @@ where
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
+                            "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} wait_timeout_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
                             budget.as_millis(),
-                            poll.as_millis()
+                            budget.saturating_sub(elapsed).as_millis()
                         ),
                     );
                 }
                 waited = true;
-                thread::sleep(poll.min(budget.saturating_sub(elapsed)));
+                let (mutex, condvar) = &*shared.lane_admission.wait;
+                let wait_guard = mutex
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match try_enqueue(item) {
+                    Ok(()) => return Ok(()),
+                    Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
+                        item = returned_item;
+                    }
+                    Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_disconnected",
+                                started_at.elapsed().as_millis()
+                            ),
+                        );
+                        return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
+                    }
+                }
+                let wait_for = budget.saturating_sub(elapsed);
+                if !wait_for.is_zero() {
+                    let _ = condvar
+                        .wait_timeout(wait_guard, wait_for)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+                continue;
             }
             Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
                 runtime_proxy_log(
@@ -9013,6 +9112,29 @@ fn runtime_continuation_status_should_refresh_verified(
         .is_none_or(|last_verified_at| runtime_binding_touch_should_persist(last_verified_at, now))
 }
 
+fn runtime_continuation_status_should_persist_touch(
+    statuses: &RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+) -> bool {
+    let Some(status) = runtime_continuation_status_map(statuses, kind).get(key) else {
+        return true;
+    };
+
+    if status.state == RuntimeContinuationBindingLifecycle::Suspect
+        && status.last_not_found_at.is_some_and(|last_not_found_at| {
+            now.saturating_sub(last_not_found_at) >= RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
+        })
+    {
+        return true;
+    }
+
+    status
+        .last_touched_at
+        .is_none_or(|last_touched_at| runtime_binding_touch_should_persist(last_touched_at, now))
+}
+
 fn runtime_mark_continuation_status_verified(
     statuses: &mut RuntimeContinuationStatuses,
     kind: RuntimeContinuationBindingKind,
@@ -9221,25 +9343,31 @@ fn runtime_touch_compact_lineage_binding(
         .get(key)
         .map(|binding| binding.profile_name.clone())
         .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
-    let mut touched = false;
+    let mut persist_touch = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = bindings.get_mut(key)
         && binding.profile_name == profile_name
     {
         if runtime_binding_touch_should_persist(binding.bound_at, now) {
-            touched = true;
+            persist_touch = true;
         }
         if binding.bound_at < now {
             binding.bound_at = now;
         }
-        touched = runtime_mark_continuation_status_touched(
+        persist_touch = runtime_continuation_status_should_persist_touch(
+            &runtime.continuation_statuses,
+            status_kind,
+            key,
+            now,
+        ) || persist_touch;
+        let _ = runtime_mark_continuation_status_touched(
             &mut runtime.continuation_statuses,
             status_kind,
             key,
             now,
-        ) || touched;
+        );
     }
-    if touched {
+    if persist_touch {
         schedule_runtime_binding_touch_save(shared, runtime, reason);
     }
     profile_name
@@ -9522,7 +9650,7 @@ fn runtime_response_bound_profile(
         );
         return Ok(None);
     }
-    let mut touched = false;
+    let mut persist_touch = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = runtime
             .state
@@ -9531,19 +9659,25 @@ fn runtime_response_bound_profile(
         && binding.profile_name == profile_name
     {
         if runtime_binding_touch_should_persist(binding.bound_at, now) {
-            touched = true;
+            persist_touch = true;
         }
         if binding.bound_at < now {
             binding.bound_at = now;
         }
-        touched = runtime_mark_continuation_status_touched(
+        persist_touch = runtime_continuation_status_should_persist_touch(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::Response,
+            previous_response_id,
+            now,
+        ) || persist_touch;
+        let _ = runtime_mark_continuation_status_touched(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
             previous_response_id,
             now,
-        ) || touched;
+        );
     }
-    if touched {
+    if persist_touch {
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
@@ -9616,25 +9750,31 @@ fn runtime_turn_state_bound_profile(
         );
         return Ok(None);
     }
-    let mut touched = false;
+    let mut persist_touch = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = runtime.turn_state_bindings.get_mut(turn_state)
         && binding.profile_name == profile_name
     {
         if runtime_binding_touch_should_persist(binding.bound_at, now) {
-            touched = true;
+            persist_touch = true;
         }
         if binding.bound_at < now {
             binding.bound_at = now;
         }
-        touched = runtime_mark_continuation_status_touched(
+        persist_touch = runtime_continuation_status_should_persist_touch(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::TurnState,
+            turn_state,
+            now,
+        ) || persist_touch;
+        let _ = runtime_mark_continuation_status_touched(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::TurnState,
             turn_state,
             now,
-        ) || touched;
+        );
     }
-    if touched {
+    if persist_touch {
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
@@ -9707,13 +9847,13 @@ fn runtime_session_bound_profile(
         );
         return Ok(None);
     }
-    let mut touched = false;
+    let mut persist_touch = false;
     if let Some(profile_name) = profile_name.as_deref() {
         if let Some(binding) = runtime.session_id_bindings.get_mut(session_id)
             && binding.profile_name == profile_name
         {
             if runtime_binding_touch_should_persist(binding.bound_at, now) {
-                touched = true;
+                persist_touch = true;
             }
             if binding.bound_at < now {
                 binding.bound_at = now;
@@ -9723,20 +9863,26 @@ fn runtime_session_bound_profile(
             && binding.profile_name == profile_name
         {
             if runtime_binding_touch_should_persist(binding.bound_at, now) {
-                touched = true;
+                persist_touch = true;
             }
             if binding.bound_at < now {
                 binding.bound_at = now;
             }
         }
-        touched = runtime_mark_continuation_status_touched(
+        persist_touch = runtime_continuation_status_should_persist_touch(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            session_id,
+            now,
+        ) || persist_touch;
+        let _ = runtime_mark_continuation_status_touched(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::SessionId,
             session_id,
             now,
-        ) || touched;
+        );
     }
-    if touched {
+    if persist_touch {
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
@@ -9762,27 +9908,48 @@ fn remember_runtime_turn_state(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let bound_at = Local::now().timestamp();
     let mut changed = false;
-    let should_update = runtime
-        .turn_state_bindings
-        .get(turn_state)
-        .is_none_or(|binding| binding.profile_name != profile_name);
-    if should_update {
-        runtime.turn_state_bindings.insert(
-            turn_state.to_string(),
-            ResponseProfileBinding {
-                profile_name: profile_name.to_string(),
-                bound_at,
-            },
-        );
-        changed = true;
+    let should_refresh_binding = match runtime.turn_state_bindings.get_mut(turn_state) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+            false
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            changed = true;
+            true
+        }
+        None => {
+            runtime.turn_state_bindings.insert(
+                turn_state.to_string(),
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+            true
+        }
+    };
+    if should_refresh_binding
+        || runtime_continuation_status_should_refresh_verified(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::TurnState,
+            turn_state,
+            bound_at,
+            Some(verified_route),
+        )
+    {
+        changed = runtime_mark_continuation_status_verified(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::TurnState,
+            turn_state,
+            bound_at,
+            Some(verified_route),
+        ) || changed;
     }
-    changed = runtime_mark_continuation_status_verified(
-        &mut runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::TurnState,
-        turn_state,
-        bound_at,
-        Some(verified_route),
-    ) || changed;
     if changed {
         prune_profile_bindings(
             &mut runtime.turn_state_bindings,
@@ -9820,31 +9987,72 @@ fn remember_runtime_session_id(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let bound_at = Local::now().timestamp();
     let mut changed = false;
-    let should_update = runtime
-        .session_id_bindings
-        .get(session_id)
-        .is_none_or(|binding| binding.profile_name != profile_name);
-    if should_update {
-        let binding = ResponseProfileBinding {
-            profile_name: profile_name.to_string(),
-            bound_at,
-        };
-        runtime
-            .session_id_bindings
-            .insert(session_id.to_string(), binding.clone());
-        runtime
-            .state
-            .session_profile_bindings
-            .insert(session_id.to_string(), binding);
-        changed = true;
+    let mut should_refresh_binding = false;
+    match runtime.session_id_bindings.get_mut(session_id) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            changed = true;
+            should_refresh_binding = true;
+        }
+        None => {
+            runtime.session_id_bindings.insert(
+                session_id.to_string(),
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+            should_refresh_binding = true;
+        }
     }
-    changed = runtime_mark_continuation_status_verified(
-        &mut runtime.continuation_statuses,
-        RuntimeContinuationBindingKind::SessionId,
-        session_id,
-        bound_at,
-        Some(verified_route),
-    ) || changed;
+    match runtime.state.session_profile_bindings.get_mut(session_id) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < bound_at {
+                binding.bound_at = bound_at;
+            }
+        }
+        Some(binding) => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = bound_at;
+            changed = true;
+            should_refresh_binding = true;
+        }
+        None => {
+            runtime.state.session_profile_bindings.insert(
+                session_id.to_string(),
+                ResponseProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at,
+                },
+            );
+            changed = true;
+            should_refresh_binding = true;
+        }
+    }
+    if should_refresh_binding
+        || runtime_continuation_status_should_refresh_verified(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            session_id,
+            bound_at,
+            Some(verified_route),
+        )
+    {
+        changed = runtime_mark_continuation_status_verified(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            session_id,
+            bound_at,
+            Some(verified_route),
+        ) || changed;
+    }
     if changed {
         prune_profile_bindings(
             &mut runtime.session_id_bindings,
@@ -9892,50 +10100,94 @@ fn remember_runtime_compact_lineage(
 
     if let Some(session_id) = session_id {
         let key = runtime_compact_session_lineage_key(session_id);
-        let should_update = runtime.session_id_bindings.get(&key).is_none_or(|binding| {
-            binding.profile_name != profile_name || binding.bound_at < bound_at
-        });
-        if should_update {
-            runtime.session_id_bindings.insert(
-                key.clone(),
-                ResponseProfileBinding {
-                    profile_name: profile_name.to_string(),
-                    bound_at,
-                },
-            );
-            changed = true;
+        let should_refresh_binding = match runtime.session_id_bindings.get_mut(&key) {
+            Some(binding) if binding.profile_name == profile_name => {
+                if binding.bound_at < bound_at {
+                    binding.bound_at = bound_at;
+                }
+                false
+            }
+            Some(binding) => {
+                binding.profile_name = profile_name.to_string();
+                binding.bound_at = bound_at;
+                changed = true;
+                true
+            }
+            None => {
+                runtime.session_id_bindings.insert(
+                    key.clone(),
+                    ResponseProfileBinding {
+                        profile_name: profile_name.to_string(),
+                        bound_at,
+                    },
+                );
+                changed = true;
+                true
+            }
+        };
+        if should_refresh_binding
+            || runtime_continuation_status_should_refresh_verified(
+                &runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::SessionId,
+                &key,
+                bound_at,
+                Some(verified_route),
+            )
+        {
+            changed = runtime_mark_continuation_status_verified(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::SessionId,
+                &key,
+                bound_at,
+                Some(verified_route),
+            ) || changed;
         }
-        changed = runtime_mark_continuation_status_verified(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::SessionId,
-            &key,
-            bound_at,
-            Some(verified_route),
-        ) || changed;
     }
 
     if let Some(turn_state) = turn_state {
         let key = runtime_compact_turn_state_lineage_key(turn_state);
-        let should_update = runtime.turn_state_bindings.get(&key).is_none_or(|binding| {
-            binding.profile_name != profile_name || binding.bound_at < bound_at
-        });
-        if should_update {
-            runtime.turn_state_bindings.insert(
-                key.clone(),
-                ResponseProfileBinding {
-                    profile_name: profile_name.to_string(),
-                    bound_at,
-                },
-            );
-            changed = true;
+        let should_refresh_binding = match runtime.turn_state_bindings.get_mut(&key) {
+            Some(binding) if binding.profile_name == profile_name => {
+                if binding.bound_at < bound_at {
+                    binding.bound_at = bound_at;
+                }
+                false
+            }
+            Some(binding) => {
+                binding.profile_name = profile_name.to_string();
+                binding.bound_at = bound_at;
+                changed = true;
+                true
+            }
+            None => {
+                runtime.turn_state_bindings.insert(
+                    key.clone(),
+                    ResponseProfileBinding {
+                        profile_name: profile_name.to_string(),
+                        bound_at,
+                    },
+                );
+                changed = true;
+                true
+            }
+        };
+        if should_refresh_binding
+            || runtime_continuation_status_should_refresh_verified(
+                &runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::TurnState,
+                &key,
+                bound_at,
+                Some(verified_route),
+            )
+        {
+            changed = runtime_mark_continuation_status_verified(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::TurnState,
+                &key,
+                bound_at,
+                Some(verified_route),
+            ) || changed;
         }
-        changed = runtime_mark_continuation_status_verified(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::TurnState,
-            &key,
-            bound_at,
-            Some(verified_route),
-        ) || changed;
     }
 
     if changed {
@@ -12013,6 +12265,97 @@ fn proxy_runtime_websocket_text_message(
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                             continue;
                         }
+                        RuntimeWebsocketAttempt::Overloaded {
+                            profile_name,
+                            payload,
+                        } => {
+                            let overload_message =
+                                extract_runtime_proxy_overload_message_from_websocket_payload(
+                                    &payload,
+                                );
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} via=direct_current_profile_fallback message={}",
+                                    overload_message.as_deref().unwrap_or("-"),
+                                ),
+                            );
+                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                            let _ = bump_runtime_profile_health_score(
+                                shared,
+                                &profile_name,
+                                RuntimeRouteKind::Websocket,
+                                RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                                "websocket_overload",
+                            );
+                            let _ = bump_runtime_profile_bad_pairing_score(
+                                shared,
+                                &profile_name,
+                                RuntimeRouteKind::Websocket,
+                                RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+                                "websocket_overload",
+                            );
+                            if !runtime_quota_blocked_affinity_is_releasable(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                                pinned_profile.as_deref(),
+                                turn_state_profile.as_deref(),
+                                session_profile.as_deref(),
+                                trusted_previous_response_affinity,
+                                request_requires_previous_response_affinity,
+                            ) {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                                return Ok(());
+                            }
+                            if previous_response_id.is_some()
+                                && trusted_previous_response_affinity
+                                && !previous_response_fresh_fallback_used
+                                && !request_requires_previous_response_affinity
+                                && let Some(fresh_request_text) =
+                                    runtime_request_text_without_previous_response_id(&request_text)
+                            {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=upstream_overloaded via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                request_text = fresh_request_text;
+                                handshake_request =
+                                    runtime_request_without_turn_state_header(&handshake_request);
+                                previous_response_id = None;
+                                request_turn_state = None;
+                                previous_response_fresh_fallback_used = true;
+                                saw_previous_response_not_found = false;
+                                previous_response_retry_candidate = None;
+                                previous_response_retry_index = 0;
+                                candidate_turn_state_retry_profile = None;
+                                candidate_turn_state_retry_value = None;
+                                trusted_previous_response_affinity = false;
+                                bound_profile = None;
+                                session_profile = None;
+                                pinned_profile = None;
+                                turn_state_profile = None;
+                                websocket_reuse_fresh_retry_profiles.clear();
+                                excluded_profiles.clear();
+                                last_failure = None;
+                                selection_started_at = Instant::now();
+                                selection_attempts = 0;
+                                continue;
+                            }
+                            excluded_profiles.insert(profile_name);
+                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                            continue;
+                        }
                         RuntimeWebsocketAttempt::PreviousResponseNotFound {
                             profile_name,
                             payload,
@@ -12453,6 +12796,61 @@ fn proxy_runtime_websocket_text_message(
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                             continue;
                         }
+                        RuntimeWebsocketAttempt::Overloaded {
+                            profile_name,
+                            payload,
+                        } => {
+                            let overload_message =
+                                extract_runtime_proxy_overload_message_from_websocket_payload(
+                                    &payload,
+                                );
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} via=direct_current_profile_fallback message={}",
+                                    overload_message.as_deref().unwrap_or("-"),
+                                ),
+                            );
+                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                            let _ = bump_runtime_profile_health_score(
+                                shared,
+                                &profile_name,
+                                RuntimeRouteKind::Websocket,
+                                RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                                "websocket_overload",
+                            );
+                            let _ = bump_runtime_profile_bad_pairing_score(
+                                shared,
+                                &profile_name,
+                                RuntimeRouteKind::Websocket,
+                                RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+                                "websocket_overload",
+                            );
+                            if !runtime_quota_blocked_affinity_is_releasable(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                                pinned_profile.as_deref(),
+                                turn_state_profile.as_deref(),
+                                session_profile.as_deref(),
+                                trusted_previous_response_affinity,
+                                request_requires_previous_response_affinity,
+                            ) {
+                                runtime_proxy_log(
+                                    shared,
+                                    format!(
+                                        "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity via=direct_current_profile_fallback"
+                                    ),
+                                );
+                                forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                                return Ok(());
+                            }
+                            excluded_profiles.insert(profile_name);
+                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                            continue;
+                        }
                         RuntimeWebsocketAttempt::PreviousResponseNotFound {
                             profile_name,
                             payload,
@@ -12809,6 +13207,94 @@ fn proxy_runtime_websocket_text_message(
                         shared,
                         format!(
                             "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked"
+                        ),
+                    );
+                    request_text = fresh_request_text;
+                    handshake_request =
+                        runtime_request_without_turn_state_header(&handshake_request);
+                    previous_response_id = None;
+                    request_turn_state = None;
+                    previous_response_fresh_fallback_used = true;
+                    saw_previous_response_not_found = false;
+                    previous_response_retry_candidate = None;
+                    previous_response_retry_index = 0;
+                    candidate_turn_state_retry_profile = None;
+                    candidate_turn_state_retry_value = None;
+                    trusted_previous_response_affinity = false;
+                    bound_profile = None;
+                    session_profile = None;
+                    pinned_profile = None;
+                    turn_state_profile = None;
+                    websocket_reuse_fresh_retry_profiles.clear();
+                    excluded_profiles.clear();
+                    last_failure = None;
+                    selection_started_at = Instant::now();
+                    selection_attempts = 0;
+                    continue;
+                }
+                excluded_profiles.insert(profile_name);
+                last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+            }
+            RuntimeWebsocketAttempt::Overloaded {
+                profile_name,
+                payload,
+            } => {
+                let overload_message =
+                    extract_runtime_proxy_overload_message_from_websocket_payload(&payload);
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} message={}",
+                        overload_message.as_deref().unwrap_or("-"),
+                    ),
+                );
+                mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                let _ = bump_runtime_profile_health_score(
+                    shared,
+                    &profile_name,
+                    RuntimeRouteKind::Websocket,
+                    RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                    "websocket_overload",
+                );
+                let _ = bump_runtime_profile_bad_pairing_score(
+                    shared,
+                    &profile_name,
+                    RuntimeRouteKind::Websocket,
+                    RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+                    "websocket_overload",
+                );
+                if !runtime_quota_blocked_affinity_is_releasable(
+                    RuntimeRouteKind::Websocket,
+                    &profile_name,
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                    trusted_previous_response_affinity,
+                    request_requires_previous_response_affinity,
+                ) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity"
+                        ),
+                    );
+                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                    return Ok(());
+                }
+                if previous_response_id.is_some()
+                    && trusted_previous_response_affinity
+                    && !previous_response_fresh_fallback_used
+                    && !request_requires_previous_response_affinity
+                    && let Some(fresh_request_text) =
+                        runtime_request_text_without_previous_response_id(&request_text)
+                {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=upstream_overloaded"
                         ),
                     );
                     request_text = fresh_request_text;
@@ -13247,6 +13733,7 @@ fn attempt_runtime_websocket_request(
             reason,
         });
     }
+
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
     let reuse_started_at = reuse_existing_session.then(Instant::now);
     let precommit_started_at = Instant::now();
@@ -13289,9 +13776,7 @@ fn attempt_runtime_websocket_request(
                 profile_name,
                 turn_state_override,
             )? {
-                RuntimeWebsocketConnectResult::Connected {
-                    socket, turn_state, ..
-                } => (
+                RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (
                     socket,
                     turn_state,
                     Some(acquire_runtime_profile_inflight_guard(
@@ -13302,6 +13787,12 @@ fn attempt_runtime_websocket_request(
                 ),
                 RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
                     return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
+                        profile_name: profile_name.to_string(),
+                        payload,
+                    });
+                }
+                RuntimeWebsocketConnectResult::Overloaded(payload) => {
+                    return Ok(RuntimeWebsocketAttempt::Overloaded {
                         profile_name: profile_name.to_string(),
                         payload,
                     });
@@ -13346,6 +13837,8 @@ fn attempt_runtime_websocket_request(
     let mut committed = false;
     let mut first_upstream_frame_seen = false;
     let mut buffered_precommit_text_frames = Vec::new();
+    let mut previous_response_owner_recorded = false;
+    let mut precommit_hold_count = 0usize;
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
@@ -13358,50 +13851,64 @@ fn attempt_runtime_websocket_request(
                     )
                     .context("failed to restore runtime websocket idle timeout")?;
                 }
-                if let Some(turn_state) = extract_runtime_turn_state_from_payload(text.as_str()) {
+
+                let inspected = inspect_runtime_websocket_text_frame(text.as_str());
+                if let Some(turn_state) = inspected.turn_state.as_deref() {
                     remember_runtime_turn_state(
                         shared,
                         profile_name,
-                        Some(turn_state.as_str()),
+                        Some(turn_state),
                         RuntimeRouteKind::Websocket,
                     )?;
-                    upstream_turn_state = Some(turn_state);
+                    upstream_turn_state = Some(turn_state.to_string());
                 }
-                match runtime_proxy_websocket_retry_action(text.as_str()) {
-                    Some(RuntimeWebsocketAttempt::QuotaBlocked { .. }) if !committed => {
-                        let _ = upstream_socket.close(None);
-                        websocket_session.reset();
-                        return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
-                            profile_name: profile_name.to_string(),
-                            payload: RuntimeWebsocketErrorPayload::Text(text),
-                        });
+
+                if !committed {
+                    match inspected.retry_kind {
+                        Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked) => {
+                            let _ = upstream_socket.close(None);
+                            websocket_session.reset();
+                            return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
+                                profile_name: profile_name.to_string(),
+                                payload: RuntimeWebsocketErrorPayload::Text(text),
+                            });
+                        }
+                        Some(RuntimeWebsocketRetryInspectionKind::Overloaded) => {
+                            let _ = upstream_socket.close(None);
+                            websocket_session.reset();
+                            return Ok(RuntimeWebsocketAttempt::Overloaded {
+                                profile_name: profile_name.to_string(),
+                                payload: RuntimeWebsocketErrorPayload::Text(text),
+                            });
+                        }
+                        Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound) => {
+                            let _ = upstream_socket.close(None);
+                            websocket_session.reset();
+                            return Ok(RuntimeWebsocketAttempt::PreviousResponseNotFound {
+                                profile_name: profile_name.to_string(),
+                                payload: RuntimeWebsocketErrorPayload::Text(text),
+                                turn_state: upstream_turn_state.clone(),
+                            });
+                        }
+                        None => {}
                     }
-                    Some(RuntimeWebsocketAttempt::PreviousResponseNotFound { .. })
-                        if !committed =>
-                    {
-                        let _ = upstream_socket.close(None);
-                        websocket_session.reset();
-                        return Ok(RuntimeWebsocketAttempt::PreviousResponseNotFound {
-                            profile_name: profile_name.to_string(),
-                            payload: RuntimeWebsocketErrorPayload::Text(text),
-                            turn_state: upstream_turn_state.clone(),
-                        });
-                    }
-                    _ => {}
                 }
-                if reuse_existing_session
-                    && !committed
-                    && runtime_websocket_precommit_hold_frame(text.as_str())
-                {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=websocket precommit_hold profile={profile_name} event_type={}",
-                            runtime_response_event_type(text.as_str())
-                                .unwrap_or_else(|| "-".to_string())
-                        ),
-                    );
-                    buffered_precommit_text_frames.push(text);
+
+                if reuse_existing_session && !committed && inspected.precommit_hold {
+                    if precommit_hold_count == 0 {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=websocket precommit_hold profile={profile_name} event_type={}",
+                                inspected.event_type.as_deref().unwrap_or("-")
+                            ),
+                        );
+                    }
+                    precommit_hold_count = precommit_hold_count.saturating_add(1);
+                    buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
+                        text,
+                        response_ids: inspected.response_ids,
+                    });
                     continue;
                 }
 
@@ -13438,15 +13945,18 @@ fn attempt_runtime_websocket_request(
                         request_previous_response_id.as_deref(),
                         request_session_id.as_deref(),
                         request_turn_state.as_deref(),
+                        &mut previous_response_owner_recorded,
                     )?;
                 }
+
                 remember_runtime_websocket_response_ids(
                     shared,
                     profile_name,
                     request_previous_response_id.as_deref(),
                     request_session_id.as_deref(),
                     request_turn_state.as_deref(),
-                    text.as_str(),
+                    &inspected.response_ids,
+                    &mut previous_response_owner_recorded,
                 )?;
                 local_socket
                     .send(WsMessage::Text(text.clone().into()))
@@ -13454,11 +13964,12 @@ fn attempt_runtime_websocket_request(
                         websocket_session.reset();
                         "failed to forward runtime websocket text frame"
                     })?;
-                if is_runtime_terminal_event(text.as_str()) {
+                if inspected.terminal_event {
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "request={request_id} transport=websocket terminal_event profile={profile_name}"
+                            "request={request_id} transport=websocket terminal_event profile={profile_name} event_type={} precommit_hold_count={precommit_hold_count}",
+                            inspected.event_type.as_deref().unwrap_or("-"),
                         ),
                     );
                     websocket_session.store(
@@ -13512,6 +14023,7 @@ fn attempt_runtime_websocket_request(
                         request_previous_response_id.as_deref(),
                         request_session_id.as_deref(),
                         request_turn_state.as_deref(),
+                        &mut previous_response_owner_recorded,
                     )?;
                 }
                 local_socket
@@ -13824,6 +14336,11 @@ fn connect_runtime_proxy_upstream_websocket(
                     runtime_websocket_error_payload_from_http_body(&body),
                 ));
             }
+            if extract_runtime_proxy_overload_message(status, &body).is_some() {
+                return Ok(RuntimeWebsocketConnectResult::Overloaded(
+                    runtime_websocket_error_payload_from_http_body(&body),
+                ));
+            }
             bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
         }
         Err(err) => {
@@ -14073,19 +14590,22 @@ fn remember_runtime_websocket_response_ids(
     request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
-    payload: &str,
+    response_ids: &[String],
+    previous_response_owner_recorded: &mut bool,
 ) -> Result<()> {
-    let response_ids = extract_runtime_response_ids_from_payload(payload);
-    remember_runtime_successful_previous_response_owner(
-        shared,
-        profile_name,
-        request_previous_response_id,
-        RuntimeRouteKind::Websocket,
-    )?;
+    if !*previous_response_owner_recorded {
+        remember_runtime_successful_previous_response_owner(
+            shared,
+            profile_name,
+            request_previous_response_id,
+            RuntimeRouteKind::Websocket,
+        )?;
+        *previous_response_owner_recorded = true;
+    }
     remember_runtime_response_ids(
         shared,
         profile_name,
-        &response_ids,
+        response_ids,
         RuntimeRouteKind::Websocket,
     )?;
     if !response_ids.is_empty() {
@@ -14102,12 +14622,13 @@ fn remember_runtime_websocket_response_ids(
 
 fn forward_runtime_proxy_buffered_websocket_text_frames(
     local_socket: &mut RuntimeLocalWebSocket,
-    buffered_frames: &mut Vec<String>,
+    buffered_frames: &mut Vec<RuntimeBufferedWebsocketTextFrame>,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
+    previous_response_owner_recorded: &mut bool,
 ) -> Result<()> {
     for frame in buffered_frames.drain(..) {
         remember_runtime_websocket_response_ids(
@@ -14116,45 +14637,60 @@ fn forward_runtime_proxy_buffered_websocket_text_frames(
             request_previous_response_id,
             request_session_id,
             request_turn_state,
-            frame.as_str(),
+            &frame.response_ids,
+            previous_response_owner_recorded,
         )?;
         local_socket
-            .send(WsMessage::Text(frame.into()))
+            .send(WsMessage::Text(frame.text.into()))
             .context("failed to forward buffered runtime websocket text frame")?;
     }
     Ok(())
 }
 
-fn runtime_proxy_websocket_retry_action(payload: &str) -> Option<RuntimeWebsocketAttempt> {
-    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
-    if let Some(message) = extract_runtime_proxy_previous_response_message_from_value(&value) {
-        let _ = message;
-        return Some(RuntimeWebsocketAttempt::PreviousResponseNotFound {
-            profile_name: String::new(),
-            payload: RuntimeWebsocketErrorPayload::Text(payload.to_string()),
-            turn_state: None,
-        });
-    }
-    if let Some(message) = extract_runtime_proxy_quota_message_from_value(&value) {
-        let _ = message;
-        return Some(RuntimeWebsocketAttempt::QuotaBlocked {
-            profile_name: String::new(),
-            payload: RuntimeWebsocketErrorPayload::Text(payload.to_string()),
-        });
-    }
+fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWebsocketTextFrame {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return RuntimeInspectedWebsocketTextFrame::default();
+    };
 
-    None
+    let event_type = runtime_response_event_type_from_value(&value);
+    let retry_kind = if extract_runtime_proxy_previous_response_message_from_value(&value).is_some()
+    {
+        Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
+    } else if extract_runtime_proxy_overload_message_from_value(&value).is_some() {
+        Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
+    } else if extract_runtime_proxy_quota_message_from_value(&value).is_some() {
+        Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
+    } else {
+        None
+    };
+    let precommit_hold = event_type
+        .as_deref()
+        .is_some_and(runtime_proxy_precommit_hold_event_kind);
+    let terminal_event = event_type
+        .as_deref()
+        .is_some_and(|kind| matches!(kind, "response.completed" | "response.failed"));
+
+    RuntimeInspectedWebsocketTextFrame {
+        event_type,
+        turn_state: extract_runtime_turn_state_from_value(&value),
+        response_ids: extract_runtime_response_ids_from_value(&value),
+        retry_kind,
+        precommit_hold,
+        terminal_event,
+    }
+}
+
+fn runtime_response_event_type_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn runtime_response_event_type(payload: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()
-        .and_then(|value| {
-            value
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
+        .and_then(|value| runtime_response_event_type_from_value(&value))
 }
 
 fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
@@ -14169,11 +14705,7 @@ fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
     )
 }
 
-fn runtime_websocket_precommit_hold_frame(payload: &str) -> bool {
-    runtime_response_event_type(payload)
-        .is_some_and(|kind| runtime_proxy_precommit_hold_event_kind(kind.as_str()))
-}
-
+#[cfg(test)]
 fn is_runtime_terminal_event(payload: &str) -> bool {
     runtime_response_event_type(payload)
         .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))
@@ -22006,6 +22538,30 @@ fn extract_runtime_proxy_quota_message_from_websocket_payload(
     }
 }
 
+fn extract_runtime_proxy_overload_message_from_websocket_payload(
+    payload: &RuntimeWebsocketErrorPayload,
+) -> Option<String> {
+    match payload {
+        RuntimeWebsocketErrorPayload::Text(text) => {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
+                && let Some(message) = extract_runtime_proxy_overload_message_from_value(&value)
+            {
+                return Some(message);
+            }
+            extract_runtime_proxy_overload_message_from_text(text)
+        }
+        RuntimeWebsocketErrorPayload::Binary(bytes) => {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes)
+                && let Some(message) = extract_runtime_proxy_overload_message_from_value(&value)
+            {
+                return Some(message);
+            }
+            extract_runtime_proxy_overload_message_from_text(&String::from_utf8_lossy(bytes))
+        }
+        RuntimeWebsocketErrorPayload::Empty => None,
+    }
+}
+
 fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<serde_json::Value>(body)
         .ok()
@@ -22013,31 +22569,69 @@ fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<String
 }
 
 fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<String> {
-    if status == 503
-        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
-        && let Some(error) = value.get("error")
-        && matches!(
-            error.get("code").and_then(serde_json::Value::as_str),
-            Some("server_is_overloaded" | "slow_down")
-        )
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
+        && let Some(message) = extract_runtime_proxy_overload_message_from_value(&value)
     {
-        return Some(
-            error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Upstream Codex backend is currently overloaded.")
-                .to_string(),
-        );
+        return Some(message);
+    }
+
+    let body_text = String::from_utf8_lossy(body).trim().to_string();
+    if matches!(status, 429 | 500 | 502 | 503 | 504 | 529)
+        && let Some(message) = extract_runtime_proxy_overload_message_from_text(&body_text)
+    {
+        return Some(message);
     }
 
     (status == 500).then(|| {
-        let body_text = String::from_utf8_lossy(body).trim().to_string();
         if body_text.is_empty() {
             "Upstream Codex backend is currently experiencing high demand.".to_string()
         } else {
             body_text
         }
     })
+}
+
+fn extract_runtime_proxy_overload_message_from_value(value: &serde_json::Value) -> Option<String> {
+    let direct_error = value.get("error");
+    let response_error = value
+        .get("response")
+        .and_then(|response| response.get("error"));
+    for error in [direct_error, response_error].into_iter().flatten() {
+        let code = error.get("code").and_then(serde_json::Value::as_str);
+        let message = error
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| error.get("detail").and_then(serde_json::Value::as_str));
+        if matches!(code, Some("server_is_overloaded" | "slow_down")) {
+            return Some(
+                message
+                    .unwrap_or("Upstream Codex backend is currently overloaded.")
+                    .to_string(),
+            );
+        }
+        if let Some(message) = message.filter(|message| runtime_proxy_overload_message(message)) {
+            return Some(message.to_string());
+        }
+    }
+
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(extract_runtime_proxy_overload_message_from_value),
+        serde_json::Value::Object(map) => map
+            .values()
+            .find_map(extract_runtime_proxy_overload_message_from_value),
+        _ => None,
+    }
+}
+
+fn extract_runtime_proxy_overload_message_from_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    runtime_proxy_overload_message(trimmed).then(|| trimmed.to_string())
 }
 
 fn extract_runtime_proxy_quota_message_from_value(value: &serde_json::Value) -> Option<String> {
@@ -22116,6 +22710,17 @@ fn runtime_proxy_usage_limit_message(message: &str) -> bool {
                 || lower.contains("more access now"))
 }
 
+fn runtime_proxy_overload_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("selected model is at capacity")
+        || (lower.contains("model is at capacity")
+            && (lower.contains("try a different model") || lower.contains("please try again")))
+        || lower.contains("backend under high demand")
+        || lower.contains("experiencing high demand")
+        || lower.contains("server is overloaded")
+        || lower.contains("currently overloaded")
+}
+
 fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
     let normalized = String::from_utf8_lossy(body)
         .split_whitespace()
@@ -22168,12 +22773,6 @@ fn extract_runtime_response_ids_from_body_bytes(body: &[u8]) -> Vec<String> {
         .ok()
         .map(|value| extract_runtime_response_ids_from_value(&value))
         .unwrap_or_default()
-}
-
-fn extract_runtime_turn_state_from_payload(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| extract_runtime_turn_state_from_value(&value))
 }
 
 fn push_runtime_response_id(response_ids: &mut Vec<String>, id: Option<&str>) {
