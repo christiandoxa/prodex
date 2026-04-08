@@ -7743,14 +7743,70 @@ fn runtime_proxy_long_lived_queue_wait_budget(path: &str, pressure_mode: bool) -
     ))
 }
 
-fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxyShared) -> bool {
+fn runtime_proxy_local_overload_pressure_active(shared: &RuntimeRotationProxyShared) -> bool {
     let now = Local::now().timestamp().max(0) as u64;
     shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
-        || runtime_proxy_queue_pressure_active(
-            runtime_state_save_queue_backlog(),
-            runtime_continuation_journal_queue_backlog(),
-            runtime_probe_refresh_queue_backlog(),
-        )
+}
+
+fn runtime_proxy_background_queue_pressure_active() -> bool {
+    runtime_proxy_queue_pressure_active(
+        runtime_state_save_queue_backlog(),
+        runtime_continuation_journal_queue_backlog(),
+        runtime_probe_refresh_queue_backlog(),
+    )
+}
+
+fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxyShared) -> bool {
+    runtime_proxy_local_overload_pressure_active(shared)
+        || runtime_proxy_background_queue_pressure_active()
+}
+
+fn runtime_proxy_background_queue_pressure_affects_route(route_kind: RuntimeRouteKind) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard
+    )
+}
+
+fn runtime_proxy_pressure_mode_for_route(
+    route_kind: RuntimeRouteKind,
+    local_overload_pressure: bool,
+    background_queue_pressure: bool,
+) -> bool {
+    local_overload_pressure
+        || (background_queue_pressure
+            && runtime_proxy_background_queue_pressure_affects_route(route_kind))
+}
+
+fn runtime_proxy_pressure_mode_active_for_route(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    runtime_proxy_pressure_mode_for_route(
+        route_kind,
+        runtime_proxy_local_overload_pressure_active(shared),
+        runtime_proxy_background_queue_pressure_active(),
+    )
+}
+
+fn runtime_proxy_pressure_mode_active_for_request_path(
+    shared: &RuntimeRotationProxyShared,
+    path: &str,
+    websocket: bool,
+) -> bool {
+    runtime_proxy_pressure_mode_active_for_route(
+        shared,
+        runtime_proxy_request_lane(path, websocket),
+    )
+}
+
+fn runtime_proxy_sync_probe_pressure_mode_active(shared: &RuntimeRotationProxyShared) -> bool {
+    runtime_proxy_local_overload_pressure_active(shared)
+        || runtime_proxy_background_queue_pressure_active()
+}
+
+fn runtime_proxy_lane_limit_marks_global_overload(lane: RuntimeRouteKind) -> bool {
+    lane == RuntimeRouteKind::Responses
 }
 
 fn runtime_proxy_should_shed_fresh_compact_request(
@@ -7953,7 +8009,8 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
     path: &str,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
     let started_at = Instant::now();
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode =
+        runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
     let budget = runtime_proxy_admission_wait_budget(path, pressure_mode);
     let mut waited = false;
     loop {
@@ -8036,7 +8093,8 @@ where
     F: FnMut(T) -> Result<(), (RuntimeProxyQueueRejection, T)>,
 {
     let started_at = Instant::now();
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode =
+        runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
     let budget = runtime_proxy_long_lived_queue_wait_budget(path, pressure_mode);
     let mut waited = false;
     loop {
@@ -8240,7 +8298,9 @@ fn handle_runtime_rotation_proxy_request(
         }
         Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-            mark_runtime_proxy_local_overload(shared, &reason);
+            if runtime_proxy_lane_limit_marks_global_overload(lane) {
+                mark_runtime_proxy_local_overload(shared, &reason);
+            }
             reject_runtime_proxy_overloaded_request(request, shared, &reason);
             return;
         }
@@ -12275,7 +12335,8 @@ fn proxy_runtime_websocket_text_message(
     let mut websocket_reuse_fresh_retry_profiles = BTreeSet::new();
 
     loop {
-        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+        let pressure_mode =
+            runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Websocket);
         if runtime_proxy_precommit_budget_exhausted(
             selection_started_at,
             selection_attempts,
@@ -13332,7 +13393,8 @@ fn proxy_runtime_websocket_text_message(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} websocket_session={session_id} profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}"
+                    "request={request_id} websocket_session={session_id} profile_inflight_saturated profile={candidate_name} hard_limit={}",
+                    runtime_proxy_profile_inflight_hard_limit(),
                 ),
             );
             excluded_profiles.insert(candidate_name);
@@ -14961,7 +15023,8 @@ fn proxy_runtime_standard_request(
         let preferred_profile = session_profile
             .clone()
             .unwrap_or_else(|| current_profile.clone());
-        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+        let pressure_mode =
+            runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Standard);
         let selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         let mut excluded_profiles = BTreeSet::new();
@@ -15083,7 +15146,8 @@ fn proxy_runtime_standard_request(
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}",
+                        "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={}",
+                        runtime_proxy_profile_inflight_hard_limit(),
                     ),
                 );
                 excluded_profiles.insert(candidate_name);
@@ -15173,7 +15237,8 @@ fn proxy_runtime_standard_request(
         .map(|(profile_name, _)| profile_name.clone())
         .or(session_profile.clone())
         .unwrap_or_else(|| current_profile.clone());
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode =
+        runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Compact);
     if runtime_proxy_should_shed_fresh_compact_request(
         pressure_mode,
         initial_compact_affinity_profile,
@@ -15370,7 +15435,8 @@ fn proxy_runtime_standard_request(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}",
+                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={}",
+                    runtime_proxy_profile_inflight_hard_limit(),
                 ),
             );
             excluded_profiles.insert(candidate_name);
@@ -15911,7 +15977,8 @@ fn proxy_runtime_responses_request(
     let mut saw_previous_response_not_found = false;
 
     loop {
-        let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+        let pressure_mode =
+            runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Responses);
         if runtime_proxy_precommit_budget_exhausted(
             selection_started_at,
             selection_attempts,
@@ -16839,7 +16906,8 @@ fn proxy_runtime_responses_request(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}"
+                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={}",
+                    runtime_proxy_profile_inflight_hard_limit(),
                 ),
             );
             saw_inflight_saturation = true;
@@ -17384,7 +17452,8 @@ fn next_runtime_response_candidate_for_route(
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
     let now = Local::now().timestamp();
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let sync_probe_pressure_mode = runtime_proxy_sync_probe_pressure_mode_active(shared);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
         state,
@@ -17521,7 +17590,7 @@ fn next_runtime_response_candidate_for_route(
         })
         .map(|candidate| candidate.order_index)
         .min();
-    let should_sync_probe_cold_start = !pressure_mode
+    let should_sync_probe_cold_start = !sync_probe_pressure_mode
         && !cold_start_probe_jobs.is_empty()
         && (candidates.is_empty()
             || best_candidate_order_index.is_none()
@@ -17530,7 +17599,7 @@ fn next_runtime_response_candidate_for_route(
                     .iter()
                     .any(|job| job.order_index < best_order_index)
             }));
-    if pressure_mode && !cold_start_probe_jobs.is_empty() {
+    if sync_probe_pressure_mode && !cold_start_probe_jobs.is_empty() {
         runtime_proxy_log(
             shared,
             format!(
@@ -17620,7 +17689,7 @@ fn next_runtime_response_candidate_for_route(
             schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
         }
     } else {
-        if pressure_mode && !cold_start_probe_jobs.is_empty() {
+        if sync_probe_pressure_mode && !cold_start_probe_jobs.is_empty() {
             runtime_proxy_log(
                 shared,
                 format!(
@@ -17881,7 +17950,7 @@ fn runtime_waitable_inflight_candidates_for_route(
     wait_affinity_owner: Option<&str>,
 ) -> Result<BTreeSet<String>> {
     let now = Local::now().timestamp();
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
         state,
@@ -17994,7 +18063,7 @@ fn runtime_any_waited_candidate_relieved(
         return Ok(false);
     }
     let now = Local::now().timestamp();
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
         state,
@@ -18104,7 +18173,7 @@ fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     continuation: bool,
     wait_affinity_owner: Option<&str>,
 ) -> Result<bool> {
-    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let wait_budget = runtime_proxy_request_inflight_wait_budget(request, pressure_mode);
     if wait_budget.is_zero() {
         return Ok(false);
@@ -18274,13 +18343,14 @@ fn runtime_profile_inflight_hard_limited_for_context(
     profile_name: &str,
     context: &str,
 ) -> Result<bool> {
+    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
     let runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     Ok(runtime_profile_inflight_count(&runtime, profile_name)
         .saturating_add(runtime_profile_inflight_hard_limit_context(context))
-        > RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT)
+        > hard_limit)
 }
 
 fn runtime_profile_in_selection_backoff(
@@ -18550,7 +18620,7 @@ fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static
 }
 
 fn runtime_profile_inflight_soft_limit(route_kind: RuntimeRouteKind, pressure_mode: bool) -> usize {
-    let base = RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT.max(1);
+    let base = runtime_proxy_profile_inflight_soft_limit().max(1);
     if !pressure_mode {
         return base;
     }

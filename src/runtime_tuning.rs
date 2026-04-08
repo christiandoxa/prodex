@@ -219,6 +219,24 @@ pub(super) fn runtime_proxy_pressure_long_lived_queue_wait_budget_ms() -> u64 {
     )
 }
 
+#[allow(dead_code)]
+pub(super) fn runtime_proxy_profile_inflight_soft_limit() -> usize {
+    usize_override_with_policy(
+        "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT",
+        runtime_policy_proxy().and_then(|policy| policy.profile_inflight_soft_limit),
+        RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+    )
+}
+
+#[allow(dead_code)]
+pub(super) fn runtime_proxy_profile_inflight_hard_limit() -> usize {
+    usize_override_with_policy(
+        "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT",
+        runtime_policy_proxy().and_then(|policy| policy.profile_inflight_hard_limit),
+        RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
+    )
+}
+
 pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
     percent_override_with_policy(
         "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
@@ -239,4 +257,126 @@ pub(super) fn runtime_startup_sync_probe_warm_limit() -> usize {
 
 pub(super) fn toml_string_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    struct TestEnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl TestEnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var_os(key);
+            unsafe { env::set_var(key, value) };
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = env::var_os(key);
+            unsafe { env::remove_var(key) };
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for TestEnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_ref() {
+                unsafe { env::set_var(self.key, value) };
+            } else {
+                unsafe { env::remove_var(self.key) };
+            }
+        }
+    }
+
+    struct TestPolicyDir {
+        root: PathBuf,
+    }
+
+    impl TestPolicyDir {
+        fn new(policy_toml: &str) -> Self {
+            clear_runtime_policy_cache();
+            let root = std::env::temp_dir().join(format!(
+                "prodex-runtime-tuning-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("policy.toml"), policy_toml).unwrap();
+            Self { root }
+        }
+    }
+
+    impl Drop for TestPolicyDir {
+        fn drop(&mut self) {
+            clear_runtime_policy_cache();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn with_test_policy_dir(policy_toml: &str) -> TestPolicyDir {
+        TestPolicyDir::new(policy_toml)
+    }
+
+    #[test]
+    fn profile_inflight_limits_read_from_policy_and_env_overrides_policy() {
+        let policy_dir = with_test_policy_dir(
+            r#"
+version = 1
+
+[runtime_proxy]
+profile_inflight_soft_limit = 7
+profile_inflight_hard_limit = 11
+"#,
+        );
+        let _home_guard = TestEnvVarGuard::set(
+            "PRODEX_HOME",
+            policy_dir.root.to_str().expect("policy dir path"),
+        );
+        let _soft_unset_guard =
+            TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT");
+        let _hard_unset_guard =
+            TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT");
+
+        assert_eq!(runtime_proxy_profile_inflight_soft_limit(), 7);
+        assert_eq!(runtime_proxy_profile_inflight_hard_limit(), 11);
+
+        let _soft_env_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT", "13");
+        let _hard_env_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT", "17");
+        assert_eq!(runtime_proxy_profile_inflight_soft_limit(), 13);
+        assert_eq!(runtime_proxy_profile_inflight_hard_limit(), 17);
+    }
+
+    #[test]
+    fn profile_inflight_limits_ignore_zero_env_values() {
+        let policy_dir = with_test_policy_dir(
+            r#"
+version = 1
+
+[runtime_proxy]
+profile_inflight_soft_limit = 7
+profile_inflight_hard_limit = 11
+"#,
+        );
+        let _home_guard = TestEnvVarGuard::set(
+            "PRODEX_HOME",
+            policy_dir.root.to_str().expect("policy dir path"),
+        );
+        let _soft_env_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT", "0");
+        let _hard_env_guard =
+            TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT", "0");
+
+        assert_eq!(runtime_proxy_profile_inflight_soft_limit(), 7);
+        assert_eq!(runtime_proxy_profile_inflight_hard_limit(), 11);
+    }
 }

@@ -75,6 +75,8 @@ pub(super) struct RuntimePolicyProxySettings {
     pub(super) async_worker_count: Option<usize>,
     pub(super) long_lived_queue_capacity: Option<usize>,
     pub(super) active_request_limit: Option<usize>,
+    pub(super) profile_inflight_soft_limit: Option<usize>,
+    pub(super) profile_inflight_hard_limit: Option<usize>,
     pub(super) responses_active_limit: Option<usize>,
     pub(super) compact_active_limit: Option<usize>,
     pub(super) websocket_active_limit: Option<usize>,
@@ -354,6 +356,16 @@ fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> Resu
         "runtime_proxy.active_request_limit",
     )?;
     validate_optional_usize(
+        policy.runtime_proxy.profile_inflight_soft_limit,
+        path,
+        "runtime_proxy.profile_inflight_soft_limit",
+    )?;
+    validate_optional_usize(
+        policy.runtime_proxy.profile_inflight_hard_limit,
+        path,
+        "runtime_proxy.profile_inflight_hard_limit",
+    )?;
+    validate_optional_usize(
         policy.runtime_proxy.responses_active_limit,
         path,
         "runtime_proxy.responses_active_limit",
@@ -543,6 +555,8 @@ backend = "file"
 [runtime_proxy]
 worker_count = 12
 active_request_limit = 96
+profile_inflight_soft_limit = 5
+profile_inflight_hard_limit = 9
 "#,
         )
         .unwrap();
@@ -554,6 +568,8 @@ active_request_limit = 96
         assert_eq!(loaded.secrets.backend, Some(SecretBackendKind::File));
         assert_eq!(loaded.runtime_proxy.worker_count, Some(12));
         assert_eq!(loaded.runtime_proxy.active_request_limit, Some(96));
+        assert_eq!(loaded.runtime_proxy.profile_inflight_soft_limit, Some(5));
+        assert_eq!(loaded.runtime_proxy.profile_inflight_hard_limit, Some(9));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -625,6 +641,32 @@ backend = "keyring"
 
         let err = load_runtime_policy_from_root(&root).unwrap_err();
         assert!(err.to_string().contains("secrets.keyring_service"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_runtime_policy_from_root_rejects_zero_profile_inflight_limits() {
+        clear_runtime_policy_cache();
+        let root = temp_root("inflight-zero");
+        let path = runtime_policy_path(&root);
+        fs::write(
+            &path,
+            r#"
+version = 1
+
+[runtime_proxy]
+profile_inflight_soft_limit = 0
+profile_inflight_hard_limit = 1
+"#,
+        )
+        .unwrap();
+
+        let err = load_runtime_policy_from_root(&root).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("runtime_proxy.profile_inflight_soft_limit")
+        );
 
         let _ = fs::remove_dir_all(root);
     }

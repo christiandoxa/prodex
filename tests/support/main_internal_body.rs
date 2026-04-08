@@ -2566,11 +2566,56 @@ fn runtime_profile_inflight_soft_limit_tightens_under_pressure() {
         runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, true);
     let pressured_compact = runtime_profile_inflight_soft_limit(RuntimeRouteKind::Compact, true);
 
-    assert_eq!(steady_responses, RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT.max(1));
+    assert_eq!(steady_responses, runtime_proxy_profile_inflight_soft_limit().max(1));
     assert!(pressured_responses >= 1);
     assert!(pressured_responses <= steady_responses);
     assert!(pressured_compact >= 1);
     assert!(pressured_compact <= pressured_responses);
+}
+
+#[test]
+fn runtime_proxy_background_queue_pressure_is_route_aware() {
+    assert!(!runtime_proxy_pressure_mode_for_route(
+        RuntimeRouteKind::Responses,
+        false,
+        true,
+    ));
+    assert!(!runtime_proxy_pressure_mode_for_route(
+        RuntimeRouteKind::Websocket,
+        false,
+        true,
+    ));
+    assert!(runtime_proxy_pressure_mode_for_route(
+        RuntimeRouteKind::Compact,
+        false,
+        true,
+    ));
+    assert!(runtime_proxy_pressure_mode_for_route(
+        RuntimeRouteKind::Standard,
+        false,
+        true,
+    ));
+    assert!(runtime_proxy_pressure_mode_for_route(
+        RuntimeRouteKind::Responses,
+        true,
+        false,
+    ));
+}
+
+#[test]
+fn runtime_proxy_only_responses_lane_limit_marks_global_overload() {
+    assert!(runtime_proxy_lane_limit_marks_global_overload(
+        RuntimeRouteKind::Responses
+    ));
+    assert!(!runtime_proxy_lane_limit_marks_global_overload(
+        RuntimeRouteKind::Compact
+    ));
+    assert!(!runtime_proxy_lane_limit_marks_global_overload(
+        RuntimeRouteKind::Websocket
+    ));
+    assert!(!runtime_proxy_lane_limit_marks_global_overload(
+        RuntimeRouteKind::Standard
+    ));
 }
 
 #[test]
@@ -5437,6 +5482,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
 #[test]
 fn runtime_profile_inflight_hard_limit_detects_saturation() {
     let temp_dir = TestDir::new();
+    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
             root: temp_dir.path.join("prodex"),
@@ -5458,10 +5504,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([(
-            "main".to_string(),
-            RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
-        )]),
+        profile_inflight: BTreeMap::from([("main".to_string(), hard_limit)]),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -5496,6 +5539,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
 #[test]
 fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
     let temp_dir = TestDir::new();
+    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
             root: temp_dir.path.join("prodex"),
@@ -5519,7 +5563,7 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
         profile_route_circuit_open_until: BTreeMap::new(),
         profile_inflight: BTreeMap::from([(
             "main".to_string(),
-            RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT.saturating_sub(1),
+            hard_limit.saturating_sub(1),
         )]),
         profile_health: BTreeMap::new(),
     };
@@ -5558,6 +5602,78 @@ fn runtime_profile_inflight_weight_prioritizes_long_lived_routes() {
     assert_eq!(runtime_profile_inflight_weight("compact_http"), 1);
     assert_eq!(runtime_profile_inflight_weight("responses_http"), 2);
     assert_eq!(runtime_profile_inflight_weight("websocket_session"), 2);
+}
+
+#[test]
+fn runtime_profile_inflight_limits_use_configured_overrides() {
+    let _soft_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT", "9");
+    let _hard_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT", "10");
+
+    assert_eq!(
+        runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, false),
+        9
+    );
+    assert_eq!(
+        runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, true),
+        8
+    );
+    assert_eq!(
+        runtime_profile_inflight_soft_limit(RuntimeRouteKind::Compact, true),
+        7
+    );
+
+    let temp_dir = TestDir::new();
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState::default(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::from([("main".to_string(), 9)]),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    assert!(
+        runtime_profile_inflight_hard_limited_for_context(&shared, "main", "responses_http")
+            .expect("responses inflight lookup should succeed")
+    );
+    assert!(
+        !runtime_profile_inflight_hard_limited_for_context(&shared, "main", "standard_http")
+            .expect("standard inflight lookup should succeed")
+    );
 }
 
 #[test]
