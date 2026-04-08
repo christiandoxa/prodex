@@ -11654,6 +11654,26 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
 }
 
 #[test]
+fn runtime_binding_touch_waits_for_full_interval_with_second_precision() {
+    let now = Local::now().timestamp();
+
+    assert!(
+        !runtime_binding_touch_should_persist(
+            now - RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS,
+            now,
+        ),
+        "second-precision timestamps should not persist exactly on the coarse boundary"
+    );
+    assert!(
+        runtime_binding_touch_should_persist(
+            now - RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS - 1,
+            now,
+        ),
+        "touch persistence should still trigger once the full interval has clearly elapsed"
+    );
+}
+
+#[test]
 fn response_affinity_touch_persists_recent_use_for_housekeeping() {
     let temp_dir = TestDir::new();
     let now = Local::now().timestamp();
@@ -26018,6 +26038,7 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
         .expect("runtime proxy should start");
     let first_url = format!("http://{}/v1/messages", proxy.listen_addr);
     let second_url = first_url.clone();
+    let (first_started_tx, first_started_rx) = std::sync::mpsc::channel();
     let first = thread::spawn(move || {
         let client = Client::builder().build().expect("client");
         let response = client
@@ -26040,12 +26061,22 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
             )
             .send()
             .expect("first anthropic request should start");
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "first anthropic request should hold the interactive slot"
+        );
+        first_started_tx
+            .send(())
+            .expect("first anthropic request should signal readiness");
         thread::sleep(Duration::from_millis(250));
         let body = response.text().expect("first anthropic stream should decode");
         assert!(body.contains("event: message_start"));
     });
 
-    thread::sleep(Duration::from_millis(40));
+    first_started_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first anthropic request should start before the overload probe");
 
     let client = Client::builder().build().expect("client");
     let response = client

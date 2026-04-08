@@ -9202,7 +9202,10 @@ fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
 }
 
 fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
-    now.saturating_sub(bound_at) >= RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS
+    // These timestamps are stored with second precision. Require strictly more
+    // than the interval so a boundary-crossing lookup does not persist nearly a
+    // second early.
+    now.saturating_sub(bound_at) > RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
