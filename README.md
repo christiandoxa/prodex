@@ -44,7 +44,7 @@ Before using `prodex`, make sure you have:
 
 ```bash
 npm install -g @christiandoxa/prodex
-````
+```
 
 ### Cargo
 
@@ -62,11 +62,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.126`:
+The current local version in this repo is `0.2.127`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.126
-cargo install prodex --force --version 0.2.126
+npm install -g @christiandoxa/prodex@0.2.127
+cargo install prodex --force --version 0.2.127
 ```
 
 Switching from a Cargo-installed binary to npm?

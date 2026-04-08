@@ -4007,6 +4007,11 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
+    let initial_second = Local::now().timestamp();
+    while Local::now().timestamp() == initial_second {
+        thread::sleep(Duration::from_millis(5));
+    }
+
     remember_runtime_successful_previous_response_owner(
         &shared,
         "main",
