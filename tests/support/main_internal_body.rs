@@ -25874,6 +25874,10 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
             .map(String::as_str),
         Some("second-account")
     );
+    assert!(
+        !request_headers.contains_key("x-prodex-internal-request-origin"),
+        "internal prodex request origin header must not leak upstream"
+    );
 
     let translated_body = backend
         .responses_bodies()
@@ -26085,4 +26089,122 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
     );
 
     first.join().expect("first request should join");
+}
+
+#[test]
+fn runtime_proxy_waits_for_anthropic_inflight_relief_before_failing() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
+
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let usage = usage_with_main_windows(90, 3600, 90, 604_800);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: Local::now().timestamp(),
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage.clone()),
+                },
+            )]),
+            profile_usage_snapshots: BTreeMap::from([("main".to_string(), snapshot)]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let inflight_guard = acquire_runtime_profile_inflight_guard(&shared, "main", "responses_http")
+        .expect("inflight guard should be acquired");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(25));
+        drop(inflight_guard);
+    });
+
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-api-key".to_string(), "dummy".to_string()),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+        ],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "second request should wait instead of failing"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+    let response = proxy_runtime_anthropic_messages_request(42, &request, &shared)
+        .expect("anthropic request should complete after inflight relief");
+
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("expected buffered anthropic response");
+    };
+    assert_eq!(parts.status, 200, "unexpected status after inflight wait");
+    let body: serde_json::Value =
+        serde_json::from_slice(&parts.body).expect("response body should parse");
+    assert_eq!(
+        body.get("type").and_then(serde_json::Value::as_str),
+        Some("message")
+    );
+
+    release.join().expect("release thread should join");
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("inflight_wait_started route=responses"),
+        "interactive inflight wait should be logged"
+    );
+    assert!(
+        log.contains("inflight_wait_finished route=responses"),
+        "interactive inflight wait completion should be logged"
+    );
 }

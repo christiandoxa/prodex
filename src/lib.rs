@@ -78,6 +78,8 @@ const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
 const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 const PRODEX_CLAUDE_PROXY_API_KEY: &str = "prodex-runtime-proxy";
+const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
+const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
 const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5";
 const PRODEX_CLAUDE_CONFIG_DIR_NAME: &str = ".claude-code";
 const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
@@ -4148,6 +4150,11 @@ impl Drop for RuntimeProfileInFlightGuard {
                     self.profile_name, remaining, self.weight, self.context
                 ),
             );
+            let (mutex, condvar) = &*self.shared.lane_admission.wait;
+            let _guard = mutex
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            condvar.notify_all();
         }
     }
 }
@@ -7666,6 +7673,27 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
     }
 }
 
+fn runtime_proxy_request_origin<'a>(headers: &'a [(String, String)]) -> Option<&'a str> {
+    runtime_proxy_request_header_value(headers, PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER)
+}
+
+fn runtime_proxy_request_prefers_interactive_inflight_wait(request: &RuntimeProxyRequest) -> bool {
+    runtime_proxy_request_origin(&request.headers).is_some_and(|origin| {
+        origin.eq_ignore_ascii_case(PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES)
+    })
+}
+
+fn runtime_proxy_request_interactive_inflight_wait_budget(
+    request: &RuntimeProxyRequest,
+    pressure_mode: bool,
+) -> Duration {
+    if runtime_proxy_request_prefers_interactive_inflight_wait(request) {
+        runtime_proxy_admission_wait_budget(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, pressure_mode)
+    } else {
+        Duration::ZERO
+    }
+}
+
 fn runtime_proxy_request_is_long_lived(path: &str, websocket: bool) -> bool {
     websocket || is_runtime_responses_path(path) || is_runtime_anthropic_messages_path(path)
 }
@@ -8076,6 +8104,23 @@ where
             }
         }
     }
+}
+
+fn wait_for_runtime_profile_inflight_relief(
+    shared: &RuntimeRotationProxyShared,
+    timeout: Duration,
+) -> bool {
+    if timeout.is_zero() {
+        return false;
+    }
+    let (mutex, condvar) = &*shared.lane_admission.wait;
+    let guard = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (_guard, result) = condvar
+        .wait_timeout(guard, timeout)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    !result.timed_out()
 }
 
 fn enqueue_runtime_proxy_long_lived_request_with_wait(
@@ -8894,6 +8939,10 @@ fn translate_runtime_anthropic_messages_request(
     if let Some(session_id) = runtime_proxy_claude_session_id(request) {
         translated_headers.push(("session_id".to_string(), session_id));
     }
+    translated_headers.push((
+        PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER.to_string(),
+        PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES.to_string(),
+    ));
 
     Ok(RuntimeAnthropicMessagesRequest {
         translated_request: RuntimeProxyRequest {
@@ -10823,24 +10872,28 @@ fn runtime_proxy_precommit_budget_exhausted(
     continuation: bool,
     pressure_mode: bool,
 ) -> bool {
-    let (attempt_limit, budget_ms) = if continuation {
+    let (attempt_limit, budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
+
+    attempts >= attempt_limit || started_at.elapsed() >= budget
+}
+
+fn runtime_proxy_precommit_budget(continuation: bool, pressure_mode: bool) -> (usize, Duration) {
+    if continuation {
         (
             RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
-            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS,
+            Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS),
         )
     } else if pressure_mode {
         (
             RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
-            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
+            Duration::from_millis(RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS),
         )
     } else {
         (
             RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
-            RUNTIME_PROXY_PRECOMMIT_BUDGET_MS,
+            Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_BUDGET_MS),
         )
-    };
-
-    attempts >= attempt_limit || started_at.elapsed() >= Duration::from_millis(budget_ms)
+    }
 }
 
 fn runtime_proxy_has_continuation_priority(
@@ -16235,6 +16288,23 @@ fn proxy_runtime_responses_request(
                     }
                 ),
             );
+            if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                request_id,
+                &request,
+                shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Responses,
+                selection_started_at,
+                runtime_proxy_has_continuation_priority(
+                    previous_response_id.as_deref(),
+                    pinned_profile.as_deref(),
+                    request_turn_state.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                ),
+            )? {
+                continue;
+            }
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
@@ -16681,8 +16751,25 @@ fn proxy_runtime_responses_request(
                     "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT}"
                 ),
             );
-            excluded_profiles.insert(candidate_name);
             saw_inflight_saturation = true;
+            if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                request_id,
+                &request,
+                shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Responses,
+                selection_started_at,
+                runtime_proxy_has_continuation_priority(
+                    previous_response_id.as_deref(),
+                    pinned_profile.as_deref(),
+                    request_turn_state.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                ),
+            )? {
+                continue;
+            }
+            excluded_profiles.insert(candidate_name);
             continue;
         }
 
@@ -17685,6 +17772,162 @@ fn next_runtime_response_candidate_for_route(
     }
 
     Ok(fallback)
+}
+
+fn runtime_has_waitable_inflight_candidate_for_route(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let (
+        state,
+        current_profile,
+        include_code_review,
+        cached_reports,
+        cached_usage_snapshots,
+        profile_usage_auth,
+        retry_backoff_until,
+        transport_backoff_until,
+        route_circuit_open_until,
+        profile_inflight,
+        profile_health,
+    ) = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
+        (
+            runtime.state.clone(),
+            runtime.current_profile.clone(),
+            runtime.include_code_review,
+            runtime.profile_probe_cache.clone(),
+            runtime.profile_usage_snapshots.clone(),
+            runtime.profile_usage_auth.clone(),
+            runtime.profile_retry_backoff_until.clone(),
+            runtime.profile_transport_backoff_until.clone(),
+            runtime.profile_route_circuit_open_until.clone(),
+            runtime.profile_inflight.clone(),
+            runtime.profile_health.clone(),
+        )
+    };
+
+    let mut reports = Vec::new();
+    for (order_index, name) in active_profile_selection_order(&state, &current_profile)
+        .into_iter()
+        .enumerate()
+    {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        let Some(entry) = cached_reports.get(&name) else {
+            continue;
+        };
+        reports.push(RunProfileProbeReport {
+            name,
+            order_index,
+            auth: entry.auth.clone(),
+            result: entry.result.clone(),
+        });
+    }
+
+    for candidate in ready_profile_candidates(
+        &reports,
+        include_code_review,
+        Some(current_profile.as_str()),
+        &state,
+        Some(&cached_usage_snapshots),
+    ) {
+        if excluded_profiles.contains(&candidate.name) {
+            continue;
+        }
+        if runtime_profile_name_in_selection_backoff(
+            &candidate.name,
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            route_kind,
+            now,
+        ) {
+            continue;
+        }
+        if runtime_profile_auth_failure_active_with_auth_cache(
+            &profile_health,
+            &profile_usage_auth,
+            &candidate.name,
+            now,
+        ) {
+            continue;
+        }
+        if runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_for_route(&candidate.usage, route_kind),
+            route_kind,
+        )
+        .is_some()
+        {
+            continue;
+        }
+        if runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
+            >= inflight_soft_limit
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    selection_started_at: Instant,
+    continuation: bool,
+) -> Result<bool> {
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let wait_budget =
+        runtime_proxy_request_interactive_inflight_wait_budget(request, pressure_mode);
+    if wait_budget.is_zero()
+        || !runtime_has_waitable_inflight_candidate_for_route(
+            shared,
+            excluded_profiles,
+            route_kind,
+        )?
+    {
+        return Ok(false);
+    }
+
+    let (_, precommit_budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
+    let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
+    let wait_for = wait_budget.min(remaining_budget);
+    if wait_for.is_zero() {
+        return Ok(false);
+    }
+
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http inflight_wait_started route={} wait_ms={}",
+            runtime_route_kind_label(route_kind),
+            wait_for.as_millis()
+        ),
+    );
+    let started_at = Instant::now();
+    let signaled = wait_for_runtime_profile_inflight_relief(shared, wait_for);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http inflight_wait_finished route={} waited_ms={} signaled={signaled}",
+            runtime_route_kind_label(route_kind),
+            started_at.elapsed().as_millis()
+        ),
+    );
+    Ok(true)
 }
 
 fn runtime_profile_usage_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
@@ -19990,6 +20233,7 @@ fn should_skip_runtime_request_header(name: &str) -> bool {
             | "transfer-encoding"
             | "upgrade"
     ) || lower.starts_with("sec-websocket-")
+        || lower.starts_with("x-prodex-internal-")
 }
 
 fn runtime_proxy_effective_user_agent(headers: &[(String, String)]) -> Option<&str> {
