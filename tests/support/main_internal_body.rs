@@ -175,7 +175,9 @@ fn wait_for_runtime_background_queues_idle() {
             return;
         }
         if Instant::now() >= deadline {
-            return;
+            panic!(
+                "runtime background queues did not go idle before timeout: backlog={backlog} active={active}"
+            );
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -378,14 +380,21 @@ where
     F: Fn(&AppState) -> bool,
 {
     let deadline = Instant::now() + Duration::from_secs(2);
+    let mut last_state = None;
     loop {
         if let Ok(state) = AppState::load(paths)
-            && predicate(&state)
         {
-            return state;
+            if predicate(&state) {
+                return state;
+            }
+            last_state = Some(state);
         }
         if Instant::now() >= deadline {
-            return AppState::load(paths).expect("state should reload");
+            let state = AppState::load(paths).expect("state should reload");
+            panic!(
+                "timed out waiting for app state predicate; last_state={:?} final_state={:?}",
+                last_state, state
+            );
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -396,23 +405,30 @@ where
     F: Fn(&RuntimeContinuationStore) -> bool,
 {
     let deadline = Instant::now() + Duration::from_secs(2);
+    let mut last_continuations = None;
     loop {
         if let Ok(continuations) = load_runtime_continuations_with_recovery(
             paths,
             &AppState::load(paths).unwrap_or_default().profiles,
         )
         .map(|loaded| loaded.value)
-            && predicate(&continuations)
         {
-            return continuations;
+            if predicate(&continuations) {
+                return continuations;
+            }
+            last_continuations = Some(continuations);
         }
         if Instant::now() >= deadline {
-            return load_runtime_continuations_with_recovery(
+            let continuations = load_runtime_continuations_with_recovery(
                 paths,
                 &AppState::load(paths).unwrap_or_default().profiles,
             )
             .map(|loaded| loaded.value)
             .expect("runtime continuations should reload");
+            panic!(
+                "timed out waiting for runtime continuations predicate; last_continuations={:?} final_continuations={:?}",
+                last_continuations, continuations
+            );
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -7121,6 +7137,104 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
     let runtime = shared.runtime.lock().expect("runtime should lock");
     assert_eq!(runtime.current_profile, "second");
     assert_eq!(runtime.state.active_profile.as_deref(), Some("main"));
+}
+
+#[test]
+fn commit_runtime_proxy_profile_selection_can_skip_current_profile_tracking() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    let switched = commit_runtime_proxy_profile_selection_with_policy(
+        &shared,
+        "second",
+        RuntimeRouteKind::Websocket,
+        false,
+    )
+    .expect("profile commit should succeed");
+
+    assert!(
+        !switched,
+        "tracked current profile should stay on the heuristic profile"
+    );
+    assert_eq!(shared.state_save_revision.load(Ordering::SeqCst), 0);
+    let runtime = shared.runtime.lock().expect("runtime should lock");
+    assert_eq!(runtime.current_profile, "main");
+    assert_eq!(runtime.state.active_profile.as_deref(), Some("main"));
+    assert!(
+        runtime.state.last_run_selected_at.is_empty(),
+        "continuation commit should not promote the global active profile"
+    );
 }
 
 #[test]
@@ -18286,19 +18400,23 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_c
     );
 
     let persisted = wait_for_state(&paths, |state| {
-        state.active_profile.as_deref() == Some("second")
+        state.active_profile.as_deref() == Some("main")
             && state
                 .session_profile_bindings
                 .get("sess-ws-overload")
                 .is_some_and(|binding| binding.profile_name == "second")
     });
-    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    assert_eq!(persisted.active_profile.as_deref(), Some("main"));
     assert_eq!(
         persisted
             .session_profile_bindings
             .get("sess-ws-overload")
             .map(|binding| binding.profile_name.as_str()),
         Some("second")
+    );
+    assert!(
+        persisted.last_run_selected_at.is_empty(),
+        "session-bound websocket continuation should not promote the global active profile"
     );
 }
 
@@ -23965,8 +24083,10 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
             .respond(response)
             .expect("health response should write");
     });
+    let client = runtime_broker_client().expect("broker client should build");
 
     let discovered = find_compatible_runtime_broker_registry(
+        &client,
         &paths,
         "current-key",
         "https://chatgpt.com/backend-api",
@@ -24020,8 +24140,10 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
             &instance_token,
         );
     });
+    let client = runtime_broker_client().expect("broker client should build");
 
     let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
+        &client,
         &paths,
         broker_key,
         &upstream_base_url,

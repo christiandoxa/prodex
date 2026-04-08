@@ -13668,6 +13668,9 @@ fn attempt_runtime_websocket_request(
     let request_session_id = runtime_request_session_id(handshake_request)
         .or_else(|| runtime_request_session_id_from_text(request_text));
     let request_turn_state = runtime_request_turn_state(handshake_request);
+    let promote_committed_profile = request_previous_response_id.is_none()
+        && request_session_id.is_none()
+        && request_turn_state.is_none();
     let (initial_quota_summary, initial_quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
     if (request_previous_response_id.is_some()
@@ -13937,10 +13940,11 @@ fn attempt_runtime_websocket_request(
                         upstream_turn_state.as_deref(),
                         RuntimeRouteKind::Websocket,
                     )?;
-                    commit_runtime_proxy_profile_selection_with_notice(
+                    let _ = commit_runtime_proxy_profile_selection_with_policy(
                         shared,
                         profile_name,
                         RuntimeRouteKind::Websocket,
+                        promote_committed_profile,
                     )?;
                     runtime_proxy_log(
                         shared,
@@ -13971,7 +13975,7 @@ fn attempt_runtime_websocket_request(
                     &mut previous_response_owner_recorded,
                 )?;
                 local_socket
-                    .send(WsMessage::Text(text.clone().into()))
+                    .send(WsMessage::Text(text.into()))
                     .with_context(|| {
                         websocket_session.reset();
                         "failed to forward runtime websocket text frame"
@@ -14015,10 +14019,11 @@ fn attempt_runtime_websocket_request(
                         upstream_turn_state.as_deref(),
                         RuntimeRouteKind::Websocket,
                     )?;
-                    commit_runtime_proxy_profile_selection_with_notice(
+                    let _ = commit_runtime_proxy_profile_selection_with_policy(
                         shared,
                         profile_name,
                         RuntimeRouteKind::Websocket,
+                        promote_committed_profile,
                     )?;
                     runtime_proxy_log(
                         shared,
@@ -19503,12 +19508,22 @@ fn commit_runtime_proxy_profile_selection(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> Result<bool> {
+    commit_runtime_proxy_profile_selection_with_policy(shared, profile_name, route_kind, true)
+}
+
+fn commit_runtime_proxy_profile_selection_with_policy(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    track_current_profile: bool,
+) -> Result<bool> {
     let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let switch_runtime_profile = runtime.current_profile != profile_name;
-    let switch_global_profile = !matches!(route_kind, RuntimeRouteKind::Compact);
+    let switch_runtime_profile = track_current_profile && runtime.current_profile != profile_name;
+    let switch_global_profile =
+        track_current_profile && !matches!(route_kind, RuntimeRouteKind::Compact);
     let switched = switch_runtime_profile;
     let now = Local::now().timestamp();
     let cleared_retry_backoff = runtime
@@ -19550,7 +19565,7 @@ fn commit_runtime_proxy_profile_selection(
     runtime_proxy_log(
         shared,
         format!(
-            "profile_commit profile={profile_name} route={} switched={switched} persisted={should_persist} cleared_route_circuit={cleared_route_circuit}",
+            "profile_commit profile={profile_name} route={} switched={switched} persisted={should_persist} track_current_profile={track_current_profile} cleared_route_circuit={cleared_route_circuit}",
             runtime_route_kind_label(route_kind),
         ),
     );
@@ -23680,9 +23695,10 @@ fn runtime_broker_process_args(
 }
 
 fn probe_runtime_broker_health(
+    client: &Client,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerHealth>> {
-    let response = match runtime_broker_client()?
+    let response = match client
         .get(runtime_broker_health_url(registry))
         .header("X-Prodex-Admin-Token", &registry.admin_token)
         .send()
@@ -23700,10 +23716,11 @@ fn probe_runtime_broker_health(
 }
 
 fn activate_runtime_broker_profile(
+    client: &Client,
     registry: &RuntimeBrokerRegistry,
     current_profile: &str,
 ) -> Result<()> {
-    let response = runtime_broker_client()?
+    let response = client
         .post(runtime_broker_activate_url(registry))
         .header("X-Prodex-Admin-Token", &registry.admin_token)
         .json(&serde_json::json!({
@@ -23766,6 +23783,7 @@ fn cleanup_runtime_broker_stale_leases(paths: &AppPaths, broker_key: &str) -> us
 }
 
 fn wait_for_existing_runtime_broker_recovery_or_exit(
+    client: &Client,
     paths: &AppPaths,
     broker_key: &str,
     upstream_base_url: &str,
@@ -23780,7 +23798,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit(
 
         if existing.upstream_base_url == upstream_base_url
             && existing.include_code_review == include_code_review
-            && let Some(health) = probe_runtime_broker_health(&existing)?
+            && let Some(health) = probe_runtime_broker_health(client, &existing)?
             && health.instance_token == existing.instance_token
         {
             return Ok(Some(existing));
@@ -23802,6 +23820,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit(
 }
 
 fn find_compatible_runtime_broker_registry(
+    client: &Client,
     paths: &AppPaths,
     excluded_broker_key: &str,
     upstream_base_url: &str,
@@ -23828,7 +23847,7 @@ fn find_compatible_runtime_broker_registry(
             );
             continue;
         }
-        if let Some(health) = probe_runtime_broker_health(&registry)?
+        if let Some(health) = probe_runtime_broker_health(client, &registry)?
             && health.instance_token == registry.instance_token
         {
             return Ok(Some((broker_key, registry)));
@@ -23839,6 +23858,7 @@ fn find_compatible_runtime_broker_registry(
 }
 
 fn wait_for_runtime_broker_ready(
+    client: &Client,
     paths: &AppPaths,
     broker_key: &str,
     expected_instance_token: &str,
@@ -23848,7 +23868,7 @@ fn wait_for_runtime_broker_ready(
     while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
         if let Some(registry) = load_runtime_broker_registry(paths, broker_key)? {
             if registry.instance_token == expected_instance_token
-                && let Some(health) = probe_runtime_broker_health(&registry)?
+                && let Some(health) = probe_runtime_broker_health(client, &registry)?
                 && health.instance_token == expected_instance_token
             {
                 return Ok(registry);
@@ -23910,14 +23930,16 @@ fn ensure_runtime_rotation_proxy_endpoint(
     let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
     let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
     let preferred_listen_addr = preferred_runtime_broker_listen_addr(paths, &broker_key)?;
+    let broker_client = runtime_broker_client()?;
 
     if let Some(existing) = wait_for_existing_runtime_broker_recovery_or_exit(
+        &broker_client,
         paths,
         &broker_key,
         upstream_base_url,
         include_code_review,
     )? {
-        activate_runtime_broker_profile(&existing, current_profile)?;
+        activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
     }
 
@@ -23930,21 +23952,22 @@ fn ensure_runtime_rotation_proxy_endpoint(
             );
         } else if existing.upstream_base_url == upstream_base_url
             && existing.include_code_review == include_code_review
-            && let Some(health) = probe_runtime_broker_health(&existing)?
+            && let Some(health) = probe_runtime_broker_health(&broker_client, &existing)?
             && health.instance_token == existing.instance_token
         {
-            activate_runtime_broker_profile(&existing, current_profile)?;
+            activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
             return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
         }
     }
 
     if let Some((existing_broker_key, existing)) = find_compatible_runtime_broker_registry(
+        &broker_client,
         paths,
         &broker_key,
         upstream_base_url,
         include_code_review,
     )? {
-        activate_runtime_broker_profile(&existing, current_profile)?;
+        activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
         return runtime_proxy_endpoint_from_registry(paths, &existing_broker_key, &existing);
     }
 
@@ -23960,8 +23983,9 @@ fn ensure_runtime_rotation_proxy_endpoint(
         &admin_token,
         preferred_listen_addr.as_deref(),
     )?;
-    let registry = wait_for_runtime_broker_ready(paths, &broker_key, &instance_token)?;
-    activate_runtime_broker_profile(&registry, current_profile)?;
+    let registry =
+        wait_for_runtime_broker_ready(&broker_client, paths, &broker_key, &instance_token)?;
+    activate_runtime_broker_profile(&broker_client, &registry, current_profile)?;
     runtime_proxy_endpoint_from_registry(paths, &broker_key, &registry)
 }
 
