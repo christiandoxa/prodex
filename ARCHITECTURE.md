@@ -149,11 +149,13 @@ What is already in place:
 - secret-management abstraction for `auth.json` and profile exports, still backed by files today
 - stable broker metrics export in JSON and Prometheus formats
 - runtime-aware diagnostics that surface broker metrics targets without changing proxy transport semantics
+- audit logging for enterprise operations, modeled as an append-only concern alongside runtime state rather than as part of transport handling
 
 Planned next steps are:
 
 - admin-grade controls such as RBAC, SSO, and central policy distribution
-- modularization of `src/lib.rs` into smaller runtime-focused units
+- modularization of runtime-store responsibilities into smaller runtime-focused units
+- extraction of state ownership, audit/event persistence, and export helpers out of the proxy hot path
 
 What remains intentionally local:
 

@@ -3,7 +3,6 @@ use base64::Engine;
 use chrono::{Local, TimeZone};
 use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
-use fs2::FileExt;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -39,6 +38,7 @@ use tungstenite::{
     WebSocket as WsSocket, client_tls_with_config,
 };
 
+mod audit_log;
 mod housekeeping;
 mod profile_commands;
 mod profile_identity;
@@ -48,12 +48,14 @@ mod runtime_config;
 mod runtime_doctor;
 mod runtime_metrics;
 mod runtime_policy;
+mod runtime_store;
 mod secret_store;
 mod shared_codex_fs;
 #[path = "cli_render.rs"]
 mod terminal_ui;
 mod update_notice;
 
+use audit_log::*;
 use housekeeping::*;
 use profile_commands::*;
 use profile_identity::*;
@@ -61,6 +63,7 @@ use quota_support::*;
 use runtime_config::*;
 use runtime_doctor::*;
 use runtime_policy::*;
+use runtime_store::*;
 use shared_codex_fs::*;
 use terminal_ui::*;
 use update_notice::*;
@@ -310,7 +313,6 @@ static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock
 static RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE: OnceLock<Arc<RuntimeContinuationJournalSaveQueue>> =
     OnceLock::new();
 static RUNTIME_PROBE_REFRESH_QUEUE: OnceLock<Arc<RuntimeProbeRefreshQueue>> = OnceLock::new();
-static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
 static RUNTIME_PERSISTENCE_MODE_BY_LOG_PATH: OnceLock<Mutex<BTreeMap<PathBuf, bool>>> =
     OnceLock::new();
 static RUNTIME_BROKER_METADATA_BY_LOG_PATH: OnceLock<
@@ -1761,89 +1763,6 @@ fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQueue>) {
     }
 }
 
-fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
-    fs::create_dir_all(&paths.root)
-        .with_context(|| format!("failed to create {}", paths.root.display()))?;
-    let lock_path = state_lock_file_path(&paths.state_file);
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to lock {}", lock_path.display()))?;
-    Ok(StateFileLock { file })
-}
-
-fn try_acquire_runtime_owner_lock(paths: &AppPaths) -> Result<Option<StateFileLock>> {
-    fs::create_dir_all(&paths.root)
-        .with_context(|| format!("failed to create {}", paths.root.display()))?;
-    let lock_path = runtime_owner_lock_file_path(paths);
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open {}", lock_path.display()))?;
-    match file.try_lock_exclusive() {
-        Ok(()) => Ok(Some(StateFileLock { file })),
-        Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
-        Err(err) => Err(err).with_context(|| format!("failed to lock {}", lock_path.display())),
-    }
-}
-
-fn state_lock_file_path(state_file: &Path) -> PathBuf {
-    json_lock_file_path(state_file)
-}
-
-fn runtime_owner_lock_file_path(paths: &AppPaths) -> PathBuf {
-    paths.root.join("runtime-owner.lock")
-}
-
-fn json_lock_file_path(path: &Path) -> PathBuf {
-    path.with_extension("json.lock")
-}
-
-fn acquire_json_file_lock(path: &Path) -> Result<JsonFileLock> {
-    let lock_path = json_lock_file_path(path);
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to lock {}", lock_path.display()))?;
-    Ok(JsonFileLock { file })
-}
-
-fn runtime_sidecar_generation_cache() -> &'static Mutex<BTreeMap<PathBuf, u64>> {
-    RUNTIME_SIDECAR_GENERATION_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-fn runtime_sidecar_cached_generation(path: &Path) -> Option<u64> {
-    runtime_sidecar_generation_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(path)
-        .copied()
-}
-
-fn remember_runtime_sidecar_generation(path: &Path, generation: u64) {
-    runtime_sidecar_generation_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(path.to_path_buf(), generation);
-}
-
-fn forget_runtime_sidecar_generation(path: &Path) {
-    runtime_sidecar_generation_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(path);
-}
-
 #[derive(Debug)]
 struct JsonFileLock {
     file: fs::File,
@@ -2586,214 +2505,6 @@ fn runtime_broker_registry_keys(paths: &AppPaths) -> Vec<String> {
     keys.sort();
     keys.dedup();
     keys
-}
-
-fn last_good_file_path(path: &Path) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("snapshot.json");
-    path.with_file_name(format!("{file_name}{LAST_GOOD_FILE_SUFFIX}"))
-}
-
-fn runtime_sidecar_generation_from_content(content: &str) -> Result<u64> {
-    let value: serde_json::Value =
-        serde_json::from_str(content).context("failed to parse runtime sidecar json")?;
-    Ok(value
-        .get("generation")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0))
-}
-
-fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Path) -> Result<u64> {
-    match fs::read_to_string(path) {
-        Ok(content) => runtime_sidecar_generation_from_content(&content).or_else(|primary_err| {
-            match fs::read_to_string(backup_path) {
-                Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
-                    .with_context(|| {
-                        format!(
-                            "failed to parse {} after primary load error: {primary_err:#}",
-                            backup_path.display()
-                        )
-                    }),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
-                Err(err) => {
-                    Err(err).with_context(|| format!("failed to read {}", backup_path.display()))
-                }
-            }
-        }),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            match fs::read_to_string(backup_path) {
-                Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
-                    .with_context(|| format!("failed to parse {}", backup_path.display())),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
-                Err(err) => {
-                    Err(err).with_context(|| format!("failed to read {}", backup_path.display()))
-                }
-            }
-        }
-        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
-    }
-}
-
-fn parse_versioned_json_or_raw<T>(content: &str) -> Result<(T, u64)>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    match serde_json::from_str::<VersionedJson<T>>(content) {
-        Ok(versioned) => Ok((versioned.value, versioned.generation)),
-        Err(_) => Ok((serde_json::from_str::<T>(content)?, 0)),
-    }
-}
-
-fn read_versioned_json_file_with_backup<T>(
-    path: &Path,
-    backup_path: &Path,
-) -> Result<RecoveredVersionedLoad<T>>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let primary =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()));
-    match primary.and_then(|content| {
-        parse_versioned_json_or_raw::<T>(&content)
-            .with_context(|| format!("failed to parse {}", path.display()))
-    }) {
-        Ok((value, generation)) => Ok(RecoveredVersionedLoad {
-            value,
-            generation,
-            recovered_from_backup: false,
-        }),
-        Err(primary_err) => {
-            let backup_content = fs::read_to_string(backup_path)
-                .with_context(|| format!("failed to read {}", backup_path.display()))?;
-            let (value, generation) = parse_versioned_json_or_raw::<T>(&backup_content)
-                .with_context(|| {
-                    format!(
-                        "failed to parse {} after primary load error: {primary_err:#}",
-                        backup_path.display()
-                    )
-                })?;
-            Ok(RecoveredVersionedLoad {
-                value,
-                generation,
-                recovered_from_backup: true,
-            })
-        }
-    }
-}
-
-fn write_versioned_json_file_with_backup<T>(
-    path: &Path,
-    backup_path: &Path,
-    generation: u64,
-    value: &T,
-) -> Result<()>
-where
-    T: Serialize + for<'de> Deserialize<'de>,
-{
-    let json = serde_json::to_string_pretty(&VersionedJson { generation, value })
-        .context("failed to serialize runtime sidecar")?;
-    write_json_file_with_backup(path, backup_path, &json, |content| {
-        let _: VersionedJson<T> =
-            serde_json::from_str(content).context("failed to validate runtime sidecar")?;
-        Ok(())
-    })
-}
-
-fn save_versioned_json_file_with_fence<T>(path: &Path, backup_path: &Path, value: &T) -> Result<()>
-where
-    T: Serialize + for<'de> Deserialize<'de>,
-{
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let _lock = acquire_json_file_lock(path)?;
-    let cached_generation = runtime_sidecar_cached_generation(path);
-    let expected_generation = cached_generation
-        .unwrap_or_else(|| runtime_sidecar_generation_from_disk(path, backup_path).unwrap_or(0));
-    let current_generation = runtime_sidecar_generation_from_disk(path, backup_path)?;
-    if current_generation != expected_generation {
-        if current_generation == 0
-            && expected_generation > 0
-            && cached_generation.is_some()
-            && !path.exists()
-            && !backup_path.exists()
-        {
-            forget_runtime_sidecar_generation(path);
-            return save_versioned_json_file_with_fence(path, backup_path, value);
-        }
-        bail!(
-            "stale runtime sidecar generation for {} expected={} current={}",
-            path.display(),
-            expected_generation,
-            current_generation
-        );
-    }
-    let next_generation = current_generation.saturating_add(1);
-    write_versioned_json_file_with_backup(path, backup_path, next_generation, value)?;
-    remember_runtime_sidecar_generation(path, next_generation);
-    Ok(())
-}
-
-fn runtime_sidecar_generation_error_is_stale(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .to_string()
-            .contains("stale runtime sidecar generation")
-    })
-}
-
-fn write_json_file_with_backup(
-    path: &Path,
-    backup_path: &Path,
-    json: &str,
-    validate: impl Fn(&str) -> Result<()>,
-) -> Result<()> {
-    let temp_file = unique_state_temp_file_path(path);
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    validate(json).with_context(|| format!("failed to validate staged {}", temp_file.display()))?;
-    fs::rename(&temp_file, path)
-        .with_context(|| format!("failed to replace {}", path.display()))?;
-    let written = fs::read_to_string(path)
-        .with_context(|| format!("failed to re-read {}", path.display()))?;
-    validate(&written).with_context(|| format!("failed to validate {}", path.display()))?;
-    fs::write(backup_path, &written)
-        .with_context(|| format!("failed to refresh {}", backup_path.display()))?;
-    Ok(())
-}
-
-fn load_json_file_with_backup<T>(path: &Path, backup_path: &Path) -> Result<RecoveredLoad<T>>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let primary =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()));
-    match primary.and_then(|content| {
-        serde_json::from_str::<T>(&content)
-            .with_context(|| format!("failed to parse {}", path.display()))
-    }) {
-        Ok(value) => Ok(RecoveredLoad {
-            value,
-            recovered_from_backup: false,
-        }),
-        Err(primary_err) => {
-            let backup_content = fs::read_to_string(backup_path)
-                .with_context(|| format!("failed to read {}", backup_path.display()))?;
-            let value = serde_json::from_str::<T>(&backup_content).with_context(|| {
-                format!(
-                    "failed to parse {} after primary load error: {primary_err:#}",
-                    backup_path.display()
-                )
-            })?;
-            Ok(RecoveredLoad {
-                value,
-                recovered_from_backup: true,
-            })
-        }
-    }
 }
 
 fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
@@ -4965,6 +4676,7 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
+        ("Audit logs".to_string(), format_audit_logs_summary()),
         (
             "Runtime metrics".to_string(),
             format_runtime_broker_metrics_targets(&runtime_metrics_targets),
@@ -5663,6 +5375,15 @@ fn runtime_logs_json_value() -> serde_json::Value {
     })
 }
 
+fn audit_log_event_best_effort(
+    component: &str,
+    action: &str,
+    outcome: &str,
+    details: serde_json::Value,
+) {
+    let _ = append_audit_event(component, action, outcome, details);
+}
+
 fn format_info_pool_remaining(
     total_remaining: i64,
     profiles_with_data: usize,
@@ -5769,6 +5490,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 runtime_policy_json_value(policy_summary.as_ref()),
             );
             object.insert("runtime_logs".to_string(), runtime_logs_json_value());
+            object.insert("audit_logs".to_string(), audit_logs_json_value());
             object.insert(
                 "live_brokers".to_string(),
                 serde_json::to_value(collect_live_runtime_broker_observations(&paths))
@@ -5829,6 +5551,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
+        ("Audit logs".to_string(), format_audit_logs_summary()),
         (
             "Runtime metrics".to_string(),
             format_runtime_broker_metrics_targets(&runtime_metrics_targets),
@@ -6867,6 +6590,18 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             proxy.listen_addr, args.broker_key, args.current_profile, args.include_code_review
         ),
     );
+    audit_log_event_best_effort(
+        "runtime_broker",
+        "start",
+        "success",
+        serde_json::json!({
+            "broker_key": args.broker_key,
+            "listen_addr": proxy.listen_addr.to_string(),
+            "current_profile": args.current_profile,
+            "include_code_review": args.include_code_review,
+            "upstream_base_url": args.upstream_base_url,
+        }),
+    );
 
     let startup_grace_until = metadata
         .started_at
@@ -7873,6 +7608,16 @@ fn handle_runtime_proxy_admin_request(
     runtime_proxy_log(
         shared,
         format!("runtime_broker_activate current_profile={current_profile}"),
+    );
+    audit_log_event_best_effort(
+        "runtime_broker",
+        "activate_profile",
+        "success",
+        serde_json::json!({
+            "broker_key": metadata.broker_key,
+            "listen_addr": metadata.listen_addr,
+            "current_profile": current_profile,
+        }),
     );
     Some(build_runtime_proxy_json_response(
         200,
@@ -23890,26 +23635,6 @@ impl AppState {
         write_state_json_atomic(paths, &json)?;
         Ok(())
     }
-}
-
-fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = STATE_SAVE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let file_name = format!(
-        "{}.{}.{}.{}.tmp",
-        state_file
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("state.json"),
-        std::process::id(),
-        nanos,
-        sequence
-    );
-
-    state_file.with_file_name(file_name)
 }
 
 fn codex_bin() -> OsString {

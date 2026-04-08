@@ -266,6 +266,7 @@ The current hardening is still local-first, but it now includes:
 - a stable live broker snapshot at `GET /__prodex/runtime/metrics`
 - a Prometheus scrape target at `GET /__prodex/runtime/metrics/prometheus`
 - `prodex info` and `prodex doctor --runtime --json` surfacing live broker metrics targets
+- enterprise audit logging for profile selection, rotation decisions, and admin-facing state changes, kept separate from transport behavior
 
 Current limitations:
 
@@ -273,6 +274,7 @@ Current limitations:
 - there is no central control plane, RBAC, SSO, or SCIM
 - `prodex doctor --runtime --json` is operationally useful, but it is not a full observability stack
 - the repo still assumes a per-host profile pool and local state ownership
+- runtime-store modularization is still in progress, so persistence and audit/event handling remain implementation details rather than a public API
 
 ## Notes
 

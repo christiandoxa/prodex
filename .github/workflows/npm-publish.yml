@@ -9,6 +9,8 @@ on:
 permissions:
   contents: read
   id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   build:
@@ -100,6 +102,11 @@ jobs:
           mkdir -p "dist/${{ matrix.artifact-name }}"
           cp "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
 
+      - name: Attest binary artifact provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v6
         with:
@@ -122,6 +129,11 @@ jobs:
 
       - name: Verify crate publish
         run: cargo publish --locked --dry-run
+
+      - name: Attest crate package provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: target/package/prodex-*.crate
 
       - name: Log in to crates.io
         run: cargo login "${CRATES_TOKEN}"

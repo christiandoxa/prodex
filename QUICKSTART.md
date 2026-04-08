@@ -198,6 +198,7 @@ Current hardening includes:
 - a stable broker metrics JSON endpoint at `/__prodex/runtime/metrics`
 - a Prometheus broker metrics endpoint at `/__prodex/runtime/metrics/prometheus`
 - `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets
+- enterprise audit logging for profile, rotation, and admin events, separate from runtime session output
 
 Known gaps today:
 
@@ -205,6 +206,7 @@ Known gaps today:
 - no RBAC, SSO, SCIM, or central admin plane
 - runtime observability is still centered on local logs plus `doctor --runtime --json`
 - the profile pool is still owned per host, not by a shared service
+- runtime-store modularization is still underway, so the state layer should be treated as an internal boundary rather than a stable integration surface
 
 Useful markers:
 

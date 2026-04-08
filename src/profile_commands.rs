@@ -150,6 +150,19 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     }
 
     state.save(&paths)?;
+    audit_log_event_best_effort(
+        "profile",
+        "add",
+        "success",
+        serde_json::json!({
+            "profile_name": args.name.clone(),
+            "managed": managed,
+            "activated": state.active_profile.as_deref() == Some(args.name.as_str()),
+            "copied_source": source_home.is_some(),
+            "codex_home": codex_home.display().to_string(),
+            "source_home": source_home.as_ref().map(|path| path.display().to_string()),
+        }),
+    );
 
     let storage_message = if source_home.is_some() {
         "Source copied into managed profile home.".to_string()
@@ -192,6 +205,18 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
         .transpose()?
         .unwrap_or_else(default_profile_export_path);
     write_profile_export_bundle(&output_path, &encoded)?;
+    audit_log_event_best_effort(
+        "profile",
+        "export",
+        "success",
+        serde_json::json!({
+            "profile_count": profile_names.len(),
+            "profile_names": profile_names,
+            "encrypted": password.is_some(),
+            "output_path": output_path.display().to_string(),
+            "active_profile": payload.active_profile.clone(),
+        }),
+    );
 
     let mut fields = vec![
         (
@@ -231,6 +256,18 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
         rollback_imported_profiles(&mut state, &commit);
         return Err(err);
     }
+    audit_log_event_best_effort(
+        "profile",
+        "import",
+        "success",
+        serde_json::json!({
+            "profile_count": imported_count,
+            "bundle_path": bundle_path.display().to_string(),
+            "encrypted": encrypted,
+            "source_active_profile": source_active_profile.clone(),
+            "active_profile": state.active_profile.clone(),
+        }),
+    );
 
     let mut fields = vec![
         (
@@ -362,6 +399,18 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     }
 
     state.save(&paths)?;
+    audit_log_event_best_effort(
+        "profile",
+        "remove",
+        "success",
+        serde_json::json!({
+            "profile_name": args.name.clone(),
+            "managed": profile.managed,
+            "deleted_home": should_delete_home,
+            "codex_home": profile.codex_home.display().to_string(),
+            "active_profile": state.active_profile.clone(),
+        }),
+    );
 
     let mut fields = vec![(
         "Result".to_string(),
@@ -398,6 +447,15 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
         .profiles
         .get(&name)
         .with_context(|| format!("profile '{}' disappeared from state", name))?;
+    audit_log_event_best_effort(
+        "profile",
+        "set_active",
+        "success",
+        serde_json::json!({
+            "profile_name": name.clone(),
+            "codex_home": profile.codex_home.display().to_string(),
+        }),
+    );
 
     let fields = vec![
         ("Result".to_string(), format!("Active profile: {name}")),
