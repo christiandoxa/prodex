@@ -13791,6 +13791,53 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
 }
 
 #[test]
+fn runtime_proxy_anthropic_admission_wait_recovers_after_short_burst() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        1,
+    );
+
+    let first = try_acquire_runtime_proxy_active_request_slot(&shared, "http", "/v1/messages")
+        .expect("first anthropic slot should be available");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(25));
+        drop(first);
+    });
+
+    let second = acquire_runtime_proxy_active_request_slot_with_wait(&shared, "http", "/v1/messages")
+        .expect("anthropic slot should recover after a short interactive wait");
+    drop(second);
+    release.join().expect("release thread should join");
+}
+
+#[test]
 fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();
@@ -16890,6 +16937,83 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
         .recv_timeout(Duration::from_secs(1))
         .expect("recovered item should reach the queue");
     assert_eq!(queued, 2);
+}
+
+#[test]
+fn runtime_proxy_absorbs_brief_anthropic_queue_burst() {
+    let _wait_budget_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
+        "20",
+    );
+
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let (sender, receiver) = mpsc::sync_channel::<u8>(1);
+    let receiver = Arc::new(Mutex::new(receiver));
+    sender.send(1).expect("queue should accept first item");
+
+    let release_receiver = Arc::clone(&receiver);
+    let release_wait = Arc::clone(&shared.lane_admission.wait);
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(25));
+        let drained = release_receiver
+            .lock()
+            .expect("receiver mutex should not be poisoned")
+            .recv_timeout(Duration::from_secs(1))
+            .expect("queue should drain after short burst");
+        assert_eq!(drained, 1);
+        let (mutex, condvar) = &*release_wait;
+        let _guard = mutex
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        condvar.notify_all();
+    });
+
+    assert!(
+        wait_for_runtime_proxy_queue_capacity(2u8, &shared, "http", "/v1/messages", |value| {
+            match sender.try_send(value) {
+                Ok(()) => Ok(()),
+                Err(TrySendError::Full(returned_value)) => {
+                    Err((RuntimeProxyQueueRejection::Full, returned_value))
+                }
+                Err(TrySendError::Disconnected(returned_value)) => {
+                    Err((RuntimeProxyQueueRejection::Disconnected, returned_value))
+                }
+            }
+        })
+        .is_ok(),
+        "anthropic queue wait should recover after a short burst"
+    );
+
+    release.join().expect("release thread should join");
 }
 
 #[test]
@@ -24643,6 +24767,28 @@ fn runtime_proxy_lane_classifies_anthropic_messages_as_responses() {
 }
 
 #[test]
+fn runtime_proxy_long_lived_classifies_anthropic_messages_as_interactive_streams() {
+    assert!(runtime_proxy_request_is_long_lived(
+        "/v1/messages?beta=true",
+        false
+    ));
+}
+
+#[test]
+fn runtime_proxy_interactive_wait_budget_extends_anthropic_messages() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "21");
+    assert_eq!(
+        runtime_proxy_admission_wait_budget("/backend-api/codex/responses", false),
+        Duration::from_millis(21)
+    );
+    assert_eq!(
+        runtime_proxy_admission_wait_budget("/v1/messages?beta=true", false),
+        Duration::from_millis(42)
+    );
+}
+
+#[test]
 fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir() {
     let temp_dir = TestDir::new();
     let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
@@ -25827,4 +25973,116 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
     let body = response.text().expect("stream body should decode");
     assert!(body.contains("event: message_start"));
     assert!(body.contains("event: message_stop"));
+}
+
+#[test]
+fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is_full() {
+    let _limit_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT", "4");
+    let _lane_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT", "1");
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "1");
+
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_slow_stream();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let first_url = format!("http://{}/v1/messages", proxy.listen_addr);
+    let second_url = first_url.clone();
+    let first = thread::spawn(move || {
+        let client = Client::builder().build().expect("client");
+        let response = client
+            .post(first_url)
+            .header("Content-Type", "application/json")
+            .header("x-api-key", "dummy")
+            .header("anthropic-version", "2023-06-01")
+            .body(
+                serde_json::json!({
+                    "model": "claude-sonnet-4-6",
+                    "stream": true,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "hold the interactive slot"
+                        }
+                    ]
+                })
+                .to_string(),
+            )
+            .send()
+            .expect("first anthropic request should start");
+        thread::sleep(Duration::from_millis(250));
+        let body = response.text().expect("first anthropic stream should decode");
+        assert!(body.contains("event: message_start"));
+    });
+
+    thread::sleep(Duration::from_millis(40));
+
+    let client = Client::builder().build().expect("client");
+    let response = client
+        .post(second_url)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", "dummy")
+        .header("anthropic-version", "2023-06-01")
+        .body(
+            serde_json::json!({
+                "model": "claude-sonnet-4-6",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "second request"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("second anthropic request should receive an overload response");
+
+    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let body: serde_json::Value = response.json().expect("error body should parse");
+    assert_eq!(
+        body.get("type").and_then(serde_json::Value::as_str),
+        Some("error")
+    );
+    assert_eq!(
+        body.get("error")
+            .and_then(|error| error.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("overloaded_error")
+    );
+    assert!(
+        body.get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| message.contains("temporarily saturated")),
+        "unexpected error body: {body}"
+    );
+
+    first.join().expect("first request should join");
 }

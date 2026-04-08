@@ -131,6 +131,7 @@ const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } 
 const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 25 } else { 200 };
 const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
     if cfg!(test) { 25 } else { 200 };
+const RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER: u64 = 2;
 const RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 150 } else { 800 };
 #[allow(dead_code)]
 const RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_BUDGET_MS: u64 =
@@ -6973,8 +6974,9 @@ fn start_runtime_rotation_proxy_with_listen_addr(
             loop {
                 match server.recv() {
                     Ok(request) => {
-                        let long_lived = is_tiny_http_websocket_upgrade(&request)
-                            || is_runtime_responses_path(request.url());
+                        let websocket = is_tiny_http_websocket_upgrade(&request);
+                        let long_lived =
+                            runtime_proxy_request_is_long_lived(request.url(), websocket);
                         if long_lived {
                             match enqueue_runtime_proxy_long_lived_request_with_wait(
                                 &long_lived_sender,
@@ -7066,6 +7068,12 @@ fn reject_runtime_proxy_overloaded_request(
             503,
             "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
         )
+    } else if is_runtime_anthropic_messages_path(&path) {
+        build_runtime_proxy_response_from_parts(build_runtime_anthropic_error_parts(
+            503,
+            runtime_anthropic_error_type_for_status(503),
+            "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
+        ))
     } else if is_runtime_responses_path(&path) || is_runtime_compact_path(&path) {
         build_runtime_proxy_json_error_response(
             503,
@@ -7658,6 +7666,42 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
     }
 }
 
+fn runtime_proxy_request_is_long_lived(path: &str, websocket: bool) -> bool {
+    websocket || is_runtime_responses_path(path) || is_runtime_anthropic_messages_path(path)
+}
+
+fn runtime_proxy_interactive_wait_budget_ms(path: &str, base_budget_ms: u64) -> u64 {
+    if is_runtime_anthropic_messages_path(path) {
+        base_budget_ms.saturating_mul(RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER)
+    } else {
+        base_budget_ms
+    }
+}
+
+fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> Duration {
+    let base_budget_ms = if pressure_mode {
+        runtime_proxy_pressure_admission_wait_budget_ms()
+    } else {
+        runtime_proxy_admission_wait_budget_ms()
+    };
+    Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
+        path,
+        base_budget_ms,
+    ))
+}
+
+fn runtime_proxy_long_lived_queue_wait_budget(path: &str, pressure_mode: bool) -> Duration {
+    let base_budget_ms = if pressure_mode {
+        runtime_proxy_pressure_long_lived_queue_wait_budget_ms()
+    } else {
+        runtime_proxy_long_lived_queue_wait_budget_ms()
+    };
+    Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
+        path,
+        base_budget_ms,
+    ))
+}
+
 fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxyShared) -> bool {
     let now = Local::now().timestamp().max(0) as u64;
     shared.local_overload_backoff_until.load(Ordering::SeqCst) > now
@@ -7869,11 +7913,7 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
     let started_at = Instant::now();
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
-    let budget = Duration::from_millis(if pressure_mode {
-        runtime_proxy_pressure_admission_wait_budget_ms()
-    } else {
-        runtime_proxy_admission_wait_budget_ms()
-    });
+    let budget = runtime_proxy_admission_wait_budget(path, pressure_mode);
     let mut waited = false;
     loop {
         match try_acquire_runtime_proxy_active_request_slot(shared, transport, path) {
@@ -7956,11 +7996,7 @@ where
 {
     let started_at = Instant::now();
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
-    let budget = Duration::from_millis(if pressure_mode {
-        runtime_proxy_pressure_long_lived_queue_wait_budget_ms()
-    } else {
-        runtime_proxy_long_lived_queue_wait_budget_ms()
-    });
+    let budget = runtime_proxy_long_lived_queue_wait_budget(path, pressure_mode);
     let mut waited = false;
     loop {
         match try_enqueue(item) {
