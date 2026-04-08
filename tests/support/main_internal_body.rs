@@ -24498,6 +24498,48 @@ fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
 }
 
 #[test]
+fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
+    let temp_dir = TestDir::new();
+    let lease_dir = temp_dir.path.join("leases");
+    let endpoint = RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:33475".parse().expect("listen addr should parse"),
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        lease_dir: lease_dir.clone(),
+        _lease: None,
+    };
+
+    let child_pid = 424242u32;
+    let lease = endpoint
+        .create_child_lease(child_pid)
+        .expect("child lease should be created");
+    let mut entries = fs::read_dir(&lease_dir)
+        .expect("lease dir should exist")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("lease dir should be readable");
+    assert_eq!(entries.len(), 1, "expected exactly one child lease file");
+    let lease_path = entries.pop().expect("child lease entry should exist").path();
+    let file_name = lease_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .expect("lease file name should be utf-8")
+        .to_string();
+    assert!(
+        file_name.starts_with("424242-"),
+        "child lease should use the child pid in its filename: {file_name}"
+    );
+    assert_eq!(
+        fs::read_to_string(&lease_path).expect("lease file should be readable"),
+        "pid=424242\n"
+    );
+
+    drop(lease);
+    let remaining = fs::read_dir(&lease_dir)
+        .expect("lease dir should still exist")
+        .count();
+    assert_eq!(remaining, 0, "dropping the lease should remove the file");
+}
+
+#[test]
 fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
     let without_review = runtime_broker_process_args(
         "main",
@@ -25782,6 +25824,88 @@ fn translate_runtime_anthropic_messages_request_honors_reasoning_override_env() 
 }
 
 #[test]
+fn translate_runtime_anthropic_messages_request_maps_web_search_server_tool() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "tool_choice": {
+                "type": "tool",
+                "name": "web_search"
+            },
+            "tools": [
+                {
+                    "type": "web_search_20260209",
+                    "name": "web_search",
+                    "allowed_domains": ["example.com"],
+                    "user_location": {
+                        "type": "approximate",
+                        "country": "ID",
+                        "city": "Jakarta",
+                        "region": "Jakarta",
+                    }
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Cari berita terbaru"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+
+    assert_eq!(
+        body.get("tool_choice").and_then(serde_json::Value::as_str),
+        Some("required")
+    );
+    assert_eq!(
+        body.get("include")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|include| include.first())
+            .and_then(serde_json::Value::as_str),
+        Some("web_search_call.action.sources")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("web_search")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("filters"))
+            .and_then(|filters| filters.get("allowed_domains"))
+            .and_then(serde_json::Value::as_array)
+            .and_then(|domains| domains.first())
+            .and_then(serde_json::Value::as_str),
+        Some("example.com")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("user_location"))
+            .and_then(|location| location.get("country"))
+            .and_then(serde_json::Value::as_str),
+        Some("ID")
+    );
+}
+
+#[test]
 fn runtime_anthropic_response_from_json_value_preserves_tool_use_and_usage() {
     let response = runtime_anthropic_response_from_json_value(
         &serde_json::json!({
@@ -25863,6 +25987,101 @@ fn runtime_anthropic_response_from_json_value_preserves_tool_use_and_usage() {
             .and_then(|usage| usage.get("cache_read_input_tokens"))
             .and_then(serde_json::Value::as_u64),
         Some(3)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_json_value_preserves_web_search_results() {
+    let response = runtime_anthropic_response_from_json_value(
+        &serde_json::json!({
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7
+            },
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "id": "ws_123",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "queries": ["berita teknologi terbaru"],
+                        "sources": [
+                            {
+                                "type": "url",
+                                "url": "https://example.com/story"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Ringkasan singkat.",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "url": "https://example.com/story",
+                                    "title": "Example Story"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }),
+        "claude-sonnet-4-6",
+        false,
+    );
+
+    let content = response
+        .get("content")
+        .and_then(serde_json::Value::as_array)
+        .expect("content should be an array");
+    assert_eq!(
+        content[0].get("type").and_then(serde_json::Value::as_str),
+        Some("server_tool_use")
+    );
+    assert_eq!(
+        content[0]
+            .get("input")
+            .and_then(|input| input.get("query"))
+            .and_then(serde_json::Value::as_str),
+        Some("berita teknologi terbaru")
+    );
+    assert_eq!(
+        content[1].get("type").and_then(serde_json::Value::as_str),
+        Some("web_search_tool_result")
+    );
+    assert_eq!(
+        content[1]
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|results| results.first())
+            .and_then(|result| result.get("url"))
+            .and_then(serde_json::Value::as_str),
+        Some("https://example.com/story")
+    );
+    assert_eq!(
+        content[1]
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|results| results.first())
+            .and_then(|result| result.get("title"))
+            .and_then(serde_json::Value::as_str),
+        Some("Example Story")
+    );
+    assert_eq!(
+        content[2].get("type").and_then(serde_json::Value::as_str),
+        Some("text")
+    );
+    assert_eq!(
+        response
+            .get("stop_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("end_turn")
     );
 }
 

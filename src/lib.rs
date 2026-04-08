@@ -3972,6 +3972,7 @@ struct RuntimeBrokerLease {
 struct RuntimeProxyEndpoint {
     listen_addr: std::net::SocketAddr,
     openai_mount_path: String,
+    lease_dir: PathBuf,
     _lease: Option<RuntimeBrokerLease>,
 }
 
@@ -5607,7 +5608,14 @@ fn handle_run(args: RunArgs) -> Result<()> {
         })
         .unwrap_or(codex_args);
 
-    let status = run_child(&codex_bin(), &runtime_args, &prepared.codex_home, &[], &[])?;
+    let status = run_child(
+        &codex_bin(),
+        &runtime_args,
+        &prepared.codex_home,
+        &[],
+        &[],
+        runtime_proxy.as_ref(),
+    )?;
     // `std::process::exit` does not run destructors, so release the broker lease
     // before mirroring Codex's exit status back to the caller.
     drop(runtime_proxy);
@@ -5647,6 +5655,7 @@ fn handle_claude(args: ClaudeArgs) -> Result<()> {
         &prepared.codex_home,
         &extra_env,
         runtime_proxy_claude_removed_env(),
+        Some(&runtime_proxy),
     )?;
     drop(runtime_proxy);
     exit_with_status(status)
@@ -8339,6 +8348,18 @@ fn handle_runtime_rotation_proxy_request(
             captured.body.len()
         ),
     );
+    if is_runtime_anthropic_messages_path(&captured.path_and_query)
+        && std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some()
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http anthropic_compat headers={:?} body_snippet={}",
+                captured.headers,
+                runtime_proxy_body_snippet(&captured.body, 1024),
+            ),
+        );
+    }
 
     if is_runtime_anthropic_messages_path(&captured.path_and_query) {
         let response = match proxy_runtime_anthropic_messages_request(request_id, &captured, shared)
@@ -8482,6 +8503,24 @@ struct RuntimeAnthropicMessagesRequest {
     requested_model: String,
     stream: bool,
     want_thinking: bool,
+    server_tools: RuntimeAnthropicServerTools,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeAnthropicServerTools {
+    web_search: bool,
+}
+
+impl RuntimeAnthropicServerTools {
+    fn needs_buffered_translation(&self) -> bool {
+        self.web_search
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeAnthropicTranslatedTools {
+    tools: Vec<serde_json::Value>,
+    server_tools: RuntimeAnthropicServerTools,
 }
 
 fn runtime_proxy_request_header_value<'a>(
@@ -8646,20 +8685,73 @@ fn runtime_proxy_anthropic_normalize_tool_schema(schema: &serde_json::Value) -> 
 
 fn runtime_proxy_translate_anthropic_tools(
     value: &serde_json::Value,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<RuntimeAnthropicTranslatedTools> {
     let Some(tools) = value.get("tools") else {
-        return Ok(Vec::new());
+        return Ok(RuntimeAnthropicTranslatedTools::default());
     };
     let tools = tools
         .as_array()
         .context("Anthropic tools must be an array when present")?;
-    tools
-        .iter()
-        .map(runtime_proxy_translate_anthropic_tool)
-        .collect()
+    let mut translated = RuntimeAnthropicTranslatedTools::default();
+    for tool in tools {
+        let (tool_value, tool_state) = runtime_proxy_translate_anthropic_tool(tool)?;
+        translated.tools.push(tool_value);
+        translated.server_tools.web_search |= tool_state.web_search;
+    }
+    Ok(translated)
 }
 
-fn runtime_proxy_translate_anthropic_tool(tool: &serde_json::Value) -> Result<serde_json::Value> {
+fn runtime_proxy_translate_anthropic_tool(
+    tool: &serde_json::Value,
+) -> Result<(serde_json::Value, RuntimeAnthropicServerTools)> {
+    let tool_type = tool
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if tool_type.is_some_and(|value| value.starts_with("web_search_")) {
+        let mut translated = serde_json::Map::new();
+        translated.insert(
+            "type".to_string(),
+            serde_json::Value::String("web_search".to_string()),
+        );
+        let allowed_domains = tool
+            .get("allowed_domains")
+            .and_then(serde_json::Value::as_array)
+            .map(|domains| {
+                domains
+                    .iter()
+                    .filter_map(|domain| {
+                        domain
+                            .as_str()
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(|value| serde_json::Value::String(value.to_string()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|domains| !domains.is_empty());
+        if let Some(allowed_domains) = allowed_domains {
+            translated.insert(
+                "filters".to_string(),
+                serde_json::json!({
+                    "allowed_domains": allowed_domains,
+                }),
+            );
+        }
+        if let Some(user_location) = tool
+            .get("user_location")
+            .filter(|value| value.is_object())
+            .cloned()
+        {
+            translated.insert("user_location".to_string(), user_location);
+        }
+        return Ok((
+            serde_json::Value::Object(translated),
+            RuntimeAnthropicServerTools { web_search: true },
+        ));
+    }
+
     let name = tool
         .get("name")
         .and_then(serde_json::Value::as_str)
@@ -8692,11 +8784,15 @@ fn runtime_proxy_translate_anthropic_tool(tool: &serde_json::Value) -> Result<se
             runtime_proxy_anthropic_normalize_tool_schema(schema),
         );
     }
-    Ok(serde_json::Value::Object(translated))
+    Ok((
+        serde_json::Value::Object(translated),
+        RuntimeAnthropicServerTools::default(),
+    ))
 }
 
 fn runtime_proxy_translate_anthropic_tool_choice(
     value: &serde_json::Value,
+    server_tools: &RuntimeAnthropicServerTools,
 ) -> Result<Option<serde_json::Value>> {
     let Some(choice) = value.get("tool_choice") else {
         return Ok(None);
@@ -8717,6 +8813,9 @@ fn runtime_proxy_translate_anthropic_tool_choice(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .context("Anthropic tool_choice type=tool requires a non-empty name")?;
+            if server_tools.web_search && name == "web_search" {
+                return Ok(Some(serde_json::Value::String("required".to_string())));
+            }
             Some(serde_json::json!({
                 "type": "function",
                 "name": name,
@@ -9028,13 +9127,21 @@ fn translate_runtime_anthropic_messages_request(
         );
     }
     let translated_tools = runtime_proxy_translate_anthropic_tools(&value)?;
-    if !translated_tools.is_empty() {
+    if !translated_tools.tools.is_empty() {
         translated_body.insert(
             "tools".to_string(),
-            serde_json::Value::Array(translated_tools),
+            serde_json::Value::Array(translated_tools.tools.clone()),
         );
     }
-    if let Some(tool_choice) = runtime_proxy_translate_anthropic_tool_choice(&value)? {
+    if translated_tools.server_tools.web_search {
+        translated_body.insert(
+            "include".to_string(),
+            serde_json::json!(["web_search_call.action.sources"]),
+        );
+    }
+    if let Some(tool_choice) =
+        runtime_proxy_translate_anthropic_tool_choice(&value, &translated_tools.server_tools)?
+    {
         translated_body.insert("tool_choice".to_string(), tool_choice);
     }
     if let Some(effort) = runtime_proxy_anthropic_reasoning_effort(&value, &target_model) {
@@ -9080,6 +9187,7 @@ fn translate_runtime_anthropic_messages_request(
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         want_thinking: runtime_proxy_anthropic_wants_thinking(&value),
+        server_tools: translated_tools.server_tools,
     })
 }
 
@@ -21939,12 +22047,175 @@ fn runtime_anthropic_reasoning_summary_text(item: &serde_json::Value) -> String 
         .unwrap_or_default()
 }
 
+fn runtime_anthropic_message_annotation_titles_by_url(
+    output: &[serde_json::Value],
+) -> BTreeMap<String, String> {
+    let mut titles = BTreeMap::new();
+    for item in output {
+        let Some(parts) = item.get("content").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for part in parts {
+            let Some(annotations) = part
+                .get("annotations")
+                .and_then(serde_json::Value::as_array)
+            else {
+                continue;
+            };
+            for annotation in annotations {
+                let url = annotation
+                    .get("url")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| {
+                        annotation
+                            .get("url_citation")
+                            .and_then(|value| value.get("url"))
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                let title = annotation
+                    .get("title")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| {
+                        annotation
+                            .get("url_citation")
+                            .and_then(|value| value.get("title"))
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                if let (Some(url), Some(title)) = (url, title) {
+                    titles
+                        .entry(url.to_string())
+                        .or_insert_with(|| title.to_string());
+                }
+            }
+        }
+    }
+    titles
+}
+
+fn runtime_anthropic_web_search_blocks_from_output_item(
+    item: &serde_json::Value,
+    annotation_titles_by_url: &BTreeMap<String, String>,
+) -> Vec<serde_json::Value> {
+    let call_id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("web_search_call")
+        .to_string();
+    let query = item
+        .get("action")
+        .and_then(|action| action.get("query"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            item.get("action")
+                .and_then(|action| action.get("queries"))
+                .and_then(serde_json::Value::as_array)
+                .and_then(|queries| queries.first())
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_default()
+        .to_string();
+
+    let mut seen_urls = BTreeSet::new();
+    let mut results = Vec::new();
+    if let Some(sources) = item
+        .get("action")
+        .and_then(|action| action.get("sources"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for source in sources {
+            let Some(url) = source
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if !seen_urls.insert(url.to_string()) {
+                continue;
+            }
+            let mut result = serde_json::Map::new();
+            result.insert(
+                "type".to_string(),
+                serde_json::Value::String("web_search_result".to_string()),
+            );
+            result.insert(
+                "url".to_string(),
+                serde_json::Value::String(url.to_string()),
+            );
+            if let Some(title) = source
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .or_else(|| annotation_titles_by_url.get(url).map(String::as_str))
+            {
+                result.insert(
+                    "title".to_string(),
+                    serde_json::Value::String(title.to_string()),
+                );
+            }
+            for key in ["encrypted_content", "page_age"] {
+                if let Some(value) = source
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    result.insert(
+                        key.to_string(),
+                        serde_json::Value::String(value.to_string()),
+                    );
+                }
+            }
+            results.push(serde_json::Value::Object(result));
+        }
+    }
+    if results.is_empty() {
+        for (url, title) in annotation_titles_by_url {
+            if !seen_urls.insert(url.clone()) {
+                continue;
+            }
+            results.push(serde_json::json!({
+                "type": "web_search_result",
+                "url": url,
+                "title": title,
+            }));
+        }
+    }
+
+    vec![
+        serde_json::json!({
+            "type": "server_tool_use",
+            "id": call_id,
+            "name": "web_search",
+            "input": {
+                "query": query,
+            },
+        }),
+        serde_json::json!({
+            "type": "web_search_tool_result",
+            "tool_use_id": call_id,
+            "content": results,
+        }),
+    ]
+}
+
 fn runtime_anthropic_output_blocks_from_json(
     output: &[serde_json::Value],
     want_thinking: bool,
 ) -> (Vec<serde_json::Value>, bool) {
     let mut content = Vec::new();
     let mut has_tool_calls = false;
+    let annotation_titles_by_url = runtime_anthropic_message_annotation_titles_by_url(output);
 
     for item in output {
         match item.get("type").and_then(serde_json::Value::as_str) {
@@ -21978,6 +22249,12 @@ fn runtime_anthropic_output_blocks_from_json(
                         }));
                     }
                 }
+            }
+            Some("web_search_call") => {
+                content.extend(runtime_anthropic_web_search_blocks_from_output_item(
+                    item,
+                    &annotation_titles_by_url,
+                ));
             }
             Some("function_call") => {
                 has_tool_calls = true;
@@ -22430,6 +22707,51 @@ fn runtime_anthropic_sse_response_parts_from_message_value(
                             "type": "input_json_delta",
                             "partial_json": serde_json::to_string(&input_json)
                                 .unwrap_or_else(|_| "{}".to_string()),
+                        }
+                    }),
+                ));
+            }
+            Some("server_tool_use") => {
+                let input_json = block
+                    .get("input")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": index_value,
+                        "content_block": {
+                            "type": "server_tool_use",
+                            "id": block.get("id").cloned().unwrap_or(serde_json::Value::String("server_tool_use".to_string())),
+                            "name": block.get("name").cloned().unwrap_or(serde_json::Value::String("web_search".to_string())),
+                            "input": serde_json::json!({}),
+                        }
+                    }),
+                ));
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_delta",
+                    serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": serde_json::to_string(&input_json)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        }
+                    }),
+                ));
+            }
+            Some("web_search_tool_result") => {
+                body.extend(runtime_anthropic_sse_event_bytes(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": index_value,
+                        "content_block": {
+                            "type": "web_search_tool_result",
+                            "tool_use_id": block.get("tool_use_id").cloned().unwrap_or(serde_json::Value::String("web_search_call".to_string())),
+                            "content": block.get("content").cloned().unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
                         }
                     }),
                 ));
@@ -23116,6 +23438,16 @@ fn translate_runtime_responses_reply_to_anthropic(
     response: RuntimeResponsesReply,
     request: &RuntimeAnthropicMessagesRequest,
 ) -> Result<RuntimeResponsesReply> {
+    if request.server_tools.needs_buffered_translation() {
+        let parts = match response {
+            RuntimeResponsesReply::Buffered(parts) => parts,
+            RuntimeResponsesReply::Streaming(response) => {
+                buffer_runtime_streaming_response_parts(response)?
+            }
+        };
+        return translate_runtime_buffered_responses_reply_to_anthropic(parts, request);
+    }
+
     match response {
         RuntimeResponsesReply::Buffered(parts) => {
             translate_runtime_buffered_responses_reply_to_anthropic(parts, request)
@@ -23520,6 +23852,7 @@ fn run_child(
     codex_home: &Path,
     extra_env: &[(&str, OsString)],
     removed_env: &[&str],
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<ExitStatus> {
     let mut command = Command::new(binary);
     command.args(args).env("CODEX_HOME", codex_home);
@@ -23529,9 +23862,23 @@ fn run_child(
     for (key, value) in extra_env {
         command.env(key, value);
     }
-    let status = command
-        .status()
+    let mut child = command
+        .spawn()
         .with_context(|| format!("failed to execute {}", binary.to_string_lossy()))?;
+    let _child_runtime_broker_lease = match runtime_proxy {
+        Some(proxy) => match proxy.create_child_lease(child.id()) {
+            Ok(lease) => Some(lease),
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        },
+        None => None,
+    };
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for {}", binary.to_string_lossy()))?;
     Ok(status)
 }
 
@@ -24082,6 +24429,12 @@ impl Drop for RuntimeBrokerLease {
     }
 }
 
+impl RuntimeProxyEndpoint {
+    fn create_child_lease(&self, pid: u32) -> Result<RuntimeBrokerLease> {
+        create_runtime_broker_lease_in_dir_for_pid(&self.lease_dir, pid)
+    }
+}
+
 fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
     let mut hasher = DefaultHasher::new();
     upstream_base_url.hash(&mut hasher);
@@ -24277,6 +24630,7 @@ fn runtime_proxy_endpoint_from_registry(
     registry: &RuntimeBrokerRegistry,
 ) -> Result<RuntimeProxyEndpoint> {
     let lease = create_runtime_broker_lease(paths, broker_key)?;
+    let lease_dir = runtime_broker_lease_dir(paths, broker_key);
     let listen_addr = registry.listen_addr.parse().with_context(|| {
         format!(
             "invalid runtime broker listen address {}",
@@ -24286,6 +24640,7 @@ fn runtime_proxy_endpoint_from_registry(
     Ok(RuntimeProxyEndpoint {
         listen_addr,
         openai_mount_path: runtime_broker_openai_mount_path(registry)?,
+        lease_dir,
         _lease: Some(lease),
     })
 }
@@ -24444,14 +24799,17 @@ fn activate_runtime_broker_profile(
 
 fn create_runtime_broker_lease(paths: &AppPaths, broker_key: &str) -> Result<RuntimeBrokerLease> {
     let lease_dir = runtime_broker_lease_dir(paths, broker_key);
-    fs::create_dir_all(&lease_dir)
+    create_runtime_broker_lease_in_dir_for_pid(&lease_dir, std::process::id())
+}
+
+fn create_runtime_broker_lease_in_dir_for_pid(
+    lease_dir: &Path,
+    pid: u32,
+) -> Result<RuntimeBrokerLease> {
+    fs::create_dir_all(lease_dir)
         .with_context(|| format!("failed to create {}", lease_dir.display()))?;
-    let path = lease_dir.join(format!(
-        "{}-{}.lease",
-        std::process::id(),
-        runtime_random_token("lease")
-    ));
-    fs::write(&path, format!("pid={}\n", std::process::id()))
+    let path = lease_dir.join(format!("{}-{}.lease", pid, runtime_random_token("lease")));
+    fs::write(&path, format!("pid={pid}\n"))
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(RuntimeBrokerLease { path })
 }
