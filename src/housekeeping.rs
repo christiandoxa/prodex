@@ -139,6 +139,26 @@ pub(crate) fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) -> 
     removed
 }
 
+pub(crate) fn newest_runtime_proxy_log_in_dir(dir: &Path) -> Option<PathBuf> {
+    prodex_runtime_log_paths_in_dir(dir)
+        .into_iter()
+        .filter_map(|path| {
+            let modified = path
+                .metadata()
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis());
+            modified.map(|modified| (modified, path))
+        })
+        .max_by(|(left_modified, left_path), (right_modified, right_path)| {
+            left_modified
+                .cmp(right_modified)
+                .then_with(|| left_path.cmp(right_path))
+        })
+        .map(|(_, path)| path)
+}
+
 pub(crate) fn cleanup_runtime_proxy_latest_pointer(pointer_path: &Path) -> bool {
     let should_remove_pointer = fs::read_to_string(pointer_path)
         .ok()

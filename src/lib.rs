@@ -8864,6 +8864,25 @@ fn runtime_request_previous_response_id(request: &RuntimeProxyRequest) -> Option
     runtime_request_previous_response_id_from_bytes(&request.body)
 }
 
+#[derive(Clone, Default)]
+struct RuntimeWebsocketRequestMetadata {
+    previous_response_id: Option<String>,
+    session_id: Option<String>,
+    requires_previous_response_affinity: bool,
+}
+
+fn parse_runtime_websocket_request_metadata(request_text: &str) -> RuntimeWebsocketRequestMetadata {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(request_text) else {
+        return RuntimeWebsocketRequestMetadata::default();
+    };
+    RuntimeWebsocketRequestMetadata {
+        previous_response_id: runtime_request_previous_response_id_from_value(&value),
+        session_id: runtime_request_session_id_from_value(&value),
+        requires_previous_response_affinity:
+            runtime_request_value_requires_previous_response_affinity(&value),
+    }
+}
+
 fn runtime_request_previous_response_id_from_bytes(body: &[u8]) -> Option<String> {
     if body.is_empty() {
         return None;
@@ -8873,6 +8892,9 @@ fn runtime_request_previous_response_id_from_bytes(body: &[u8]) -> Option<String
     runtime_request_previous_response_id_from_value(&value)
 }
 
+#[cfg(test)]
+#[cfg(test)]
+#[cfg(test)]
 fn runtime_request_previous_response_id_from_text(request_text: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
     runtime_request_previous_response_id_from_value(&value)
@@ -8964,12 +8986,6 @@ fn runtime_request_text_without_previous_response_id(request_text: &str) -> Opti
     serde_json::to_string(&value).ok()
 }
 
-fn runtime_request_text_requires_previous_response_affinity(request_text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(request_text)
-        .map(|value| runtime_request_value_requires_previous_response_affinity(&value))
-        .unwrap_or(false)
-}
-
 fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
     request.headers.iter().find_map(|(name, value)| {
         name.eq_ignore_ascii_case("x-codex-turn-state")
@@ -9002,12 +9018,6 @@ fn runtime_request_session_id_from_turn_metadata(request: &RuntimeProxyRequest) 
                 .then(|| value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-        .and_then(|value| runtime_request_session_id_from_value(&value))
-}
-
-fn runtime_request_session_id_from_text(request_text: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(request_text)
-        .ok()
         .and_then(|value| runtime_request_session_id_from_value(&value))
 }
 
@@ -11921,11 +11931,12 @@ fn run_runtime_proxy_websocket_session(
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
                 let message_id = runtime_proxy_next_request_id(shared);
+                let request_metadata = parse_runtime_websocket_request_metadata(text.as_ref());
                 runtime_proxy_log(
                     shared,
                     format!(
                         "request={message_id} websocket_session={session_id} inbound_text previous_response_id={:?} turn_state={:?} bytes={}",
-                        runtime_request_previous_response_id_from_text(text.as_ref()),
+                        request_metadata.previous_response_id,
                         runtime_request_turn_state(handshake_request),
                         text.len()
                     ),
@@ -11936,6 +11947,7 @@ fn run_runtime_proxy_websocket_session(
                     local_socket,
                     handshake_request,
                     text.as_ref(),
+                    &request_metadata,
                     shared,
                     &mut websocket_session,
                 )?;
@@ -11997,17 +12009,18 @@ fn proxy_runtime_websocket_text_message(
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     request_text: &str,
+    request_metadata: &RuntimeWebsocketRequestMetadata,
     shared: &RuntimeRotationProxyShared,
     websocket_session: &mut RuntimeWebsocketSessionState,
 ) -> Result<()> {
     let mut handshake_request = handshake_request.clone();
     let mut request_text = request_text.to_string();
     let request_requires_previous_response_affinity =
-        runtime_request_text_requires_previous_response_affinity(&request_text);
-    let mut previous_response_id = runtime_request_previous_response_id_from_text(&request_text);
+        request_metadata.requires_previous_response_affinity;
+    let mut previous_response_id = request_metadata.previous_response_id.clone();
     let mut request_turn_state = runtime_request_turn_state(&handshake_request);
     let request_session_id = runtime_request_session_id(&handshake_request)
-        .or_else(|| runtime_request_session_id_from_text(&request_text));
+        .or_else(|| request_metadata.session_id.clone());
     let mut bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| {
@@ -12098,7 +12111,7 @@ fn proxy_runtime_websocket_text_message(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
-                && !runtime_request_text_requires_previous_response_affinity(&request_text)
+                && !request_requires_previous_response_affinity
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -12185,6 +12198,9 @@ fn proxy_runtime_websocket_text_message(
                         local_socket,
                         &handshake_request,
                         &request_text,
+                        previous_response_id.as_deref(),
+                        request_session_id.as_deref(),
+                        request_turn_state.as_deref(),
                         shared,
                         websocket_session,
                         &current_profile,
@@ -12629,7 +12645,7 @@ fn proxy_runtime_websocket_text_message(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
-                && !runtime_request_text_requires_previous_response_affinity(&request_text)
+                && !request_requires_previous_response_affinity
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -12716,6 +12732,9 @@ fn proxy_runtime_websocket_text_message(
                         local_socket,
                         &handshake_request,
                         &request_text,
+                        previous_response_id.as_deref(),
+                        request_session_id.as_deref(),
+                        request_turn_state.as_deref(),
                         shared,
                         websocket_session,
                         &current_profile,
@@ -13139,6 +13158,9 @@ fn proxy_runtime_websocket_text_message(
             local_socket,
             &handshake_request,
             &request_text,
+            previous_response_id.as_deref(),
+            request_session_id.as_deref(),
+            request_turn_state.as_deref(),
             shared,
             websocket_session,
             &candidate_name,
@@ -13517,7 +13539,7 @@ fn proxy_runtime_websocket_text_message(
                     continue;
                 }
                 if reuse_failed_bound_previous_response
-                    && !runtime_request_text_requires_previous_response_affinity(&request_text)
+                    && !request_requires_previous_response_affinity
                     && let Some(fresh_request_text) =
                         runtime_request_text_without_previous_response_id(&request_text)
                 {
@@ -13666,16 +13688,14 @@ fn attempt_runtime_websocket_request(
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     request_text: &str,
+    request_previous_response_id: Option<&str>,
+    request_session_id: Option<&str>,
+    request_turn_state: Option<&str>,
     shared: &RuntimeRotationProxyShared,
     websocket_session: &mut RuntimeWebsocketSessionState,
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
-    let request_previous_response_id = runtime_request_previous_response_id(handshake_request)
-        .or_else(|| runtime_request_previous_response_id_from_text(request_text));
-    let request_session_id = runtime_request_session_id(handshake_request)
-        .or_else(|| runtime_request_session_id_from_text(request_text));
-    let request_turn_state = runtime_request_turn_state(handshake_request);
     let promote_committed_profile = request_previous_response_id.is_none()
         && request_session_id.is_none()
         && request_turn_state.is_none();

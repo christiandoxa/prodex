@@ -1181,12 +1181,39 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
     let paths = AppPaths::discover().ok();
     let pointer_path = runtime_proxy_latest_log_pointer_path();
     let pointer_content = fs::read_to_string(&pointer_path).ok();
-    let log_path = pointer_content
+    let pointed_log_path = pointer_content
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
+    let newest_log_path = newest_runtime_proxy_log_in_dir(&runtime_proxy_log_dir());
     let pointer_exists = pointer_path.exists();
+    let pointer_target_exists = pointed_log_path.as_ref().is_some_and(|path| path.exists());
+    let pointer_note = match (pointed_log_path.as_ref(), newest_log_path.as_ref()) {
+        (Some(pointed), Some(newest)) if pointed.exists() && newest != pointed => {
+            Some("Runtime log pointer was stale; sampled a newer log instead.")
+        }
+        (Some(_), Some(_)) if !pointer_target_exists => {
+            Some("Runtime log pointer target was missing; sampled a newer log instead.")
+        }
+        (Some(_), None) if !pointer_target_exists => {
+            Some("Runtime log pointer target was missing.")
+        }
+        _ => None,
+    };
+    let log_path = if pointer_target_exists {
+        newest_log_path
+            .as_ref()
+            .filter(|path| {
+                pointed_log_path
+                    .as_ref()
+                    .is_some_and(|pointed| *path != pointed)
+            })
+            .cloned()
+            .or(pointed_log_path.clone())
+    } else {
+        newest_log_path.clone()
+    };
     let log_exists = log_path.as_ref().is_some_and(|path| path.exists());
 
     let mut summary = if let Some(log_path) = log_path.as_ref().filter(|path| path.exists()) {
@@ -1363,6 +1390,11 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
             "No recent overload or stream-failure markers were detected in the sampled runtime tail."
                 .to_string()
         };
+    }
+    if let Some(note) = pointer_note {
+        if !summary.diagnosis.contains(note) {
+            summary.diagnosis = format!("{} {}", summary.diagnosis, note);
+        }
     }
     summary
 }

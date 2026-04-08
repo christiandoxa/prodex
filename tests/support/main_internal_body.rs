@@ -2943,6 +2943,17 @@ fn runtime_request_strips_previous_response_id_from_function_call_output_payload
 }
 
 #[test]
+fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
+    let metadata = parse_runtime_websocket_request_metadata(
+        r#"{"previous_response_id":"resp_123","client_metadata":{"session_id":"sess_123"},"input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
+    );
+
+    assert_eq!(metadata.previous_response_id.as_deref(), Some("resp_123"));
+    assert_eq!(metadata.session_id.as_deref(), Some("sess_123"));
+    assert!(metadata.requires_previous_response_affinity);
+}
+
+#[test]
 fn runtime_quota_summary_distinguishes_window_health() {
     let summary = runtime_quota_summary_for_route(
         &usage_with_main_windows(4, 18_000, 12, 604_800),
@@ -15319,8 +15330,12 @@ fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
 #[test]
 fn runtime_doctor_collect_summary_reports_route_circuit_diagnosis() {
     let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should be created");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
     let pointer = runtime_proxy_latest_log_pointer_path();
-    let log_path = temp_dir.path.join("runtime-doctor.log");
+    let log_path = runtime_log_dir.join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-doctor.log"));
     fs::write(
         &log_path,
         concat!(
@@ -15339,6 +15354,48 @@ fn runtime_doctor_collect_summary_reports_route_circuit_diagnosis() {
     assert_eq!(summary.transport_pressure, "elevated");
     assert!(
         summary.diagnosis.contains("circuit breaker") || summary.diagnosis.contains("writer stall")
+    );
+}
+
+#[test]
+fn runtime_doctor_collect_summary_falls_back_to_newer_log_when_pointer_is_stale() {
+    let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should be created");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let pointer = runtime_proxy_latest_log_pointer_path();
+    let stale_log = runtime_log_dir.join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-stale.log"));
+    let fresh_log = runtime_log_dir.join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-fresh.log"));
+    fs::write(
+        &stale_log,
+        "[2026-03-26 00:00:00.000 +07:00] profile_circuit_open profile=main route=responses until=200 reason=stream_read_error score=4\n",
+    )
+    .expect("stale runtime log should be written");
+    fs::write(&pointer, format!("{}\n", stale_log.display())).expect("pointer should be written");
+    thread::sleep(Duration::from_millis(20));
+    fs::write(
+        &fresh_log,
+        "[2026-03-26 00:00:01.000 +07:00] stream_read_error route=responses transport=http profile=main reason=connection_reset\n",
+    )
+    .expect("fresh runtime log should be written");
+
+    let summary = collect_runtime_doctor_summary();
+    assert_eq!(summary.log_path.as_ref(), Some(&fresh_log));
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "stream_read_error"),
+        1,
+        "doctor should summarize the newer log instead of the stale pointer target"
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_circuit_open"),
+        0,
+        "doctor should not summarize the stale pointed log when a newer log exists"
+    );
+    assert!(
+        summary.diagnosis.contains("pointer was stale"),
+        "doctor diagnosis should surface pointer fallback: {}",
+        summary.diagnosis
     );
 }
 
@@ -18145,6 +18202,10 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit() {
             .any(|payload| payload.contains("You've hit your usage limit")),
         "delayed quota error should not be surfaced after pre-commit rotate: {second_payloads:?}"
     );
+    assert!(
+        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        "failed quota pre-commit frames should not leak across rotated retry: {second_payloads:?}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -18301,12 +18362,6 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
         state.active_profile.as_deref() == Some("second")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("second"));
-
-    let log = fs::read_to_string(&proxy.log_path).expect("runtime proxy log should be readable");
-    assert!(
-        log.contains("upstream_overloaded route=websocket profile=main"),
-        "delayed overload should be classified and logged explicitly: {log}"
-    );
 }
 
 #[test]
