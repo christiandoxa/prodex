@@ -215,6 +215,8 @@ prodex quota --all
 prodex quota --all --once
 prodex quota --profile main --detail
 prodex info
+prodex audit
+prodex audit --tail 20 --component profile
 prodex cleanup
 prodex doctor
 prodex doctor --quota
@@ -244,6 +246,10 @@ version = 1
 log_format = "json"
 log_dir = "runtime-logs"
 
+[secrets]
+backend = "file"
+# keyring_service = "prodex"
+
 [runtime_proxy]
 worker_count = 16
 active_request_limit = 128
@@ -255,22 +261,27 @@ stream_idle_timeout_ms = 300000
 Notes:
 
 * Environment variables still win over `policy.toml`.
-* `prodex info` and `prodex doctor` show the active policy file and effective runtime log mode.
+* `prodex info` and `prodex doctor` show the active policy file, selected secret backend, and effective runtime log mode.
 * The default runtime log format remains `text`; set `log_format = "json"` or `PRODEX_RUNTIME_LOG_FORMAT=json` when you want machine-readable runtime logs.
+* Secret backend selection can be overridden with `PRODEX_SECRET_BACKEND` and `PRODEX_SECRET_KEYRING_SERVICE`.
+* `prodex audit` reads the local append-only audit log and supports `--tail`, `--component`, `--action`, `--outcome`, and `--json`.
 
 ## Enterprise Hardening
 
 The current hardening is still local-first, but it now includes:
 
-- a secret-management abstraction for `auth.json` and exported profile bundles, with the current backend still file-based
+- a secret-management abstraction for `auth.json` and exported profile bundles, plus global secret-backend selection via policy or environment
 - a stable live broker snapshot at `GET /__prodex/runtime/metrics`
 - a Prometheus scrape target at `GET /__prodex/runtime/metrics/prometheus`
-- `prodex info` and `prodex doctor --runtime --json` surfacing live broker metrics targets
-- enterprise audit logging for profile selection, rotation decisions, and admin-facing state changes, kept separate from transport behavior
+- `prodex info` and `prodex doctor --runtime --json` surfacing live broker metrics targets and the selected secret backend
+- enterprise audit logging for profile selection, rotation decisions, and admin-facing state changes, kept separate from transport behavior and discoverable via `prodex info` or `prodex doctor --runtime --json`
+- `prodex audit` as a local read-only CLI surface for browsing recent append-only audit events
 
 Current limitations:
 
-- there is no keychain, Vault, or KMS-backed secret backend yet
+- local `auth.json` remains the compatibility source of truth for current Codex flows even when a non-file backend is selected
+- there is no keychain, Vault, or KMS-backed secret backend implementation yet
+- audit logs follow the resolved runtime log directory by default, or `PRODEX_AUDIT_LOG_DIR` when set
 - there is no central control plane, RBAC, SSO, or SCIM
 - `prodex doctor --runtime --json` is operationally useful, but it is not a full observability stack
 - the repo still assumes a per-host profile pool and local state ownership

@@ -155,6 +155,8 @@ prodex current
 ```bash
 prodex cleanup
 prodex doctor
+prodex audit
+prodex audit --tail 20 --component profile
 prodex doctor --quota
 prodex doctor --runtime
 prodex doctor --runtime --json
@@ -171,6 +173,8 @@ That pointer path stays in `/tmp` only when the runtime log directory is still o
 
 Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, dead broker artifacts, and old orphaned managed profile homes that are no longer tracked.
 
+Use `prodex audit` when you want to inspect the local append-only audit log. It supports `--tail`, `--component`, `--action`, `--outcome`, and `--json`.
+
 For managed local deployments, you can pin runtime logging and proxy tuning in `~/.prodex/policy.toml`:
 
 ```toml
@@ -179,6 +183,10 @@ version = 1
 [runtime]
 log_format = "json"
 log_dir = "runtime-logs"
+
+[secrets]
+backend = "file"
+# keyring_service = "prodex"
 
 [runtime_proxy]
 worker_count = 16
@@ -194,15 +202,18 @@ Prodex is still a local-first tool, even after the current enterprise hardening 
 
 Current hardening includes:
 
-- a secret-management abstraction for `auth.json` and export bundles, with the active backend still file-based
+- a secret-management abstraction for `auth.json` and export bundles, plus global secret-backend selection through policy or environment
 - a stable broker metrics JSON endpoint at `/__prodex/runtime/metrics`
 - a Prometheus broker metrics endpoint at `/__prodex/runtime/metrics/prometheus`
-- `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets
-- enterprise audit logging for profile, rotation, and admin events, separate from runtime session output
+- `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets and the selected secret backend
+- enterprise audit logging for profile, rotation, and admin events, separate from runtime session output and discoverable through `prodex info` or `prodex doctor --runtime --json`
+- `prodex audit` for browsing the local append-only audit log without touching runtime proxy behavior
 
 Known gaps today:
 
-- no keychain, Vault, or KMS-backed secret storage yet
+- local `auth.json` remains the compatibility source of truth for current Codex flows even when a non-file backend is selected
+- no keychain, Vault, or KMS-backed secret storage implementation yet
+- audit logs follow the resolved runtime log directory by default, or `PRODEX_AUDIT_LOG_DIR` when set
 - no RBAC, SSO, SCIM, or central admin plane
 - runtime observability is still centered on local logs plus `doctor --runtime --json`
 - the profile pool is still owned per host, not by a shared service

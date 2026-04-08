@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -46,11 +49,14 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Check locked compile graph
+        run: cargo check --locked --all-targets --all-features
+
       # Keep the requested -D warnings gate visible without blocking the rest of the
       # supply-chain checks until the existing source warning backlog is cleared.
       - name: Run clippy warning gate
         continue-on-error: true
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.1

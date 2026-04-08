@@ -64,6 +64,7 @@ pub(crate) fn should_emit_update_notice(command: &Commands) -> bool {
     match command {
         Commands::Info(_) => false,
         Commands::Doctor(args) => !args.json,
+        Commands::Audit(args) => !args.json,
         Commands::Quota(args) => !args.raw,
         _ => true,
     }

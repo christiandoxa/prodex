@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use super::AppPaths;
+use super::{AppPaths, secret_store::SecretBackendKind};
 
 const PRODEX_POLICY_FILE_NAME: &str = "policy.toml";
 pub(super) const PRODEX_POLICY_VERSION: u32 = 1;
@@ -51,12 +51,19 @@ struct RuntimePolicyConfig {
     version: u32,
     runtime: RuntimePolicyRuntimeSettings,
     runtime_proxy: RuntimePolicyProxySettings,
+    secrets: RuntimePolicySecretsSettings,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RuntimePolicyRuntimeSettings {
     pub(super) log_format: Option<RuntimeLogFormat>,
     pub(super) log_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct RuntimePolicySecretsSettings {
+    pub(super) backend: Option<SecretBackendKind>,
+    pub(super) keyring_service: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -101,6 +108,8 @@ struct RuntimePolicyFile {
     runtime: RuntimePolicyRuntimeFile,
     #[serde(default)]
     runtime_proxy: RuntimePolicyProxySettings,
+    #[serde(default)]
+    secrets: RuntimePolicySecretsFile,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -108,6 +117,13 @@ struct RuntimePolicyFile {
 struct RuntimePolicyRuntimeFile {
     log_format: Option<RuntimeLogFormat>,
     log_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimePolicySecretsFile {
+    backend: Option<String>,
+    keyring_service: Option<String>,
 }
 
 fn runtime_policy_cache() -> &'static Mutex<BTreeMap<PathBuf, Option<RuntimePolicyConfig>>> {
@@ -180,6 +196,17 @@ pub(super) fn runtime_policy_proxy() -> Option<RuntimePolicyProxySettings> {
         .map(|config| config.runtime_proxy)
 }
 
+pub(super) fn runtime_policy_secrets() -> Option<RuntimePolicySecretsSettings> {
+    if !runtime_policy_enabled_for_current_process() {
+        return None;
+    }
+    let paths = AppPaths::discover().ok()?;
+    load_runtime_policy_cached(&paths.root)
+        .ok()
+        .flatten()
+        .map(|config| config.secrets)
+}
+
 fn load_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyConfig>> {
     let mut cache = runtime_policy_cache()
         .lock()
@@ -213,12 +240,28 @@ fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicyConf
             .map(|value| resolve_runtime_policy_path(root, value))
             .transpose()?,
     };
+    let secrets = RuntimePolicySecretsSettings {
+        backend: parsed
+            .secrets
+            .backend
+            .as_deref()
+            .map(parse_secret_backend_kind)
+            .transpose()?,
+        keyring_service: parsed
+            .secrets
+            .keyring_service
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    };
 
     Ok(Some(RuntimePolicyConfig {
         path,
         version: parsed.version,
         runtime,
         runtime_proxy: parsed.runtime_proxy,
+        secrets,
     }))
 }
 
@@ -249,6 +292,35 @@ fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> Resu
         && log_dir.trim().is_empty()
     {
         bail!("runtime.log_dir in {} cannot be empty", path.display());
+    }
+    let secret_backend = if let Some(backend) = policy.secrets.backend.as_deref() {
+        Some(
+            parse_secret_backend_kind(backend)
+                .with_context(|| format!("invalid secrets.backend in {}", path.display()))?,
+        )
+    } else {
+        None
+    };
+    if secret_backend == Some(SecretBackendKind::Keyring)
+        && policy
+            .secrets
+            .keyring_service
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(|value| value.is_empty())
+    {
+        bail!(
+            "secrets.keyring_service in {} is required when secrets.backend=keyring",
+            path.display()
+        );
+    }
+    if let Some(service) = policy.secrets.keyring_service.as_deref()
+        && service.trim().is_empty()
+    {
+        bail!(
+            "secrets.keyring_service in {} cannot be empty",
+            path.display()
+        );
     }
 
     validate_optional_usize(
@@ -404,6 +476,12 @@ fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> Resu
     Ok(())
 }
 
+fn parse_secret_backend_kind(value: &str) -> Result<SecretBackendKind> {
+    value
+        .parse::<SecretBackendKind>()
+        .map_err(anyhow::Error::new)
+}
+
 fn validate_optional_usize(value: Option<usize>, path: &Path, field: &str) -> Result<()> {
     if matches!(value, Some(0)) {
         bail!("{field} in {} must be greater than 0", path.display());
@@ -459,6 +537,9 @@ version = 1
 log_format = "json"
 log_dir = "runtime-logs"
 
+[secrets]
+backend = "file"
+
 [runtime_proxy]
 worker_count = 12
 active_request_limit = 96
@@ -470,6 +551,7 @@ active_request_limit = 96
         assert_eq!(loaded.version, 1);
         assert_eq!(loaded.runtime.log_format, Some(RuntimeLogFormat::Json));
         assert_eq!(loaded.runtime.log_dir, Some(root.join("runtime-logs")));
+        assert_eq!(loaded.secrets.backend, Some(SecretBackendKind::File));
         assert_eq!(loaded.runtime_proxy.worker_count, Some(12));
         assert_eq!(loaded.runtime_proxy.active_request_limit, Some(96));
 
@@ -497,6 +579,52 @@ log_format = "json"
             err.to_string()
                 .contains("unsupported prodex policy version")
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_runtime_policy_from_root_parses_secret_settings() {
+        clear_runtime_policy_cache();
+        let root = temp_root("secrets");
+        let path = runtime_policy_path(&root);
+        fs::write(
+            &path,
+            r#"
+version = 1
+
+[secrets]
+backend = "keyring"
+keyring_service = "prodex"
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
+        assert_eq!(loaded.secrets.backend, Some(SecretBackendKind::Keyring));
+        assert_eq!(loaded.secrets.keyring_service.as_deref(), Some("prodex"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_runtime_policy_from_root_rejects_keyring_backend_without_service() {
+        clear_runtime_policy_cache();
+        let root = temp_root("secrets-missing-service");
+        let path = runtime_policy_path(&root);
+        fs::write(
+            &path,
+            r#"
+version = 1
+
+[secrets]
+backend = "keyring"
+"#,
+        )
+        .unwrap();
+
+        let err = load_runtime_policy_from_root(&root).unwrap_err();
+        assert!(err.to_string().contains("secrets.keyring_service"));
 
         let _ = fs::remove_dir_all(root);
     }

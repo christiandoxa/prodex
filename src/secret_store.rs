@@ -106,13 +106,103 @@ impl fmt::Display for SecretError {
 
 impl StdError for SecretError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretBackendKind {
+    File,
+    Keyring,
+}
+
+impl SecretBackendKind {
+    pub fn file() -> Self {
+        Self::File
+    }
+
+    pub fn keyring() -> Self {
+        Self::Keyring
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Keyring => "keyring",
+        }
+    }
+}
+
+impl fmt::Display for SecretBackendKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SecretBackendKind {
+    type Err = SecretError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "file" => Ok(Self::File),
+            "keyring" => Ok(Self::Keyring),
+            _ => Err(SecretError::invalid_location(format!(
+                "unknown secret backend '{value}'"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretRevision {
+    size_bytes: u64,
+    modified_at: Option<SystemTime>,
+}
+
+impl SecretRevision {
+    pub fn new(size_bytes: u64, modified_at: Option<SystemTime>) -> Self {
+        Self {
+            size_bytes,
+            modified_at,
+        }
+    }
+
+    pub fn from_metadata(metadata: &fs::Metadata) -> Self {
+        Self::new(metadata.len(), metadata.modified().ok())
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    pub fn modified_at(&self) -> Option<SystemTime> {
+        self.modified_at.clone()
+    }
+}
+
+impl fmt::Display for SecretRevision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.modified_at.as_ref() {
+            Some(modified_at) => write!(
+                f,
+                "size_bytes={} modified_at={modified_at:?}",
+                self.size_bytes
+            ),
+            None => write!(f, "size_bytes={} modified_at=none", self.size_bytes),
+        }
+    }
+}
+
 pub trait SecretBackend {
     fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError>;
     fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError>;
     fn delete(&self, location: &SecretLocation) -> Result<(), SecretError>;
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+pub trait SecretRevisionBackend: SecretBackend {
+    fn probe_revision(
+        &self,
+        location: &SecretLocation,
+    ) -> Result<Option<SecretRevision>, SecretError>;
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FileSecretBackend;
 
 impl FileSecretBackend {
@@ -184,7 +274,29 @@ impl SecretBackend for FileSecretBackend {
     }
 }
 
-#[derive(Debug, Clone)]
+impl SecretRevisionBackend for FileSecretBackend {
+    fn probe_revision(
+        &self,
+        location: &SecretLocation,
+    ) -> Result<Option<SecretRevision>, SecretError> {
+        let path = match location {
+            SecretLocation::File(path) => path,
+            SecretLocation::Keyring { service, account } => {
+                return Err(SecretError::unsupported(format!(
+                    "keyring://{service}/{account}"
+                )));
+            }
+        };
+
+        match fs::metadata(path) {
+            Ok(metadata) => Ok(Some(SecretRevision::from_metadata(&metadata))),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(SecretError::io(path, err)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyringSecretBackend {
     service: String,
 }
@@ -267,6 +379,121 @@ impl SecretBackend for KeyringSecretBackend {
     }
 }
 
+impl SecretRevisionBackend for KeyringSecretBackend {
+    fn probe_revision(
+        &self,
+        location: &SecretLocation,
+    ) -> Result<Option<SecretRevision>, SecretError> {
+        match location {
+            SecretLocation::Keyring { service, account } => {
+                if service != &self.service {
+                    return Err(SecretError::invalid_location(format!(
+                        "expected keyring service '{}' but got '{}'",
+                        self.service, service
+                    )));
+                }
+                Err(SecretError::unsupported(format!(
+                    "keyring://{service}/{account}"
+                )))
+            }
+            SecretLocation::File(path) => Err(SecretError::unsupported(format!(
+                "file://{}",
+                path.display()
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretBackendSelection {
+    File(FileSecretBackend),
+    Keyring(KeyringSecretBackend),
+}
+
+impl SecretBackendSelection {
+    pub fn file() -> Self {
+        Self::File(FileSecretBackend::new())
+    }
+
+    pub fn keyring(service: impl Into<String>) -> Result<Self, SecretError> {
+        Ok(Self::Keyring(KeyringSecretBackend::new(service)?))
+    }
+
+    pub fn from_kind(
+        kind: SecretBackendKind,
+        keyring_service: Option<String>,
+    ) -> Result<Self, SecretError> {
+        match kind {
+            SecretBackendKind::File => Ok(Self::file()),
+            SecretBackendKind::Keyring => match keyring_service {
+                Some(service) => Self::keyring(service),
+                None => Err(SecretError::invalid_location(
+                    "keyring backend requires a service name",
+                )),
+            },
+        }
+    }
+
+    pub fn kind(&self) -> SecretBackendKind {
+        match self {
+            Self::File(_) => SecretBackendKind::File,
+            Self::Keyring(_) => SecretBackendKind::Keyring,
+        }
+    }
+
+    pub fn keyring_service(&self) -> Option<&str> {
+        match self {
+            Self::File(_) => None,
+            Self::Keyring(backend) => Some(backend.service()),
+        }
+    }
+
+    pub fn into_manager(self) -> SecretManager<Self> {
+        SecretManager::new(self)
+    }
+}
+
+impl Default for SecretBackendSelection {
+    fn default() -> Self {
+        Self::file()
+    }
+}
+
+impl SecretBackend for SecretBackendSelection {
+    fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {
+        match self {
+            Self::File(backend) => backend.read(location),
+            Self::Keyring(backend) => backend.read(location),
+        }
+    }
+
+    fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {
+        match self {
+            Self::File(backend) => backend.write(location, value),
+            Self::Keyring(backend) => backend.write(location, value),
+        }
+    }
+
+    fn delete(&self, location: &SecretLocation) -> Result<(), SecretError> {
+        match self {
+            Self::File(backend) => backend.delete(location),
+            Self::Keyring(backend) => backend.delete(location),
+        }
+    }
+}
+
+impl SecretRevisionBackend for SecretBackendSelection {
+    fn probe_revision(
+        &self,
+        location: &SecretLocation,
+    ) -> Result<Option<SecretRevision>, SecretError> {
+        match self {
+            Self::File(backend) => backend.probe_revision(location),
+            Self::Keyring(backend) => backend.probe_revision(location),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SecretManager<B> {
     backend: B,
@@ -315,12 +542,45 @@ impl<B: SecretBackend> SecretManager<B> {
     }
 }
 
+impl<B: SecretRevisionBackend> SecretManager<B> {
+    pub fn probe_revision(
+        &self,
+        location: &SecretLocation,
+    ) -> Result<Option<SecretRevision>, SecretError> {
+        self.backend.probe_revision(location)
+    }
+}
+
 pub fn auth_json_path(codex_home: impl AsRef<Path>) -> PathBuf {
     codex_home.as_ref().join("auth.json")
 }
 
 pub fn auth_json_location(codex_home: impl AsRef<Path>) -> SecretLocation {
     SecretLocation::File(auth_json_path(codex_home))
+}
+
+pub fn auth_json_location_for_backend(
+    codex_home: impl AsRef<Path>,
+    selection: &SecretBackendSelection,
+) -> SecretLocation {
+    match selection {
+        SecretBackendSelection::File(_) => auth_json_location(codex_home),
+        SecretBackendSelection::Keyring(backend) => SecretLocation::keyring(
+            backend.service().to_string(),
+            auth_json_keyring_account(codex_home),
+        ),
+    }
+}
+
+pub fn auth_json_keyring_account(codex_home: impl AsRef<Path>) -> String {
+    format!("auth-json:{}", codex_home.as_ref().display())
+}
+
+pub fn describe_secret_location(location: &SecretLocation) -> String {
+    match location {
+        SecretLocation::File(path) => path.display().to_string(),
+        SecretLocation::Keyring { service, account } => format!("keyring://{service}/{account}"),
+    }
 }
 
 fn unique_temp_path(path: &Path) -> PathBuf {
@@ -446,5 +706,93 @@ mod tests {
 
         let err = KeyringSecretBackend::new("   ").unwrap_err();
         assert!(matches!(err, SecretError::InvalidLocation { .. }));
+    }
+
+    #[test]
+    fn selectable_backend_file_round_trips_text_values() {
+        let root = temp_dir("selection-text");
+        let path = root.join("nested/auth.json");
+        let store = SecretBackendSelection::file().into_manager();
+        let location = SecretLocation::file(&path);
+
+        store
+            .write_text(&location, "{\"access_token\":\"abc\"}")
+            .unwrap();
+
+        assert_eq!(
+            store.read_text(&location).unwrap().as_deref(),
+            Some("{\"access_token\":\"abc\"}")
+        );
+        assert_eq!(
+            store.read(&location).unwrap(),
+            Some(SecretValue::Text("{\"access_token\":\"abc\"}".to_string()))
+        );
+
+        store.delete(&location).unwrap();
+        assert_eq!(store.read(&location).unwrap(), None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn selectable_backend_from_kind_requires_keyring_service() {
+        assert_eq!(
+            SecretBackendSelection::from_kind(SecretBackendKind::File, None)
+                .unwrap()
+                .kind(),
+            SecretBackendKind::File
+        );
+
+        let err = SecretBackendSelection::from_kind(SecretBackendKind::Keyring, None).unwrap_err();
+        assert!(matches!(err, SecretError::InvalidLocation { .. }));
+    }
+
+    #[test]
+    fn file_backend_probe_revision_tracks_metadata() {
+        let root = temp_dir("revision");
+        let path = root.join("secret.bin");
+        let store = SecretBackendSelection::file().into_manager();
+        let location = SecretLocation::file(&path);
+
+        store
+            .write(&location, SecretValue::bytes(vec![0xff, 0x00, 0x41]))
+            .unwrap();
+
+        let metadata = fs::metadata(&path).unwrap();
+        let revision = store.probe_revision(&location).unwrap();
+        assert_eq!(revision, Some(SecretRevision::from_metadata(&metadata)));
+        assert_eq!(revision.as_ref().map(SecretRevision::size_bytes), Some(3));
+        assert_eq!(
+            revision.as_ref().and_then(SecretRevision::modified_at),
+            metadata.modified().ok()
+        );
+
+        store
+            .write(&location, SecretValue::bytes(vec![0xff, 0x00, 0x41, 0x42]))
+            .unwrap();
+        let updated_revision = store.probe_revision(&location).unwrap();
+        assert_ne!(revision, updated_revision);
+
+        store.delete(&location).unwrap();
+        assert_eq!(store.probe_revision(&location).unwrap(), None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn auth_json_location_for_keyring_backend_uses_deterministic_account() {
+        let selection = SecretBackendSelection::keyring("prodex").unwrap();
+        let location = auth_json_location_for_backend("/tmp/codex-home", &selection);
+        assert_eq!(
+            location,
+            SecretLocation::Keyring {
+                service: "prodex".to_string(),
+                account: "auth-json:/tmp/codex-home".to_string(),
+            }
+        );
+        assert_eq!(
+            describe_secret_location(&location),
+            "keyring://prodex/auth-json:/tmp/codex-home"
+        );
     }
 }

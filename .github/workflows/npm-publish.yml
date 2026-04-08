@@ -127,6 +127,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Package crate for attestation
+        run: cargo package --locked
+
       - name: Verify crate publish
         run: cargo publish --locked --dry-run
 
@@ -178,7 +181,7 @@ jobs:
           set -euo pipefail
           docker run --rm \
             -v "${PWD}/release:/source:ro" \
-            anchore/syft:latest \
+            anchore/syft:v1.41.2 \
             dir:/source -o spdx-json > release-sbom.spdx.json
 
       - name: Upload release SBOM

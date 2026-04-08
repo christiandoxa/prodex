@@ -13,7 +13,7 @@ pub(crate) fn fetch_profile_email(codex_home: &Path) -> Result<String> {
         Err(usage_error) => {
             if let Some(auth_error) = auth_email_error {
                 bail!(
-                    "failed to read account email from auth.json ({auth_error:#}) and quota endpoint ({usage_error:#})"
+                    "failed to read account email from stored auth secret ({auth_error:#}) and quota endpoint ({usage_error:#})"
                 );
             }
             Err(usage_error)
@@ -22,16 +22,15 @@ pub(crate) fn fetch_profile_email(codex_home: &Path) -> Result<String> {
 }
 
 fn read_profile_email_from_auth(codex_home: &Path) -> Result<Option<String>> {
-    let auth_path = secret_store::auth_json_path(codex_home);
-    if !auth_path.is_file() {
-        return Ok(None);
-    }
+    let auth_location = secret_store::auth_json_path(codex_home);
 
-    let content = read_auth_json_text(codex_home)
-        .with_context(|| format!("failed to read {}", auth_path.display()))?
-        .with_context(|| format!("failed to read {}", auth_path.display()))?;
+    let Some(content) = read_auth_json_text(codex_home)
+        .with_context(|| format!("failed to read {}", auth_location.display()))?
+    else {
+        return Ok(None);
+    };
     let stored_auth: StoredAuth = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+        .with_context(|| format!("failed to parse {}", auth_location.display()))?;
     let id_token = stored_auth
         .tokens
         .as_ref()
@@ -44,7 +43,7 @@ fn read_profile_email_from_auth(codex_home: &Path) -> Result<Option<String>> {
     };
 
     parse_email_from_id_token(id_token)
-        .with_context(|| format!("failed to parse id_token in {}", auth_path.display()))
+        .with_context(|| format!("failed to parse id_token in {}", auth_location.display()))
 }
 
 pub(crate) fn parse_email_from_id_token(raw_jwt: &str) -> Result<Option<String>> {

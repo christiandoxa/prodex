@@ -146,16 +146,18 @@ These modules reduce `main.rs` size and make it easier to reason about the runti
 
 What is already in place:
 
-- secret-management abstraction for `auth.json` and profile exports, still backed by files today
+- secret-management abstraction for `auth.json` and profile exports, plus global secret-backend selection
 - stable broker metrics export in JSON and Prometheus formats
 - runtime-aware diagnostics that surface broker metrics targets without changing proxy transport semantics
-- audit logging for enterprise operations, modeled as an append-only concern alongside runtime state rather than as part of transport handling
+- audit logging for enterprise operations, modeled as an append-only concern alongside runtime state rather than as part of transport handling, with logs following the resolved runtime log directory by default and `PRODEX_AUDIT_LOG_DIR` as the override
+- `prodex audit` as a local, read-only CLI surface for browsing recent append-only audit events
 
 Planned next steps are:
 
 - admin-grade controls such as RBAC, SSO, and central policy distribution
-- modularization of runtime-store responsibilities into smaller runtime-focused units
+- continued modularization of runtime-store responsibilities into smaller runtime-focused units; the `runtime_store` split is already in progress, but the boundary is still internal
 - extraction of state ownership, audit/event persistence, and export helpers out of the proxy hot path
+- a real non-file secret backend implementation and a backend-neutral revision signal for runtime auth invalidation
 
 What remains intentionally local:
 

@@ -3384,6 +3384,29 @@ fn quota_command_accepts_once_flag() {
 }
 
 #[test]
+fn audit_command_accepts_filters_and_json() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "audit",
+        "--tail",
+        "50",
+        "--component",
+        "profile",
+        "--action",
+        "use",
+        "--json",
+    ])
+    .expect("audit command");
+    let Commands::Audit(args) = command else {
+        panic!("expected audit command");
+    };
+    assert_eq!(args.tail, 50);
+    assert_eq!(args.component.as_deref(), Some("profile"));
+    assert_eq!(args.action.as_deref(), Some("use"));
+    assert!(args.json);
+}
+
+#[test]
 fn bare_prodex_defaults_to_run_command() {
     let command = parse_cli_command_from(["prodex"]).expect("bare prodex should parse");
     let Commands::Run(args) = command else {
@@ -23516,6 +23539,13 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         quota: false,
         runtime: true,
         json: true,
+    })));
+    assert!(!should_emit_update_notice(&Commands::Audit(AuditArgs {
+        tail: 20,
+        json: true,
+        component: None,
+        action: None,
+        outcome: None,
     })));
     assert!(!should_emit_update_notice(&Commands::Quota(QuotaArgs {
         profile: None,

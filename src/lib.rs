@@ -198,6 +198,8 @@ const RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
+const PRODEX_SECRET_BACKEND_ENV: &str = "PRODEX_SECRET_BACKEND";
+const PRODEX_SECRET_KEYRING_SERVICE_ENV: &str = "PRODEX_SECRET_KEYRING_SERVICE";
 const INFO_RUNTIME_LOG_TAIL_BYTES: usize = if cfg!(test) { 64 * 1024 } else { 512 * 1024 };
 const INFO_FORECAST_LOOKBACK_SECONDS: i64 = if cfg!(test) { 3_600 } else { 3 * 60 * 60 };
 const INFO_FORECAST_MIN_SPAN_SECONDS: i64 = if cfg!(test) { 60 } else { 5 * 60 };
@@ -293,6 +295,12 @@ Examples:
   prodex doctor --quota
   prodex doctor --runtime
   prodex doctor --runtime --json";
+const CLI_AUDIT_AFTER_HELP: &str = "\
+Examples:
+  prodex audit
+  prodex audit --tail 50
+  prodex audit --component profile --action use
+  prodex audit --json";
 const CLI_CLEANUP_AFTER_HELP: &str = "\
 Examples:
   prodex cleanup";
@@ -2201,37 +2209,38 @@ fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppS
     compact_app_state(merged, Local::now().timestamp())
 }
 
-fn runtime_profile_usage_auth_metadata(path: &Path) -> Result<(u64, Option<SystemTime>)> {
-    let metadata =
-        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
-    Ok((metadata.len(), metadata.modified().ok()))
-}
-
 fn read_auth_json_text(codex_home: &Path) -> Result<Option<String>> {
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .read_text(&secret_store::auth_json_location(codex_home))
         .map_err(anyhow::Error::new)
 }
 
+fn probe_auth_secret_revision(codex_home: &Path) -> Result<Option<secret_store::SecretRevision>> {
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .probe_revision(&secret_store::auth_json_location(codex_home))
+        .map_err(anyhow::Error::new)
+}
+
 fn load_runtime_profile_usage_auth_cache_entry(
     codex_home: &Path,
 ) -> Result<RuntimeProfileUsageAuthCacheEntry> {
-    let auth_path = secret_store::auth_json_path(codex_home);
-    let (file_len, modified_at) = runtime_profile_usage_auth_metadata(&auth_path)?;
+    let location = secret_store::auth_json_location(codex_home);
+    let revision = probe_auth_secret_revision(codex_home)?;
     let auth = read_usage_auth(codex_home)?;
     Ok(RuntimeProfileUsageAuthCacheEntry {
         auth,
-        auth_path,
-        file_len,
-        modified_at,
+        location,
+        revision,
     })
 }
 
 fn runtime_profile_usage_auth_cache_entry_matches(
     entry: &RuntimeProfileUsageAuthCacheEntry,
 ) -> Result<bool> {
-    let (file_len, modified_at) = runtime_profile_usage_auth_metadata(&entry.auth_path)?;
-    Ok(file_len == entry.file_len && modified_at == entry.modified_at)
+    let revision = secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .probe_revision(&entry.location)
+        .map_err(anyhow::Error::new)?;
+    Ok(revision == entry.revision)
 }
 
 fn load_runtime_profile_usage_auth_cache(
@@ -2407,50 +2416,6 @@ fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState 
     compact_app_state(merged, Local::now().timestamp())
 }
 
-fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()> {
-    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE") {
-        bail!("injected runtime state save failure");
-    }
-    write_json_file_with_backup(
-        &paths.state_file,
-        &state_last_good_file_path(paths),
-        json,
-        |content| {
-            let _: AppState =
-                serde_json::from_str(content).context("failed to validate prodex state")?;
-            Ok(())
-        },
-    )
-}
-
-fn runtime_scores_file_path(paths: &AppPaths) -> PathBuf {
-    paths.root.join("runtime-scores.json")
-}
-
-fn state_last_good_file_path(paths: &AppPaths) -> PathBuf {
-    last_good_file_path(&paths.state_file)
-}
-
-fn runtime_usage_snapshots_file_path(paths: &AppPaths) -> PathBuf {
-    paths.root.join("runtime-usage-snapshots.json")
-}
-
-fn runtime_scores_last_good_file_path(paths: &AppPaths) -> PathBuf {
-    last_good_file_path(&runtime_scores_file_path(paths))
-}
-
-fn runtime_usage_snapshots_last_good_file_path(paths: &AppPaths) -> PathBuf {
-    last_good_file_path(&runtime_usage_snapshots_file_path(paths))
-}
-
-fn runtime_backoffs_file_path(paths: &AppPaths) -> PathBuf {
-    paths.root.join("runtime-backoffs.json")
-}
-
-fn runtime_backoffs_last_good_file_path(paths: &AppPaths) -> PathBuf {
-    last_good_file_path(&runtime_backoffs_file_path(paths))
-}
-
 fn runtime_continuations_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-continuations.json")
 }
@@ -2509,56 +2474,6 @@ fn runtime_broker_registry_keys(paths: &AppPaths) -> Vec<String> {
 
 fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("update-check.json")
-}
-
-fn runtime_profile_score_profile_name(key: &str) -> &str {
-    key.rsplit(':').next().unwrap_or(key)
-}
-
-fn compact_runtime_profile_scores(
-    mut scores: BTreeMap<String, RuntimeProfileHealth>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> BTreeMap<String, RuntimeProfileHealth> {
-    let oldest_allowed = now.saturating_sub(RUNTIME_SCORE_RETENTION_SECONDS);
-    scores.retain(|key, value| {
-        profiles.contains_key(runtime_profile_score_profile_name(key))
-            && value.updated_at >= oldest_allowed
-    });
-    scores
-}
-
-fn compact_runtime_usage_snapshots(
-    mut snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
-    let oldest_allowed = now.saturating_sub(RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS);
-    snapshots.retain(|profile_name, snapshot| {
-        profiles.contains_key(profile_name) && snapshot.checked_at >= oldest_allowed
-    });
-    snapshots
-}
-
-fn compact_runtime_profile_backoffs(
-    mut backoffs: RuntimeProfileBackoffs,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> RuntimeProfileBackoffs {
-    backoffs
-        .retry_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    backoffs.transport_backoff_until.retain(|key, until| {
-        runtime_profile_transport_backoff_key_matches_profiles(key, profiles) && *until > now
-    });
-    backoffs
-        .route_circuit_open_until
-        .retain(|route_profile_key, _| {
-            profiles.contains_key(runtime_profile_route_circuit_profile_name(
-                route_profile_key,
-            ))
-        });
-    backoffs
 }
 
 fn runtime_continuation_store_from_app_state(state: &AppState) -> RuntimeContinuationStore {
@@ -2865,259 +2780,6 @@ fn runtime_profile_transport_backoff_max_until(
         .max()
 }
 
-fn merge_runtime_profile_scores(
-    existing: &BTreeMap<String, RuntimeProfileHealth>,
-    incoming: &BTreeMap<String, RuntimeProfileHealth>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> BTreeMap<String, RuntimeProfileHealth> {
-    let mut merged = existing.clone();
-    for (key, value) in incoming {
-        let should_replace = merged
-            .get(key)
-            .is_none_or(|current| current.updated_at <= value.updated_at);
-        if should_replace {
-            merged.insert(key.clone(), value.clone());
-        }
-    }
-    compact_runtime_profile_scores(merged, profiles, Local::now().timestamp())
-}
-
-fn load_runtime_profile_scores(
-    paths: &AppPaths,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> Result<BTreeMap<String, RuntimeProfileHealth>> {
-    let path = runtime_scores_file_path(paths);
-    if !path.exists() {
-        return Ok(BTreeMap::new());
-    }
-    let loaded = read_versioned_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
-        &path,
-        &runtime_scores_last_good_file_path(paths),
-    )?;
-    remember_runtime_sidecar_generation(&path, loaded.generation);
-    let scores = loaded.value;
-    Ok(compact_runtime_profile_scores(
-        scores,
-        profiles,
-        Local::now().timestamp(),
-    ))
-}
-
-fn load_runtime_profile_scores_with_recovery(
-    paths: &AppPaths,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> Result<RecoveredLoad<BTreeMap<String, RuntimeProfileHealth>>> {
-    let path = runtime_scores_file_path(paths);
-    if !path.exists() && !runtime_scores_last_good_file_path(paths).exists() {
-        return Ok(RecoveredLoad {
-            value: BTreeMap::new(),
-            recovered_from_backup: false,
-        });
-    }
-    let loaded = read_versioned_json_file_with_backup::<BTreeMap<String, RuntimeProfileHealth>>(
-        &path,
-        &runtime_scores_last_good_file_path(paths),
-    )?;
-    remember_runtime_sidecar_generation(&path, loaded.generation);
-    Ok(RecoveredLoad {
-        value: compact_runtime_profile_scores(loaded.value, profiles, Local::now().timestamp()),
-        recovered_from_backup: loaded.recovered_from_backup,
-    })
-}
-
-fn save_runtime_profile_scores(
-    paths: &AppPaths,
-    scores: &BTreeMap<String, RuntimeProfileHealth>,
-) -> Result<()> {
-    let path = runtime_scores_file_path(paths);
-    let profiles = AppState::load(paths)
-        .map(|state| state.profiles)
-        .unwrap_or_default();
-    let compacted =
-        compact_runtime_profile_scores(scores.clone(), &profiles, Local::now().timestamp());
-    save_versioned_json_file_with_fence(
-        &path,
-        &runtime_scores_last_good_file_path(paths),
-        &compacted,
-    )?;
-    Ok(())
-}
-
-fn merge_runtime_usage_snapshots(
-    existing: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    incoming: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
-    let mut merged = existing.clone();
-    for (profile_name, snapshot) in incoming {
-        let should_replace = merged
-            .get(profile_name)
-            .is_none_or(|current| current.checked_at <= snapshot.checked_at);
-        if should_replace {
-            merged.insert(profile_name.clone(), snapshot.clone());
-        }
-    }
-    compact_runtime_usage_snapshots(merged, profiles, Local::now().timestamp())
-}
-
-fn load_runtime_usage_snapshots(
-    paths: &AppPaths,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> Result<BTreeMap<String, RuntimeProfileUsageSnapshot>> {
-    let path = runtime_usage_snapshots_file_path(paths);
-    if !path.exists() {
-        return Ok(BTreeMap::new());
-    }
-    let loaded = read_versioned_json_file_with_backup::<
-        BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    >(&path, &runtime_usage_snapshots_last_good_file_path(paths))?;
-    remember_runtime_sidecar_generation(&path, loaded.generation);
-    let snapshots = loaded.value;
-    Ok(compact_runtime_usage_snapshots(
-        snapshots,
-        profiles,
-        Local::now().timestamp(),
-    ))
-}
-
-fn load_runtime_usage_snapshots_with_recovery(
-    paths: &AppPaths,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> Result<RecoveredLoad<BTreeMap<String, RuntimeProfileUsageSnapshot>>> {
-    let path = runtime_usage_snapshots_file_path(paths);
-    if !path.exists() && !runtime_usage_snapshots_last_good_file_path(paths).exists() {
-        return Ok(RecoveredLoad {
-            value: BTreeMap::new(),
-            recovered_from_backup: false,
-        });
-    }
-    let loaded = read_versioned_json_file_with_backup::<
-        BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    >(&path, &runtime_usage_snapshots_last_good_file_path(paths))?;
-    remember_runtime_sidecar_generation(&path, loaded.generation);
-    Ok(RecoveredLoad {
-        value: compact_runtime_usage_snapshots(loaded.value, profiles, Local::now().timestamp()),
-        recovered_from_backup: loaded.recovered_from_backup,
-    })
-}
-
-fn save_runtime_usage_snapshots(
-    paths: &AppPaths,
-    snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-) -> Result<()> {
-    let path = runtime_usage_snapshots_file_path(paths);
-    let profiles = AppState::load(paths)
-        .map(|state| state.profiles)
-        .unwrap_or_default();
-    let compacted =
-        compact_runtime_usage_snapshots(snapshots.clone(), &profiles, Local::now().timestamp());
-    save_versioned_json_file_with_fence(
-        &path,
-        &runtime_usage_snapshots_last_good_file_path(paths),
-        &compacted,
-    )?;
-    Ok(())
-}
-
-fn merge_runtime_profile_backoffs(
-    existing: &RuntimeProfileBackoffs,
-    incoming: &RuntimeProfileBackoffs,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> RuntimeProfileBackoffs {
-    let mut merged = existing.clone();
-    for (profile_name, until) in &incoming.retry_backoff_until {
-        merged
-            .retry_backoff_until
-            .insert(profile_name.clone(), *until);
-    }
-    for (profile_name, until) in &incoming.transport_backoff_until {
-        merged
-            .transport_backoff_until
-            .insert(profile_name.clone(), *until);
-    }
-    for (route_profile_key, until) in &incoming.route_circuit_open_until {
-        merged
-            .route_circuit_open_until
-            .insert(route_profile_key.clone(), *until);
-    }
-    merged
-        .retry_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    merged.transport_backoff_until.retain(|key, until| {
-        runtime_profile_transport_backoff_key_matches_profiles(key, profiles) && *until > now
-    });
-    merged
-        .route_circuit_open_until
-        .retain(|route_profile_key, _| {
-            profiles.contains_key(runtime_profile_route_circuit_profile_name(
-                route_profile_key,
-            ))
-        });
-    compact_runtime_profile_backoffs(merged, profiles, now)
-}
-
-fn load_runtime_profile_backoffs(
-    paths: &AppPaths,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> Result<RuntimeProfileBackoffs> {
-    let path = runtime_backoffs_file_path(paths);
-    if !path.exists() {
-        return Ok(RuntimeProfileBackoffs::default());
-    }
-    let loaded = read_versioned_json_file_with_backup::<RuntimeProfileBackoffs>(
-        &path,
-        &runtime_backoffs_last_good_file_path(paths),
-    )?;
-    remember_runtime_sidecar_generation(&path, loaded.generation);
-    let backoffs = loaded.value;
-    Ok(compact_runtime_profile_backoffs(
-        backoffs,
-        profiles,
-        Local::now().timestamp(),
-    ))
-}
-
-fn load_runtime_profile_backoffs_with_recovery(
-    paths: &AppPaths,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> Result<RecoveredLoad<RuntimeProfileBackoffs>> {
-    let path = runtime_backoffs_file_path(paths);
-    if !path.exists() && !runtime_backoffs_last_good_file_path(paths).exists() {
-        return Ok(RecoveredLoad {
-            value: RuntimeProfileBackoffs::default(),
-            recovered_from_backup: false,
-        });
-    }
-    let loaded = read_versioned_json_file_with_backup::<RuntimeProfileBackoffs>(
-        &path,
-        &runtime_backoffs_last_good_file_path(paths),
-    )?;
-    remember_runtime_sidecar_generation(&path, loaded.generation);
-    Ok(RecoveredLoad {
-        value: compact_runtime_profile_backoffs(loaded.value, profiles, Local::now().timestamp()),
-        recovered_from_backup: loaded.recovered_from_backup,
-    })
-}
-
-fn save_runtime_profile_backoffs(
-    paths: &AppPaths,
-    backoffs: &RuntimeProfileBackoffs,
-) -> Result<()> {
-    let path = runtime_backoffs_file_path(paths);
-    let profiles = AppState::load(paths)
-        .map(|state| state.profiles)
-        .unwrap_or_default();
-    let compacted =
-        compact_runtime_profile_backoffs(backoffs.clone(), &profiles, Local::now().timestamp());
-    save_versioned_json_file_with_fence(
-        &path,
-        &runtime_backoffs_last_good_file_path(paths),
-        &compacted,
-    )?;
-    Ok(())
-}
-
 fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
     snapshot: &AppState,
@@ -3240,6 +2902,11 @@ enum Commands {
         after_help = CLI_DOCTOR_AFTER_HELP
     )]
     Doctor(DoctorArgs),
+    #[command(
+        about = "Inspect structured enterprise audit events written to /tmp.",
+        after_help = CLI_AUDIT_AFTER_HELP
+    )]
+    Audit(AuditArgs),
     #[command(
         about = "Remove stale local runtime logs, temp homes, dead broker artifacts, and orphaned managed homes.",
         after_help = CLI_CLEANUP_AFTER_HELP
@@ -3404,6 +3071,25 @@ struct DoctorArgs {
     /// Emit machine-readable JSON output. Supported together with --runtime.
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Args, Debug)]
+struct AuditArgs {
+    /// Show only the most recent matching events.
+    #[arg(long, default_value_t = 50, value_name = "COUNT")]
+    tail: usize,
+    /// Emit machine-readable JSON output.
+    #[arg(long)]
+    json: bool,
+    /// Filter by component, for example `profile` or `runtime`.
+    #[arg(long, value_name = "NAME")]
+    component: Option<String>,
+    /// Filter by action, for example `use` or `broker_start`.
+    #[arg(long, value_name = "NAME")]
+    action: Option<String>,
+    /// Filter by outcome, for example `success` or `failure`.
+    #[arg(long, value_name = "NAME")]
+    outcome: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -3922,9 +3608,8 @@ struct RuntimeRotationState {
 #[derive(Debug, Clone)]
 struct RuntimeProfileUsageAuthCacheEntry {
     auth: UsageAuth,
-    auth_path: PathBuf,
-    file_len: u64,
-    modified_at: Option<SystemTime>,
+    location: secret_store::SecretLocation,
+    revision: Option<secret_store::SecretRevision>,
 }
 
 #[derive(Debug, Clone)]
@@ -4559,6 +4244,7 @@ fn run() -> Result<()> {
         Commands::Current => handle_current_profile(),
         Commands::Info(args) => handle_info(args),
         Commands::Doctor(args) => handle_doctor(args),
+        Commands::Audit(args) => handle_audit(args),
         Commands::Cleanup => handle_cleanup(),
         Commands::Login(args) => handle_codex_login(args),
         Commands::Logout(selector) => handle_codex_logout(selector),
@@ -4605,6 +4291,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "current"
             | "info"
             | "doctor"
+            | "audit"
             | "cleanup"
             | "login"
             | "logout"
@@ -4674,6 +4361,10 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
         (
             "Runtime policy".to_string(),
             format_runtime_policy_summary(policy_summary.as_ref()),
+        ),
+        (
+            "Secret backend".to_string(),
+            format_secret_backend_summary(),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
         ("Audit logs".to_string(), format_audit_logs_summary()),
@@ -5375,6 +5066,51 @@ fn runtime_logs_json_value() -> serde_json::Value {
     })
 }
 
+fn configured_secret_backend_selection() -> Result<secret_store::SecretBackendSelection> {
+    let policy = runtime_policy_secrets();
+    let backend = env::var(PRODEX_SECRET_BACKEND_ENV)
+        .ok()
+        .map(|value| value.parse::<secret_store::SecretBackendKind>())
+        .transpose()
+        .map_err(anyhow::Error::new)?
+        .or_else(|| policy.as_ref().and_then(|policy| policy.backend))
+        .unwrap_or(secret_store::SecretBackendKind::File);
+    let keyring_service = env::var(PRODEX_SECRET_KEYRING_SERVICE_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            policy
+                .as_ref()
+                .and_then(|policy| policy.keyring_service.clone())
+        });
+    secret_store::SecretBackendSelection::from_kind(backend, keyring_service)
+        .map_err(anyhow::Error::new)
+}
+
+fn format_secret_backend_summary() -> String {
+    match configured_secret_backend_selection() {
+        Ok(selection) => match selection.keyring_service() {
+            Some(service) => format!("{} ({service})", selection.kind()),
+            None => selection.kind().to_string(),
+        },
+        Err(err) => format!("invalid ({err})"),
+    }
+}
+
+fn secret_backend_json_value() -> serde_json::Value {
+    match configured_secret_backend_selection() {
+        Ok(selection) => serde_json::json!({
+            "backend": selection.kind().as_str(),
+            "keyring_service": selection.keyring_service(),
+        }),
+        Err(err) => serde_json::json!({
+            "invalid": true,
+            "error": err.to_string(),
+        }),
+    }
+}
+
 fn audit_log_event_best_effort(
     component: &str,
     action: &str,
@@ -5489,6 +5225,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 "runtime_policy".to_string(),
                 runtime_policy_json_value(policy_summary.as_ref()),
             );
+            object.insert("secret_backend".to_string(), secret_backend_json_value());
             object.insert("runtime_logs".to_string(), runtime_logs_json_value());
             object.insert("audit_logs".to_string(), audit_logs_json_value());
             object.insert(
@@ -5549,6 +5286,10 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         (
             "Runtime policy".to_string(),
             format_runtime_policy_summary(policy_summary.as_ref()),
+        ),
+        (
+            "Secret backend".to_string(),
+            format_secret_backend_summary(),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
         ("Audit logs".to_string(), format_audit_logs_summary()),
@@ -5634,6 +5375,39 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
         }
         print_panel(&format!("Profile {}", report.summary.name), &fields);
     }
+
+    Ok(())
+}
+
+fn handle_audit(args: AuditArgs) -> Result<()> {
+    let query = AuditLogQuery {
+        tail: args.tail,
+        component: args.component.as_deref().map(str::trim).map(str::to_string),
+        action: args.action.as_deref().map(str::trim).map(str::to_string),
+        outcome: args.outcome.as_deref().map(str::trim).map(str::to_string),
+    };
+    let events = read_recent_audit_events(&query)?;
+
+    if args.json {
+        let json = serde_json::to_string_pretty(&serde_json::json!({
+            "audit_logs": audit_logs_json_value(),
+            "filters": {
+                "tail": query.tail,
+                "component": query.component,
+                "action": query.action,
+                "outcome": query.outcome,
+            },
+            "events": events,
+        }))
+        .context("failed to serialize audit log output")?;
+        println!("{json}");
+        return Ok(());
+    }
+
+    println!(
+        "{}",
+        render_audit_events_human(&audit_log_path(), &query, &events)
+    );
 
     Ok(())
 }

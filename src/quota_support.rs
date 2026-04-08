@@ -1216,14 +1216,6 @@ pub(crate) fn watch_all_quotas(
 }
 
 pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
-    let auth_path = secret_store::auth_json_path(codex_home);
-    if !auth_path.is_file() {
-        return AuthSummary {
-            label: "no-auth".to_string(),
-            quota_compatible: false,
-        };
-    }
-
     let content = match read_auth_json_text(codex_home) {
         Ok(Some(content)) => content,
         Err(_) => {
@@ -1283,19 +1275,17 @@ pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
 }
 
 pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
-    let auth_path = secret_store::auth_json_path(codex_home);
-    if !auth_path.is_file() {
+    let auth_location = secret_store::auth_json_path(codex_home);
+    let Some(content) = read_auth_json_text(codex_home)
+        .with_context(|| format!("failed to read {}", auth_location.display()))?
+    else {
         bail!(
-            "auth file not found at {}. Run `codex login` first.",
-            auth_path.display()
+            "auth secret not found at {}. Run `codex login` first.",
+            auth_location.display()
         );
-    }
-
-    let content = read_auth_json_text(codex_home)
-        .with_context(|| format!("failed to read {}", auth_path.display()))?
-        .with_context(|| format!("failed to read {}", auth_path.display()))?;
+    };
     let stored_auth: StoredAuth = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+        .with_context(|| format!("failed to parse {}", auth_location.display()))?;
 
     let has_api_key = stored_auth
         .openai_api_key
@@ -1308,13 +1298,13 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
     let tokens = stored_auth
         .tokens
         .as_ref()
-        .context("auth tokens are missing from auth.json")?;
+        .context("auth tokens are missing from the stored auth secret")?;
     let access_token = tokens
         .access_token
         .as_deref()
         .map(str::trim)
         .filter(|token| !token.is_empty())
-        .context("access token not found in auth.json")?
+        .context("access token not found in the stored auth secret")?
         .to_string();
     let account_id = tokens
         .account_id
