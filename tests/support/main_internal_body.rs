@@ -13469,7 +13469,6 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
 fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
     let _budget_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "200");
-    let _poll_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS", "150");
     let temp_dir = TestDir::new();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -18117,6 +18116,10 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
             .any(|payload| payload.contains("Selected model is at capacity")),
         "capacity error should not be surfaced after pre-commit rotate: {second_payloads:?}"
     );
+    assert!(
+        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        "failed pre-commit frames should not leak across rotated retry: {second_payloads:?}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -18131,6 +18134,12 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
         state.active_profile.as_deref() == Some("second")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+
+    let log = fs::read_to_string(&proxy.log_path).expect("runtime proxy log should be readable");
+    assert!(
+        log.contains("upstream_overloaded route=websocket profile=main"),
+        "delayed overload should be classified and logged explicitly: {log}"
+    );
 }
 
 #[test]

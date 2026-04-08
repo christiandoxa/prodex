@@ -120,7 +120,6 @@ const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else 
 const RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS: i64 = if cfg!(test) { 8 } else { 120 };
 const RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS: i64 = if cfg!(test) { 1 } else { 3 };
 const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
-const RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS: u64 = if cfg!(test) { 5 } else { 25 };
 const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
 const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 25 } else { 200 };
 const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
@@ -212,6 +211,7 @@ const RUNTIME_BROKER_READY_TIMEOUT_MS: u64 = if cfg!(test) { 3_000 } else { 15_0
 const RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 750 };
 const RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1_500 };
 const RUNTIME_BROKER_POLL_INTERVAL_MS: u64 = if cfg!(test) { 25 } else { 100 };
+const RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS: u64 = if cfg!(test) { 125 } else { 1_000 };
 const RUNTIME_BROKER_IDLE_GRACE_SECONDS: i64 = if cfg!(test) { 1 } else { 5 };
 const CLI_WIDTH: usize = 110;
 const CLI_MIN_WIDTH: usize = 60;
@@ -6650,17 +6650,26 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     let startup_grace_until = metadata
         .started_at
         .saturating_add(runtime_broker_startup_grace_seconds());
+    let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
+    let lease_scan_interval = Duration::from_millis(
+        RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS.max(RUNTIME_BROKER_POLL_INTERVAL_MS),
+    );
     let mut idle_started_at = None::<i64>;
+    let mut cached_live_leases = 0usize;
+    let mut last_lease_scan_at = Instant::now() - lease_scan_interval;
     loop {
-        let live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
         let active_requests = proxy.active_request_count.load(Ordering::SeqCst);
-        if live_leases > 0 || active_requests > 0 {
+        if active_requests == 0 && last_lease_scan_at.elapsed() >= lease_scan_interval {
+            cached_live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
+            last_lease_scan_at = Instant::now();
+        }
+        if cached_live_leases > 0 || active_requests > 0 {
             idle_started_at = None;
         } else {
             let now = Local::now().timestamp();
             if now < startup_grace_until {
                 idle_started_at = None;
-                thread::sleep(Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS));
+                thread::sleep(poll_interval);
                 continue;
             }
             let idle_since = idle_started_at.get_or_insert(now);
@@ -6676,7 +6685,7 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
                 break;
             }
         }
-        thread::sleep(Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS));
+        thread::sleep(poll_interval);
     }
 
     drop(proxy);
@@ -7144,13 +7153,13 @@ fn start_runtime_rotation_proxy_with_listen_addr(
         let shared = shared.clone();
         let receiver = Arc::clone(&long_lived_receiver);
         worker_threads.push(thread::spawn(move || {
-            while !shutdown.load(Ordering::SeqCst) {
+            loop {
                 let request = {
                     let guard = receiver.lock();
                     let Ok(receiver) = guard else {
                         break;
                     };
-                    receiver.recv_timeout(Duration::from_millis(200))
+                    receiver.recv()
                 };
                 match request {
                     Ok(request) => {
@@ -7162,8 +7171,10 @@ fn start_runtime_rotation_proxy_with_listen_addr(
                         drop(_guard);
                         handle_runtime_rotation_proxy_request(request, &shared);
                     }
-                    Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => break,
+                    Err(_) => break,
+                }
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
                 }
             }
         }));
@@ -7175,9 +7186,9 @@ fn start_runtime_rotation_proxy_with_listen_addr(
         let shared = shared.clone();
         let long_lived_sender = long_lived_sender.clone();
         worker_threads.push(thread::spawn(move || {
-            while !shutdown.load(Ordering::SeqCst) {
-                match server.recv_timeout(Duration::from_millis(200)) {
-                    Ok(Some(request)) => {
+            loop {
+                match server.recv() {
+                    Ok(request) => {
                         let long_lived = is_tiny_http_websocket_upgrade(&request)
                             || is_runtime_responses_path(request.url());
                         if long_lived {
@@ -7214,9 +7225,11 @@ fn start_runtime_rotation_proxy_with_listen_addr(
                             handle_runtime_rotation_proxy_request(request, &shared);
                         }
                     }
-                    Ok(None) => {}
                     Err(_) if shutdown.load(Ordering::SeqCst) => break,
                     Err(_) => {}
+                }
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
                 }
             }
         }));
@@ -7242,7 +7255,7 @@ impl Drop for RuntimeRotationProxy {
         for _ in 0..self.accept_worker_count {
             self.server.unblock();
         }
-        for worker in self.worker_threads.drain(..) {
+        while let Some(worker) = self.worker_threads.pop() {
             let _ = worker.join();
         }
         let _ = self.owner_lock.take();
@@ -7837,7 +7850,6 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
     } else {
         runtime_proxy_admission_wait_budget_ms()
     });
-    let poll = Duration::from_millis(runtime_proxy_admission_wait_poll_ms().max(1));
     let mut waited = false;
     loop {
         match try_acquire_runtime_proxy_active_request_slot(shared, transport, path) {
@@ -7875,9 +7887,9 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "runtime_proxy_admission_wait_started transport={transport} path={path} budget_ms={} poll_ms={} reason={} pressure_mode={pressure_mode}",
+                            "runtime_proxy_admission_wait_started transport={transport} path={path} budget_ms={} wait_timeout_ms={} reason={} pressure_mode={pressure_mode}",
                             budget.as_millis(),
-                            poll.as_millis(),
+                            budget.saturating_sub(elapsed).as_millis(),
                             match rejection {
                                 RuntimeProxyAdmissionRejection::GlobalLimit =>
                                     "active_request_limit",
@@ -7897,7 +7909,7 @@ fn acquire_runtime_proxy_active_request_slot_with_wait(
                 {
                     return Ok(guard);
                 }
-                let wait_for = poll.min(budget.saturating_sub(elapsed));
+                let wait_for = budget.saturating_sub(elapsed);
                 if !wait_for.is_zero() {
                     let _ = condvar
                         .wait_timeout(wait_guard, wait_for)
@@ -20267,6 +20279,10 @@ fn write_runtime_streaming_response(
     mut response: RuntimeStreamingResponse,
 ) -> io::Result<()> {
     let mut writer = writer;
+    let flush_each_chunk = response.headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("content-type")
+            && value.to_ascii_lowercase().contains("text/event-stream")
+    });
     let started_at = Instant::now();
     let log_writer_error = |stage: &str,
                             chunk_count: usize,
@@ -20416,10 +20432,12 @@ fn write_runtime_streaming_response(
             log_writer_error("chunk_suffix", chunk_count, total_bytes, &err);
             err
         })?;
-        writer.flush().map_err(|err| {
-            log_writer_error("chunk_flush", chunk_count, total_bytes, &err);
-            err
-        })?;
+        if flush_each_chunk || chunk_count == 1 {
+            writer.flush().map_err(|err| {
+                log_writer_error("chunk_flush", chunk_count, total_bytes, &err);
+                err
+            })?;
+        }
     }
     writer.write_all(b"0\r\n\r\n").map_err(|err| {
         log_writer_error("trailer", chunk_count, total_bytes, &err);

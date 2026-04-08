@@ -170,13 +170,6 @@ pub(super) fn runtime_proxy_pressure_admission_wait_budget_ms() -> u64 {
     )
 }
 
-pub(super) fn runtime_proxy_admission_wait_poll_ms() -> u64 {
-    timeout_override_ms(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS",
-        RUNTIME_PROXY_ADMISSION_WAIT_POLL_MS,
-    )
-}
-
 pub(super) fn runtime_proxy_long_lived_queue_wait_budget_ms() -> u64 {
     timeout_override_ms(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
