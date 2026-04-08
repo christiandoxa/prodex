@@ -17,16 +17,15 @@ That means you can keep working smoothly across multiple accounts while preservi
 
 ## Why `prodex`?
 
-If you use Codex CLI or Claude Code heavily, account switching and quota limits can become painful fast.
+Not everyone wants to pay $200 for a single account.
 
-`prodex` solves that by:
+Sometimes it makes more sense to run 2 or 3 separate $20 accounts you already have. The problem is that doing it manually is annoying fast. You have to log in, log out, switch homes, check quota, and keep track of which session belongs to which account.
 
-- isolating each account into its own profile
-- checking quota before a session starts
-- letting new work land on another available profile
-- keeping ongoing continuations attached to their original profile
+`prodex` exists to remove that pain.
 
-The result is a workflow that feels predictable, lightweight, and safe.
+It manages isolated profiles for each account, checks quota before launch, routes fresh work to an available profile, and keeps ongoing continuations attached to the right one.
+
+Less account juggling, less friction, more actual work.
 
 ## Requirements
 
