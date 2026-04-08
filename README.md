@@ -62,12 +62,18 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.2.127`:
+The current local version in this repo is `0.2.128`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.2.127
-cargo install prodex --force --version 0.2.127
+npm install -g @christiandoxa/prodex@0.2.128
+cargo install prodex --force --version 0.2.128
 ```
+
+Dependency status in this repo:
+
+- The npm runtime dependency is already at the latest published `@openai/codex` release: `0.118.0`
+- `cargo update` currently produces no Rust lockfile changes on the Rust `1.94.1` compatible graph used by this project
+- `generic-array` remains pinned transitively by `crypto-common`, and `sha2 0.11` would require a wider RustCrypto compatibility jump than this release
 
 Switching from a Cargo-installed binary to npm?
 
