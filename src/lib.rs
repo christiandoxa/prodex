@@ -487,6 +487,7 @@ struct RuntimeProxyLaneAdmission {
     websocket_active: Arc<AtomicUsize>,
     standard_active: Arc<AtomicUsize>,
     wait: Arc<(Mutex<()>, Condvar)>,
+    inflight_release_revision: Arc<AtomicU64>,
     limits: RuntimeProxyLaneLimits,
 }
 
@@ -498,6 +499,7 @@ impl RuntimeProxyLaneAdmission {
             websocket_active: Arc::new(AtomicUsize::new(0)),
             standard_active: Arc::new(AtomicUsize::new(0)),
             wait: Arc::new((Mutex::new(()), Condvar::new())),
+            inflight_release_revision: Arc::new(AtomicU64::new(0)),
             limits,
         }
     }
@@ -4150,6 +4152,10 @@ impl Drop for RuntimeProfileInFlightGuard {
                     self.profile_name, remaining, self.weight, self.context
                 ),
             );
+            self.shared
+                .lane_admission
+                .inflight_release_revision
+                .fetch_add(1, Ordering::SeqCst);
             let (mutex, condvar) = &*self.shared.lane_admission.wait;
             let _guard = mutex
                 .lock()
@@ -7683,12 +7689,19 @@ fn runtime_proxy_request_prefers_interactive_inflight_wait(request: &RuntimeProx
     })
 }
 
-fn runtime_proxy_request_interactive_inflight_wait_budget(
+fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
+    is_runtime_responses_path(&request.path_and_query)
+        || runtime_proxy_request_prefers_interactive_inflight_wait(request)
+}
+
+fn runtime_proxy_request_inflight_wait_budget(
     request: &RuntimeProxyRequest,
     pressure_mode: bool,
 ) -> Duration {
     if runtime_proxy_request_prefers_interactive_inflight_wait(request) {
         runtime_proxy_admission_wait_budget(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, pressure_mode)
+    } else if runtime_proxy_request_prefers_inflight_wait(request) {
+        runtime_proxy_admission_wait_budget(&request.path_and_query, pressure_mode)
     } else {
         Duration::ZERO
     }
@@ -8106,21 +8119,35 @@ where
     }
 }
 
-fn wait_for_runtime_profile_inflight_relief(
+fn runtime_profile_inflight_release_revision(shared: &RuntimeRotationProxyShared) -> u64 {
+    shared
+        .lane_admission
+        .inflight_release_revision
+        .load(Ordering::SeqCst)
+}
+
+fn wait_for_runtime_profile_inflight_relief_since(
     shared: &RuntimeRotationProxyShared,
     timeout: Duration,
+    observed_revision: u64,
 ) -> bool {
     if timeout.is_zero() {
         return false;
+    }
+    if runtime_profile_inflight_release_revision(shared) != observed_revision {
+        return true;
     }
     let (mutex, condvar) = &*shared.lane_admission.wait;
     let guard = mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if runtime_profile_inflight_release_revision(shared) != observed_revision {
+        return true;
+    }
     let (_guard, result) = condvar
         .wait_timeout(guard, timeout)
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    !result.timed_out()
+    !result.timed_out() || runtime_profile_inflight_release_revision(shared) != observed_revision
 }
 
 fn enqueue_runtime_proxy_long_lived_request_with_wait(
@@ -17890,15 +17917,12 @@ fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     continuation: bool,
 ) -> Result<bool> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
-    let wait_budget =
-        runtime_proxy_request_interactive_inflight_wait_budget(request, pressure_mode);
-    if wait_budget.is_zero()
-        || !runtime_has_waitable_inflight_candidate_for_route(
-            shared,
-            excluded_profiles,
-            route_kind,
-        )?
-    {
+    let wait_budget = runtime_proxy_request_inflight_wait_budget(request, pressure_mode);
+    if wait_budget.is_zero() {
+        return Ok(false);
+    }
+    let current_release_revision = runtime_profile_inflight_release_revision(shared);
+    if !runtime_has_waitable_inflight_candidate_for_route(shared, excluded_profiles, route_kind)? {
         return Ok(false);
     }
 
@@ -17918,7 +17942,8 @@ fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         ),
     );
     let started_at = Instant::now();
-    let signaled = wait_for_runtime_profile_inflight_relief(shared, wait_for);
+    let signaled =
+        wait_for_runtime_profile_inflight_relief_since(shared, wait_for, current_release_revision);
     runtime_proxy_log(
         shared,
         format!(
@@ -17927,7 +17952,7 @@ fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
             started_at.elapsed().as_millis()
         ),
     );
-    Ok(true)
+    Ok(signaled)
 }
 
 fn runtime_profile_usage_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
