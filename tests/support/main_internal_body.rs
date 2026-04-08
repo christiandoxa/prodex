@@ -11198,6 +11198,53 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
 }
 
 #[test]
+fn runtime_continuation_journal_save_for_profiles_preserves_bindings_without_state_file() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/main"),
+            managed: true,
+            email: Some("main@example.com".to_string()),
+        },
+    )]);
+    let continuations = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        ..RuntimeContinuationStore::default()
+    };
+
+    save_runtime_continuation_journal_for_profiles(&paths, &continuations, &profiles, now)
+        .expect("journal save with explicit profiles should succeed");
+
+    let loaded = load_runtime_continuation_journal_with_recovery(&paths, &profiles)
+        .expect("journal should reload")
+        .value;
+    assert_eq!(loaded.saved_at, now);
+    assert_eq!(
+        loaded
+            .continuations
+            .response_profile_bindings
+            .get("resp-main")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("main")
+    );
+}
+
+#[test]
 fn runtime_continuation_journal_retry_does_not_resurrect_released_response_binding() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {

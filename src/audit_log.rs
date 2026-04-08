@@ -113,8 +113,13 @@ pub(super) fn read_recent_audit_events(query: &AuditLogQuery) -> Result<Vec<Audi
         return Ok(Vec::new());
     }
 
+    let candidate_lines = if query.has_filters() {
+        read_recent_audit_lines(&path, None)?
+    } else {
+        read_recent_audit_lines(&path, Some(query.tail))?
+    };
     let mut matches = Vec::new();
-    for line in read_recent_audit_lines(&path, query.tail)? {
+    for line in candidate_lines {
         if line.trim().is_empty() {
             continue;
         }
@@ -218,8 +223,8 @@ fn truncate_audit_details(value: &str, max_chars: usize) -> String {
     }
 }
 
-fn read_recent_audit_lines(path: &Path, tail: usize) -> Result<Vec<String>> {
-    if tail == 0 {
+fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<Vec<String>> {
+    if tail == Some(0) {
         return Ok(Vec::new());
     }
     let file =
@@ -241,12 +246,13 @@ fn read_recent_audit_lines(path: &Path, tail: usize) -> Result<Vec<String>> {
     if start > 0 && !content.starts_with('\n') && !lines.is_empty() {
         lines.remove(0);
     }
-    if lines.len() > tail {
+    if let Some(tail) = tail
+        && lines.len() > tail
+    {
         let keep_from = lines.len().saturating_sub(tail);
-        Ok(lines.split_off(keep_from))
-    } else {
-        Ok(lines)
+        return Ok(lines.split_off(keep_from));
     }
+    Ok(lines)
 }
 
 #[cfg(test)]
@@ -380,6 +386,40 @@ mod tests {
         assert_eq!(tailed.len(), 1);
         assert_eq!(tailed[0].component, "runtime");
         assert_eq!(tailed[0].action, "broker_start");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_recent_audit_events_with_filters_scans_beyond_last_tail_lines() {
+        let dir = temp_dir("query-filter-window");
+        let _guard = AuditLogEnvGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
+
+        let mut content = String::new();
+        content.push_str(
+            "{\"recorded_at\":\"2026-04-08T00:00:00+00:00\",\"recorded_at_epoch\":1,\"pid\":10,\"component\":\"profile\",\"action\":\"use\",\"outcome\":\"success\",\"details\":{\"profile_name\":\"main\"}}\n",
+        );
+        for index in 0..20 {
+            content.push_str(&format!(
+                "{{\"recorded_at\":\"2026-04-08T00:00:{:02}+00:00\",\"recorded_at_epoch\":{},\"pid\":10,\"component\":\"runtime\",\"action\":\"broker_start\",\"outcome\":\"success\",\"details\":{{\"index\":{}}}}}\n",
+                index + 1,
+                index + 2,
+                index
+            ));
+        }
+        fs::write(audit_log_path(), content).unwrap();
+
+        let events = read_recent_audit_events(&AuditLogQuery {
+            tail: 5,
+            component: Some("profile".to_string()),
+            action: Some("use".to_string()),
+            outcome: Some("success".to_string()),
+        })
+        .unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].component, "profile");
+        assert_eq!(events[0].action, "use");
 
         let _ = fs::remove_dir_all(dir);
     }

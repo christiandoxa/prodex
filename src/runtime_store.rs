@@ -488,16 +488,25 @@ pub(super) fn load_runtime_profile_scores_with_recovery(
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn save_runtime_profile_scores(
     paths: &AppPaths,
     scores: &BTreeMap<String, RuntimeProfileHealth>,
 ) -> Result<()> {
-    let path = runtime_scores_file_path(paths);
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
+    save_runtime_profile_scores_for_profiles(paths, scores, &profiles)
+}
+
+pub(super) fn save_runtime_profile_scores_for_profiles(
+    paths: &AppPaths,
+    scores: &BTreeMap<String, RuntimeProfileHealth>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<()> {
+    let path = runtime_scores_file_path(paths);
     let compacted =
-        compact_runtime_profile_scores(scores.clone(), &profiles, Local::now().timestamp());
+        compact_runtime_profile_scores(scores.clone(), profiles, Local::now().timestamp());
     save_versioned_json_file_with_fence(
         &path,
         &runtime_scores_last_good_file_path(paths),
@@ -563,16 +572,25 @@ pub(super) fn load_runtime_usage_snapshots_with_recovery(
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn save_runtime_usage_snapshots(
     paths: &AppPaths,
     snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
 ) -> Result<()> {
-    let path = runtime_usage_snapshots_file_path(paths);
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
+    save_runtime_usage_snapshots_for_profiles(paths, snapshots, &profiles)
+}
+
+pub(super) fn save_runtime_usage_snapshots_for_profiles(
+    paths: &AppPaths,
+    snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<()> {
+    let path = runtime_usage_snapshots_file_path(paths);
     let compacted =
-        compact_runtime_usage_snapshots(snapshots.clone(), &profiles, Local::now().timestamp());
+        compact_runtime_usage_snapshots(snapshots.clone(), profiles, Local::now().timestamp());
     save_versioned_json_file_with_fence(
         &path,
         &runtime_usage_snapshots_last_good_file_path(paths),
@@ -661,16 +679,25 @@ pub(super) fn load_runtime_profile_backoffs_with_recovery(
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn save_runtime_profile_backoffs(
     paths: &AppPaths,
     backoffs: &RuntimeProfileBackoffs,
 ) -> Result<()> {
-    let path = runtime_backoffs_file_path(paths);
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
+    save_runtime_profile_backoffs_for_profiles(paths, backoffs, &profiles)
+}
+
+pub(super) fn save_runtime_profile_backoffs_for_profiles(
+    paths: &AppPaths,
+    backoffs: &RuntimeProfileBackoffs,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<()> {
+    let path = runtime_backoffs_file_path(paths);
     let compacted =
-        compact_runtime_profile_backoffs(backoffs.clone(), &profiles, Local::now().timestamp());
+        compact_runtime_profile_backoffs(backoffs.clone(), profiles, Local::now().timestamp());
     save_versioned_json_file_with_fence(
         &path,
         &runtime_backoffs_last_good_file_path(paths),

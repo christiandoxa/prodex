@@ -712,6 +712,7 @@ fn schedule_runtime_state_save(
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
     let queued_at = Instant::now();
     let ready_at = queued_at + runtime_state_save_debounce(reason);
+    let state_profiles = state.profiles.clone();
     let journal_continuations = runtime_state_save_reason_requires_continuation_journal(reason)
         .then(|| continuations.clone());
     if cfg!(test) {
@@ -757,7 +758,13 @@ fn schedule_runtime_state_save(
             ),
         }
         if let Some(continuations) = journal_continuations {
-            schedule_runtime_continuation_journal_save(shared, continuations, paths, reason);
+            schedule_runtime_continuation_journal_save(
+                shared,
+                continuations,
+                state.profiles.clone(),
+                paths,
+                reason,
+            );
         }
         return;
     }
@@ -808,7 +815,13 @@ fn schedule_runtime_state_save(
         );
     }
     if let Some(continuations) = journal_continuations {
-        schedule_runtime_continuation_journal_save(shared, continuations, paths, reason);
+        schedule_runtime_continuation_journal_save(
+            shared,
+            continuations,
+            state_profiles,
+            paths,
+            reason,
+        );
     }
 }
 
@@ -915,6 +928,7 @@ fn schedule_runtime_continuation_journal_save_from_runtime(
         schedule_runtime_continuation_journal_save(
             shared,
             runtime_continuation_store_snapshot(runtime),
+            runtime.state.profiles.clone(),
             runtime.paths.clone(),
             reason,
         );
@@ -1057,6 +1071,7 @@ fn runtime_proxy_queue_pressure_active(
 fn schedule_runtime_continuation_journal_save(
     shared: &RuntimeRotationProxyShared,
     continuations: RuntimeContinuationStore,
+    profiles: BTreeMap<String, ProfileEntry>,
     paths: AppPaths,
     reason: &str,
 ) {
@@ -1076,7 +1091,12 @@ fn schedule_runtime_continuation_journal_save(
             format!("continuation_journal_save_inline reason={reason} backlog=0"),
         );
         let saved_at = Local::now().timestamp();
-        match save_runtime_continuation_journal(&paths, &continuations, saved_at) {
+        match save_runtime_continuation_journal_for_profiles(
+            &paths,
+            &continuations,
+            &profiles,
+            saved_at,
+        ) {
             Ok(()) => runtime_proxy_log(
                 shared,
                 format!(
@@ -1109,6 +1129,7 @@ fn schedule_runtime_continuation_journal_save(
                 RuntimeContinuationJournalSnapshot {
                     paths,
                     continuations,
+                    profiles,
                 },
             ),
             log_path: shared.log_path.clone(),
@@ -1147,6 +1168,7 @@ fn runtime_continuation_journal_snapshot_from_runtime(
     RuntimeContinuationJournalSnapshot {
         paths: runtime.paths.clone(),
         continuations: runtime_continuation_store_snapshot(runtime),
+        profiles: runtime.state.profiles.clone(),
     }
 }
 
@@ -1290,9 +1312,10 @@ fn runtime_continuation_journal_save_worker_loop(queue: Arc<RuntimeContinuationJ
                 }
             };
             match snapshot.and_then(|snapshot| {
-                save_runtime_continuation_journal(
+                save_runtime_continuation_journal_for_profiles(
                     &snapshot.paths,
                     &snapshot.continuations,
+                    &snapshot.profiles,
                     job.saved_at,
                 )
             }) {
@@ -2664,6 +2687,7 @@ fn load_runtime_continuation_journal_with_recovery(
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn save_runtime_continuation_journal(
     paths: &AppPaths,
     continuations: &RuntimeContinuationStore,
@@ -2672,15 +2696,24 @@ fn save_runtime_continuation_journal(
     let profiles = AppState::load(paths)
         .map(|state| state.profiles)
         .unwrap_or_default();
-    let incoming = compact_runtime_continuation_store(continuations.clone(), &profiles);
+    save_runtime_continuation_journal_for_profiles(paths, continuations, &profiles, saved_at)
+}
+
+fn save_runtime_continuation_journal_for_profiles(
+    paths: &AppPaths,
+    continuations: &RuntimeContinuationStore,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    saved_at: i64,
+) -> Result<()> {
+    let incoming = compact_runtime_continuation_store(continuations.clone(), profiles);
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
-        let existing = load_runtime_continuation_journal_with_recovery(paths, &profiles)?;
+        let existing = load_runtime_continuation_journal_with_recovery(paths, profiles)?;
         let journal = RuntimeContinuationJournal {
             saved_at: saved_at.max(existing.value.saved_at),
             continuations: merge_runtime_continuation_store(
                 &existing.value.continuations,
                 &incoming,
-                &profiles,
+                profiles,
             ),
         };
         match save_versioned_json_file_with_fence(
@@ -2846,9 +2879,13 @@ fn save_runtime_state_snapshot_if_latest(
                 &merged.profiles,
             )?;
             write_state_json_atomic(paths, &json)?;
-            save_runtime_profile_scores(paths, &merged_scores)?;
-            save_runtime_usage_snapshots(paths, &merged_usage_snapshots)?;
-            save_runtime_profile_backoffs(paths, &merged_backoffs)?;
+            save_runtime_profile_scores_for_profiles(paths, &merged_scores, &merged.profiles)?;
+            save_runtime_usage_snapshots_for_profiles(
+                paths,
+                &merged_usage_snapshots,
+                &merged.profiles,
+            )?;
+            save_runtime_profile_backoffs_for_profiles(paths, &merged_backoffs, &merged.profiles)?;
             Ok(())
         })();
         match save_result {
@@ -3490,6 +3527,7 @@ struct RuntimeStateSaveJob {
 struct RuntimeContinuationJournalSnapshot {
     paths: AppPaths,
     continuations: RuntimeContinuationStore,
+    profiles: BTreeMap<String, ProfileEntry>,
 }
 
 #[derive(Debug, Clone)]
