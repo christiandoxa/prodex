@@ -26092,7 +26092,7 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
 }
 
 #[test]
-fn runtime_proxy_waits_for_anthropic_inflight_relief_before_failing() {
+fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
     let _budget_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
 
@@ -26207,10 +26207,18 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_before_failing() {
         log.contains("inflight_wait_finished route=responses"),
         "interactive inflight wait completion should be logged"
     );
+    assert!(
+        log.contains("useful=true"),
+        "successful Anthropics inflight wait should log useful relief"
+    );
+    assert!(
+        log.contains("wake_source=inflight_release"),
+        "successful Anthropics inflight wait should log inflight_release wake source"
+    );
 }
 
 #[test]
-fn runtime_proxy_waits_for_responses_inflight_relief_before_failing() {
+fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
     let _budget_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "40");
 
@@ -26315,6 +26323,14 @@ fn runtime_proxy_waits_for_responses_inflight_relief_before_failing() {
         log.contains("inflight_wait_finished route=responses"),
         "responses inflight wait completion should be logged"
     );
+    assert!(
+        log.contains("useful=true"),
+        "successful responses inflight wait should log useful relief"
+    );
+    assert!(
+        log.contains("wake_source=inflight_release"),
+        "successful responses inflight wait should log inflight_release wake source"
+    );
 }
 
 #[test]
@@ -26364,5 +26380,332 @@ fn runtime_profile_inflight_relief_wait_returns_immediately_after_prior_release(
     assert!(
         started_at.elapsed() < Duration::from_millis(20),
         "release-aware inflight wait should not sleep after the release was already observed"
+    );
+}
+
+#[test]
+fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() {
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let observed_revision = runtime_profile_inflight_release_revision(&shared);
+    let active_guard = try_acquire_runtime_proxy_active_request_slot(
+        &shared,
+        "http",
+        "/backend-api/codex/responses",
+    )
+    .expect("active request slot should be acquired");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        drop(active_guard);
+    });
+
+    assert!(
+        !wait_for_runtime_profile_inflight_relief_since(
+            &shared,
+            Duration::from_millis(100),
+            observed_revision,
+        ),
+        "active-request release notify should not count as inflight relief"
+    );
+
+    release.join().expect("active-request release thread should join");
+    assert_eq!(
+        runtime_profile_inflight_release_revision(&shared),
+        observed_revision,
+        "active-request release should not change inflight release revision"
+    );
+}
+
+#[test]
+fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
+
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+
+    let usage = usage_with_main_windows(90, 3600, 90, 604_800);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: Local::now().timestamp(),
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage.clone()),
+                },
+            )]),
+            profile_usage_snapshots: BTreeMap::from([("main".to_string(), snapshot)]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let _inflight_guard = acquire_runtime_profile_inflight_guard(&shared, "main", "responses_http")
+        .expect("inflight guard should be acquired");
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: serde_json::json!({
+            "input": "request should time out without inflight relief"
+        })
+        .to_string()
+        .into_bytes(),
+    };
+    let response = proxy_runtime_responses_request(44, &request, &shared)
+        .expect("responses request should return a local timeout result");
+
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("expected buffered responses reply");
+    };
+    assert_eq!(parts.status, 503, "unexpected status without inflight relief");
+    let body: serde_json::Value =
+        serde_json::from_slice(&parts.body).expect("response body should parse");
+    assert_eq!(
+        body.get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(serde_json::Value::as_str),
+        Some("service_unavailable")
+    );
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("inflight_wait_started route=responses"),
+        "responses inflight timeout should log wait start"
+    );
+    assert!(
+        log.contains("inflight_wait_finished route=responses"),
+        "responses inflight timeout should log wait finish"
+    );
+    assert!(
+        log.contains("useful=false"),
+        "timeout without relief should log useful=false"
+    );
+    assert!(
+        log.contains("wake_source=timeout"),
+        "timeout without relief should log wake_source=timeout"
+    );
+}
+
+#[test]
+fn runtime_proxy_wait_scopes_to_session_owner_relief() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "40");
+
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let usage = usage_with_main_windows(90, 3600, 90, 604_800);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("second".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home,
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::from([(
+                    "sess-main".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: Local::now().timestamp(),
+                    },
+                )]),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "second".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: Local::now().timestamp(),
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage.clone()),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: Local::now().timestamp(),
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage.clone()),
+                    },
+                ),
+            ]),
+            profile_usage_snapshots: BTreeMap::from([
+                ("main".to_string(), snapshot),
+                (
+                    "second".to_string(),
+                    runtime_profile_usage_snapshot_from_usage(&usage),
+                ),
+            ]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let main_inflight = acquire_runtime_profile_inflight_guard(&shared, "main", "responses_http")
+        .expect("main inflight guard should be acquired");
+    let second_inflight =
+        acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
+            .expect("second inflight guard should be acquired");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        drop(second_inflight);
+    });
+
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("session_id".to_string(), "sess-main".to_string()),
+        ],
+        body: serde_json::json!({
+            "input": "request should only count owner relief as useful"
+        })
+        .to_string()
+        .into_bytes(),
+    };
+    assert!(
+        !runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+            45,
+            &request,
+            &shared,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            Instant::now(),
+            true,
+            Some("main"),
+        )
+        .expect("owner-scoped wait should complete"),
+        "non-owner release should not count as useful relief"
+    );
+
+    release.join().expect("non-owner release thread should join");
+    drop(main_inflight);
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("inflight_wait_finished route=responses"),
+        "owner-scoped wait should log completion"
+    );
+    assert!(
+        log.contains("useful=false"),
+        "non-owner release should not be logged as useful relief"
+    );
+    assert!(
+        log.contains("wake_source=inflight_release"),
+        "non-owner release should still be logged as an inflight release wake"
     );
 }

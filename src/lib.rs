@@ -8126,28 +8126,63 @@ fn runtime_profile_inflight_release_revision(shared: &RuntimeRotationProxyShared
         .load(Ordering::SeqCst)
 }
 
-fn wait_for_runtime_profile_inflight_relief_since(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProfileInFlightWaitOutcome {
+    InflightRelease,
+    OtherNotify,
+    Timeout,
+}
+
+fn runtime_profile_inflight_wait_outcome_label(
+    outcome: RuntimeProfileInFlightWaitOutcome,
+) -> &'static str {
+    match outcome {
+        RuntimeProfileInFlightWaitOutcome::InflightRelease => "inflight_release",
+        RuntimeProfileInFlightWaitOutcome::OtherNotify => "other_notify",
+        RuntimeProfileInFlightWaitOutcome::Timeout => "timeout",
+    }
+}
+
+fn runtime_profile_inflight_wait_outcome_since(
     shared: &RuntimeRotationProxyShared,
     timeout: Duration,
     observed_revision: u64,
-) -> bool {
+) -> RuntimeProfileInFlightWaitOutcome {
     if timeout.is_zero() {
-        return false;
+        return RuntimeProfileInFlightWaitOutcome::Timeout;
     }
     if runtime_profile_inflight_release_revision(shared) != observed_revision {
-        return true;
+        return RuntimeProfileInFlightWaitOutcome::InflightRelease;
     }
     let (mutex, condvar) = &*shared.lane_admission.wait;
     let guard = mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if runtime_profile_inflight_release_revision(shared) != observed_revision {
-        return true;
+        return RuntimeProfileInFlightWaitOutcome::InflightRelease;
     }
     let (_guard, result) = condvar
         .wait_timeout(guard, timeout)
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    !result.timed_out() || runtime_profile_inflight_release_revision(shared) != observed_revision
+    if runtime_profile_inflight_release_revision(shared) != observed_revision {
+        RuntimeProfileInFlightWaitOutcome::InflightRelease
+    } else if result.timed_out() {
+        RuntimeProfileInFlightWaitOutcome::Timeout
+    } else {
+        RuntimeProfileInFlightWaitOutcome::OtherNotify
+    }
+}
+
+#[cfg(test)]
+fn wait_for_runtime_profile_inflight_relief_since(
+    shared: &RuntimeRotationProxyShared,
+    timeout: Duration,
+    observed_revision: u64,
+) -> bool {
+    matches!(
+        runtime_profile_inflight_wait_outcome_since(shared, timeout, observed_revision),
+        RuntimeProfileInFlightWaitOutcome::InflightRelease
+    )
 }
 
 fn enqueue_runtime_proxy_long_lived_request_with_wait(
@@ -10935,6 +10970,23 @@ fn runtime_proxy_has_continuation_priority(
         || request_turn_state.is_some()
         || turn_state_profile.is_some()
         || session_profile.is_some()
+}
+
+fn runtime_wait_affinity_owner<'a>(
+    strict_affinity_profile: Option<&'a str>,
+    pinned_profile: Option<&'a str>,
+    turn_state_profile: Option<&'a str>,
+    session_profile: Option<&'a str>,
+    trusted_previous_response_affinity: bool,
+) -> Option<&'a str> {
+    strict_affinity_profile
+        .or(turn_state_profile)
+        .or_else(|| {
+            trusted_previous_response_affinity
+                .then_some(pinned_profile)
+                .flatten()
+        })
+        .or(session_profile)
 }
 
 fn runtime_proxy_allows_direct_current_profile_fallback(
@@ -16329,6 +16381,15 @@ fn proxy_runtime_responses_request(
                     turn_state_profile.as_deref(),
                     session_profile.as_deref(),
                 ),
+                runtime_wait_affinity_owner(
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                    trusted_previous_response_affinity,
+                ),
             )? {
                 continue;
             }
@@ -16792,6 +16853,15 @@ fn proxy_runtime_responses_request(
                     request_turn_state.as_deref(),
                     turn_state_profile.as_deref(),
                     session_profile.as_deref(),
+                ),
+                runtime_wait_affinity_owner(
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile.as_deref(),
+                    turn_state_profile.as_deref(),
+                    session_profile.as_deref(),
+                    trusted_previous_response_affinity,
                 ),
             )? {
                 continue;
@@ -17801,11 +17871,12 @@ fn next_runtime_response_candidate_for_route(
     Ok(fallback)
 }
 
-fn runtime_has_waitable_inflight_candidate_for_route(
+fn runtime_waitable_inflight_candidates_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
-) -> Result<bool> {
+    wait_affinity_owner: Option<&str>,
+) -> Result<BTreeSet<String>> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
@@ -17842,12 +17913,16 @@ fn runtime_has_waitable_inflight_candidate_for_route(
         )
     };
 
+    let mut waitable_profiles = BTreeSet::new();
     let mut reports = Vec::new();
     for (order_index, name) in active_profile_selection_order(&state, &current_profile)
         .into_iter()
         .enumerate()
     {
         if excluded_profiles.contains(&name) {
+            continue;
+        }
+        if wait_affinity_owner.is_some_and(|owner| owner != name) {
             continue;
         }
         let Some(entry) = cached_reports.get(&name) else {
@@ -17900,6 +17975,115 @@ fn runtime_has_waitable_inflight_candidate_for_route(
         if runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
             >= inflight_soft_limit
         {
+            waitable_profiles.insert(candidate.name.clone());
+        }
+    }
+
+    Ok(waitable_profiles)
+}
+
+fn runtime_any_waited_candidate_relieved(
+    shared: &RuntimeRotationProxyShared,
+    waited_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    if waited_profiles.is_empty() {
+        return Ok(false);
+    }
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let (
+        state,
+        current_profile,
+        include_code_review,
+        cached_reports,
+        cached_usage_snapshots,
+        profile_usage_auth,
+        retry_backoff_until,
+        transport_backoff_until,
+        route_circuit_open_until,
+        profile_inflight,
+        profile_health,
+    ) = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
+        (
+            runtime.state.clone(),
+            runtime.current_profile.clone(),
+            runtime.include_code_review,
+            runtime.profile_probe_cache.clone(),
+            runtime.profile_usage_snapshots.clone(),
+            runtime.profile_usage_auth.clone(),
+            runtime.profile_retry_backoff_until.clone(),
+            runtime.profile_transport_backoff_until.clone(),
+            runtime.profile_route_circuit_open_until.clone(),
+            runtime.profile_inflight.clone(),
+            runtime.profile_health.clone(),
+        )
+    };
+
+    let mut reports = Vec::new();
+    for (order_index, name) in active_profile_selection_order(&state, &current_profile)
+        .into_iter()
+        .enumerate()
+    {
+        if !waited_profiles.contains(&name) {
+            continue;
+        }
+        let Some(entry) = cached_reports.get(&name) else {
+            continue;
+        };
+        reports.push(RunProfileProbeReport {
+            name,
+            order_index,
+            auth: entry.auth.clone(),
+            result: entry.result.clone(),
+        });
+    }
+
+    for candidate in ready_profile_candidates(
+        &reports,
+        include_code_review,
+        Some(current_profile.as_str()),
+        &state,
+        Some(&cached_usage_snapshots),
+    ) {
+        if !waited_profiles.contains(&candidate.name) {
+            continue;
+        }
+        if runtime_profile_name_in_selection_backoff(
+            &candidate.name,
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            route_kind,
+            now,
+        ) {
+            continue;
+        }
+        if runtime_profile_auth_failure_active_with_auth_cache(
+            &profile_health,
+            &profile_usage_auth,
+            &candidate.name,
+            now,
+        ) {
+            continue;
+        }
+        if runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_for_route(&candidate.usage, route_kind),
+            route_kind,
+        )
+        .is_some()
+        {
+            continue;
+        }
+        if runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
+            < inflight_soft_limit
+        {
             return Ok(true);
         }
     }
@@ -17915,44 +18099,85 @@ fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     route_kind: RuntimeRouteKind,
     selection_started_at: Instant,
     continuation: bool,
+    wait_affinity_owner: Option<&str>,
 ) -> Result<bool> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
     let wait_budget = runtime_proxy_request_inflight_wait_budget(request, pressure_mode);
     if wait_budget.is_zero() {
         return Ok(false);
     }
-    let current_release_revision = runtime_profile_inflight_release_revision(shared);
-    if !runtime_has_waitable_inflight_candidate_for_route(shared, excluded_profiles, route_kind)? {
+    let waited_profiles = runtime_waitable_inflight_candidates_for_route(
+        shared,
+        excluded_profiles,
+        route_kind,
+        wait_affinity_owner,
+    )?;
+    if waited_profiles.is_empty() {
         return Ok(false);
     }
 
     let (_, precommit_budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
     let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
-    let wait_for = wait_budget.min(remaining_budget);
-    if wait_for.is_zero() {
+    let total_wait_budget = wait_budget.min(remaining_budget);
+    if total_wait_budget.is_zero() {
         return Ok(false);
     }
+    let wait_deadline = Instant::now() + total_wait_budget;
 
     runtime_proxy_log(
         shared,
         format!(
             "request={request_id} transport=http inflight_wait_started route={} wait_ms={}",
             runtime_route_kind_label(route_kind),
-            wait_for.as_millis()
+            total_wait_budget.as_millis()
         ),
     );
     let started_at = Instant::now();
-    let signaled =
-        wait_for_runtime_profile_inflight_relief_since(shared, wait_for, current_release_revision);
+    let mut observed_revision = runtime_profile_inflight_release_revision(shared);
+    let mut signaled = false;
+    let mut useful_relief = false;
+    let mut wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
+    loop {
+        let remaining_wait = wait_deadline.saturating_duration_since(Instant::now());
+        if remaining_wait.is_zero() {
+            break;
+        }
+        match runtime_profile_inflight_wait_outcome_since(shared, remaining_wait, observed_revision)
+        {
+            RuntimeProfileInFlightWaitOutcome::InflightRelease => {
+                signaled = true;
+                wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
+                observed_revision = runtime_profile_inflight_release_revision(shared);
+                useful_relief =
+                    runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
+                if useful_relief {
+                    break;
+                }
+            }
+            RuntimeProfileInFlightWaitOutcome::OtherNotify => {
+                signaled = true;
+                wake_source = RuntimeProfileInFlightWaitOutcome::OtherNotify;
+                observed_revision = runtime_profile_inflight_release_revision(shared);
+            }
+            RuntimeProfileInFlightWaitOutcome::Timeout => {
+                if !signaled {
+                    wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
+                }
+                break;
+            }
+        }
+    }
     runtime_proxy_log(
         shared,
         format!(
-            "request={request_id} transport=http inflight_wait_finished route={} waited_ms={} signaled={signaled}",
+            "request={request_id} transport=http inflight_wait_finished route={} waited_ms={} signaled={signaled} useful={} wake_source={}",
             runtime_route_kind_label(route_kind),
-            started_at.elapsed().as_millis()
+            started_at.elapsed().as_millis(),
+            useful_relief,
+            runtime_profile_inflight_wait_outcome_label(wake_source),
         ),
     );
-    Ok(signaled)
+    Ok(useful_relief)
 }
 
 fn runtime_profile_usage_cache_is_fresh(entry: &RuntimeProfileProbeCacheEntry, now: i64) -> bool {
