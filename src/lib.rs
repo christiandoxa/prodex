@@ -2956,7 +2956,7 @@ enum Commands {
     )]
     Login(CodexPassthroughArgs),
     #[command(about = "Run codex logout for the selected or active profile.")]
-    Logout(ProfileSelector),
+    Logout(LogoutArgs),
     #[command(
         about = "Inspect live quota for one profile or the whole profile pool.",
         after_help = CLI_QUOTA_AFTER_HELP
@@ -3058,6 +3058,22 @@ struct ProfileSelector {
     /// Profile name. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     profile: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct LogoutArgs {
+    /// Profile name. If omitted, prodex uses the active profile.
+    #[arg(value_name = "NAME", conflicts_with = "profile")]
+    profile_name: Option<String>,
+    /// Profile name. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    profile: Option<String>,
+}
+
+impl LogoutArgs {
+    fn selected_profile(&self) -> Option<&str> {
+        self.profile.as_deref().or(self.profile_name.as_deref())
+    }
 }
 
 #[derive(Args, Debug)]
@@ -4285,7 +4301,7 @@ fn run() -> Result<()> {
         Commands::Audit(args) => handle_audit(args),
         Commands::Cleanup => handle_cleanup(),
         Commands::Login(args) => handle_codex_login(args),
-        Commands::Logout(selector) => handle_codex_logout(selector),
+        Commands::Logout(args) => handle_codex_logout(args),
         Commands::Quota(args) => handle_quota(args),
         Commands::Run(args) => handle_run(args),
         Commands::Claude(args) => handle_claude(args),

@@ -693,10 +693,10 @@ fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
     bail!("failed to allocate a temporary CODEX_HOME for login")
 }
 
-pub(crate) fn handle_codex_logout(selector: ProfileSelector) -> Result<()> {
+pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let profile_name = resolve_profile_name(&state, selector.profile.as_deref())?;
+    let profile_name = resolve_profile_name(&state, args.selected_profile())?;
     let codex_home = state
         .profiles
         .get(&profile_name)

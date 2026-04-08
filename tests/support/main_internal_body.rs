@@ -3440,6 +3440,29 @@ fn cleanup_command_does_not_default_to_run() {
 }
 
 #[test]
+fn logout_command_accepts_positional_profile_name() {
+    let command = parse_cli_command_from(["prodex", "logout", "second"]).expect("logout command");
+    let Commands::Logout(args) = command else {
+        panic!("expected logout command");
+    };
+    assert_eq!(args.profile_name.as_deref(), Some("second"));
+    assert_eq!(args.selected_profile(), Some("second"));
+    assert!(args.profile.is_none());
+}
+
+#[test]
+fn logout_command_accepts_profile_flag() {
+    let command =
+        parse_cli_command_from(["prodex", "logout", "--profile", "second"]).expect("logout command");
+    let Commands::Logout(args) = command else {
+        panic!("expected logout command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("second"));
+    assert_eq!(args.selected_profile(), Some("second"));
+    assert!(args.profile_name.is_none());
+}
+
+#[test]
 fn bare_prodex_accepts_run_options_before_codex_args() {
     let command =
         parse_cli_command_from(["prodex", "--profile", "second", "exec", "review this repo"])
