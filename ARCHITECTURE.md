@@ -133,6 +133,7 @@ The safest first extractions are support domains that are not on the hot path:
 
 - `terminal_ui`: panel rendering and terminal layout helpers
 - `runtime_config`: runtime timeout, env override, and fault-injection helpers
+- `runtime_policy`: versioned local policy loading for enterprise-style deployments
 - `runtime_doctor`: runtime diagnostic summarization and rendering
 
 These modules reduce `main.rs` size and make it easier to reason about the runtime path without weakening behavior.

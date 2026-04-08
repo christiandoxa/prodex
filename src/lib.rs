@@ -46,6 +46,7 @@ mod quota_support;
 #[path = "runtime_tuning.rs"]
 mod runtime_config;
 mod runtime_doctor;
+mod runtime_policy;
 mod shared_codex_fs;
 #[path = "cli_render.rs"]
 mod terminal_ui;
@@ -57,6 +58,7 @@ use profile_identity::*;
 use quota_support::*;
 use runtime_config::*;
 use runtime_doctor::*;
+use runtime_policy::*;
 use shared_codex_fs::*;
 use terminal_ui::*;
 use update_notice::*;
@@ -317,7 +319,16 @@ fn runtime_proxy_log_dir() -> PathBuf {
     env::var_os("PRODEX_RUNTIME_LOG_DIR")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+        .or_else(|| runtime_policy_runtime().and_then(|policy| policy.log_dir))
         .unwrap_or_else(env::temp_dir)
+}
+
+fn runtime_proxy_log_format() -> RuntimeLogFormat {
+    env::var("PRODEX_RUNTIME_LOG_FORMAT")
+        .ok()
+        .and_then(|value| RuntimeLogFormat::parse(&value))
+        .or_else(|| runtime_policy_runtime().and_then(|policy| policy.log_format))
+        .unwrap_or(RuntimeLogFormat::Text)
 }
 
 fn create_runtime_proxy_log_path() -> PathBuf {
@@ -363,8 +374,9 @@ fn runtime_proxy_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    usize_override(
+    usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
+        runtime_policy_proxy().and_then(|policy| policy.worker_count),
         (parallelism.saturating_mul(4)).clamp(8, 32),
     )
     .clamp(1, 64)
@@ -378,8 +390,9 @@ fn runtime_proxy_long_lived_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    usize_override(
+    usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
+        runtime_policy_proxy().and_then(|policy| policy.long_lived_worker_count),
         runtime_proxy_long_lived_worker_count_default(parallelism),
     )
     .clamp(1, 256)
@@ -389,8 +402,9 @@ fn runtime_probe_refresh_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    usize_override(
+    usize_override_with_policy(
         "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
+        runtime_policy_proxy().and_then(|policy| policy.probe_refresh_worker_count),
         parallelism.clamp(2, 4),
     )
     .clamp(1, 8)
@@ -404,8 +418,9 @@ fn runtime_proxy_async_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4);
-    usize_override(
+    usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
+        runtime_policy_proxy().and_then(|policy| policy.async_worker_count),
         runtime_proxy_async_worker_count_default(parallelism),
     )
     .clamp(2, 8)
@@ -413,8 +428,9 @@ fn runtime_proxy_async_worker_count() -> usize {
 
 fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
     let default_capacity = worker_count.saturating_mul(8).clamp(128, 1024);
-    usize_override(
+    usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
+        runtime_policy_proxy().and_then(|policy| policy.long_lived_queue_capacity),
         default_capacity,
     )
     .max(1)
@@ -433,8 +449,9 @@ fn runtime_proxy_active_request_limit(
     worker_count: usize,
     long_lived_worker_count: usize,
 ) -> usize {
-    usize_override(
+    usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
+        runtime_policy_proxy().and_then(|policy| policy.active_request_limit),
         runtime_proxy_active_request_limit_default(worker_count, long_lived_worker_count),
     )
     .max(1)
@@ -496,26 +513,30 @@ fn runtime_proxy_lane_limits(
 ) -> RuntimeProxyLaneLimits {
     let global_limit = global_limit.max(1);
     RuntimeProxyLaneLimits {
-        responses: usize_override(
+        responses: usize_override_with_policy(
             "PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT",
+            runtime_policy_proxy().and_then(|policy| policy.responses_active_limit),
             (global_limit.saturating_mul(3) / 4).clamp(4, global_limit),
         )
         .min(global_limit)
         .max(1),
-        compact: usize_override(
+        compact: usize_override_with_policy(
             "PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT",
+            runtime_policy_proxy().and_then(|policy| policy.compact_active_limit),
             (global_limit / 4).clamp(2, 6).min(global_limit),
         )
         .min(global_limit)
         .max(1),
-        websocket: usize_override(
+        websocket: usize_override_with_policy(
             "PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT",
+            runtime_policy_proxy().and_then(|policy| policy.websocket_active_limit),
             long_lived_worker_count.clamp(2, global_limit),
         )
         .min(global_limit)
         .max(1),
-        standard: usize_override(
+        standard: usize_override_with_policy(
             "PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT",
+            runtime_policy_proxy().and_then(|policy| policy.standard_active_limit),
             (worker_count / 2).clamp(2, 8).min(global_limit),
         )
         .min(global_limit)
@@ -523,10 +544,70 @@ fn runtime_proxy_lane_limits(
     }
 }
 
+fn runtime_proxy_log_fields(message: &str) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    for token in message.split_whitespace() {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        fields.insert(key.to_string(), value.trim_matches('"').to_string());
+    }
+    fields
+}
+
+fn runtime_proxy_log_event(message: &str) -> Option<&str> {
+    message
+        .split_whitespace()
+        .find(|token| !token.contains('='))
+        .filter(|token| !token.is_empty())
+}
+
 fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
     let sanitized = message.replace(['\r', '\n'], " ");
-    let line = format!("[{timestamp}] {sanitized}\n");
+    let line = match runtime_proxy_log_format() {
+        RuntimeLogFormat::Text => format!("[{timestamp}] {sanitized}\n"),
+        RuntimeLogFormat::Json => {
+            let mut value = serde_json::Map::new();
+            value.insert(
+                "timestamp".to_string(),
+                serde_json::Value::String(timestamp.to_string()),
+            );
+            value.insert(
+                "pid".to_string(),
+                serde_json::Value::Number(std::process::id().into()),
+            );
+            value.insert(
+                "message".to_string(),
+                serde_json::Value::String(sanitized.clone()),
+            );
+            if let Some(event) = runtime_proxy_log_event(&sanitized) {
+                value.insert(
+                    "event".to_string(),
+                    serde_json::Value::String(event.to_string()),
+                );
+            }
+            let fields = runtime_proxy_log_fields(&sanitized);
+            if !fields.is_empty() {
+                value.insert(
+                    "fields".to_string(),
+                    serde_json::Value::Object(
+                        fields
+                            .into_iter()
+                            .map(|(key, value)| (key, serde_json::Value::String(value)))
+                            .collect(),
+                    ),
+                );
+            }
+            match serde_json::to_string(&serde_json::Value::Object(value)) {
+                Ok(serialized) => format!("{serialized}\n"),
+                Err(_) => format!("[{timestamp}] {sanitized}\n"),
+            }
+        }
+    };
     if let Ok(mut file) = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -4360,6 +4441,53 @@ struct RuntimeBrokerHealth {
     persistence_role: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeBrokerLaneMetrics {
+    active: usize,
+    limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeBrokerTrafficMetrics {
+    responses: RuntimeBrokerLaneMetrics,
+    compact: RuntimeBrokerLaneMetrics,
+    websocket: RuntimeBrokerLaneMetrics,
+    standard: RuntimeBrokerLaneMetrics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeBrokerContinuationMetrics {
+    response_bindings: usize,
+    turn_state_bindings: usize,
+    session_id_bindings: usize,
+    warm: usize,
+    verified: usize,
+    suspect: usize,
+    dead: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RuntimeBrokerMetrics {
+    health: RuntimeBrokerHealth,
+    active_request_limit: usize,
+    local_overload_backoff_remaining_seconds: u64,
+    traffic: RuntimeBrokerTrafficMetrics,
+    profile_inflight: BTreeMap<String, usize>,
+    retry_backoffs: usize,
+    transport_backoffs: usize,
+    route_circuits: usize,
+    degraded_profiles: usize,
+    degraded_routes: usize,
+    continuations: RuntimeBrokerContinuationMetrics,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RuntimeBrokerObservation {
+    broker_key: String,
+    listen_addr: String,
+    metrics: RuntimeBrokerMetrics,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct RuntimeBrokerMetadata {
@@ -4703,6 +4831,7 @@ fn run() -> Result<()> {
     if !matches!(command, Commands::RuntimeBroker(_)) {
         let _ = show_update_notice_if_available(&command);
     }
+    ensure_runtime_policy_valid()?;
     match command {
         Commands::Profile(command) => handle_profile_command(command),
         Commands::UseProfile(selector) => handle_set_active_profile(selector),
@@ -4793,6 +4922,7 @@ fn handle_profile_command(command: ProfileCommands) -> Result<()> {
 fn handle_info(_args: InfoArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
+    let policy_summary = runtime_policy_summary()?;
     let now = Local::now().timestamp();
     let version_summary = format_info_prodex_version(&paths)?;
     let quota = collect_info_quota_aggregate(&paths, &state, now);
@@ -4819,6 +4949,11 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
             "Active profile".to_string(),
             state.active_profile.as_deref().unwrap_or("-").to_string(),
         ),
+        (
+            "Runtime policy".to_string(),
+            format_runtime_policy_summary(policy_summary.as_ref()),
+        ),
+        ("Runtime logs".to_string(), format_runtime_logs_summary()),
         ("Prodex version".to_string(), version_summary),
         (
             "Prodex processes".to_string(),
@@ -5481,6 +5616,38 @@ fn format_info_quota_data_summary(aggregate: &InfoQuotaAggregate) -> String {
     )
 }
 
+fn format_runtime_policy_summary(summary: Option<&RuntimePolicySummary>) -> String {
+    summary
+        .map(|summary| format!("{} (v{})", summary.path.display(), summary.version))
+        .unwrap_or_else(|| "disabled".to_string())
+}
+
+fn format_runtime_logs_summary() -> String {
+    format!(
+        "{} ({})",
+        runtime_proxy_log_dir().display(),
+        runtime_proxy_log_format().as_str()
+    )
+}
+
+fn runtime_policy_json_value(summary: Option<&RuntimePolicySummary>) -> serde_json::Value {
+    summary
+        .map(|summary| {
+            serde_json::json!({
+                "path": summary.path.display().to_string(),
+                "version": summary.version,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn runtime_logs_json_value() -> serde_json::Value {
+    serde_json::json!({
+        "directory": runtime_proxy_log_dir().display().to_string(),
+        "format": runtime_proxy_log_format().as_str(),
+    })
+}
+
 fn format_info_pool_remaining(
     total_remaining: i64,
     profiles_with_data: usize,
@@ -5575,10 +5742,24 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let codex_home = default_codex_home(&paths)?;
+    let policy_summary = runtime_policy_summary()?;
 
     if args.runtime && args.json {
         let summary = collect_runtime_doctor_summary();
-        let json = serde_json::to_string_pretty(&runtime_doctor_json_value(&summary))
+        let mut value = runtime_doctor_json_value(&summary);
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "runtime_policy".to_string(),
+                runtime_policy_json_value(policy_summary.as_ref()),
+            );
+            object.insert("runtime_logs".to_string(), runtime_logs_json_value());
+            object.insert(
+                "live_brokers".to_string(),
+                serde_json::to_value(collect_live_runtime_broker_observations(&paths))
+                    .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+            );
+        }
+        let json = serde_json::to_string_pretty(&value)
             .context("failed to serialize runtime doctor summary")?;
         println!("{json}");
         return Ok(());
@@ -5622,6 +5803,11 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
             "Quota endpoint".to_string(),
             usage_url(&quota_base_url(None)),
         ),
+        (
+            "Runtime policy".to_string(),
+            format_runtime_policy_summary(policy_summary.as_ref()),
+        ),
+        ("Runtime logs".to_string(), format_runtime_logs_summary()),
         ("Profiles".to_string(), state.profiles.len().to_string()),
         (
             "Active profile".to_string(),
@@ -7331,12 +7517,137 @@ fn update_runtime_broker_current_profile(log_path: &Path, current_profile: &str)
     }
 }
 
+fn runtime_broker_continuation_metrics(
+    statuses: &RuntimeContinuationStatuses,
+) -> RuntimeBrokerContinuationMetrics {
+    let mut metrics = RuntimeBrokerContinuationMetrics {
+        response_bindings: statuses.response.len(),
+        turn_state_bindings: statuses.turn_state.len(),
+        session_id_bindings: statuses.session_id.len(),
+        warm: 0,
+        verified: 0,
+        suspect: 0,
+        dead: 0,
+    };
+    for status in statuses
+        .response
+        .values()
+        .chain(statuses.turn_state.values())
+        .chain(statuses.session_id.values())
+    {
+        match status.state {
+            RuntimeContinuationBindingLifecycle::Warm => metrics.warm += 1,
+            RuntimeContinuationBindingLifecycle::Verified => metrics.verified += 1,
+            RuntimeContinuationBindingLifecycle::Suspect => metrics.suspect += 1,
+            RuntimeContinuationBindingLifecycle::Dead => metrics.dead += 1,
+        }
+    }
+    metrics
+}
+
+fn runtime_broker_metrics_snapshot(
+    shared: &RuntimeRotationProxyShared,
+    metadata: &RuntimeBrokerMetadata,
+) -> Result<RuntimeBrokerMetrics> {
+    let now = Local::now().timestamp();
+    let now_u64 = now.max(0) as u64;
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+
+    let health = RuntimeBrokerHealth {
+        pid: std::process::id(),
+        started_at: metadata.started_at,
+        current_profile: metadata.current_profile.clone(),
+        include_code_review: metadata.include_code_review,
+        active_requests: shared.active_request_count.load(Ordering::SeqCst),
+        instance_token: metadata.instance_token.clone(),
+        persistence_role: if runtime_proxy_persistence_enabled(shared) {
+            "owner".to_string()
+        } else {
+            "follower".to_string()
+        },
+    };
+
+    let degraded_profiles = runtime
+        .profile_health
+        .iter()
+        .filter(|(key, entry)| {
+            !key.starts_with("__") && runtime_profile_effective_health_score(entry, now) > 0
+        })
+        .count();
+    let degraded_routes = runtime
+        .profile_health
+        .iter()
+        .filter(|(key, entry)| {
+            key.starts_with("__route_health__:")
+                && runtime_profile_effective_health_score(entry, now) > 0
+        })
+        .count();
+
+    Ok(RuntimeBrokerMetrics {
+        health,
+        active_request_limit: shared.active_request_limit,
+        local_overload_backoff_remaining_seconds: shared
+            .local_overload_backoff_until
+            .load(Ordering::SeqCst)
+            .saturating_sub(now_u64),
+        traffic: RuntimeBrokerTrafficMetrics {
+            responses: RuntimeBrokerLaneMetrics {
+                active: shared
+                    .lane_admission
+                    .responses_active
+                    .load(Ordering::SeqCst),
+                limit: shared.lane_admission.limits.responses,
+            },
+            compact: RuntimeBrokerLaneMetrics {
+                active: shared.lane_admission.compact_active.load(Ordering::SeqCst),
+                limit: shared.lane_admission.limits.compact,
+            },
+            websocket: RuntimeBrokerLaneMetrics {
+                active: shared
+                    .lane_admission
+                    .websocket_active
+                    .load(Ordering::SeqCst),
+                limit: shared.lane_admission.limits.websocket,
+            },
+            standard: RuntimeBrokerLaneMetrics {
+                active: shared.lane_admission.standard_active.load(Ordering::SeqCst),
+                limit: shared.lane_admission.limits.standard,
+            },
+        },
+        profile_inflight: runtime.profile_inflight.clone(),
+        retry_backoffs: runtime
+            .profile_retry_backoff_until
+            .values()
+            .filter(|until| **until > now)
+            .count(),
+        transport_backoffs: runtime
+            .profile_transport_backoff_until
+            .values()
+            .filter(|until| **until > now)
+            .count(),
+        route_circuits: runtime
+            .profile_route_circuit_open_until
+            .values()
+            .filter(|until| **until > now)
+            .count(),
+        degraded_profiles,
+        degraded_routes,
+        continuations: runtime_broker_continuation_metrics(&runtime.continuation_statuses),
+    })
+}
+
 fn handle_runtime_proxy_admin_request(
     request: &mut tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) -> Option<tiny_http::ResponseBox> {
     let path = path_without_query(request.url());
-    if path != "/__prodex/runtime/health" && path != "/__prodex/runtime/activate" {
+    if path != "/__prodex/runtime/health"
+        && path != "/__prodex/runtime/metrics"
+        && path != "/__prodex/runtime/activate"
+    {
         return None;
     }
 
@@ -7370,6 +7681,21 @@ fn handle_runtime_proxy_admin_request(
             },
         };
         let body = serde_json::to_string(&health).ok()?;
+        return Some(build_runtime_proxy_json_response(200, body));
+    }
+
+    if path == "/__prodex/runtime/metrics" {
+        let metrics = match runtime_broker_metrics_snapshot(shared, &metadata) {
+            Ok(metrics) => metrics,
+            Err(err) => {
+                return Some(build_runtime_proxy_json_error_response(
+                    500,
+                    "internal_error",
+                    &err.to_string(),
+                ));
+            }
+        };
+        let body = serde_json::to_string(&metrics).ok()?;
         return Some(build_runtime_proxy_json_response(200, body));
     }
 
@@ -23587,6 +23913,10 @@ fn runtime_broker_health_url(registry: &RuntimeBrokerRegistry) -> String {
     format!("http://{}/__prodex/runtime/health", registry.listen_addr)
 }
 
+fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> String {
+    format!("http://{}/__prodex/runtime/metrics", registry.listen_addr)
+}
+
 fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     format!("http://{}/__prodex/runtime/activate", registry.listen_addr)
 }
@@ -23733,6 +24063,52 @@ fn probe_runtime_broker_health(
         .json::<RuntimeBrokerHealth>()
         .context("failed to decode runtime broker health response")?;
     Ok(Some(health))
+}
+
+fn probe_runtime_broker_metrics(
+    client: &Client,
+    registry: &RuntimeBrokerRegistry,
+) -> Result<Option<RuntimeBrokerMetrics>> {
+    let response = match client
+        .get(runtime_broker_metrics_url(registry))
+        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .send()
+    {
+        Ok(response) => response,
+        Err(_) => return Ok(None),
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let metrics = response
+        .json::<RuntimeBrokerMetrics>()
+        .context("failed to decode runtime broker metrics response")?;
+    Ok(Some(metrics))
+}
+
+fn collect_live_runtime_broker_observations(paths: &AppPaths) -> Vec<RuntimeBrokerObservation> {
+    let Ok(client) = runtime_broker_client() else {
+        return Vec::new();
+    };
+
+    let mut observations = Vec::new();
+    for broker_key in runtime_broker_registry_keys(paths) {
+        let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
+            continue;
+        };
+        if !runtime_process_pid_alive(registry.pid) {
+            continue;
+        }
+        let Ok(Some(metrics)) = probe_runtime_broker_metrics(&client, &registry) else {
+            continue;
+        };
+        observations.push(RuntimeBrokerObservation {
+            broker_key,
+            listen_addr: registry.listen_addr,
+            metrics,
+        });
+    }
+    observations
 }
 
 fn activate_runtime_broker_profile(

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -1485,18 +1486,61 @@ pub(crate) fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
 }
 
 fn runtime_doctor_line_timestamp(line: &str) -> Option<String> {
+    if let Some(value) = runtime_doctor_json_line_value(line) {
+        return value
+            .get("timestamp")
+            .or_else(|| value.get("ts"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string);
+    }
     let end = line.find("] ")?;
     line.strip_prefix('[')
         .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
         .map(ToString::to_string)
 }
 
+fn runtime_doctor_json_line_value(line: &str) -> Option<serde_json::Value> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    serde_json::from_str(trimmed).ok()
+}
+
+fn runtime_doctor_line_message<'a>(line: &'a str) -> Cow<'a, str> {
+    if let Some(value) = runtime_doctor_json_line_value(line)
+        && let Some(message) = value.get("message").and_then(serde_json::Value::as_str)
+    {
+        return Cow::Owned(message.to_string());
+    }
+    Cow::Borrowed(
+        line.split_once("] ")
+            .map(|(_, message)| message)
+            .unwrap_or(line)
+            .trim(),
+    )
+}
+
 fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
-    let message = line
-        .split_once("] ")
-        .map(|(_, message)| message)
-        .unwrap_or(line)
-        .trim();
+    if let Some(value) = runtime_doctor_json_line_value(line)
+        && let Some(fields) = value.get("fields").and_then(serde_json::Value::as_object)
+    {
+        let mut parsed = BTreeMap::new();
+        for (key, value) in fields {
+            let string_value = match value {
+                serde_json::Value::String(value) => value.clone(),
+                serde_json::Value::Number(value) => value.to_string(),
+                serde_json::Value::Bool(value) => value.to_string(),
+                _ => continue,
+            };
+            parsed.insert(key.clone(), string_value);
+        }
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+
+    let message = runtime_doctor_line_message(line);
     let mut fields = BTreeMap::new();
     for token in message.split_whitespace() {
         let Some((key, value)) = token.split_once('=') else {
@@ -1511,6 +1555,7 @@ fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
 }
 
 fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
+    let message = runtime_doctor_line_message(line);
     [
         "runtime_proxy_queue_overloaded",
         "runtime_proxy_active_limit_reached",
@@ -1571,7 +1616,7 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "quota_blocked_affinity_released",
     ]
     .into_iter()
-    .find(|marker| line.contains(marker))
+    .find(|marker| message.contains(marker))
 }
 
 fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
@@ -1585,4 +1630,33 @@ fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
         .take(limit.saturating_sub(1))
         .collect::<String>()
         + "…"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summarize_runtime_log_tail_understands_json_lines() {
+        let tail = br#"{"timestamp":"2026-04-08 10:00:00.000 +00:00","message":"request=7 profile_health profile=main route=responses score=4","fields":{"request":"7","profile":"main","route":"responses","score":"4"}}"#;
+        let summary = summarize_runtime_log_tail(tail);
+
+        assert_eq!(summary.line_count, 1);
+        assert_eq!(
+            summary.marker_counts.get("profile_health").copied(),
+            Some(1)
+        );
+        assert_eq!(
+            summary.first_timestamp.as_deref(),
+            Some("2026-04-08 10:00:00.000 +00:00")
+        );
+        assert_eq!(
+            summary
+                .marker_last_fields
+                .get("profile_health")
+                .and_then(|fields| fields.get("profile"))
+                .map(String::as_str),
+            Some("main")
+        );
+    }
 }

@@ -23841,6 +23841,71 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
 }
 
 #[test]
+fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    register_runtime_broker_metadata(
+        &proxy.log_path,
+        RuntimeBrokerMetadata {
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            instance_token: "instance".to_string(),
+            admin_token: "secret".to_string(),
+        },
+    );
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .get(format!(
+            "http://{}/__prodex/runtime/metrics",
+            proxy.listen_addr
+        ))
+        .header("X-Prodex-Admin-Token", "secret")
+        .send()
+        .expect("runtime broker metrics request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let metrics = response
+        .json::<RuntimeBrokerMetrics>()
+        .expect("runtime broker metrics should decode");
+    assert_eq!(metrics.health.current_profile, "main");
+    assert_eq!(metrics.health.instance_token, "instance");
+    assert_eq!(metrics.health.persistence_role, "owner");
+    assert!(metrics.active_request_limit > 0);
+    assert!(metrics.traffic.responses.limit > 0);
+    assert_eq!(metrics.local_overload_backoff_remaining_seconds, 0);
+    assert_eq!(metrics.continuations.response_bindings, 0);
+}
+
+#[test]
 fn runtime_proxy_log_paths_remain_unique_under_parallel_generation() {
     let worker_count = 32;
     let paths_per_worker = 8;
@@ -23948,6 +24013,29 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
         .json::<RuntimeBrokerHealth>()
         .expect("runtime broker health should decode");
     assert_eq!(health.current_profile, "second");
+}
+
+#[test]
+fn runtime_proxy_worker_count_env_override_beats_policy_file() {
+    let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex");
+    fs::create_dir_all(&prodex_home).expect("prodex home should exist");
+    fs::write(
+        prodex_home.join("policy.toml"),
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 11
+"#,
+    )
+    .expect("policy file should write");
+    let _prodex_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
+    let _worker_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "13");
+
+    clear_runtime_policy_cache();
+    assert_eq!(runtime_proxy_worker_count(), 13);
+    clear_runtime_policy_cache();
 }
 
 #[test]

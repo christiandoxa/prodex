@@ -157,6 +157,7 @@ prodex cleanup
 prodex doctor
 prodex doctor --quota
 prodex doctor --runtime
+prodex doctor --runtime --json
 ```
 
 If a runtime session looks stalled, inspect the latest proxy log:
@@ -166,7 +167,26 @@ prodex doctor --runtime
 tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 ```
 
+That pointer path stays in `/tmp` only when the runtime log directory is still on the default setting. If you override the log directory, use `prodex doctor --runtime --json` to find the active `log_path` and live broker metrics.
+
 Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, dead broker artifacts, and old orphaned managed profile homes that are no longer tracked.
+
+For managed local deployments, you can pin runtime logging and proxy tuning in `~/.prodex/policy.toml`:
+
+```toml
+version = 1
+
+[runtime]
+log_format = "json"
+log_dir = "runtime-logs"
+
+[runtime_proxy]
+worker_count = 16
+active_request_limit = 128
+responses_active_limit = 96
+```
+
+Environment variables still override `policy.toml`.
 
 Useful markers:
 

@@ -160,6 +160,22 @@ jobs:
       - name: Sync package versions
         run: node scripts/npm/sync-version.mjs --root release/packages
 
+      - name: Generate release SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${PWD}/release:/source:ro" \
+            anchore/syft:latest \
+            dir:/source -o spdx-json > release-sbom.spdx.json
+
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-sbom
+          path: release-sbom.spdx.json
+          if-no-files-found: error
+
       - name: Publish staged packages
         run: node scripts/npm/publish.mjs --root release --provenance
         env:
