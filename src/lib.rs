@@ -4482,6 +4482,14 @@ enum RuntimeSseInspectionProgress {
 }
 
 #[derive(Default)]
+struct RuntimeParsedSseEvent {
+    quota_blocked: bool,
+    previous_response_not_found: bool,
+    response_ids: Vec<String>,
+    event_type: Option<String>,
+}
+
+#[derive(Default)]
 struct RuntimeSseTapState {
     line: Vec<u8>,
     data_lines: Vec<String>,
@@ -14704,6 +14712,7 @@ fn runtime_response_event_type_from_value(value: &serde_json::Value) -> Option<S
         .map(str::to_string)
 }
 
+#[cfg(test)]
 fn runtime_response_event_type(payload: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()
@@ -21039,20 +21048,19 @@ fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseInspectionPro
         let line_text = String::from_utf8_lossy(&line);
         let trimmed = line_text.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
-            if let Some(message) = extract_runtime_proxy_quota_message_from_sse(&data_lines) {
-                let _ = message;
+            let event = parse_runtime_sse_event(&data_lines);
+            if event.quota_blocked {
                 return Ok(RuntimeSseInspectionProgress::QuotaBlocked);
             }
-            if let Some(message) =
-                extract_runtime_proxy_previous_response_message_from_sse(&data_lines)
-            {
-                let _ = message;
+            if event.previous_response_not_found {
                 return Ok(RuntimeSseInspectionProgress::PreviousResponseNotFound);
             }
-            response_ids.extend(extract_runtime_response_ids_from_sse(&data_lines));
+            response_ids.extend(event.response_ids);
             if !data_lines.is_empty()
-                && !extract_runtime_response_event_type_from_sse(&data_lines)
-                    .is_some_and(|kind| runtime_proxy_precommit_hold_event_kind(kind.as_str()))
+                && !event
+                    .event_type
+                    .as_deref()
+                    .is_some_and(runtime_proxy_precommit_hold_event_kind)
             {
                 saw_commit_ready_event = true;
             }
@@ -22500,44 +22508,35 @@ fn translate_runtime_responses_reply_to_anthropic(
     }
 }
 
-fn extract_runtime_proxy_quota_message_from_sse(data_lines: &[String]) -> Option<String> {
+fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {
     if data_lines.is_empty() {
         return None;
     }
 
     let payload = data_lines.join("\n");
-    let value = serde_json::from_str::<serde_json::Value>(&payload).ok()?;
-    extract_runtime_proxy_quota_message_from_value(&value)
+    serde_json::from_str::<serde_json::Value>(&payload).ok()
 }
 
-fn extract_runtime_proxy_previous_response_message_from_sse(
-    data_lines: &[String],
-) -> Option<String> {
-    if data_lines.is_empty() {
-        return None;
-    }
+fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
+    let Some(value) = parse_runtime_sse_payload(data_lines) else {
+        return RuntimeParsedSseEvent::default();
+    };
 
-    let payload = data_lines.join("\n");
-    let value = serde_json::from_str::<serde_json::Value>(&payload).ok()?;
-    extract_runtime_proxy_previous_response_message_from_value(&value)
+    RuntimeParsedSseEvent {
+        quota_blocked: extract_runtime_proxy_quota_message_from_value(&value).is_some(),
+        previous_response_not_found: extract_runtime_proxy_previous_response_message_from_value(
+            &value,
+        )
+        .is_some(),
+        response_ids: extract_runtime_response_ids_from_value(&value),
+        event_type: runtime_response_event_type_from_value(&value),
+    }
 }
 
 fn extract_runtime_response_ids_from_sse(data_lines: &[String]) -> Vec<String> {
-    if data_lines.is_empty() {
-        return Vec::new();
-    }
-
-    let payload = data_lines.join("\n");
-    extract_runtime_response_ids_from_payload(&payload)
-}
-
-fn extract_runtime_response_event_type_from_sse(data_lines: &[String]) -> Option<String> {
-    if data_lines.is_empty() {
-        return None;
-    }
-
-    let payload = data_lines.join("\n");
-    runtime_response_event_type(&payload)
+    parse_runtime_sse_payload(data_lines)
+        .map(|value| extract_runtime_response_ids_from_value(&value))
+        .unwrap_or_default()
 }
 
 fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
@@ -22794,6 +22793,7 @@ fn extract_runtime_proxy_previous_response_message_from_value(
     None
 }
 
+#[cfg(test)]
 fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()

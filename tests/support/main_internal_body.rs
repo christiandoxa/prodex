@@ -358,6 +358,40 @@ impl Write for FailAfterFirstChunkWriter {
     }
 }
 
+struct FailOnUnexpectedMidStreamFlushWriter {
+    flush_count: usize,
+    saw_trailer: bool,
+}
+
+impl FailOnUnexpectedMidStreamFlushWriter {
+    fn new() -> Self {
+        Self {
+            flush_count: 0,
+            saw_trailer: false,
+        }
+    }
+}
+
+impl Write for FailOnUnexpectedMidStreamFlushWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf == b"0\r\n\r\n" {
+            self.saw_trailer = true;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.flush_count >= 2 && !self.saw_trailer {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "unexpected non-SSE chunk flush before trailer",
+            ));
+        }
+        self.flush_count += 1;
+        Ok(())
+    }
+}
+
 fn set_test_websocket_io_timeout(
     socket: &mut WsSocket<MaybeTlsStream<TcpStream>>,
     timeout: Duration,
@@ -17122,6 +17156,25 @@ fn inspect_runtime_sse_buffer_detects_retryable_error_after_hold_frames() {
 }
 
 #[test]
+fn inspect_runtime_sse_buffer_detects_quota_blocked_after_hold_frames() {
+    let buffered = concat!(
+        "event: response.created\r\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second\"}}\r\n",
+        "\r\n",
+        "event: response.failed\r\n",
+        "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"main quota exhausted\"}}}\r\n",
+        "\r\n"
+    )
+    .as_bytes()
+    .to_vec();
+
+    assert!(matches!(
+        inspect_runtime_sse_buffer(&buffered).expect("inspection should succeed"),
+        RuntimeSseInspectionProgress::QuotaBlocked
+    ));
+}
+
+#[test]
 fn extract_runtime_response_ids_accepts_top_level_response_fields() {
     let response_id_only = extract_runtime_response_ids_from_payload(
         "{\"type\":\"response.output_item.done\",\"response_id\":\"resp-second-next\"}",
@@ -19635,6 +19688,75 @@ fn runtime_proxy_logs_local_writer_disconnect_after_first_chunk() {
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("first_local_chunk"));
     assert!(tail.contains("local_writer_error"));
+}
+
+#[test]
+fn runtime_proxy_non_sse_stream_does_not_flush_each_chunk() {
+    let temp_dir = TestDir::new();
+    let log_path = temp_dir.path.join("runtime-proxy.log");
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        runtime: Arc::new(Mutex::new(RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "second".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        })),
+        log_path: log_path.clone(),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+    };
+    let body = TwoChunkReader::new(vec![b"{\"partial\":".to_vec(), b"1}".to_vec()]);
+    let response = RuntimeStreamingResponse {
+        status: 200,
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: Box::new(body),
+        request_id: 1,
+        profile_name: "second".to_string(),
+        log_path: log_path.clone(),
+        shared,
+        _inflight_guard: None,
+    };
+    let writer: Box<dyn Write + Send + 'static> =
+        Box::new(FailOnUnexpectedMidStreamFlushWriter::new());
+
+    write_runtime_streaming_response(writer, response)
+        .expect("non-SSE stream should not flush each chunk before trailer");
+
+    let tail =
+        read_runtime_log_tail(&log_path, 32 * 1024).expect("runtime log tail should be readable");
+    let tail = String::from_utf8_lossy(&tail);
+    assert!(tail.contains("first_local_chunk"));
+    assert!(!tail.contains("local_writer_error"));
 }
 
 #[test]
