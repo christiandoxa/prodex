@@ -22,12 +22,13 @@ pub(crate) fn fetch_profile_email(codex_home: &Path) -> Result<String> {
 }
 
 fn read_profile_email_from_auth(codex_home: &Path) -> Result<Option<String>> {
-    let auth_path = codex_home.join("auth.json");
+    let auth_path = secret_store::auth_json_path(codex_home);
     if !auth_path.is_file() {
         return Ok(None);
     }
 
-    let content = fs::read_to_string(&auth_path)
+    let content = read_auth_json_text(codex_home)
+        .with_context(|| format!("failed to read {}", auth_path.display()))?
         .with_context(|| format!("failed to read {}", auth_path.display()))?;
     let stored_auth: StoredAuth = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", auth_path.display()))?;

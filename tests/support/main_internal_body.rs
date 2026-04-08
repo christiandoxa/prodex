@@ -23812,6 +23812,8 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
+            broker_key: runtime_broker_key(&backend.base_url(), false),
+            listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
@@ -23873,6 +23875,8 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
+            broker_key: runtime_broker_key(&backend.base_url(), false),
+            listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
@@ -23903,6 +23907,74 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     assert!(metrics.traffic.responses.limit > 0);
     assert_eq!(metrics.local_overload_backoff_remaining_seconds, 0);
     assert_eq!(metrics.continuations.response_bindings, 0);
+}
+
+#[test]
+fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    register_runtime_broker_metadata(
+        &proxy.log_path,
+        RuntimeBrokerMetadata {
+            broker_key: runtime_broker_key(&backend.base_url(), false),
+            listen_addr: proxy.listen_addr.to_string(),
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            instance_token: "instance".to_string(),
+            admin_token: "secret".to_string(),
+        },
+    );
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .get(format!(
+            "http://{}/__prodex/runtime/metrics/prometheus",
+            proxy.listen_addr
+        ))
+        .header("X-Prodex-Admin-Token", "secret")
+        .send()
+        .expect("runtime broker prometheus request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/plain; version=0.0.4; charset=utf-8")
+    );
+    let body = response.text().expect("prometheus body should decode");
+    assert!(body.contains("prodex_runtime_broker_info"));
+    assert!(body.contains("broker_key=\""));
+    assert!(body.contains("current_profile=\"main\""));
 }
 
 #[test]
@@ -23980,6 +24052,8 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
+            broker_key: runtime_broker_key(&backend.base_url(), false),
+            listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,

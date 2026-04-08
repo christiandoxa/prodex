@@ -1216,7 +1216,7 @@ pub(crate) fn watch_all_quotas(
 }
 
 pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
-    let auth_path = codex_home.join("auth.json");
+    let auth_path = secret_store::auth_json_path(codex_home);
     if !auth_path.is_file() {
         return AuthSummary {
             label: "no-auth".to_string(),
@@ -1224,11 +1224,17 @@ pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
         };
     }
 
-    let content = match fs::read_to_string(&auth_path) {
-        Ok(content) => content,
+    let content = match read_auth_json_text(codex_home) {
+        Ok(Some(content)) => content,
         Err(_) => {
             return AuthSummary {
                 label: "unreadable-auth".to_string(),
+                quota_compatible: false,
+            };
+        }
+        Ok(None) => {
+            return AuthSummary {
+                label: "no-auth".to_string(),
                 quota_compatible: false,
             };
         }
@@ -1277,7 +1283,7 @@ pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
 }
 
 pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
-    let auth_path = codex_home.join("auth.json");
+    let auth_path = secret_store::auth_json_path(codex_home);
     if !auth_path.is_file() {
         bail!(
             "auth file not found at {}. Run `codex login` first.",
@@ -1285,7 +1291,8 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
         );
     }
 
-    let content = fs::read_to_string(&auth_path)
+    let content = read_auth_json_text(codex_home)
+        .with_context(|| format!("failed to read {}", auth_path.display()))?
         .with_context(|| format!("failed to read {}", auth_path.display()))?;
     let stored_auth: StoredAuth = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", auth_path.display()))?;

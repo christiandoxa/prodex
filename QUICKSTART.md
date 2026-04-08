@@ -188,6 +188,24 @@ responses_active_limit = 96
 
 Environment variables still override `policy.toml`.
 
+## Enterprise Notes
+
+Prodex is still a local-first tool, even after the current enterprise hardening work.
+
+Current hardening includes:
+
+- a secret-management abstraction for `auth.json` and export bundles, with the active backend still file-based
+- a stable broker metrics JSON endpoint at `/__prodex/runtime/metrics`
+- a Prometheus broker metrics endpoint at `/__prodex/runtime/metrics/prometheus`
+- `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets
+
+Known gaps today:
+
+- no keychain, Vault, or KMS-backed secret storage yet
+- no RBAC, SSO, SCIM, or central admin plane
+- runtime observability is still centered on local logs plus `doctor --runtime --json`
+- the profile pool is still owned per host, not by a shared service
+
 Useful markers:
 
 - `runtime_proxy_queue_overloaded`

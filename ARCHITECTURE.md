@@ -105,6 +105,8 @@ Runtime logging and `prodex doctor --runtime` are non-core for execution, but cr
 
 They should stay accurate and cheap to maintain.
 
+The current enterprise hardening extends diagnostics into a stable metrics/export layer, while keeping the runtime proxy itself transport-transparent.
+
 ## Optional Optimizers
 
 These are the parts most open to future simplification if complexity must be reduced:
@@ -137,6 +139,28 @@ The safest first extractions are support domains that are not on the hot path:
 - `runtime_doctor`: runtime diagnostic summarization and rendering
 
 These modules reduce `main.rs` size and make it easier to reason about the runtime path without weakening behavior.
+
+## Enterprise Gaps
+
+`prodex` is still not a full enterprise control plane.
+
+What is already in place:
+
+- secret-management abstraction for `auth.json` and profile exports, still backed by files today
+- stable broker metrics export in JSON and Prometheus formats
+- runtime-aware diagnostics that surface broker metrics targets without changing proxy transport semantics
+
+Planned next steps are:
+
+- admin-grade controls such as RBAC, SSO, and central policy distribution
+- modularization of `src/lib.rs` into smaller runtime-focused units
+
+What remains intentionally local:
+
+- state files and profile homes
+- per-host broker ownership
+- policy loading from the local filesystem
+- diagnostics that are cheap enough to run on a developer workstation
 
 ## Simplification Rule
 

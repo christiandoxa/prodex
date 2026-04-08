@@ -258,6 +258,22 @@ Notes:
 * `prodex info` and `prodex doctor` show the active policy file and effective runtime log mode.
 * The default runtime log format remains `text`; set `log_format = "json"` or `PRODEX_RUNTIME_LOG_FORMAT=json` when you want machine-readable runtime logs.
 
+## Enterprise Hardening
+
+The current hardening is still local-first, but it now includes:
+
+- a secret-management abstraction for `auth.json` and exported profile bundles, with the current backend still file-based
+- a stable live broker snapshot at `GET /__prodex/runtime/metrics`
+- a Prometheus scrape target at `GET /__prodex/runtime/metrics/prometheus`
+- `prodex info` and `prodex doctor --runtime --json` surfacing live broker metrics targets
+
+Current limitations:
+
+- there is no keychain, Vault, or KMS-backed secret backend yet
+- there is no central control plane, RBAC, SSO, or SCIM
+- `prodex doctor --runtime --json` is operationally useful, but it is not a full observability stack
+- the repo still assumes a per-host profile pool and local state ownership
+
 ## Notes
 
 * Managed profiles share persisted Codex state through Prodex-owned shared storage.

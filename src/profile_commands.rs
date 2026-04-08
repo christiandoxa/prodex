@@ -689,8 +689,9 @@ fn build_profile_export_payload(
             .profiles
             .get(name)
             .with_context(|| format!("profile '{}' is missing", name))?;
-        let auth_path = profile.codex_home.join("auth.json");
-        let auth_json = fs::read_to_string(&auth_path)
+        let auth_path = secret_store::auth_json_path(&profile.codex_home);
+        let auth_json = read_auth_json_text(&profile.codex_home)
+            .with_context(|| format!("failed to read {}", auth_path.display()))?
             .with_context(|| format!("failed to read {}", auth_path.display()))?;
         let _: StoredAuth = serde_json::from_str(&auth_json)
             .with_context(|| format!("failed to parse {}", auth_path.display()))?;
@@ -1109,19 +1110,10 @@ fn unique_import_staging_home(paths: &AppPaths, profile_name: &str) -> PathBuf {
 }
 
 fn write_secret_text_file(path: &Path, content: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to secure {}", path.display()))?;
-    }
-    Ok(())
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(path), content)
+        .map_err(anyhow::Error::new)
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
 #[cfg(test)]

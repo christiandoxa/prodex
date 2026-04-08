@@ -46,7 +46,9 @@ mod quota_support;
 #[path = "runtime_tuning.rs"]
 mod runtime_config;
 mod runtime_doctor;
+mod runtime_metrics;
 mod runtime_policy;
+mod secret_store;
 mod shared_codex_fs;
 #[path = "cli_render.rs"]
 mod terminal_ui;
@@ -2286,10 +2288,16 @@ fn runtime_profile_usage_auth_metadata(path: &Path) -> Result<(u64, Option<Syste
     Ok((metadata.len(), metadata.modified().ok()))
 }
 
+fn read_auth_json_text(codex_home: &Path) -> Result<Option<String>> {
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .read_text(&secret_store::auth_json_location(codex_home))
+        .map_err(anyhow::Error::new)
+}
+
 fn load_runtime_profile_usage_auth_cache_entry(
     codex_home: &Path,
 ) -> Result<RuntimeProfileUsageAuthCacheEntry> {
-    let auth_path = codex_home.join("auth.json");
+    let auth_path = secret_store::auth_json_path(codex_home);
     let (file_len, modified_at) = runtime_profile_usage_auth_metadata(&auth_path)?;
     let auth = read_usage_auth(codex_home)?;
     Ok(RuntimeProfileUsageAuthCacheEntry {
@@ -4491,6 +4499,8 @@ struct RuntimeBrokerObservation {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct RuntimeBrokerMetadata {
+    broker_key: String,
+    listen_addr: String,
     started_at: i64,
     current_profile: String,
     include_code_review: bool,
@@ -4923,6 +4933,7 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let policy_summary = runtime_policy_summary()?;
+    let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
     let now = Local::now().timestamp();
     let version_summary = format_info_prodex_version(&paths)?;
     let quota = collect_info_quota_aggregate(&paths, &state, now);
@@ -4954,6 +4965,10 @@ fn handle_info(_args: InfoArgs) -> Result<()> {
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
+        (
+            "Runtime metrics".to_string(),
+            format_runtime_broker_metrics_targets(&runtime_metrics_targets),
+        ),
         ("Prodex version".to_string(), version_summary),
         (
             "Prodex processes".to_string(),
@@ -5743,6 +5758,7 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let state = AppState::load(&paths)?;
     let codex_home = default_codex_home(&paths)?;
     let policy_summary = runtime_policy_summary()?;
+    let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
 
     if args.runtime && args.json {
         let summary = collect_runtime_doctor_summary();
@@ -5756,6 +5772,11 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
             object.insert(
                 "live_brokers".to_string(),
                 serde_json::to_value(collect_live_runtime_broker_observations(&paths))
+                    .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+            );
+            object.insert(
+                "live_broker_metrics_targets".to_string(),
+                serde_json::to_value(&runtime_metrics_targets)
                     .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
             );
         }
@@ -5808,6 +5829,10 @@ fn handle_doctor(args: DoctorArgs) -> Result<()> {
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
+        (
+            "Runtime metrics".to_string(),
+            format_runtime_broker_metrics_targets(&runtime_metrics_targets),
+        ),
         ("Profiles".to_string(), state.profiles.len().to_string()),
         (
             "Active profile".to_string(),
@@ -6814,6 +6839,8 @@ fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     }
 
     let metadata = RuntimeBrokerMetadata {
+        broker_key: runtime_broker_key(&args.upstream_base_url, args.include_code_review),
+        listen_addr: proxy.listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         current_profile: args.current_profile.clone(),
         include_code_review: args.include_code_review,
@@ -7508,6 +7535,22 @@ fn build_runtime_proxy_json_response(status: u16, body: String) -> tiny_http::Re
     response.boxed()
 }
 
+fn build_runtime_proxy_string_response(
+    status: u16,
+    body: String,
+    content_type: &str,
+) -> tiny_http::ResponseBox {
+    let mut response = TinyResponse::from_string(body).with_status_code(status);
+    if let Ok(header) = TinyHeader::from_bytes("Content-Type", content_type) {
+        response = response.with_header(header);
+    }
+    response.boxed()
+}
+
+fn build_runtime_proxy_prometheus_response(status: u16, body: String) -> tiny_http::ResponseBox {
+    build_runtime_proxy_string_response(status, body, "text/plain; version=0.0.4; charset=utf-8")
+}
+
 fn update_runtime_broker_current_profile(log_path: &Path, current_profile: &str) {
     let mut metadata_by_path = runtime_broker_metadata_by_log_path()
         .lock()
@@ -7543,6 +7586,63 @@ fn runtime_broker_continuation_metrics(
         }
     }
     metrics
+}
+
+fn runtime_broker_prometheus_snapshot(
+    metadata: &RuntimeBrokerMetadata,
+    metrics: &RuntimeBrokerMetrics,
+) -> runtime_metrics::RuntimeBrokerSnapshot {
+    let profile_inflight = metrics
+        .profile_inflight
+        .iter()
+        .map(|(profile, count)| (profile.clone(), *count as u64))
+        .collect();
+
+    runtime_metrics::RuntimeBrokerSnapshot {
+        broker_key: metadata.broker_key.clone(),
+        listen_addr: metadata.listen_addr.clone(),
+        pid: metrics.health.pid,
+        started_at_unix_seconds: metrics.health.started_at,
+        current_profile: metrics.health.current_profile.clone(),
+        include_code_review: metrics.health.include_code_review,
+        persistence_role: metrics.health.persistence_role.clone(),
+        active_requests: metrics.health.active_requests as u64,
+        active_request_limit: metrics.active_request_limit as u64,
+        local_overload_backoff_remaining_seconds: metrics.local_overload_backoff_remaining_seconds,
+        traffic: runtime_metrics::RuntimeBrokerTrafficMetrics {
+            responses: runtime_metrics::RuntimeBrokerLaneMetrics {
+                active: metrics.traffic.responses.active as u64,
+                limit: metrics.traffic.responses.limit as u64,
+            },
+            compact: runtime_metrics::RuntimeBrokerLaneMetrics {
+                active: metrics.traffic.compact.active as u64,
+                limit: metrics.traffic.compact.limit as u64,
+            },
+            websocket: runtime_metrics::RuntimeBrokerLaneMetrics {
+                active: metrics.traffic.websocket.active as u64,
+                limit: metrics.traffic.websocket.limit as u64,
+            },
+            standard: runtime_metrics::RuntimeBrokerLaneMetrics {
+                active: metrics.traffic.standard.active as u64,
+                limit: metrics.traffic.standard.limit as u64,
+            },
+        },
+        profile_inflight,
+        retry_backoffs: metrics.retry_backoffs as u64,
+        transport_backoffs: metrics.transport_backoffs as u64,
+        route_circuits: metrics.route_circuits as u64,
+        degraded_profiles: metrics.degraded_profiles as u64,
+        degraded_routes: metrics.degraded_routes as u64,
+        continuations: runtime_metrics::RuntimeBrokerContinuationMetrics {
+            response_bindings: metrics.continuations.response_bindings as u64,
+            turn_state_bindings: metrics.continuations.turn_state_bindings as u64,
+            session_id_bindings: metrics.continuations.session_id_bindings as u64,
+            warm: metrics.continuations.warm as u64,
+            verified: metrics.continuations.verified as u64,
+            suspect: metrics.continuations.suspect as u64,
+            dead: metrics.continuations.dead as u64,
+        },
+    }
 }
 
 fn runtime_broker_metrics_snapshot(
@@ -7646,6 +7746,7 @@ fn handle_runtime_proxy_admin_request(
     let path = path_without_query(request.url());
     if path != "/__prodex/runtime/health"
         && path != "/__prodex/runtime/metrics"
+        && path != "/__prodex/runtime/metrics/prometheus"
         && path != "/__prodex/runtime/activate"
     {
         return None;
@@ -7697,6 +7798,22 @@ fn handle_runtime_proxy_admin_request(
         };
         let body = serde_json::to_string(&metrics).ok()?;
         return Some(build_runtime_proxy_json_response(200, body));
+    }
+
+    if path == "/__prodex/runtime/metrics/prometheus" {
+        let metrics = match runtime_broker_metrics_snapshot(shared, &metadata) {
+            Ok(metrics) => metrics,
+            Err(err) => {
+                return Some(build_runtime_proxy_json_error_response(
+                    500,
+                    "internal_error",
+                    &err.to_string(),
+                ));
+            }
+        };
+        let snapshot = runtime_broker_prometheus_snapshot(&metadata, &metrics);
+        let body = runtime_metrics::render_runtime_broker_prometheus(&snapshot);
+        return Some(build_runtime_proxy_prometheus_response(200, body));
     }
 
     if request.method().as_str() != "POST" {
@@ -23917,6 +24034,13 @@ fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> String {
     format!("http://{}/__prodex/runtime/metrics", registry.listen_addr)
 }
 
+fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -> String {
+    format!(
+        "http://{}/__prodex/runtime/metrics/prometheus",
+        registry.listen_addr
+    )
+}
+
 fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     format!("http://{}/__prodex/runtime/activate", registry.listen_addr)
 }
@@ -24109,6 +24233,28 @@ fn collect_live_runtime_broker_observations(paths: &AppPaths) -> Vec<RuntimeBrok
         });
     }
     observations
+}
+
+fn collect_runtime_broker_metrics_targets(paths: &AppPaths) -> Vec<String> {
+    let mut targets = Vec::new();
+    for broker_key in runtime_broker_registry_keys(paths) {
+        let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
+            continue;
+        };
+        if !runtime_process_pid_alive(registry.pid) {
+            continue;
+        }
+        targets.push(runtime_broker_metrics_prometheus_url(&registry));
+    }
+    targets
+}
+
+fn format_runtime_broker_metrics_targets(targets: &[String]) -> String {
+    match targets {
+        [] => "-".to_string(),
+        [target] => target.clone(),
+        [first, rest @ ..] => format!("{first} (+{} more)", rest.len()),
+    }
 }
 
 fn activate_runtime_broker_profile(
