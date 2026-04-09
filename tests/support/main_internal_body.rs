@@ -21,6 +21,14 @@ fn ci_timing_upper_bound_ms(local_ms: u64, ci_ms: u64) -> Duration {
     }
 }
 
+fn ci_timing_budget_ms(local_ms: u64, ci_ms: u64) -> String {
+    if running_in_ci() {
+        ci_ms.max(local_ms).to_string()
+    } else {
+        local_ms.to_string()
+    }
+}
+
 fn usage_with_main_windows(
     five_hour_remaining: i64,
     five_hour_reset_offset_seconds: i64,
@@ -13867,8 +13875,10 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
 
 #[test]
 fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "200");
+    let _budget_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        &ci_timing_budget_ms(200, 1_000),
+    );
     let temp_dir = TestDir::new();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -13940,8 +13950,10 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
 
 #[test]
 fn runtime_proxy_anthropic_admission_wait_recovers_after_short_burst() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
+    let _budget_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        &ci_timing_budget_ms(20, 100),
+    );
     let temp_dir = TestDir::new();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
@@ -17091,7 +17103,7 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
 fn runtime_proxy_absorbs_brief_anthropic_queue_burst() {
     let _wait_budget_guard = TestEnvVarGuard::set(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
-        "20",
+        &ci_timing_budget_ms(20, 100),
     );
 
     let temp_dir = TestDir::new();

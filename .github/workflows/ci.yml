@@ -189,9 +189,12 @@ jobs:
               --skip runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models \
               --skip runtime_proxy_claude_reasoning_effort_override_normalizes_env \
               --skip runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env \
+              --skip runtime_proxy_active_request_wait_recovers_after_short_burst \
+              --skip runtime_proxy_anthropic_admission_wait_recovers_after_short_burst \
               --skip runtime_proxy_retries_after_websocket_reuse_silent_hang \
               --skip runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall \
               --skip runtime_proxy_sheds_long_lived_queue_overload_fast \
+              --skip runtime_proxy_absorbs_brief_anthropic_queue_burst \
               --skip runtime_proxy_absorbs_brief_long_lived_queue_burst \
               --skip runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
               --skip runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
@@ -227,7 +230,10 @@ jobs:
             runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models \
             runtime_proxy_claude_reasoning_effort_override_normalizes_env \
             runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env \
+            runtime_proxy_active_request_wait_recovers_after_short_burst \
+            runtime_proxy_anthropic_admission_wait_recovers_after_short_burst \
             runtime_proxy_sheds_long_lived_queue_overload_fast \
+            runtime_proxy_absorbs_brief_anthropic_queue_burst \
             runtime_proxy_absorbs_brief_long_lived_queue_burst \
             runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
             runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
