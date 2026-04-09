@@ -86,6 +86,7 @@ const PRODEX_SHARED_CLAUDE_DIR_NAME: &str = "claude";
 const DEFAULT_CLAUDE_CONFIG_DIR_NAME: &str = ".claude";
 const DEFAULT_CLAUDE_CONFIG_FILE_NAME: &str = ".claude.json";
 const DEFAULT_CLAUDE_SETTINGS_FILE_NAME: &str = "settings.json";
+const PRODEX_CLAUDE_DEFAULT_WEB_TOOLS: &[&str] = &["WebSearch", "WebFetch"];
 const PRODEX_CLAUDE_LEGACY_IMPORT_MARKER_NAME: &str = ".prodex-legacy-imported";
 const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
@@ -6526,6 +6527,22 @@ fn ensure_runtime_proxy_claude_launch_config(
             project.insert(key.to_string(), serde_json::json!([]));
         }
     }
+    if let Some(allowed_tools) = project
+        .get_mut("allowedTools")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        let mut seen = BTreeSet::new();
+        for entry in allowed_tools.iter() {
+            if let Some(tool_name) = entry.as_str() {
+                seen.insert(tool_name.to_string());
+            }
+        }
+        for tool_name in PRODEX_CLAUDE_DEFAULT_WEB_TOOLS {
+            if seen.insert((*tool_name).to_string()) {
+                allowed_tools.push(serde_json::Value::String((*tool_name).to_string()));
+            }
+        }
+    }
     if !project
         .get("mcpServers")
         .is_some_and(serde_json::Value::is_object)
@@ -6578,6 +6595,34 @@ fn ensure_runtime_proxy_claude_settings(config_dir: &Path) -> Result<()> {
         .as_object_mut()
         .expect("Claude Code settings should be normalized to an object");
     object.insert("skipWebFetchPreflight".to_string(), serde_json::json!(true));
+    let permissions = object
+        .entry("permissions".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !permissions.is_object() {
+        *permissions = serde_json::json!({});
+    }
+    let permissions = permissions
+        .as_object_mut()
+        .expect("Claude Code permissions should be normalized to an object");
+    let allow = permissions
+        .entry("allow".to_string())
+        .or_insert_with(|| serde_json::json!([]));
+    if !allow.is_array() {
+        *allow = serde_json::json!([]);
+    }
+    if let Some(allow) = allow.as_array_mut() {
+        let mut seen = BTreeSet::new();
+        for entry in allow.iter() {
+            if let Some(tool_name) = entry.as_str() {
+                seen.insert(tool_name.to_string());
+            }
+        }
+        for tool_name in PRODEX_CLAUDE_DEFAULT_WEB_TOOLS {
+            if seen.insert((*tool_name).to_string()) {
+                allow.push(serde_json::Value::String((*tool_name).to_string()));
+            }
+        }
+    }
 
     let rendered =
         serde_json::to_string_pretty(&settings).context("failed to render Claude Code settings")?;
@@ -8930,6 +8975,8 @@ struct RuntimeAnthropicMessagesRequest {
     stream: bool,
     want_thinking: bool,
     server_tools: RuntimeAnthropicServerTools,
+    carried_web_search_requests: u64,
+    carried_web_fetch_requests: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -9572,6 +9619,87 @@ fn runtime_proxy_translate_anthropic_tool_result(
     Ok(translated)
 }
 
+fn runtime_proxy_anthropic_tool_use_server_tool_usage(block: &serde_json::Value) -> (u64, u64) {
+    match block.get("type").and_then(serde_json::Value::as_str) {
+        Some("server_tool_use")
+            if block.get("name").and_then(serde_json::Value::as_str) == Some("web_search") =>
+        {
+            (1, 0)
+        }
+        Some("tool_use") => match block
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+        {
+            Some("WebSearch") => (1, 0),
+            Some("WebFetch") => (0, 1),
+            _ => (0, 0),
+        },
+        _ => (0, 0),
+    }
+}
+
+fn runtime_proxy_anthropic_message_has_tool_chain_blocks(message: &serde_json::Value) -> bool {
+    let Some(content) = message.get("content") else {
+        return false;
+    };
+    let Some(blocks) = content.as_array() else {
+        return false;
+    };
+    blocks.iter().any(|block| {
+        matches!(
+            block.get("type").and_then(serde_json::Value::as_str),
+            Some(
+                "tool_use"
+                    | "server_tool_use"
+                    | "tool_result"
+                    | "web_search_tool_result"
+                    | "web_fetch_tool_result"
+            )
+        )
+    })
+}
+
+fn runtime_proxy_anthropic_carried_server_tool_usage(messages: &[serde_json::Value]) -> (u64, u64) {
+    let mut web_search_requests = 0;
+    let mut web_fetch_requests = 0;
+    let mut collecting_suffix = false;
+
+    for message in messages.iter().rev() {
+        let Some(blocks) = message.get("content").and_then(serde_json::Value::as_array) else {
+            if collecting_suffix {
+                break;
+            }
+            continue;
+        };
+        let mut saw_tool_chain_block = false;
+        for block in blocks {
+            let (web_search, web_fetch) = runtime_proxy_anthropic_tool_use_server_tool_usage(block);
+            if web_search > 0 || web_fetch > 0 {
+                web_search_requests += web_search;
+                web_fetch_requests += web_fetch;
+                saw_tool_chain_block = true;
+                continue;
+            }
+            if matches!(
+                block.get("type").and_then(serde_json::Value::as_str),
+                Some("tool_result" | "web_search_tool_result" | "web_fetch_tool_result")
+            ) {
+                saw_tool_chain_block = true;
+            }
+        }
+        if saw_tool_chain_block {
+            collecting_suffix = true;
+        } else if collecting_suffix
+            || runtime_proxy_anthropic_message_has_tool_chain_blocks(message)
+        {
+            break;
+        }
+    }
+
+    (web_search_requests, web_fetch_requests)
+}
+
 fn translate_runtime_anthropic_messages_request(
     request: &RuntimeProxyRequest,
 ) -> Result<RuntimeAnthropicMessagesRequest> {
@@ -9591,6 +9719,8 @@ fn translate_runtime_anthropic_messages_request(
     if messages.is_empty() {
         bail!("Anthropic request requires at least one message");
     }
+    let (carried_web_search_requests, carried_web_fetch_requests) =
+        runtime_proxy_anthropic_carried_server_tool_usage(messages);
 
     let mut input = Vec::new();
     for message in messages {
@@ -9700,6 +9830,8 @@ fn translate_runtime_anthropic_messages_request(
             .unwrap_or(false),
         want_thinking: runtime_proxy_anthropic_wants_thinking(&value),
         server_tools: translated_tools.server_tools,
+        carried_web_search_requests,
+        carried_web_fetch_requests,
     })
 }
 
@@ -22908,10 +23040,27 @@ fn runtime_anthropic_output_blocks_from_json(
     (content, has_tool_calls)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn runtime_anthropic_response_from_json_value(
     value: &serde_json::Value,
     requested_model: &str,
     want_thinking: bool,
+) -> serde_json::Value {
+    runtime_anthropic_response_from_json_value_with_carried_usage(
+        value,
+        requested_model,
+        want_thinking,
+        0,
+        0,
+    )
+}
+
+fn runtime_anthropic_response_from_json_value_with_carried_usage(
+    value: &serde_json::Value,
+    requested_model: &str,
+    want_thinking: bool,
+    carried_web_search_requests: u64,
+    carried_web_fetch_requests: u64,
 ) -> serde_json::Value {
     let (input_tokens, output_tokens, cached_tokens) = runtime_anthropic_usage_from_value(value);
     let output = value
@@ -22922,8 +23071,10 @@ fn runtime_anthropic_response_from_json_value(
     let web_search_requests = runtime_anthropic_tool_usage_web_search_requests_from_value(value)
         .max(runtime_anthropic_web_search_request_count_from_output(
             &output,
-        ));
-    let web_fetch_requests = runtime_anthropic_web_fetch_request_count_from_output(&output);
+        ))
+        .max(carried_web_search_requests);
+    let web_fetch_requests = runtime_anthropic_web_fetch_request_count_from_output(&output)
+        .max(carried_web_fetch_requests);
     let (content, has_tool_calls) =
         runtime_anthropic_output_blocks_from_json(&output, want_thinking);
     let usage = runtime_anthropic_usage_json(
@@ -23189,8 +23340,26 @@ fn runtime_anthropic_response_from_sse_bytes(
     requested_model: &str,
     want_thinking: bool,
 ) -> Result<serde_json::Value> {
+    runtime_anthropic_response_from_sse_bytes_with_carried_usage(
+        body,
+        requested_model,
+        want_thinking,
+        0,
+        0,
+    )
+}
+
+fn runtime_anthropic_response_from_sse_bytes_with_carried_usage(
+    body: &[u8],
+    requested_model: &str,
+    want_thinking: bool,
+    carried_web_search_requests: u64,
+    carried_web_fetch_requests: u64,
+) -> Result<serde_json::Value> {
     let mut collected = RuntimeAnthropicCollectedResponse {
         want_thinking,
+        web_search_requests: carried_web_search_requests,
+        web_fetch_requests: carried_web_fetch_requests,
         ..RuntimeAnthropicCollectedResponse::default()
     };
     let mut line = Vec::new();
@@ -23278,6 +23447,17 @@ fn runtime_anthropic_sse_response_parts_from_message_value(
         .get("usage")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let message_start_usage = serde_json::json!({
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "server_tool_use": usage
+            .get("server_tool_use")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({
+                "web_search_requests": 0,
+                "web_fetch_requests": 0,
+            })),
+    });
 
     body.extend(runtime_anthropic_sse_event_bytes(
         "message_start",
@@ -23291,10 +23471,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value(
                 "model": model,
                 "stop_reason": serde_json::Value::Null,
                 "stop_sequence": serde_json::Value::Null,
-                "usage": {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                }
+                "usage": message_start_usage,
             }
         }),
     ));
@@ -23537,13 +23714,21 @@ struct RuntimeAnthropicSseReader {
     input_tokens: u64,
     output_tokens: u64,
     cached_tokens: Option<u64>,
+    web_search_requests: u64,
+    web_fetch_requests: u64,
     active_tool_use: Option<RuntimeAnthropicStreamToolUse>,
     terminal_sent: bool,
     inner_finished: bool,
 }
 
 impl RuntimeAnthropicSseReader {
-    fn new(inner: Box<dyn Read + Send>, model: String, want_thinking: bool) -> Self {
+    fn new(
+        inner: Box<dyn Read + Send>,
+        model: String,
+        want_thinking: bool,
+        carried_web_search_requests: u64,
+        carried_web_fetch_requests: u64,
+    ) -> Self {
         let mut reader = Self {
             inner,
             pending: VecDeque::new(),
@@ -23560,6 +23745,8 @@ impl RuntimeAnthropicSseReader {
             input_tokens: 0,
             output_tokens: 0,
             cached_tokens: None,
+            web_search_requests: carried_web_search_requests,
+            web_fetch_requests: carried_web_fetch_requests,
             active_tool_use: None,
             terminal_sent: false,
             inner_finished: false,
@@ -23579,6 +23766,10 @@ impl RuntimeAnthropicSseReader {
                     "usage": {
                         "input_tokens": 0,
                         "output_tokens": 0,
+                        "server_tool_use": {
+                            "web_search_requests": carried_web_search_requests,
+                            "web_fetch_requests": carried_web_fetch_requests,
+                        }
                     }
                 }
             }),
@@ -23739,21 +23930,13 @@ impl RuntimeAnthropicSseReader {
             self.ensure_text_block();
             self.close_text_block();
         }
-        let mut usage = serde_json::Map::new();
-        usage.insert(
-            "input_tokens".to_string(),
-            serde_json::Value::Number(self.input_tokens.into()),
+        let usage = runtime_anthropic_usage_json(
+            self.input_tokens,
+            self.output_tokens,
+            self.cached_tokens,
+            self.web_search_requests,
+            self.web_fetch_requests,
         );
-        usage.insert(
-            "output_tokens".to_string(),
-            serde_json::Value::Number(self.output_tokens.into()),
-        );
-        if let Some(cached_tokens) = self.cached_tokens {
-            usage.insert(
-                "cache_read_input_tokens".to_string(),
-                serde_json::Value::Number(cached_tokens.into()),
-            );
-        }
         self.push_event(
             "message_delta",
             serde_json::json!({
@@ -23902,38 +24085,52 @@ impl RuntimeAnthropicSseReader {
                 }
             }
             Some("response.output_item.done") => {
-                if value
+                match value
                     .get("item")
                     .and_then(|item| item.get("type"))
                     .and_then(serde_json::Value::as_str)
-                    == Some("function_call")
                 {
-                    if self.active_tool_use.is_none() {
-                        let call_id = value
+                    Some("function_call") => {
+                        if let Some(item) = value.get("item") {
+                            let (web_search_requests, web_fetch_requests) =
+                                runtime_anthropic_output_item_server_tool_usage(item);
+                            self.web_search_requests += web_search_requests;
+                            self.web_fetch_requests += web_fetch_requests;
+                        }
+                        if self.active_tool_use.is_none() {
+                            let call_id = value
+                                .get("item")
+                                .and_then(|item| item.get("call_id"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("tool_call");
+                            let name = value
+                                .get("item")
+                                .and_then(|item| item.get("name"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("tool");
+                            self.start_tool_use_block(call_id, name);
+                        }
+                        let arguments = value
                             .get("item")
-                            .and_then(|item| item.get("call_id"))
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("tool_call");
+                            .and_then(|item| item.get("arguments"))
+                            .and_then(serde_json::Value::as_str);
                         let name = value
                             .get("item")
                             .and_then(|item| item.get("name"))
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("tool");
-                        self.start_tool_use_block(call_id, name);
+                            .and_then(serde_json::Value::as_str);
+                        let call_id = value
+                            .get("item")
+                            .and_then(|item| item.get("call_id"))
+                            .and_then(serde_json::Value::as_str);
+                        self.finish_active_tool_use(arguments, name, call_id);
                     }
-                    let arguments = value
-                        .get("item")
-                        .and_then(|item| item.get("arguments"))
-                        .and_then(serde_json::Value::as_str);
-                    let name = value
-                        .get("item")
-                        .and_then(|item| item.get("name"))
-                        .and_then(serde_json::Value::as_str);
-                    let call_id = value
-                        .get("item")
-                        .and_then(|item| item.get("call_id"))
-                        .and_then(serde_json::Value::as_str);
-                    self.finish_active_tool_use(arguments, name, call_id);
+                    Some("web_search_call") => {
+                        if let Some(item) = value.get("item") {
+                            self.web_search_requests +=
+                                runtime_anthropic_web_search_request_count_from_output_item(item);
+                        }
+                    }
+                    _ => {}
                 }
             }
             Some("response.completed") => {
@@ -23942,6 +24139,21 @@ impl RuntimeAnthropicSseReader {
                 self.input_tokens = input_tokens;
                 self.output_tokens = output_tokens;
                 self.cached_tokens = cached_tokens;
+                self.web_search_requests = self.web_search_requests.max(
+                    runtime_anthropic_tool_usage_web_search_requests_from_value(value),
+                );
+                if let Some(output) = value
+                    .get("response")
+                    .and_then(|response| response.get("output"))
+                    .and_then(serde_json::Value::as_array)
+                {
+                    self.web_search_requests = self.web_search_requests.max(
+                        runtime_anthropic_web_search_request_count_from_output(output),
+                    );
+                    self.web_fetch_requests = self.web_fetch_requests.max(
+                        runtime_anthropic_web_fetch_request_count_from_output(output),
+                    );
+                }
                 self.finish_success();
             }
             Some("error" | "response.failed") => {
@@ -24049,10 +24261,12 @@ fn translate_runtime_buffered_responses_reply_to_anthropic(
     }
 
     let response = if looks_like_sse {
-        runtime_anthropic_response_from_sse_bytes(
+        runtime_anthropic_response_from_sse_bytes_with_carried_usage(
             &parts.body,
             &request.requested_model,
             request.want_thinking,
+            request.carried_web_search_requests,
+            request.carried_web_fetch_requests,
         )?
     } else {
         let value = serde_json::from_slice::<serde_json::Value>(&parts.body)
@@ -24062,10 +24276,12 @@ fn translate_runtime_buffered_responses_reply_to_anthropic(
                 runtime_anthropic_error_from_upstream_parts(parts),
             ));
         }
-        runtime_anthropic_response_from_json_value(
+        runtime_anthropic_response_from_json_value_with_carried_usage(
             &value,
             &request.requested_model,
             request.want_thinking,
+            request.carried_web_search_requests,
+            request.carried_web_fetch_requests,
         )
     };
 
@@ -24127,6 +24343,8 @@ fn translate_runtime_responses_reply_to_anthropic(
                     response.body,
                     request.requested_model.clone(),
                     request.want_thinking,
+                    request.carried_web_search_requests,
+                    request.carried_web_fetch_requests,
                 )),
                 request_id: response.request_id,
                 profile_name: response.profile_name,
