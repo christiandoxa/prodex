@@ -172,7 +172,7 @@ impl SecretRevision {
     }
 
     pub fn modified_at(&self) -> Option<SystemTime> {
-        self.modified_at.clone()
+        self.modified_at
     }
 }
 

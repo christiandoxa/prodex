@@ -557,8 +557,7 @@ mod tests {
             .unwrap();
         let second = rendered
             .lines()
-            .skip_while(|line| !line.starts_with("prodex_runtime_broker_active_requests"))
-            .next()
+            .find(|line| line.starts_with("prodex_runtime_broker_active_requests"))
             .unwrap();
         assert!(first.starts_with("prodex_runtime_broker_info"));
         assert!(second.starts_with("prodex_runtime_broker_active_requests"));

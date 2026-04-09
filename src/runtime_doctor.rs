@@ -249,31 +249,31 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
     );
     value.insert(
         "recovered_state_file".to_string(),
-        serde_json::Value::from(summary.recovered_state_file.clone()),
+        serde_json::Value::from(summary.recovered_state_file),
     );
     value.insert(
         "recovered_continuations_file".to_string(),
-        serde_json::Value::from(summary.recovered_continuations_file.clone()),
+        serde_json::Value::from(summary.recovered_continuations_file),
     );
     value.insert(
         "recovered_continuation_journal_file".to_string(),
-        serde_json::Value::from(summary.recovered_continuation_journal_file.clone()),
+        serde_json::Value::from(summary.recovered_continuation_journal_file),
     );
     value.insert(
         "recovered_scores_file".to_string(),
-        serde_json::Value::from(summary.recovered_scores_file.clone()),
+        serde_json::Value::from(summary.recovered_scores_file),
     );
     value.insert(
         "recovered_usage_snapshots_file".to_string(),
-        serde_json::Value::from(summary.recovered_usage_snapshots_file.clone()),
+        serde_json::Value::from(summary.recovered_usage_snapshots_file),
     );
     value.insert(
         "recovered_backoffs_file".to_string(),
-        serde_json::Value::from(summary.recovered_backoffs_file.clone()),
+        serde_json::Value::from(summary.recovered_backoffs_file),
     );
     value.insert(
         "last_good_backups_present".to_string(),
-        serde_json::Value::from(summary.last_good_backups_present.clone()),
+        serde_json::Value::from(summary.last_good_backups_present),
     );
     value.insert(
         "degraded_routes".to_string(),
@@ -807,7 +807,7 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 class.to_string(),
                 markers
                     .iter()
-                    .map(|marker| runtime_doctor_marker_count(summary, *marker))
+                    .map(|marker| runtime_doctor_marker_count(summary, marker))
                     .sum(),
             )
         })
@@ -1392,10 +1392,10 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
                 .to_string()
         };
     }
-    if let Some(note) = pointer_note {
-        if !summary.diagnosis.contains(note) {
-            summary.diagnosis = format!("{} {}", summary.diagnosis, note);
-        }
+    if let Some(note) = pointer_note
+        && !summary.diagnosis.contains(note)
+    {
+        summary.diagnosis = format!("{} {}", summary.diagnosis, note);
     }
     summary
 }

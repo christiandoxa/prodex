@@ -27,6 +27,7 @@ pub(super) fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock>
     let lock_path = state_lock_file_path(&paths.state_file);
     let file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)
@@ -42,6 +43,7 @@ pub(super) fn try_acquire_runtime_owner_lock(paths: &AppPaths) -> Result<Option<
     let lock_path = runtime_owner_lock_file_path(paths);
     let file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)
@@ -69,6 +71,7 @@ pub(super) fn acquire_json_file_lock(path: &Path) -> Result<JsonFileLock> {
     let lock_path = json_lock_file_path(path);
     let file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)

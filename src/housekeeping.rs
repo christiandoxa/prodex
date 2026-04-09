@@ -113,7 +113,7 @@ pub(crate) fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) -> 
     let oldest_allowed = now_epoch.saturating_sub(RUNTIME_PROXY_LOG_RETENTION_SECONDS);
     let mut paths = prodex_runtime_log_paths_in_dir(dir)
         .into_iter()
-        .filter_map(|path| {
+        .map(|path| {
             let modified = path
                 .metadata()
                 .ok()
@@ -121,7 +121,7 @@ pub(crate) fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) -> 
                 .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
                 .map(|duration| duration.as_secs() as i64)
                 .unwrap_or(i64::MIN);
-            Some((path, modified))
+            (path, modified)
         })
         .collect::<Vec<_>>();
     paths.sort_by_key(|(path, modified)| (*modified, path.clone()));
@@ -130,10 +130,8 @@ pub(crate) fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) -> 
         .saturating_sub(RUNTIME_PROXY_LOG_RETENTION_COUNT);
     let mut removed = 0usize;
     for (index, (path, modified)) in paths.into_iter().enumerate() {
-        if modified < oldest_allowed || index < excess {
-            if fs::remove_file(path).is_ok() {
-                removed += 1;
-            }
+        if (modified < oldest_allowed || index < excess) && fs::remove_file(path).is_ok() {
+            removed += 1;
         }
     }
     removed
@@ -198,10 +196,8 @@ pub(crate) fn cleanup_stale_login_dirs_at(paths: &AppPaths, now: SystemTime) -> 
             .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
             .map(|duration| duration.as_secs() as i64)
             .unwrap_or(i64::MIN);
-        if modified < oldest_allowed {
-            if remove_dir_if_exists(&path).is_ok() {
-                removed += 1;
-            }
+        if modified < oldest_allowed && remove_dir_if_exists(&path).is_ok() {
+            removed += 1;
         }
     }
     removed

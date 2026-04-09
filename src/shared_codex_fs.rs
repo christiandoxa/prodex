@@ -595,9 +595,7 @@ fn ensure_symlink_to_shared(
     shared_path: &Path,
     kind: SharedCodexEntryKind,
 ) -> Result<()> {
-    if local_path.exists() {
-        remove_path(local_path)?;
-    } else if fs::symlink_metadata(local_path).is_ok() {
+    if local_path.exists() || fs::symlink_metadata(local_path).is_ok() {
         remove_path(local_path)?;
     }
 

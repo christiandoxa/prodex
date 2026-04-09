@@ -194,8 +194,7 @@ const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } el
 const RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS: u64 = if cfg!(test) { 10 } else { 200 };
 const RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS: u64 =
     if cfg!(test) { 120 } else { 8_000 };
-const RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS: u64 =
-    if cfg!(test) { 60_000 } else { 60_000 };
+const RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS: u64 = 60_000;
 const RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS: u64 = if cfg!(test) { 50 } else { 1_000 };
 const RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES: usize = 8 * 1024;
 const RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY: usize = 2;
@@ -701,6 +700,7 @@ fn runtime_broker_metadata_for_log_path(log_path: &Path) -> Option<RuntimeBroker
         .cloned()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn schedule_runtime_state_save(
     shared: &RuntimeRotationProxyShared,
     state: AppState,
@@ -2762,7 +2762,7 @@ fn runtime_profile_transport_backoff_key(
     )
 }
 
-fn runtime_profile_transport_backoff_key_parts<'a>(key: &'a str) -> Option<(&'a str, &'a str)> {
+fn runtime_profile_transport_backoff_key_parts(key: &str) -> Option<(&str, &str)> {
     runtime_profile_route_key_parts(key, "__route_transport_backoff__:")
 }
 
@@ -2825,6 +2825,7 @@ fn runtime_profile_transport_backoff_max_until(
         .max()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
     snapshot: &AppState,
@@ -3534,6 +3535,7 @@ struct RuntimeStateSaveSnapshot {
     backoffs: RuntimeProfileBackoffs,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 enum RuntimeStateSavePayload {
     Snapshot(RuntimeStateSaveSnapshot),
@@ -4099,6 +4101,7 @@ struct RuntimeSseTapState {
     remembered_response_ids: BTreeSet<String>,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum RuntimeResponsesReply {
     Buffered(RuntimeBufferedResponseParts),
     Streaming(RuntimeStreamingResponse),
@@ -4236,11 +4239,13 @@ enum RuntimeWebsocketAttempt {
     },
 }
 
+#[allow(clippy::large_enum_variant)]
 enum RuntimeUpstreamFailureResponse {
     Http(RuntimeResponsesReply),
     Websocket(RuntimeWebsocketErrorPayload),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum RuntimeWebsocketConnectResult {
     Connected {
@@ -4784,8 +4789,10 @@ fn runtime_log_pid_from_path(path: &Path) -> Option<u32> {
 }
 
 fn collect_info_runtime_load_summary(log_paths: &[PathBuf], now: i64) -> InfoRuntimeLoadSummary {
-    let mut summary = InfoRuntimeLoadSummary::default();
-    summary.log_count = log_paths.len();
+    let mut summary = InfoRuntimeLoadSummary {
+        log_count: log_paths.len(),
+        ..InfoRuntimeLoadSummary::default()
+    };
 
     for path in log_paths {
         let Ok(tail) = read_runtime_log_tail(path, INFO_RUNTIME_LOG_TAIL_BYTES) else {
@@ -5831,7 +5838,7 @@ fn runtime_proxy_claude_native_client_tool_enabled(enabled_tokens: &[&str]) -> b
         match token.to_ascii_lowercase().as_str() {
             "0" | "false" | "no" | "off" | "none" => return false,
             "1" | "true" | "yes" | "on" | "all" => enabled = true,
-            value if enabled_tokens.iter().any(|candidate| value == *candidate) => enabled = true,
+            value if enabled_tokens.contains(&value) => enabled = true,
             _ => {}
         }
     }
@@ -7116,8 +7123,7 @@ fn should_enable_runtime_rotation_proxy(
     state
         .profiles
         .values()
-        .filter(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
-        .next()
+        .find(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
         .is_some()
 }
 
@@ -8188,7 +8194,7 @@ fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
     }
 }
 
-fn runtime_proxy_request_origin<'a>(headers: &'a [(String, String)]) -> Option<&'a str> {
+fn runtime_proxy_request_origin(headers: &[(String, String)]) -> Option<&str> {
     runtime_proxy_request_header_value(headers, PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER)
 }
 
@@ -8752,6 +8758,7 @@ fn wait_for_runtime_profile_inflight_relief_since(
     )
 }
 
+#[allow(clippy::result_large_err)]
 fn enqueue_runtime_proxy_long_lived_request_with_wait(
     sender: &mpsc::SyncSender<tiny_http::Request>,
     request: tiny_http::Request,
@@ -11575,7 +11582,7 @@ fn runtime_request_session_id_from_turn_metadata(request: &RuntimeProxyRequest) 
         .iter()
         .find_map(|(name, value)| {
             name.eq_ignore_ascii_case("x-codex-turn-metadata")
-                .then(|| value.as_str())
+                .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
         .and_then(|value| runtime_request_session_id_from_value(&value))
@@ -13078,11 +13085,11 @@ fn clear_runtime_stale_previous_response_binding(
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    if !runtime
+    if runtime
         .state
         .response_profile_bindings
         .get(previous_response_id)
-        .is_some_and(|binding| binding.profile_name == profile_name)
+        .is_none_or(|binding| binding.profile_name != profile_name)
     {
         drop(runtime);
         return Ok(false);
@@ -13772,6 +13779,7 @@ fn runtime_candidate_has_hard_affinity(
             && session_profile.is_some_and(|profile_name| profile_name == candidate_name))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_quota_blocked_affinity_is_releasable(
     route_kind: RuntimeRouteKind,
     candidate_name: &str,
@@ -13839,6 +13847,7 @@ fn runtime_quota_precommit_guard_reason(
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn select_runtime_response_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
@@ -14587,6 +14596,7 @@ fn run_runtime_proxy_websocket_session(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn proxy_runtime_websocket_text_message(
     session_id: u64,
     request_id: u64,
@@ -14766,415 +14776,408 @@ fn proxy_runtime_websocket_text_message(
                 session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
-            ) {
-                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+            ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Websocket,
+            )? {
+                runtime_proxy_log(
                     shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Websocket,
+                    format!(
+                        "request={request_id} websocket_session={session_id} direct_current_profile_fallback profile={current_profile} reason=precommit_budget_exhausted"
+                    ),
+                );
+                match attempt_runtime_websocket_request(
+                    request_id,
+                    local_socket,
+                    &handshake_request,
+                    &request_text,
+                    previous_response_id.as_deref(),
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    shared,
+                    websocket_session,
+                    &current_profile,
+                    request_turn_state.as_deref(),
                 )? {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} direct_current_profile_fallback profile={current_profile} reason=precommit_budget_exhausted"
-                        ),
-                    );
-                    match attempt_runtime_websocket_request(
-                        request_id,
-                        local_socket,
-                        &handshake_request,
-                        &request_text,
-                        previous_response_id.as_deref(),
-                        request_session_id.as_deref(),
-                        request_turn_state.as_deref(),
-                        shared,
-                        websocket_session,
-                        &current_profile,
-                        request_turn_state.as_deref(),
-                    )? {
-                        RuntimeWebsocketAttempt::Delivered => return Ok(()),
-                        RuntimeWebsocketAttempt::QuotaBlocked {
-                            profile_name,
-                            payload,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Websocket,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                                return Ok(());
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                            )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request_text) =
-                                    runtime_request_text_without_previous_response_id(&request_text)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request_text = fresh_request_text;
-                                handshake_request =
-                                    runtime_request_without_turn_state_header(&handshake_request);
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                websocket_reuse_fresh_retry_profiles.clear();
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                            continue;
+                    RuntimeWebsocketAttempt::Delivered => return Ok(()),
+                    RuntimeWebsocketAttempt::QuotaBlocked {
+                        profile_name,
+                        payload,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Websocket,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                            return Ok(());
                         }
-                        RuntimeWebsocketAttempt::Overloaded {
-                            profile_name,
-                            payload,
-                        } => {
-                            let overload_message =
-                                extract_runtime_proxy_overload_message_from_websocket_payload(
-                                    &payload,
-                                );
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} via=direct_current_profile_fallback message={}",
-                                    overload_message.as_deref().unwrap_or("-"),
+                                    "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
                                 ),
                             );
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            let _ = bump_runtime_profile_health_score(
-                                shared,
-                                &profile_name,
-                                RuntimeRouteKind::Websocket,
-                                RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
-                                "websocket_overload",
-                            );
-                            let _ = bump_runtime_profile_bad_pairing_score(
-                                shared,
-                                &profile_name,
-                                RuntimeRouteKind::Websocket,
-                                RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
-                                "websocket_overload",
-                            );
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Websocket,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                                return Ok(());
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request_text) =
-                                    runtime_request_text_without_previous_response_id(&request_text)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=upstream_overloaded via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request_text = fresh_request_text;
-                                handshake_request =
-                                    runtime_request_without_turn_state_header(&handshake_request);
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                websocket_reuse_fresh_retry_profiles.clear();
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                            continue;
                         }
-                        RuntimeWebsocketAttempt::PreviousResponseNotFound {
-                            profile_name,
-                            payload,
-                            turn_state,
-                        } => {
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request_text) =
+                                runtime_request_text_without_previous_response_id(&request_text)
+                        {
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                    turn_state
+                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
                                 ),
                             );
-                            saw_previous_response_not_found = true;
-                            if previous_response_retry_candidate.as_deref()
-                                != Some(profile_name.as_str())
-                            {
-                                previous_response_retry_candidate = Some(profile_name.clone());
-                                previous_response_retry_index = 0;
-                            }
-                            let has_turn_state_retry = turn_state.is_some();
-                            if has_turn_state_retry {
-                                candidate_turn_state_retry_profile = Some(profile_name.clone());
-                                candidate_turn_state_retry_value = turn_state;
-                            }
-                            if has_turn_state_retry
-                                && let Some(delay) = runtime_previous_response_retry_delay(
-                                    previous_response_retry_index,
-                                )
-                            {
-                                previous_response_retry_index += 1;
-                                last_failure =
-                                    Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                        delay.as_millis()
-                                    ),
-                                );
-                                continue;
-                            }
+                            request_text = fresh_request_text;
+                            handshake_request =
+                                runtime_request_without_turn_state_header(&handshake_request);
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
-                            if !has_turn_state_retry && !request_requires_previous_response_affinity
-                            {
-                                let _ = clear_runtime_stale_previous_response_binding(
-                                    shared,
-                                    &profile_name,
-                                    previous_response_id.as_deref(),
-                                )?;
-                            }
-                            let released_affinity = release_runtime_previous_response_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                                RuntimeRouteKind::Websocket,
-                            )?;
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if compact_followup_profile
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            websocket_reuse_fresh_retry_profiles.clear();
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
+                            continue;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::Overloaded {
+                        profile_name,
+                        payload,
+                    } => {
+                        let overload_message =
+                            extract_runtime_proxy_overload_message_from_websocket_payload(&payload);
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} via=direct_current_profile_fallback message={}",
+                                overload_message.as_deref().unwrap_or("-"),
+                            ),
+                        );
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        let _ = bump_runtime_profile_health_score(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Websocket,
+                            RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                            "websocket_overload",
+                        );
+                        let _ = bump_runtime_profile_bad_pairing_score(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Websocket,
+                            RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+                            "websocket_overload",
+                        );
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Websocket,
+                            &profile_name,
+                            compact_followup_profile
                                 .as_ref()
-                                .is_some_and(|(owner, _)| owner == &profile_name)
-                            {
-                                compact_followup_profile = None;
-                            }
-                            excluded_profiles.insert(profile_name);
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity via=direct_current_profile_fallback"
+                                ),
+                            );
+                            forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                            return Ok(());
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request_text) =
+                                runtime_request_text_without_previous_response_id(&request_text)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=upstream_overloaded via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request_text = fresh_request_text;
+                            handshake_request =
+                                runtime_request_without_turn_state_header(&handshake_request);
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
+                            previous_response_retry_candidate = None;
+                            previous_response_retry_index = 0;
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            websocket_reuse_fresh_retry_profiles.clear();
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
+                            continue;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::PreviousResponseNotFound {
+                        profile_name,
+                        payload,
+                        turn_state,
+                    } => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                turn_state
+                            ),
+                        );
+                        saw_previous_response_not_found = true;
+                        if previous_response_retry_candidate.as_deref()
+                            != Some(profile_name.as_str())
+                        {
+                            previous_response_retry_candidate = Some(profile_name.clone());
+                            previous_response_retry_index = 0;
+                        }
+                        let has_turn_state_retry = turn_state.is_some();
+                        if has_turn_state_retry {
+                            candidate_turn_state_retry_profile = Some(profile_name.clone());
+                            candidate_turn_state_retry_value = turn_state;
+                        }
+                        if has_turn_state_retry
+                            && let Some(delay) =
+                                runtime_previous_response_retry_delay(previous_response_retry_index)
+                        {
+                            previous_response_retry_index += 1;
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
+                                    delay.as_millis()
+                                ),
+                            );
                             continue;
                         }
-                        RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
-                            excluded_profiles.insert(profile_name);
-                            continue;
-                        }
-                        RuntimeWebsocketAttempt::LocalSelectionBlocked {
-                            profile_name,
-                            reason,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Websocket,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                send_runtime_proxy_websocket_error(
-                                    local_socket,
-                                    503,
-                                    "service_unavailable",
-                                    runtime_proxy_local_selection_failure_message(),
-                                )?;
-                                return Ok(());
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
+                        previous_response_retry_candidate = None;
+                        previous_response_retry_index = 0;
+                        if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                            let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
                                 previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
                             )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request_text) =
-                                    runtime_request_text_without_previous_response_id(&request_text)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request_text = fresh_request_text;
-                                handshake_request =
-                                    runtime_request_without_turn_state_header(&handshake_request);
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                websocket_reuse_fresh_retry_profiles.clear();
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
+                        }
+                        let released_affinity = release_runtime_previous_response_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                            RuntimeRouteKind::Websocket,
+                        )?;
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if compact_followup_profile
+                            .as_ref()
+                            .is_some_and(|(owner, _)| owner == &profile_name)
+                        {
+                            compact_followup_profile = None;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
+                        excluded_profiles.insert(profile_name);
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                        profile_name,
+                        reason,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Websocket,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            send_runtime_proxy_websocket_error(
+                                local_socket,
+                                503,
+                                "service_unavailable",
+                                runtime_proxy_local_selection_failure_message(),
+                            )?;
+                            return Ok(());
+                        }
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request_text) =
+                                runtime_request_text_without_previous_response_id(&request_text)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request_text = fresh_request_text;
+                            handshake_request =
+                                runtime_request_without_turn_state_header(&handshake_request);
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
+                            previous_response_retry_candidate = None;
+                            previous_response_retry_index = 0;
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            websocket_reuse_fresh_retry_profiles.clear();
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
                             continue;
                         }
+                        excluded_profiles.insert(profile_name);
+                        continue;
                     }
                 }
             }
@@ -15300,377 +15303,370 @@ fn proxy_runtime_websocket_text_message(
                 session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
-            ) {
-                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+            ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Websocket,
+            )? {
+                runtime_proxy_log(
                     shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Websocket,
+                    format!(
+                        "request={request_id} websocket_session={session_id} direct_current_profile_fallback profile={current_profile} reason=candidate_exhausted"
+                    ),
+                );
+                match attempt_runtime_websocket_request(
+                    request_id,
+                    local_socket,
+                    &handshake_request,
+                    &request_text,
+                    previous_response_id.as_deref(),
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    shared,
+                    websocket_session,
+                    &current_profile,
+                    request_turn_state.as_deref(),
                 )? {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} direct_current_profile_fallback profile={current_profile} reason=candidate_exhausted"
-                        ),
-                    );
-                    match attempt_runtime_websocket_request(
-                        request_id,
-                        local_socket,
-                        &handshake_request,
-                        &request_text,
-                        previous_response_id.as_deref(),
-                        request_session_id.as_deref(),
-                        request_turn_state.as_deref(),
-                        shared,
-                        websocket_session,
-                        &current_profile,
-                        request_turn_state.as_deref(),
-                    )? {
-                        RuntimeWebsocketAttempt::Delivered => return Ok(()),
-                        RuntimeWebsocketAttempt::QuotaBlocked {
-                            profile_name,
-                            payload,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Websocket,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                                return Ok(());
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                            )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request_text) =
-                                    runtime_request_text_without_previous_response_id(&request_text)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request_text = fresh_request_text;
-                                handshake_request =
-                                    runtime_request_without_turn_state_header(&handshake_request);
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                websocket_reuse_fresh_retry_profiles.clear();
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                            continue;
+                    RuntimeWebsocketAttempt::Delivered => return Ok(()),
+                    RuntimeWebsocketAttempt::QuotaBlocked {
+                        profile_name,
+                        payload,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Websocket,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                            return Ok(());
                         }
-                        RuntimeWebsocketAttempt::Overloaded {
-                            profile_name,
-                            payload,
-                        } => {
-                            let overload_message =
-                                extract_runtime_proxy_overload_message_from_websocket_payload(
-                                    &payload,
-                                );
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} via=direct_current_profile_fallback message={}",
-                                    overload_message.as_deref().unwrap_or("-"),
+                                    "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
                                 ),
                             );
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            let _ = bump_runtime_profile_health_score(
-                                shared,
-                                &profile_name,
-                                RuntimeRouteKind::Websocket,
-                                RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
-                                "websocket_overload",
-                            );
-                            let _ = bump_runtime_profile_bad_pairing_score(
-                                shared,
-                                &profile_name,
-                                RuntimeRouteKind::Websocket,
-                                RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
-                                "websocket_overload",
-                            );
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Websocket,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                                return Ok(());
-                            }
-                            excluded_profiles.insert(profile_name);
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                            continue;
                         }
-                        RuntimeWebsocketAttempt::PreviousResponseNotFound {
-                            profile_name,
-                            payload,
-                            turn_state,
-                        } => {
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request_text) =
+                                runtime_request_text_without_previous_response_id(&request_text)
+                        {
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                    turn_state
+                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
                                 ),
                             );
-                            saw_previous_response_not_found = true;
-                            if previous_response_retry_candidate.as_deref()
-                                != Some(profile_name.as_str())
-                            {
-                                previous_response_retry_candidate = Some(profile_name.clone());
-                                previous_response_retry_index = 0;
-                            }
-                            let has_turn_state_retry = turn_state.is_some();
-                            if has_turn_state_retry {
-                                candidate_turn_state_retry_profile = Some(profile_name.clone());
-                                candidate_turn_state_retry_value = turn_state;
-                            }
-                            if has_turn_state_retry
-                                && let Some(delay) = runtime_previous_response_retry_delay(
-                                    previous_response_retry_index,
-                                )
-                            {
-                                previous_response_retry_index += 1;
-                                last_failure =
-                                    Some(RuntimeUpstreamFailureResponse::Websocket(payload));
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                        delay.as_millis()
-                                    ),
-                                );
-                                continue;
-                            }
+                            request_text = fresh_request_text;
+                            handshake_request =
+                                runtime_request_without_turn_state_header(&handshake_request);
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
-                            if !has_turn_state_retry && !request_requires_previous_response_affinity
-                            {
-                                let _ = clear_runtime_stale_previous_response_binding(
-                                    shared,
-                                    &profile_name,
-                                    previous_response_id.as_deref(),
-                                )?;
-                            }
-                            let released_affinity = release_runtime_previous_response_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                                RuntimeRouteKind::Websocket,
-                            )?;
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if compact_followup_profile
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            websocket_reuse_fresh_retry_profiles.clear();
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
+                            continue;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::Overloaded {
+                        profile_name,
+                        payload,
+                    } => {
+                        let overload_message =
+                            extract_runtime_proxy_overload_message_from_websocket_payload(&payload);
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} websocket_session={session_id} upstream_overloaded route=websocket profile={profile_name} via=direct_current_profile_fallback message={}",
+                                overload_message.as_deref().unwrap_or("-"),
+                            ),
+                        );
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        let _ = bump_runtime_profile_health_score(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Websocket,
+                            RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                            "websocket_overload",
+                        );
+                        let _ = bump_runtime_profile_bad_pairing_score(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Websocket,
+                            RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+                            "websocket_overload",
+                        );
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Websocket,
+                            &profile_name,
+                            compact_followup_profile
                                 .as_ref()
-                                .is_some_and(|(owner, _)| owner == &profile_name)
-                            {
-                                compact_followup_profile = None;
-                            }
-                            excluded_profiles.insert(profile_name);
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} upstream_overload_passthrough route=websocket profile={profile_name} reason=hard_affinity via=direct_current_profile_fallback"
+                                ),
+                            );
+                            forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                            return Ok(());
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::PreviousResponseNotFound {
+                        profile_name,
+                        payload,
+                        turn_state,
+                    } => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                turn_state
+                            ),
+                        );
+                        saw_previous_response_not_found = true;
+                        if previous_response_retry_candidate.as_deref()
+                            != Some(profile_name.as_str())
+                        {
+                            previous_response_retry_candidate = Some(profile_name.clone());
+                            previous_response_retry_index = 0;
+                        }
+                        let has_turn_state_retry = turn_state.is_some();
+                        if has_turn_state_retry {
+                            candidate_turn_state_retry_profile = Some(profile_name.clone());
+                            candidate_turn_state_retry_value = turn_state;
+                        }
+                        if has_turn_state_retry
+                            && let Some(delay) =
+                                runtime_previous_response_retry_delay(previous_response_retry_index)
+                        {
+                            previous_response_retry_index += 1;
                             last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
+                                    delay.as_millis()
+                                ),
+                            );
                             continue;
                         }
-                        RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
-                            excluded_profiles.insert(profile_name);
-                            continue;
-                        }
-                        RuntimeWebsocketAttempt::LocalSelectionBlocked {
-                            profile_name,
-                            reason,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Websocket,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                send_runtime_proxy_websocket_error(
-                                    local_socket,
-                                    503,
-                                    "service_unavailable",
-                                    runtime_proxy_local_selection_failure_message(),
-                                )?;
-                                return Ok(());
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
+                        previous_response_retry_candidate = None;
+                        previous_response_retry_index = 0;
+                        if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                            let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
                                 previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
                             )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request_text) =
-                                    runtime_request_text_without_previous_response_id(&request_text)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request_text = fresh_request_text;
-                                handshake_request =
-                                    runtime_request_without_turn_state_header(&handshake_request);
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                websocket_reuse_fresh_retry_profiles.clear();
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
+                        }
+                        let released_affinity = release_runtime_previous_response_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                            RuntimeRouteKind::Websocket,
+                        )?;
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if compact_followup_profile
+                            .as_ref()
+                            .is_some_and(|(owner, _)| owner == &profile_name)
+                        {
+                            compact_followup_profile = None;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
+                        excluded_profiles.insert(profile_name);
+                        continue;
+                    }
+                    RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                        profile_name,
+                        reason,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Websocket,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            send_runtime_proxy_websocket_error(
+                                local_socket,
+                                503,
+                                "service_unavailable",
+                                runtime_proxy_local_selection_failure_message(),
+                            )?;
+                            return Ok(());
+                        }
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request_text) =
+                                runtime_request_text_without_previous_response_id(&request_text)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request_text = fresh_request_text;
+                            handshake_request =
+                                runtime_request_without_turn_state_header(&handshake_request);
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
+                            previous_response_retry_candidate = None;
+                            previous_response_retry_index = 0;
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            websocket_reuse_fresh_retry_profiles.clear();
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
                             continue;
                         }
+                        excluded_profiles.insert(profile_name);
+                        continue;
                     }
                 }
             }
@@ -16269,6 +16265,7 @@ fn proxy_runtime_websocket_text_message(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn attempt_runtime_websocket_request(
     request_id: u64,
     local_socket: &mut RuntimeLocalWebSocket,
@@ -16545,7 +16542,7 @@ fn attempt_runtime_websocket_request(
                     remember_runtime_session_id(
                         shared,
                         profile_name,
-                        request_session_id.as_deref(),
+                        request_session_id,
                         RuntimeRouteKind::Websocket,
                     )?;
                     remember_runtime_turn_state(
@@ -16572,9 +16569,9 @@ fn attempt_runtime_websocket_request(
                         &mut buffered_precommit_text_frames,
                         shared,
                         profile_name,
-                        request_previous_response_id.as_deref(),
-                        request_session_id.as_deref(),
-                        request_turn_state.as_deref(),
+                        request_previous_response_id,
+                        request_session_id,
+                        request_turn_state,
                         &mut previous_response_owner_recorded,
                     )?;
                 }
@@ -16582,9 +16579,9 @@ fn attempt_runtime_websocket_request(
                 remember_runtime_websocket_response_ids(
                     shared,
                     profile_name,
-                    request_previous_response_id.as_deref(),
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
+                    request_previous_response_id,
+                    request_session_id,
+                    request_turn_state,
                     &inspected.response_ids,
                     &mut previous_response_owner_recorded,
                 )?;
@@ -16624,7 +16621,7 @@ fn attempt_runtime_websocket_request(
                     remember_runtime_session_id(
                         shared,
                         profile_name,
-                        request_session_id.as_deref(),
+                        request_session_id,
                         RuntimeRouteKind::Websocket,
                     )?;
                     remember_runtime_turn_state(
@@ -16651,9 +16648,9 @@ fn attempt_runtime_websocket_request(
                         &mut buffered_precommit_text_frames,
                         shared,
                         profile_name,
-                        request_previous_response_id.as_deref(),
-                        request_session_id.as_deref(),
-                        request_turn_state.as_deref(),
+                        request_previous_response_id,
+                        request_session_id,
+                        request_turn_state,
                         &mut previous_response_owner_recorded,
                     )?;
                 }
@@ -16945,15 +16942,15 @@ fn connect_runtime_proxy_upstream_websocket(
         Err(WsError::Http(response)) => {
             let status = response.status().as_u16();
             let body = response.body().clone().unwrap_or_default();
-            if matches!(status, 401 | 403) {
-                if status == 401 || extract_runtime_proxy_quota_message(&body).is_none() {
-                    note_runtime_profile_auth_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        status,
-                    );
-                }
+            if matches!(status, 401 | 403)
+                && (status == 401 || extract_runtime_proxy_quota_message(&body).is_none())
+            {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Websocket,
+                    status,
+                );
             }
             runtime_proxy_log(
                 shared,
@@ -17251,6 +17248,7 @@ fn remember_runtime_websocket_response_ids(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn forward_runtime_proxy_buffered_websocket_text_frames(
     local_socket: &mut RuntimeLocalWebSocket,
     buffered_frames: &mut Vec<RuntimeBufferedWebsocketTextFrame>,
@@ -17963,27 +17961,25 @@ fn attempt_runtime_noncompact_standard_request(
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
     let response =
         send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
-            .map_err(|err| {
+            .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
                     "standard_upstream_request",
-                    &err,
+                    err,
                 );
-                err
             })?;
     if request.path_and_query.ends_with("/backend-api/wham/usage") {
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
-            .map_err(|err| {
+            .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
                     "standard_buffer_usage_response",
-                    &err,
+                    err,
                 );
-                err
             })?;
         if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
             update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
@@ -18007,15 +18003,14 @@ fn attempt_runtime_noncompact_standard_request(
             RuntimeRouteKind::Standard,
         )?;
         let response =
-            forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
+            forward_runtime_proxy_response(shared, response, Vec::new()).inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
                     "standard_forward_response",
-                    &err,
+                    err,
                 );
-                err
             })?;
         return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
@@ -18024,16 +18019,15 @@ fn attempt_runtime_noncompact_standard_request(
     }
 
     let status = response.status().as_u16();
-    let parts =
-        buffer_runtime_proxy_async_response_parts(shared, response, Vec::new()).map_err(|err| {
+    let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+        .inspect_err(|err| {
             note_runtime_profile_transport_failure(
                 shared,
                 profile_name,
                 RuntimeRouteKind::Standard,
                 "standard_buffer_response",
-                &err,
+                err,
             );
-            err
         })?;
     let retryable_quota =
         matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
@@ -18114,30 +18108,28 @@ fn attempt_runtime_standard_request(
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
     let response =
         send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
-            .map_err(|err| {
+            .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Compact,
                     "compact_upstream_request",
-                    &err,
+                    err,
                 );
-                err
             })?;
     if !is_runtime_compact_path(&request.path_and_query) || response.status().is_success() {
         let response_turn_state = is_runtime_compact_path(&request.path_and_query)
             .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
             .flatten();
         let response =
-            forward_runtime_proxy_response(shared, response, Vec::new()).map_err(|err| {
+            forward_runtime_proxy_response(shared, response, Vec::new()).inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Compact,
                     "compact_forward_response",
-                    &err,
+                    err,
                 );
-                err
             })?;
         remember_runtime_session_id(
             shared,
@@ -18173,16 +18165,15 @@ fn attempt_runtime_standard_request(
     }
 
     let status = response.status().as_u16();
-    let parts =
-        buffer_runtime_proxy_async_response_parts(shared, response, Vec::new()).map_err(|err| {
+    let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+        .inspect_err(|err| {
             note_runtime_profile_transport_failure(
                 shared,
                 profile_name,
                 RuntimeRouteKind::Compact,
                 "compact_buffer_response",
-                &err,
+                err,
             );
-            err
         })?;
     let retryable_quota =
         matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
@@ -18415,336 +18406,332 @@ fn proxy_runtime_responses_request(
                 session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
-            ) {
-                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+            ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Responses,
+            )? {
+                runtime_proxy_log(
                     shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Responses,
+                    format!(
+                        "request={request_id} transport=http direct_current_profile_fallback profile={current_profile} reason=precommit_budget_exhausted"
+                    ),
+                );
+                match attempt_runtime_responses_request(
+                    request_id,
+                    &request,
+                    shared,
+                    &current_profile,
+                    request_turn_state.as_deref(),
                 )? {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http direct_current_profile_fallback profile={current_profile} reason=precommit_budget_exhausted"
-                        ),
-                    );
-                    match attempt_runtime_responses_request(
-                        request_id,
-                        &request,
-                        shared,
-                        &current_profile,
-                        request_turn_state.as_deref(),
-                    )? {
-                        RuntimeResponsesAttempt::Success {
-                            profile_name,
-                            response,
-                        } => {
-                            if saw_previous_response_not_found {
-                                remember_runtime_successful_previous_response_owner(
-                                    shared,
-                                    &profile_name,
-                                    previous_response_id.as_deref(),
-                                    RuntimeRouteKind::Responses,
-                                )?;
-                            }
-                            commit_runtime_proxy_profile_selection_with_notice(
+                    RuntimeResponsesAttempt::Success {
+                        profile_name,
+                        response,
+                    } => {
+                        if saw_previous_response_not_found {
+                            remember_runtime_successful_previous_response_owner(
                                 shared,
                                 &profile_name,
+                                previous_response_id.as_deref(),
                                 RuntimeRouteKind::Responses,
                             )?;
-                            let _ = release_runtime_compact_lineage(
-                                shared,
-                                &profile_name,
-                                request_session_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                "response_committed_post_commit",
-                            );
-                            runtime_proxy_log(
-                                shared,
-                                format!(
-                                    "request={request_id} transport=http committed profile={profile_name} via=direct_current_profile_fallback"
-                                ),
-                            );
+                        }
+                        commit_runtime_proxy_profile_selection_with_notice(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Responses,
+                        )?;
+                        let _ = release_runtime_compact_lineage(
+                            shared,
+                            &profile_name,
+                            request_session_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            "response_committed_post_commit",
+                        );
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=http committed profile={profile_name} via=direct_current_profile_fallback"
+                            ),
+                        );
+                        return Ok(response);
+                    }
+                    RuntimeResponsesAttempt::QuotaBlocked {
+                        profile_name,
+                        response,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Responses,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
                             return Ok(response);
                         }
-                        RuntimeResponsesAttempt::QuotaBlocked {
-                            profile_name,
-                            response,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Responses,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                return Ok(response);
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                            )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request) =
-                                    runtime_request_without_previous_response_affinity(&request)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request = fresh_request;
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                session_profile = None;
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
-                            continue;
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
                         }
-                        RuntimeResponsesAttempt::PreviousResponseNotFound {
-                            profile_name,
-                            response,
-                            turn_state,
-                        } => {
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                    turn_state
+                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
                                 ),
                             );
-                            saw_previous_response_not_found = true;
-                            if previous_response_retry_candidate.as_deref()
-                                != Some(profile_name.as_str())
-                            {
-                                previous_response_retry_candidate = Some(profile_name.clone());
-                                previous_response_retry_index = 0;
-                            }
-                            let has_turn_state_retry = turn_state.is_some();
-                            if has_turn_state_retry {
-                                candidate_turn_state_retry_profile = Some(profile_name.clone());
-                                candidate_turn_state_retry_value = turn_state;
-                            }
-                            if has_turn_state_retry
-                                && let Some(delay) = runtime_previous_response_retry_delay(
-                                    previous_response_retry_index,
-                                )
-                            {
-                                previous_response_retry_index += 1;
-                                last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                        delay.as_millis()
-                                    ),
-                                );
-                                continue;
-                            }
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request) =
+                                runtime_request_without_previous_response_affinity(&request)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request = fresh_request;
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
-                            if !has_turn_state_retry && !request_requires_previous_response_affinity
-                            {
-                                let _ = clear_runtime_stale_previous_response_binding(
-                                    shared,
-                                    &profile_name,
-                                    previous_response_id.as_deref(),
-                                )?;
-                            }
-                            let released_affinity = release_runtime_previous_response_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                                RuntimeRouteKind::Responses,
-                            )?;
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if compact_followup_profile
-                                .as_ref()
-                                .is_some_and(|(owner, _)| owner == &profile_name)
-                            {
-                                compact_followup_profile = None;
-                            }
-                            excluded_profiles.insert(profile_name);
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            session_profile = None;
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
+                            continue;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        continue;
+                    }
+                    RuntimeResponsesAttempt::PreviousResponseNotFound {
+                        profile_name,
+                        response,
+                        turn_state,
+                    } => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                turn_state
+                            ),
+                        );
+                        saw_previous_response_not_found = true;
+                        if previous_response_retry_candidate.as_deref()
+                            != Some(profile_name.as_str())
+                        {
+                            previous_response_retry_candidate = Some(profile_name.clone());
+                            previous_response_retry_index = 0;
+                        }
+                        let has_turn_state_retry = turn_state.is_some();
+                        if has_turn_state_retry {
+                            candidate_turn_state_retry_profile = Some(profile_name.clone());
+                            candidate_turn_state_retry_value = turn_state;
+                        }
+                        if has_turn_state_retry
+                            && let Some(delay) =
+                                runtime_previous_response_retry_delay(previous_response_retry_index)
+                        {
+                            previous_response_retry_index += 1;
                             last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
+                                    delay.as_millis()
+                                ),
+                            );
                             continue;
                         }
-                        RuntimeResponsesAttempt::LocalSelectionBlocked {
-                            profile_name,
-                            reason,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Responses,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                return Ok(RuntimeResponsesReply::Buffered(
-                                    build_runtime_proxy_json_error_parts(
-                                        503,
-                                        "service_unavailable",
-                                        runtime_proxy_local_selection_failure_message(),
-                                    ),
-                                ));
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
+                        previous_response_retry_candidate = None;
+                        previous_response_retry_index = 0;
+                        if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                            let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
                                 previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
                             )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request) =
-                                    runtime_request_without_previous_response_affinity(&request)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request = fresh_request;
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
+                        }
+                        let released_affinity = release_runtime_previous_response_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                            RuntimeRouteKind::Responses,
+                        )?;
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if compact_followup_profile
+                            .as_ref()
+                            .is_some_and(|(owner, _)| owner == &profile_name)
+                        {
+                            compact_followup_profile = None;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        continue;
+                    }
+                    RuntimeResponsesAttempt::LocalSelectionBlocked {
+                        profile_name,
+                        reason,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Responses,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            return Ok(RuntimeResponsesReply::Buffered(
+                                build_runtime_proxy_json_error_parts(
+                                    503,
+                                    "service_unavailable",
+                                    runtime_proxy_local_selection_failure_message(),
+                                ),
+                            ));
+                        }
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request) =
+                                runtime_request_without_previous_response_affinity(&request)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request = fresh_request;
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
+                            previous_response_retry_candidate = None;
+                            previous_response_retry_index = 0;
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
                             continue;
                         }
+                        excluded_profiles.insert(profile_name);
+                        continue;
                     }
                 }
             }
@@ -18880,336 +18867,332 @@ fn proxy_runtime_responses_request(
                 session_profile.as_deref(),
                 saw_inflight_saturation,
                 last_failure.is_some(),
-            ) {
-                if let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+            ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+                shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Responses,
+            )? {
+                runtime_proxy_log(
                     shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Responses,
+                    format!(
+                        "request={request_id} transport=http direct_current_profile_fallback profile={current_profile} reason=candidate_exhausted"
+                    ),
+                );
+                match attempt_runtime_responses_request(
+                    request_id,
+                    &request,
+                    shared,
+                    &current_profile,
+                    request_turn_state.as_deref(),
                 )? {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http direct_current_profile_fallback profile={current_profile} reason=candidate_exhausted"
-                        ),
-                    );
-                    match attempt_runtime_responses_request(
-                        request_id,
-                        &request,
-                        shared,
-                        &current_profile,
-                        request_turn_state.as_deref(),
-                    )? {
-                        RuntimeResponsesAttempt::Success {
-                            profile_name,
-                            response,
-                        } => {
-                            if saw_previous_response_not_found {
-                                remember_runtime_successful_previous_response_owner(
-                                    shared,
-                                    &profile_name,
-                                    previous_response_id.as_deref(),
-                                    RuntimeRouteKind::Responses,
-                                )?;
-                            }
-                            commit_runtime_proxy_profile_selection_with_notice(
+                    RuntimeResponsesAttempt::Success {
+                        profile_name,
+                        response,
+                    } => {
+                        if saw_previous_response_not_found {
+                            remember_runtime_successful_previous_response_owner(
                                 shared,
                                 &profile_name,
+                                previous_response_id.as_deref(),
                                 RuntimeRouteKind::Responses,
                             )?;
-                            let _ = release_runtime_compact_lineage(
-                                shared,
-                                &profile_name,
-                                request_session_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                "response_committed_post_commit",
-                            );
-                            runtime_proxy_log(
-                                shared,
-                                format!(
-                                    "request={request_id} transport=http committed profile={profile_name} via=direct_current_profile_fallback"
-                                ),
-                            );
+                        }
+                        commit_runtime_proxy_profile_selection_with_notice(
+                            shared,
+                            &profile_name,
+                            RuntimeRouteKind::Responses,
+                        )?;
+                        let _ = release_runtime_compact_lineage(
+                            shared,
+                            &profile_name,
+                            request_session_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            "response_committed_post_commit",
+                        );
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=http committed profile={profile_name} via=direct_current_profile_fallback"
+                            ),
+                        );
+                        return Ok(response);
+                    }
+                    RuntimeResponsesAttempt::QuotaBlocked {
+                        profile_name,
+                        response,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Responses,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
                             return Ok(response);
                         }
-                        RuntimeResponsesAttempt::QuotaBlocked {
-                            profile_name,
-                            response,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Responses,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                return Ok(response);
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                            )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request) =
-                                    runtime_request_without_previous_response_affinity(&request)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request = fresh_request;
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                session_profile = None;
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
-                            continue;
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
                         }
-                        RuntimeResponsesAttempt::PreviousResponseNotFound {
-                            profile_name,
-                            response,
-                            turn_state,
-                        } => {
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                    turn_state
+                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
                                 ),
                             );
-                            saw_previous_response_not_found = true;
-                            if previous_response_retry_candidate.as_deref()
-                                != Some(profile_name.as_str())
-                            {
-                                previous_response_retry_candidate = Some(profile_name.clone());
-                                previous_response_retry_index = 0;
-                            }
-                            let has_turn_state_retry = turn_state.is_some();
-                            if has_turn_state_retry {
-                                candidate_turn_state_retry_profile = Some(profile_name.clone());
-                                candidate_turn_state_retry_value = turn_state;
-                            }
-                            if has_turn_state_retry
-                                && let Some(delay) = runtime_previous_response_retry_delay(
-                                    previous_response_retry_index,
-                                )
-                            {
-                                previous_response_retry_index += 1;
-                                last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                        delay.as_millis()
-                                    ),
-                                );
-                                continue;
-                            }
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request) =
+                                runtime_request_without_previous_response_affinity(&request)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request = fresh_request;
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
                             previous_response_retry_candidate = None;
                             previous_response_retry_index = 0;
-                            if !has_turn_state_retry && !request_requires_previous_response_affinity
-                            {
-                                let _ = clear_runtime_stale_previous_response_binding(
-                                    shared,
-                                    &profile_name,
-                                    previous_response_id.as_deref(),
-                                )?;
-                            }
-                            let released_affinity = release_runtime_previous_response_affinity(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                                RuntimeRouteKind::Responses,
-                            )?;
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if compact_followup_profile
-                                .as_ref()
-                                .is_some_and(|(owner, _)| owner == &profile_name)
-                            {
-                                compact_followup_profile = None;
-                            }
-                            excluded_profiles.insert(profile_name);
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            session_profile = None;
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
+                            continue;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        continue;
+                    }
+                    RuntimeResponsesAttempt::PreviousResponseNotFound {
+                        profile_name,
+                        response,
+                        turn_state,
+                    } => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
+                                turn_state
+                            ),
+                        );
+                        saw_previous_response_not_found = true;
+                        if previous_response_retry_candidate.as_deref()
+                            != Some(profile_name.as_str())
+                        {
+                            previous_response_retry_candidate = Some(profile_name.clone());
+                            previous_response_retry_index = 0;
+                        }
+                        let has_turn_state_retry = turn_state.is_some();
+                        if has_turn_state_retry {
+                            candidate_turn_state_retry_profile = Some(profile_name.clone());
+                            candidate_turn_state_retry_value = turn_state;
+                        }
+                        if has_turn_state_retry
+                            && let Some(delay) =
+                                runtime_previous_response_retry_delay(previous_response_retry_index)
+                        {
+                            previous_response_retry_index += 1;
                             last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
+                                    delay.as_millis()
+                                ),
+                            );
                             continue;
                         }
-                        RuntimeResponsesAttempt::LocalSelectionBlocked {
-                            profile_name,
-                            reason,
-                        } => {
-                            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                            if !runtime_quota_blocked_affinity_is_releasable(
-                                RuntimeRouteKind::Responses,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                                pinned_profile.as_deref(),
-                                turn_state_profile.as_deref(),
-                                session_profile.as_deref(),
-                                trusted_previous_response_affinity,
-                                request_requires_previous_response_affinity,
-                            ) {
-                                return Ok(RuntimeResponsesReply::Buffered(
-                                    build_runtime_proxy_json_error_parts(
-                                        503,
-                                        "service_unavailable",
-                                        runtime_proxy_local_selection_failure_message(),
-                                    ),
-                                ));
-                            }
-                            let released_affinity = release_runtime_quota_blocked_affinity(
+                        previous_response_retry_candidate = None;
+                        previous_response_retry_index = 0;
+                        if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                            let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
                                 previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
                             )?;
-                            if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                                bound_profile = None;
-                            }
-                            if session_profile.as_deref() == Some(profile_name.as_str()) {
-                                session_profile = None;
-                            }
-                            if candidate_turn_state_retry_profile.as_deref()
-                                == Some(profile_name.as_str())
-                            {
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                            }
-                            if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                                pinned_profile = None;
-                                previous_response_retry_index = 0;
-                            }
-                            if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                                turn_state_profile = None;
-                            }
-                            if released_affinity {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                            }
-                            if previous_response_id.is_some()
-                                && trusted_previous_response_affinity
-                                && !previous_response_fresh_fallback_used
-                                && !request_requires_previous_response_affinity
-                                && let Some(fresh_request) =
-                                    runtime_request_without_previous_response_affinity(&request)
-                            {
-                                runtime_proxy_log(
-                                    shared,
-                                    format!(
-                                        "request={request_id} transport=http previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
-                                    ),
-                                );
-                                request = fresh_request;
-                                previous_response_id = None;
-                                request_turn_state = None;
-                                previous_response_fresh_fallback_used = true;
-                                saw_previous_response_not_found = false;
-                                previous_response_retry_candidate = None;
-                                previous_response_retry_index = 0;
-                                candidate_turn_state_retry_profile = None;
-                                candidate_turn_state_retry_value = None;
-                                trusted_previous_response_affinity = false;
-                                bound_profile = None;
-                                session_profile = None;
-                                pinned_profile = None;
-                                turn_state_profile = None;
-                                excluded_profiles.clear();
-                                last_failure = None;
-                                selection_started_at = Instant::now();
-                                selection_attempts = 0;
-                                continue;
-                            }
-                            excluded_profiles.insert(profile_name);
+                        }
+                        let released_affinity = release_runtime_previous_response_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                            RuntimeRouteKind::Responses,
+                        )?;
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if compact_followup_profile
+                            .as_ref()
+                            .is_some_and(|(owner, _)| owner == &profile_name)
+                        {
+                            compact_followup_profile = None;
+                        }
+                        excluded_profiles.insert(profile_name);
+                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        continue;
+                    }
+                    RuntimeResponsesAttempt::LocalSelectionBlocked {
+                        profile_name,
+                        reason,
+                    } => {
+                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+                        if !runtime_quota_blocked_affinity_is_releasable(
+                            RuntimeRouteKind::Responses,
+                            &profile_name,
+                            compact_followup_profile
+                                .as_ref()
+                                .map(|(profile_name, _)| profile_name.as_str()),
+                            pinned_profile.as_deref(),
+                            turn_state_profile.as_deref(),
+                            session_profile.as_deref(),
+                            trusted_previous_response_affinity,
+                            request_requires_previous_response_affinity,
+                        ) {
+                            return Ok(RuntimeResponsesReply::Buffered(
+                                build_runtime_proxy_json_error_parts(
+                                    503,
+                                    "service_unavailable",
+                                    runtime_proxy_local_selection_failure_message(),
+                                ),
+                            ));
+                        }
+                        let released_affinity = release_runtime_quota_blocked_affinity(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                            request_turn_state.as_deref(),
+                            request_session_id.as_deref(),
+                        )?;
+                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
+                            bound_profile = None;
+                        }
+                        if session_profile.as_deref() == Some(profile_name.as_str()) {
+                            session_profile = None;
+                        }
+                        if candidate_turn_state_retry_profile.as_deref()
+                            == Some(profile_name.as_str())
+                        {
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                        }
+                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
+                            pinned_profile = None;
+                            previous_response_retry_index = 0;
+                        }
+                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
+                            turn_state_profile = None;
+                        }
+                        if released_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                        }
+                        if previous_response_id.is_some()
+                            && trusted_previous_response_affinity
+                            && !previous_response_fresh_fallback_used
+                            && !request_requires_previous_response_affinity
+                            && let Some(fresh_request) =
+                                runtime_request_without_previous_response_affinity(&request)
+                        {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=http previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
+                                ),
+                            );
+                            request = fresh_request;
+                            previous_response_id = None;
+                            request_turn_state = None;
+                            previous_response_fresh_fallback_used = true;
+                            saw_previous_response_not_found = false;
+                            previous_response_retry_candidate = None;
+                            previous_response_retry_index = 0;
+                            candidate_turn_state_retry_profile = None;
+                            candidate_turn_state_retry_value = None;
+                            trusted_previous_response_affinity = false;
+                            bound_profile = None;
+                            session_profile = None;
+                            pinned_profile = None;
+                            turn_state_profile = None;
+                            excluded_profiles.clear();
+                            last_failure = None;
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
                             continue;
                         }
+                        excluded_profiles.insert(profile_name);
+                        continue;
                     }
                 }
             }
@@ -19720,29 +19703,27 @@ fn attempt_runtime_responses_request(
         profile_name,
         turn_state_override,
     )
-    .map_err(|err| {
+    .inspect_err(|err| {
         note_runtime_profile_transport_failure(
             shared,
             profile_name,
             RuntimeRouteKind::Responses,
             "responses_upstream_request",
-            &err,
+            err,
         );
-        err
     })?;
     let response_turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
-            .map_err(|err| {
+            .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Responses,
                     "responses_buffer_response",
-                    &err,
+                    err,
                 );
-                err
             })?;
         let retryable_quota = matches!(status, 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
@@ -19787,15 +19768,14 @@ fn attempt_runtime_responses_request(
         profile_name,
         inflight_guard,
     )
-    .map_err(|err| {
+    .inspect_err(|err| {
         note_runtime_profile_transport_failure(
             shared,
             profile_name,
             RuntimeRouteKind::Responses,
             "responses_prepare_success",
-            &err,
+            err,
         );
-        err
     })
 }
 
@@ -20172,7 +20152,7 @@ fn next_runtime_response_candidate_for_route(
                 inflight,
                 runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
                 index,
-                format!(
+                format_args!(
                     "quota_source={} {}",
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary)
@@ -20516,6 +20496,7 @@ fn runtime_any_waited_candidate_relieved(
     Ok(false)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -21603,10 +21584,7 @@ fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
     )
 }
 
-fn runtime_quota_pressure_sort_key_for_route(
-    usage: &UsageResponse,
-    route_kind: RuntimeRouteKind,
-) -> (
+type RuntimeQuotaPressureSortKey = (
     RuntimeQuotaPressureBand,
     i64,
     i64,
@@ -21616,7 +21594,12 @@ fn runtime_quota_pressure_sort_key_for_route(
     Reverse<i64>,
     i64,
     i64,
-) {
+);
+
+fn runtime_quota_pressure_sort_key_for_route(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+) -> RuntimeQuotaPressureSortKey {
     let score = ready_profile_score_for_route(usage, route_kind);
     (
         runtime_quota_pressure_band_for_route(usage, route_kind),
@@ -21633,17 +21616,7 @@ fn runtime_quota_pressure_sort_key_for_route(
 
 fn runtime_quota_pressure_sort_key_for_route_from_summary(
     summary: RuntimeQuotaSummary,
-) -> (
-    RuntimeQuotaPressureBand,
-    i64,
-    i64,
-    i64,
-    Reverse<i64>,
-    Reverse<i64>,
-    Reverse<i64>,
-    i64,
-    i64,
-) {
+) -> RuntimeQuotaPressureSortKey {
     (
         summary.route_band,
         match summary.route_band {
@@ -22721,15 +22694,13 @@ fn send_runtime_proxy_upstream_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
-    if matches!(response.status().as_u16(), 401 | 403) {
-        if response.status().as_u16() == 401 {
-            note_runtime_profile_auth_failure(
-                shared,
-                profile_name,
-                runtime_proxy_request_lane(&request.path_and_query, false),
-                response.status().as_u16(),
-            );
-        }
+    if matches!(response.status().as_u16(), 401 | 403) && response.status().as_u16() == 401 {
+        note_runtime_profile_auth_failure(
+            shared,
+            profile_name,
+            runtime_proxy_request_lane(&request.path_and_query, false),
+            response.status().as_u16(),
+        );
     }
     note_runtime_profile_latency_observation(
         shared,
@@ -22837,15 +22808,13 @@ fn send_runtime_proxy_upstream_responses_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
-    if matches!(response.status().as_u16(), 401 | 403) {
-        if response.status().as_u16() == 401 {
-            note_runtime_profile_auth_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Responses,
-                response.status().as_u16(),
-            );
-        }
+    if matches!(response.status().as_u16(), 401 | 403) && response.status().as_u16() == 401 {
+        note_runtime_profile_auth_failure(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Responses,
+            response.status().as_u16(),
+        );
     }
     note_runtime_profile_latency_observation(
         shared,
@@ -22941,6 +22910,7 @@ fn forward_runtime_proxy_response(
     Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_runtime_proxy_responses_success(
     request_id: u64,
     request_previous_response_id: Option<&str>,
@@ -23344,13 +23314,11 @@ fn write_runtime_streaming_response(
             err
         })?;
     }
-    writer.write_all(b"\r\n").map_err(|err| {
-        log_writer_error("headers_end", 0, 0, &err);
-        err
+    writer.write_all(b"\r\n").inspect_err(|err| {
+        log_writer_error("headers_end", 0, 0, err);
     })?;
-    writer.flush().map_err(|err| {
-        log_writer_error("headers_flush", 0, 0, &err);
-        err
+    writer.flush().inspect_err(|err| {
+        log_writer_error("headers_flush", 0, 0, err);
     })?;
 
     let mut buffer = [0_u8; 8192];
@@ -23440,28 +23408,23 @@ fn write_runtime_streaming_response(
             log_writer_error("chunk_size", chunk_count, total_bytes, &err);
             err
         })?;
-        writer.write_all(&buffer[..read]).map_err(|err| {
-            log_writer_error("chunk_body", chunk_count, total_bytes, &err);
-            err
+        writer.write_all(&buffer[..read]).inspect_err(|err| {
+            log_writer_error("chunk_body", chunk_count, total_bytes, err);
         })?;
-        writer.write_all(b"\r\n").map_err(|err| {
-            log_writer_error("chunk_suffix", chunk_count, total_bytes, &err);
-            err
+        writer.write_all(b"\r\n").inspect_err(|err| {
+            log_writer_error("chunk_suffix", chunk_count, total_bytes, err);
         })?;
         if flush_each_chunk || chunk_count == 1 {
-            writer.flush().map_err(|err| {
-                log_writer_error("chunk_flush", chunk_count, total_bytes, &err);
-                err
+            writer.flush().inspect_err(|err| {
+                log_writer_error("chunk_flush", chunk_count, total_bytes, err);
             })?;
         }
     }
-    writer.write_all(b"0\r\n\r\n").map_err(|err| {
-        log_writer_error("trailer", chunk_count, total_bytes, &err);
-        err
+    writer.write_all(b"0\r\n\r\n").inspect_err(|err| {
+        log_writer_error("trailer", chunk_count, total_bytes, err);
     })?;
-    writer.flush().map_err(|err| {
-        log_writer_error("trailer_flush", chunk_count, total_bytes, &err);
-        err
+    writer.flush().inspect_err(|err| {
+        log_writer_error("trailer_flush", chunk_count, total_bytes, err);
     })?;
     runtime_proxy_log_to_path(
         &response.log_path,
@@ -25241,6 +25204,7 @@ fn runtime_anthropic_response_from_json_value(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_anthropic_response_from_json_value_with_carried_usage(
     value: &serde_json::Value,
     requested_model: &str,
@@ -25648,7 +25612,6 @@ impl RuntimeAnthropicCollectedResponse {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-#[cfg_attr(not(test), allow(dead_code))]
 fn runtime_anthropic_response_from_sse_bytes(
     body: &[u8],
     requested_model: &str,
@@ -25666,6 +25629,7 @@ fn runtime_anthropic_response_from_sse_bytes(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_anthropic_response_from_sse_bytes_with_carried_usage(
     body: &[u8],
     requested_model: &str,
@@ -26025,6 +25989,7 @@ fn runtime_response_body_looks_like_sse(body: &[u8]) -> bool {
     prefix.starts_with(b"event:") || prefix.starts_with(b"data:")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     body: &[u8],
     requested_model: &str,
@@ -26110,6 +26075,7 @@ struct RuntimeAnthropicSseReader {
 }
 
 impl RuntimeAnthropicSseReader {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         inner: Box<dyn Read + Send>,
         model: String,
@@ -27465,53 +27431,52 @@ fn schedule_ready_profile_candidates(
         ready_profile_runtime_sort_key(candidate, state, best_total_pressure, now)
     });
 
-    if let Some(preferred_name) = preferred_profile {
-        if let Some(preferred_index) = candidates.iter().position(|candidate| {
+    if let Some(preferred_name) = preferred_profile
+        && let Some(preferred_index) = candidates.iter().position(|candidate| {
             candidate.name == preferred_name
                 && !profile_in_run_selection_cooldown(state, &candidate.name, now)
-        }) {
-            let preferred_score = ready_profile_score(&candidates[preferred_index]).total_pressure;
-            let selected_score = ready_profile_score(&candidates[0]).total_pressure;
+        })
+    {
+        let preferred_score = ready_profile_score(&candidates[preferred_index]).total_pressure;
+        let selected_score = ready_profile_score(&candidates[0]).total_pressure;
 
-            if preferred_index > 0
-                && score_within_bps(
-                    preferred_score,
-                    selected_score,
-                    RUN_SELECTION_HYSTERESIS_BPS,
-                )
-            {
-                let preferred_candidate = candidates.remove(preferred_index);
-                candidates.insert(0, preferred_candidate);
-            }
+        if preferred_index > 0
+            && score_within_bps(
+                preferred_score,
+                selected_score,
+                RUN_SELECTION_HYSTERESIS_BPS,
+            )
+        {
+            let preferred_candidate = candidates.remove(preferred_index);
+            candidates.insert(0, preferred_candidate);
         }
     }
 
     candidates
 }
 
+type ReadyProfileSortKey = (
+    i64,
+    i64,
+    i64,
+    Reverse<i64>,
+    Reverse<i64>,
+    Reverse<i64>,
+    i64,
+    i64,
+    usize,
+    usize,
+    usize,
+);
+
+type ReadyProfileRuntimeSortKey = (usize, usize, i64, ReadyProfileSortKey);
+
 fn ready_profile_runtime_sort_key(
     candidate: &ReadyProfileCandidate,
     state: &AppState,
     best_total_pressure: i64,
     now: i64,
-) -> (
-    usize,
-    usize,
-    i64,
-    (
-        i64,
-        i64,
-        i64,
-        Reverse<i64>,
-        Reverse<i64>,
-        Reverse<i64>,
-        i64,
-        i64,
-        usize,
-        usize,
-        usize,
-    ),
-) {
+) -> ReadyProfileRuntimeSortKey {
     let score = ready_profile_score(candidate);
     let near_optimal = score_within_bps(
         score.total_pressure,
@@ -27538,21 +27503,7 @@ fn ready_profile_runtime_sort_key(
     )
 }
 
-fn ready_profile_sort_key(
-    candidate: &ReadyProfileCandidate,
-) -> (
-    i64,
-    i64,
-    i64,
-    Reverse<i64>,
-    Reverse<i64>,
-    Reverse<i64>,
-    i64,
-    i64,
-    usize,
-    usize,
-    usize,
-) {
+fn ready_profile_sort_key(candidate: &ReadyProfileCandidate) -> ReadyProfileSortKey {
     let score = ready_profile_score(candidate);
 
     (
@@ -28021,12 +27972,7 @@ fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
     collect_process_rows()
         .into_iter()
         .find(|row| row.pid == pid)
-        .and_then(|row| {
-            row.args
-                .into_iter()
-                .filter(|arg| Path::new(arg).exists())
-                .last()
-        })
+        .and_then(|row| row.args.into_iter().rfind(|arg| Path::new(arg).exists()))
         .map(PathBuf::from)
         .or_else(|| fs::read_link(format!("/proc/{pid}/exe")).ok())
 }
@@ -28344,19 +28290,19 @@ fn wait_for_runtime_broker_ready(
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
     while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
-        if let Some(registry) = load_runtime_broker_registry(paths, broker_key)? {
-            if registry.instance_token == expected_instance_token
-                && let Some(health) = probe_runtime_broker_health(client, &registry)?
-                && health.instance_token == expected_instance_token
-            {
-                return Ok(registry);
-            }
+        if let Some(registry) = load_runtime_broker_registry(paths, broker_key)?
+            && registry.instance_token == expected_instance_token
+            && let Some(health) = probe_runtime_broker_health(client, &registry)?
+            && health.instance_token == expected_instance_token
+        {
+            return Ok(registry);
         }
         thread::sleep(poll_interval);
     }
     bail!("timed out waiting for runtime broker readiness");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_runtime_broker_process(
     paths: &AppPaths,
     current_profile: &str,

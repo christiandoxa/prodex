@@ -474,14 +474,14 @@ pub(crate) fn handle_current_profile() -> Result<()> {
 
     let Some(active) = state.active_profile.as_deref() else {
         let mut fields = vec![("Status".to_string(), "No active profile.".to_string())];
-        if state.profiles.len() == 1 {
-            if let Some((name, profile)) = state.profiles.iter().next() {
-                fields.push(("Only profile".to_string(), name.clone()));
-                fields.push((
-                    "CODEX_HOME".to_string(),
-                    profile.codex_home.display().to_string(),
-                ));
-            }
+        if state.profiles.len() == 1
+            && let Some((name, profile)) = state.profiles.iter().next()
+        {
+            fields.push(("Only profile".to_string(), name.clone()));
+            fields.push((
+                "CODEX_HOME".to_string(),
+                profile.codex_home.display().to_string(),
+            ));
         }
         print_panel("Active Profile", &fields);
         return Ok(());
@@ -555,10 +555,10 @@ fn login_into_profile(
         return Ok(status);
     }
 
-    if let Ok(email) = fetch_profile_email(&codex_home) {
-        if let Some(profile) = state.profiles.get_mut(&profile_name) {
-            profile.email = Some(email);
-        }
+    if let Ok(email) = fetch_profile_email(&codex_home)
+        && let Some(profile) = state.profiles.get_mut(&profile_name)
+    {
+        profile.email = Some(email);
     }
 
     let account_email = state

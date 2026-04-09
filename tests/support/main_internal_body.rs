@@ -1529,6 +1529,7 @@ fn runtime_proxy_backend_is_websocket_upgrade(stream: &TcpStream) -> bool {
     request.contains("upgrade: websocket")
 }
 
+#[allow(clippy::result_large_err)]
 fn handle_runtime_proxy_backend_websocket(
     stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
@@ -5763,13 +5764,12 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
     drop(standard);
 
     assert!(
-        shared
+        !shared
             .runtime
             .lock()
             .expect("runtime should lock")
             .profile_inflight
-            .get("main")
-            .is_none(),
+            .contains_key("main"),
         "weighted inflight release should fully drain the profile count"
     );
 }
@@ -7164,13 +7164,12 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         .expect("profile commit should succeed");
 
     assert!(
-        shared
+        !shared
             .runtime
             .lock()
             .expect("runtime should lock")
             .profile_health
-            .get("main")
-            .is_none(),
+            .contains_key("main"),
         "successful commit should clear temporary health penalty"
     );
     let runtime = shared.runtime.lock().expect("runtime should lock");
@@ -7570,11 +7569,10 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
             .lock()
             .expect("runtime should lock")
             .profile_health
-            .get(&runtime_profile_route_health_key(
+            .contains_key(&runtime_profile_route_health_key(
                 "main",
                 RuntimeRouteKind::Compact
-            ))
-            .is_some(),
+            )),
         "successful commit should keep unrelated route health penalty intact"
     );
 }
@@ -7663,16 +7661,15 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         .expect("profile commit should succeed");
 
     assert!(
-        shared
+        !shared
             .runtime
             .lock()
             .expect("runtime should lock")
             .profile_health
-            .get(&runtime_profile_route_bad_pairing_key(
+            .contains_key(&runtime_profile_route_bad_pairing_key(
                 "main",
                 RuntimeRouteKind::Websocket
-            ))
-            .is_none(),
+            )),
         "successful commit should clear bad pairing memory for the successful route"
     );
     assert!(
@@ -7681,11 +7678,10 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
             .lock()
             .expect("runtime should lock")
             .profile_health
-            .get(&runtime_profile_route_bad_pairing_key(
+            .contains_key(&runtime_profile_route_bad_pairing_key(
                 "main",
                 RuntimeRouteKind::Compact
-            ))
-            .is_some(),
+            )),
         "successful commit should keep unrelated route bad pairing memory intact"
     );
 }
@@ -7777,21 +7773,22 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
     commit_runtime_proxy_profile_selection(&shared, "main", RuntimeRouteKind::Responses)
         .expect("second profile commit should succeed");
     assert!(
-        shared
+        !shared
             .runtime
             .lock()
             .expect("runtime should lock")
             .profile_health
-            .get(&route_key)
-            .is_none(),
+            .contains_key(&route_key),
         "consecutive successes should accelerate route recovery"
     );
 }
 
 #[test]
 fn runtime_doctor_json_value_includes_selection_markers() {
-    let mut summary = RuntimeDoctorSummary::default();
-    summary.line_count = 3;
+    let mut summary = RuntimeDoctorSummary {
+        line_count: 3,
+        ..RuntimeDoctorSummary::default()
+    };
     summary.marker_counts.insert("selection_pick", 2);
     summary.marker_counts.insert("selection_skip_current", 1);
     summary
@@ -10798,7 +10795,7 @@ fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
             .expect("legacy backup should serialize cleanly"),
     )
     .expect("legacy backup should be writable");
-    fs::write(&runtime_backoffs_file_path(&paths), "{ not valid json")
+    fs::write(runtime_backoffs_file_path(&paths), "{ not valid json")
         .expect("broken primary backoffs should be writable");
 
     let loaded = load_runtime_profile_backoffs_with_recovery(&paths, &profiles)
@@ -17943,25 +17940,22 @@ fn runtime_proxy_aborts_stalled_http_fallback_before_long_hang() {
         elapsed < Duration::from_secs(2),
         "stalled HTTP fallback took too long: {elapsed:?}"
     );
-    match result {
-        Ok(response) => {
-            assert_eq!(
-                response.status(),
-                reqwest::StatusCode::OK,
-                "runtime proxy should surface a dropped stream, not a synthetic HTTP error"
-            );
-            let content_type = response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            assert!(
-                content_type.contains("text/event-stream"),
-                "runtime proxy should keep responses transport semantics on failure"
-            );
-        }
-        Err(_) => {}
+    if let Ok(response) = result {
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "runtime proxy should surface a dropped stream, not a synthetic HTTP error"
+        );
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            content_type.contains("text/event-stream"),
+            "runtime proxy should keep responses transport semantics on failure"
+        );
     }
 }
 
@@ -27426,7 +27420,7 @@ fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_tool_ca
             "Inspect the browser UI.\n\nInteract with the graphical computer display. Display resolution: 1600x900 pixels. Display number: 1. Zoom action enabled."
         )
     );
-    assert_eq!(
+    assert!(
         tools[1]
             .get("parameters")
             .and_then(|parameters| parameters.get("properties"))
@@ -27439,8 +27433,7 @@ fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_tool_ca
                     .filter_map(serde_json::Value::as_str)
                     .collect::<Vec<_>>()
             })
-            .is_some_and(|values| values.contains(&"zoom")),
-        true
+            .is_some_and(|values| values.contains(&"zoom"))
     );
     assert_eq!(
         tools[1]

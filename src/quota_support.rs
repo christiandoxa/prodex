@@ -365,14 +365,12 @@ pub(crate) fn render_quota_reports_window_with_layout(
             .into_iter()
             .map(|line| format!("  {line}")),
         );
-        if detail {
-            if let Some(resets) = resets.as_deref() {
-                section.extend(
-                    wrap_text(resets, total_width.saturating_sub(2).max(1))
-                        .into_iter()
-                        .map(|line| format!("  {line}")),
-                );
-            }
+        if detail && let Some(resets) = resets.as_deref() {
+            section.extend(
+                wrap_text(resets, total_width.saturating_sub(2).max(1))
+                    .into_iter()
+                    .map(|line| format!("  {line}")),
+            );
         }
         section.push(String::new());
         sections.push(section);
