@@ -25260,6 +25260,7 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
     .expect("Claude config should be valid JSON");
     assert_eq!(config["numStartups"], serde_json::json!(1));
     assert_eq!(config["hasCompletedOnboarding"], serde_json::json!(true));
+    assert!(config.get("skipWebFetchPreflight").is_none());
     assert_eq!(config["lastOnboardingVersion"], serde_json::json!("2.1.90"));
     let additional_model_options = config["additionalModelOptionsCache"]
         .as_array()
@@ -25285,6 +25286,13 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
     assert!(project["enabledMcpjsonServers"].is_array());
     assert!(project["disabledMcpjsonServers"].is_array());
     assert!(project["exampleFiles"].is_array());
+
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(config_dir.join("settings.json"))
+            .expect("Claude settings should be written"),
+    )
+    .expect("Claude settings should be valid JSON");
+    assert_eq!(settings["skipWebFetchPreflight"], serde_json::json!(true));
 }
 
 #[test]
@@ -25322,6 +25330,16 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
         .expect("existing config should serialize"),
     )
     .expect("existing config should write");
+    fs::write(
+        config_dir.join("settings.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "effortLevel": "high",
+            "customSetting": "keep-me",
+            "skipWebFetchPreflight": false
+        }))
+        .expect("existing settings should serialize"),
+    )
+    .expect("existing settings should write");
 
     ensure_runtime_proxy_claude_launch_config(&config_dir, &cwd, Some("2.1.90"))
         .expect("Claude config merge should succeed");
@@ -25333,6 +25351,7 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
     .expect("merged Claude config should be valid JSON");
     assert_eq!(config["numStartups"], serde_json::json!(7));
     assert_eq!(config["customField"], serde_json::json!("keep-me"));
+    assert!(config.get("skipWebFetchPreflight").is_none());
     let additional_model_options = config["additionalModelOptionsCache"]
         .as_array()
         .expect("additional model options cache should be preserved as an array");
@@ -25361,6 +25380,15 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
         config["projects"][cwd_key.as_str()]["hasTrustDialogAccepted"],
         serde_json::json!(true)
     );
+
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(config_dir.join("settings.json"))
+            .expect("Claude settings should still exist"),
+    )
+    .expect("merged Claude settings should be valid JSON");
+    assert_eq!(settings["effortLevel"], serde_json::json!("high"));
+    assert_eq!(settings["customSetting"], serde_json::json!("keep-me"));
+    assert_eq!(settings["skipWebFetchPreflight"], serde_json::json!(true));
 }
 
 #[test]
@@ -25375,6 +25403,14 @@ fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state
         "{\"message\":\"first\"}\n{\"message\":\"second\"}\n",
     )
     .expect("legacy Claude chat history should write");
+    fs::write(
+        legacy_claude_dir.join("settings.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "effortLevel": "high"
+        }))
+        .expect("legacy Claude settings should serialize"),
+    )
+    .expect("legacy Claude settings should write");
     fs::write(
         home_dir.join(".claude.json"),
         serde_json::to_string_pretty(&serde_json::json!({
@@ -25426,6 +25462,12 @@ fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state
         config["projects"]["/tmp/legacy"]["allowedTools"],
         serde_json::json!(["Bash"])
     );
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(shared_dir.join("settings.json"))
+            .expect("shared Claude settings should be readable"),
+    )
+    .expect("shared Claude settings should parse");
+    assert_eq!(settings["effortLevel"], serde_json::json!("high"));
 }
 
 #[test]
@@ -25461,6 +25503,14 @@ fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_
         .expect("legacy profile Claude config should serialize"),
     )
     .expect("legacy profile Claude config should write");
+    fs::write(
+        profile_dir.join("settings.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "effortLevel": "high"
+        }))
+        .expect("legacy profile Claude settings should serialize"),
+    )
+    .expect("legacy profile Claude settings should write");
 
     fs::create_dir_all(shared_dir.join("projects/workspace"))
         .expect("shared Claude project dir should exist");
@@ -25477,6 +25527,14 @@ fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_
         .expect("shared Claude config should serialize"),
     )
     .expect("shared Claude config should write");
+    fs::write(
+        shared_dir.join("settings.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model": "gpt-5.4"
+        }))
+        .expect("shared Claude settings should serialize"),
+    )
+    .expect("shared Claude settings should write");
 
     let config_dir = prepare_runtime_proxy_claude_config_dir(&paths, &codex_home, true)
         .expect("Claude config dir should be prepared");
@@ -25498,6 +25556,13 @@ fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_
     .expect("shared Claude config should parse");
     assert_eq!(config["sharedOnly"], serde_json::json!(true));
     assert_eq!(config["profileOnly"], serde_json::json!(true));
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(shared_dir.join("settings.json"))
+            .expect("shared Claude settings should still be readable"),
+    )
+    .expect("shared Claude settings should parse");
+    assert_eq!(settings["model"], serde_json::json!("gpt-5.4"));
+    assert_eq!(settings["effortLevel"], serde_json::json!("high"));
 }
 
 #[test]
@@ -25823,6 +25888,189 @@ fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
 }
 
 #[test]
+fn translate_runtime_anthropic_messages_request_preserves_tool_references() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_search",
+                            "name": "ToolSearch",
+                            "input": {
+                                "query": "select:WebSearch,WebFetch,TodoWrite"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_search",
+                            "content": [
+                                {
+                                    "type": "tool_reference",
+                                    "tool_name": "WebSearch",
+                                },
+                                {
+                                    "type": "tool_reference",
+                                    "tool_name": "WebFetch",
+                                },
+                                {
+                                    "type": "tool_reference",
+                                    "tool_name": "TodoWrite",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    let input = body
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .expect("input array should exist");
+
+    assert_eq!(input.len(), 2);
+    assert_eq!(
+        input[0].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call")
+    );
+    assert_eq!(
+        input[0].get("name").and_then(serde_json::Value::as_str),
+        Some("ToolSearch")
+    );
+    assert_eq!(
+        input[1].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call_output")
+    );
+
+    let output = input[1]
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .expect("tool result output should be a string");
+    let output: serde_json::Value =
+        serde_json::from_str(output).expect("tool result output should be valid JSON");
+    assert_eq!(
+        output
+            .get("tool_references")
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items.iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+            }),
+        Some(vec!["WebSearch", "WebFetch", "TodoWrite"])
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_maps_web_fetch_tool_result() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "server_tool_use",
+                            "id": "srvtoolu_fetch",
+                            "name": "web_fetch",
+                            "input": {
+                                "url": "https://example.com/article"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "web_fetch_tool_result",
+                            "tool_use_id": "srvtoolu_fetch",
+                            "content": {
+                                "type": "web_fetch_result",
+                                "url": "https://example.com/article",
+                                "content": {
+                                    "type": "document",
+                                    "source": {
+                                        "type": "text",
+                                        "media_type": "text/plain",
+                                        "data": "Example content",
+                                    },
+                                    "title": "Example Article",
+                                },
+                                "retrieved_at": "2026-04-09T03:00:00Z",
+                            }
+                        }
+                    ]
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    let input = body
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .expect("input array should exist");
+
+    assert_eq!(input.len(), 2);
+    assert_eq!(
+        input[0].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call")
+    );
+    assert_eq!(
+        input[0].get("name").and_then(serde_json::Value::as_str),
+        Some("web_fetch")
+    );
+    assert_eq!(
+        input[1].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call_output")
+    );
+
+    let output = input[1]
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .expect("tool result output should be a string");
+    let output: serde_json::Value =
+        serde_json::from_str(output).expect("tool result output should be valid JSON");
+    assert_eq!(
+        output.get("type").and_then(serde_json::Value::as_str),
+        Some("web_fetch_result")
+    );
+    assert_eq!(
+        output.get("url").and_then(serde_json::Value::as_str),
+        Some("https://example.com/article")
+    );
+}
+
+#[test]
 fn runtime_proxy_anthropic_reasoning_effort_normalizes_output_config_levels() {
     let cases = [
         ("gpt-5.4", "low", Some("low")),
@@ -26043,6 +26291,57 @@ fn translate_runtime_anthropic_messages_request_maps_web_search_server_tool() {
 }
 
 #[test]
+fn translate_runtime_anthropic_messages_request_forces_implicit_web_search_tool_choice() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "tools": [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "allowed_domains": []
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Perform a web search for the latest OpenAI news"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+
+    assert_eq!(
+        body.get("tool_choice").and_then(serde_json::Value::as_str),
+        Some("required")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("web_search")
+    );
+}
+
+#[test]
 fn runtime_anthropic_response_from_json_value_preserves_tool_use_and_usage() {
     let response = runtime_anthropic_response_from_json_value(
         &serde_json::json!({
@@ -26124,6 +26423,45 @@ fn runtime_anthropic_response_from_json_value_preserves_tool_use_and_usage() {
             .and_then(|usage| usage.get("cache_read_input_tokens"))
             .and_then(serde_json::Value::as_u64),
         Some(3)
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(0)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_json_value_counts_web_search_tool_use() {
+    let response = runtime_anthropic_response_from_json_value(
+        &serde_json::json!({
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7
+            },
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_123",
+                    "name": "WebSearch",
+                    "arguments": "{\"query\":\"OpenAI latest news today\"}"
+                }
+            ]
+        }),
+        "claude-sonnet-4-6",
+        false,
+    );
+
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
     );
 }
 
@@ -26220,6 +26558,14 @@ fn runtime_anthropic_response_from_json_value_preserves_web_search_results() {
             .and_then(serde_json::Value::as_str),
         Some("end_turn")
     );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
 }
 
 #[test]
@@ -26270,6 +26616,86 @@ fn runtime_anthropic_response_from_sse_bytes_collects_deltas_and_tool_use() {
             .and_then(|usage| usage.get("input_tokens"))
             .and_then(serde_json::Value::as_u64),
         Some(9)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_sse_bytes_preserves_web_search_usage() {
+    let body = concat!(
+        "event: response.output_item.done\r\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_123\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"queries\":[\"OpenAI latest news today\"],\"sources\":[{\"type\":\"url\",\"url\":\"https://openai.com/index/industrial-policy-for-the-intelligence-age\",\"title\":\"Industrial policy for the Intelligence Age\"}]}}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"tool_usage\":{\"web_search\":{\"num_requests\":1}},\"output\":[{\"type\":\"web_search_call\",\"id\":\"ws_123\",\"status\":\"completed\",\"action\":{\"type\":\"search\",\"queries\":[\"OpenAI latest news today\"],\"sources\":[{\"type\":\"url\",\"url\":\"https://openai.com/index/industrial-policy-for-the-intelligence-age\",\"title\":\"Industrial policy for the Intelligence Age\"}]}},{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"OpenAI published a new industrial policy post.\"}]}]}}\r\n",
+        "\r\n"
+    )
+    .as_bytes()
+    .to_vec();
+    let response = runtime_anthropic_response_from_sse_bytes(&body, "claude-sonnet-4-6", false)
+        .expect("SSE translation should succeed");
+    let content = response
+        .get("content")
+        .and_then(serde_json::Value::as_array)
+        .expect("content should be an array");
+    assert_eq!(
+        content[0].get("type").and_then(serde_json::Value::as_str),
+        Some("server_tool_use")
+    );
+    assert_eq!(
+        content[1].get("type").and_then(serde_json::Value::as_str),
+        Some("web_search_tool_result")
+    );
+    assert_eq!(
+        content[2].get("text").and_then(serde_json::Value::as_str),
+        Some("OpenAI published a new industrial policy post.")
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_sse_bytes_counts_web_search_tool_use() {
+    let body = concat!(
+        "event: response.output_item.added\r\n",
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"WebSearch\"}}\r\n",
+        "\r\n",
+        "event: response.function_call_arguments.delta\r\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"query\\\":\\\"OpenAI latest news today\\\"}\"}\r\n",
+        "\r\n",
+        "event: response.output_item.done\r\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"WebSearch\"}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"output\":[]}}\r\n",
+        "\r\n"
+    )
+    .as_bytes()
+    .to_vec();
+    let response = runtime_anthropic_response_from_sse_bytes(&body, "claude-sonnet-4-6", false)
+        .expect("SSE translation should succeed");
+
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("tool_use")
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
     );
 }
 
