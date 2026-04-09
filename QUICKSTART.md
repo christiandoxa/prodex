@@ -128,7 +128,8 @@ Use this path when you want Claude Code to be the front end while Prodex still r
 What changes on this path:
 
 - Claude Code talks to a local Anthropic-compatible Prodex proxy
-- each profile gets its own `CLAUDE_CONFIG_DIR`
+- managed profiles link `CLAUDE_CONFIG_DIR` into shared Prodex Claude state
+- the first managed Claude launch imports your existing `~/.claude` and `~/.claude.json` when present
 - the initial Claude model follows the shared Codex `config.toml` model when available
 - Claude's `opus`, `sonnet`, and `haiku` entries are pinned to representative GPT models
 - Prodex seeds Claude's picker with the Prodex GPT catalog via Claude-native placeholder model IDs

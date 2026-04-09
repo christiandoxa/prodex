@@ -161,6 +161,8 @@ prodex claude -- -p "summarize this repo"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
+For managed profiles, Prodex now seeds Claude state from your existing `~/.claude` and `~/.claude.json` on first use, then keeps Claude config and chat history in shared Prodex-managed state.
+
 ## Command Reference
 
 ### Profile & Login

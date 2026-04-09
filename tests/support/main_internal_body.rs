@@ -25364,6 +25364,143 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
 }
 
 #[test]
+fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state() {
+    let temp_dir = TestDir::new();
+    let home_dir = temp_dir.path.join("home");
+    let legacy_claude_dir = home_dir.join(".claude");
+    let legacy_project_dir = legacy_claude_dir.join("projects/workspace");
+    fs::create_dir_all(&legacy_project_dir).expect("legacy Claude project dir should exist");
+    fs::write(
+        legacy_project_dir.join("session.jsonl"),
+        "{\"message\":\"first\"}\n{\"message\":\"second\"}\n",
+    )
+    .expect("legacy Claude chat history should write");
+    fs::write(
+        home_dir.join(".claude.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "customField": "keep-me",
+            "projects": {
+                "/tmp/legacy": {
+                    "allowedTools": ["Bash"]
+                }
+            }
+        }))
+        .expect("legacy Claude config should serialize"),
+    )
+    .expect("legacy Claude config should write");
+    let _home_guard = TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let codex_home = paths.managed_profiles_root.join("main");
+
+    let config_dir = prepare_runtime_proxy_claude_config_dir(&paths, &codex_home, true)
+        .expect("Claude config dir should be prepared");
+    let shared_dir = runtime_proxy_shared_claude_config_dir(&paths);
+    assert!(
+        same_path(&config_dir, &shared_dir),
+        "managed Claude config dir should point at shared Prodex Claude state"
+    );
+    assert!(
+        runtime_proxy_claude_legacy_import_marker_path(&shared_dir).exists(),
+        "legacy import marker should be written after successful import"
+    );
+    assert_eq!(
+        fs::read_to_string(shared_dir.join("projects/workspace/session.jsonl"))
+            .expect("shared Claude history should be readable"),
+        "{\"message\":\"first\"}\n{\"message\":\"second\"}\n"
+    );
+
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(shared_dir.join(".claude.json"))
+            .expect("shared Claude config should be readable"),
+    )
+    .expect("shared Claude config should parse");
+    assert_eq!(config["customField"], serde_json::json!("keep-me"));
+    assert_eq!(
+        config["projects"]["/tmp/legacy"]["allowedTools"],
+        serde_json::json!(["Bash"])
+    );
+}
+
+#[test]
+fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_shared_root() {
+    let temp_dir = TestDir::new();
+    let home_dir = temp_dir.path.join("home");
+    fs::create_dir_all(&home_dir).expect("home dir should exist");
+    let _home_guard = TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let codex_home = paths.managed_profiles_root.join("main");
+    let profile_dir = runtime_proxy_claude_config_dir(&codex_home);
+    let shared_dir = runtime_proxy_shared_claude_config_dir(&paths);
+
+    fs::create_dir_all(profile_dir.join("projects/workspace"))
+        .expect("legacy profile Claude project dir should exist");
+    fs::write(
+        profile_dir.join("projects/workspace/session.jsonl"),
+        "{\"message\":\"first\"}\n{\"message\":\"second\"}\n",
+    )
+    .expect("legacy profile Claude history should write");
+    fs::write(
+        profile_dir.join(".claude.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "profileOnly": true
+        }))
+        .expect("legacy profile Claude config should serialize"),
+    )
+    .expect("legacy profile Claude config should write");
+
+    fs::create_dir_all(shared_dir.join("projects/workspace"))
+        .expect("shared Claude project dir should exist");
+    fs::write(
+        shared_dir.join("projects/workspace/session.jsonl"),
+        "{\"message\":\"first\"}\n",
+    )
+    .expect("shared Claude history should write");
+    fs::write(
+        shared_dir.join(".claude.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "sharedOnly": true
+        }))
+        .expect("shared Claude config should serialize"),
+    )
+    .expect("shared Claude config should write");
+
+    let config_dir = prepare_runtime_proxy_claude_config_dir(&paths, &codex_home, true)
+        .expect("Claude config dir should be prepared");
+    assert!(
+        same_path(&config_dir, &shared_dir),
+        "managed Claude config dir should resolve to shared Prodex Claude state"
+    );
+
+    let merged_history = fs::read_to_string(shared_dir.join("projects/workspace/session.jsonl"))
+        .expect("merged Claude history should be readable");
+    assert_eq!(
+        merged_history,
+        "{\"message\":\"first\"}\n{\"message\":\"second\"}"
+    );
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(shared_dir.join(".claude.json"))
+            .expect("shared Claude config should still be readable"),
+    )
+    .expect("shared Claude config should parse");
+    assert_eq!(config["sharedOnly"], serde_json::json!(true));
+    assert_eq!(config["profileOnly"], serde_json::json!(true));
+}
+
+#[test]
 fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
