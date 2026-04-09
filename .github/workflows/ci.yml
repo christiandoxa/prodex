@@ -206,6 +206,10 @@ jobs:
               --skip runtime_proxy_broker_health_endpoint_reports_registered_metadata \
               --skip runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
               --skip runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
+              --skip runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds \
+              --skip runtime_proxy_waits_for_responses_inflight_relief_then_succeeds \
+              --skip runtime_proxy_responses_inflight_relief_times_out_without_relief \
+              --skip runtime_proxy_wait_scopes_to_session_owner_relief \
               --skip runtime_proxy_keeps_previous_response_affinity_for_http_requests \
               --skip runtime_proxy_keeps_previous_response_affinity_for_websocket_requests \
               --skip runtime_proxy_restores_compact_followup_owner_across_restart \
@@ -245,6 +249,10 @@ jobs:
             runtime_proxy_broker_health_endpoint_reports_registered_metadata \
             runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
             runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
+            runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds \
+            runtime_proxy_waits_for_responses_inflight_relief_then_succeeds \
+            runtime_proxy_responses_inflight_relief_times_out_without_relief \
+            runtime_proxy_wait_scopes_to_session_owner_relief \
             runtime_proxy_keeps_previous_response_affinity_for_http_requests \
             runtime_proxy_keeps_previous_response_affinity_for_websocket_requests \
             runtime_proxy_restores_compact_followup_owner_across_restart \
