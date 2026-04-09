@@ -19465,9 +19465,6 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
     };
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
-        .expect("latest runtime pointer should exist");
-    let log_path = PathBuf::from(log_path.trim());
 
     let (mut socket, _response) = ws_connect(format!(
         "ws://{}/backend-api/codex/responses",
@@ -19554,6 +19551,13 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
     let mut tail = Vec::new();
     let mut observed = false;
     for _ in 0..160 {
+        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+            .into_iter()
+            .next_back()
+        else {
+            thread::sleep(Duration::from_millis(25));
+            continue;
+        };
         tail = read_runtime_log_tail(&log_path, 32 * 1024)
             .expect("runtime log tail should be readable");
         let text = String::from_utf8_lossy(&tail);
