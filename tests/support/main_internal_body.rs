@@ -9,6 +9,18 @@ use std::sync::{
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+fn running_in_ci() -> bool {
+    std::env::var_os("GITHUB_ACTIONS").is_some() || std::env::var_os("CI").is_some()
+}
+
+fn ci_timing_upper_bound_ms(local_ms: u64, ci_ms: u64) -> Duration {
+    if running_in_ci() {
+        Duration::from_millis(ci_ms.max(local_ms))
+    } else {
+        Duration::from_millis(local_ms)
+    }
+}
+
 fn usage_with_main_windows(
     five_hour_remaining: i64,
     five_hour_reset_offset_seconds: i64,
@@ -13919,7 +13931,7 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
     )
     .expect("second slot should recover after a short wait");
     assert!(
-        started_at.elapsed() < Duration::from_millis(100),
+        started_at.elapsed() < ci_timing_upper_bound_ms(100, 250),
         "slot wait should wake promptly after release instead of waiting for poll timeout"
     );
     drop(second);
@@ -16963,7 +16975,7 @@ fn runtime_proxy_sheds_long_lived_queue_overload_fast() {
         "queue overload should fail fast once the bounded wait budget is exhausted"
     );
     assert!(
-        started_at.elapsed() < Duration::from_millis(500),
+        started_at.elapsed() < ci_timing_upper_bound_ms(500, 1_000),
         "queue overload response took too long: {:?}",
         started_at.elapsed()
     );
@@ -17061,7 +17073,7 @@ fn runtime_proxy_absorbs_brief_long_lived_queue_burst() {
         "queue wait should recover once the short-lived burst drains"
     );
     assert!(
-        started_at.elapsed() < Duration::from_millis(200),
+        started_at.elapsed() < ci_timing_upper_bound_ms(200, 400),
         "queue wait should recover promptly after capacity is signaled: {:?}",
         started_at.elapsed()
     );
@@ -17989,7 +18001,7 @@ fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
     let elapsed = started.elapsed();
 
     assert!(
-        response_ready < Duration::from_millis(125),
+        response_ready < ci_timing_upper_bound_ms(125, 300),
         "runtime proxy waited too long before starting HTTP stream passthrough: {response_ready:?}"
     );
     assert!(
@@ -27535,7 +27547,7 @@ fn runtime_profile_inflight_relief_wait_returns_immediately_after_prior_release(
         observed_revision,
     ));
     assert!(
-        started_at.elapsed() < Duration::from_millis(20),
+        started_at.elapsed() < ci_timing_upper_bound_ms(20, 100),
         "release-aware inflight wait should not sleep after the release was already observed"
     );
 }

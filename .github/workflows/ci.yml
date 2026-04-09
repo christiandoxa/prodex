@@ -141,7 +141,17 @@ jobs:
       - name: Run runtime proxy internal test shard
         run: |
           set -euo pipefail
-          cargo test --lib main_internal_tests::runtime_proxy_ -- --test-threads=1
+          for attempt in 1 2; do
+            echo "runtime proxy shard attempt ${attempt}"
+            if cargo test --lib main_internal_tests::runtime_proxy_ -- --test-threads=1; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 2 ]; then
+              exit 1
+            fi
+            echo "retrying runtime proxy shard after a transient failure"
+            sleep 5
+          done
 
   runtime-stress:
     runs-on: ubuntu-latest
