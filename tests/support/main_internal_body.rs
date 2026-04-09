@@ -565,6 +565,7 @@ enum RuntimeProxyBackendMode {
     WebsocketDelayedQuotaAfterPrelude,
     WebsocketDelayedOverloadAfterPrelude,
     WebsocketReuseSilentHang,
+    WebsocketReusePrecommitHoldStall,
     WebsocketReusePreviousResponseNeedsTurnState,
     WebsocketCloseMidTurn,
     WebsocketPreviousResponseNeedsTurnState,
@@ -645,6 +646,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReuseSilentHang)
     }
 
+    fn start_websocket_reuse_precommit_hold_stall() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall)
+    }
+
     fn start_websocket_reuse_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState)
     }
@@ -703,6 +708,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude
                                 | RuntimeProxyBackendMode::WebsocketDelayedOverloadAfterPrelude
                                 | RuntimeProxyBackendMode::WebsocketReuseSilentHang
+                                | RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
@@ -1897,6 +1903,58 @@ fn handle_runtime_proxy_backend_websocket(
                         runtime_proxy_stream_idle_timeout_ms() + 100,
                     ));
                     break;
+                }
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall
+                ) && request_count == 2
+                {
+                    let hold_delay = Duration::from_millis(
+                        runtime_proxy_websocket_precommit_progress_timeout_ms() / 2 + 10,
+                    );
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.created",
+                                "response": {
+                                    "id": response_id
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.created should be sent");
+                    thread::sleep(hold_delay);
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.in_progress",
+                                "response": {
+                                    "id": response_id
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.in_progress should be sent");
+                    thread::sleep(hold_delay);
+                    websocket
+                        .send(WsMessage::Text(
+                            serde_json::json!({
+                                "type": "response.output_item.added",
+                                "response": {
+                                    "id": response_id
+                                },
+                                "item": {
+                                    "type": "message",
+                                    "id": "msg-second"
+                                }
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .expect("response.output_item.added should be sent");
+                    continue;
                 }
                 websocket
                     .send(WsMessage::Text(
@@ -19349,6 +19407,171 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("websocket_reuse_watchdog"));
     assert!(tail.contains("websocket_precommit_frame_timeout"));
+}
+
+#[test]
+fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
+    let backend = RuntimeProxyBackend::start_websocket_reuse_precommit_hold_stall();
+    let temp_dir = TestDir::new();
+    let runtime_log_dir = temp_dir.path.join("runtime-logs");
+    let _runtime_log_dir_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
+        .expect("latest runtime pointer should exist");
+    let log_path = PathBuf::from(log_path.trim());
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for first request")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.completed\""))
+    );
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("second runtime proxy websocket request should be sent");
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open for second request")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"response.completed\""))
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "third-account".to_string(),
+        ]
+    );
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("third")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("third"));
+    let mut tail = Vec::new();
+    let mut observed = false;
+    for _ in 0..160 {
+        tail = read_runtime_log_tail(&log_path, 32 * 1024)
+            .expect("runtime log tail should be readable");
+        let text = String::from_utf8_lossy(&tail);
+        if text.contains("websocket_reuse_watchdog")
+            && text.contains("websocket_precommit_hold_timeout")
+        {
+            observed = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        observed,
+        "runtime log should capture websocket precommit hold timeout watchdog"
+    );
+    let tail = String::from_utf8_lossy(&tail);
+    assert!(tail.contains("websocket_reuse_watchdog"));
+    assert!(tail.contains("websocket_precommit_hold_timeout"));
 }
 
 #[test]

@@ -5999,9 +5999,13 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                        Some(Duration::from_millis(if reuse_existing_session {
+                            runtime_proxy_websocket_precommit_progress_timeout_ms()
+                        } else {
+                            runtime_proxy_stream_idle_timeout_ms()
+                        })),
                     )
-                    .context("failed to restore runtime websocket idle timeout")?;
+                    .context("failed to restore runtime websocket upstream timeout")?;
                 }
 
                 let inspected = inspect_runtime_websocket_text_frame(text.as_str());
@@ -6061,10 +6065,41 @@ pub(super) fn attempt_runtime_websocket_request(
                         text,
                         response_ids: inspected.response_ids,
                     });
+                    let elapsed_ms = precommit_started_at.elapsed().as_millis();
+                    let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
+                    if elapsed_ms >= u128::from(timeout_ms) {
+                        let _ = upstream_socket.close(None);
+                        websocket_session.reset();
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "websocket_precommit_hold_timeout profile={profile_name} elapsed_ms={elapsed_ms} threshold_ms={timeout_ms} reuse={reuse_existing_session} hold_count={precommit_hold_count}"
+                            ),
+                        );
+                        let transport_error = anyhow::anyhow!(
+                            "runtime websocket upstream remained in pre-commit hold beyond the progress deadline after {elapsed_ms} ms"
+                        );
+                        note_runtime_profile_transport_failure(
+                            shared,
+                            profile_name,
+                            RuntimeRouteKind::Websocket,
+                            "websocket_precommit_hold_timeout",
+                            &transport_error,
+                        );
+                        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                            profile_name: profile_name.to_string(),
+                            event: "precommit_hold_timeout",
+                        });
+                    }
                     continue;
                 }
 
                 if !committed {
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
+                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                    )
+                    .context("failed to restore runtime websocket idle timeout")?;
                     remember_runtime_session_id(
                         shared,
                         profile_name,
@@ -6139,11 +6174,20 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
+                        Some(Duration::from_millis(if reuse_existing_session {
+                            runtime_proxy_websocket_precommit_progress_timeout_ms()
+                        } else {
+                            runtime_proxy_stream_idle_timeout_ms()
+                        })),
+                    )
+                    .context("failed to restore runtime websocket upstream timeout")?;
+                }
+                if !committed {
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
                         Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
                     )
                     .context("failed to restore runtime websocket idle timeout")?;
-                }
-                if !committed {
                     remember_runtime_session_id(
                         shared,
                         profile_name,
@@ -6192,9 +6236,13 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                        Some(Duration::from_millis(if reuse_existing_session {
+                            runtime_proxy_websocket_precommit_progress_timeout_ms()
+                        } else {
+                            runtime_proxy_stream_idle_timeout_ms()
+                        })),
                     )
-                    .context("failed to restore runtime websocket idle timeout")?;
+                    .context("failed to restore runtime websocket upstream timeout")?;
                 }
                 upstream_socket
                     .send(WsMessage::Pong(payload))
@@ -6205,9 +6253,13 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                        Some(Duration::from_millis(if reuse_existing_session {
+                            runtime_proxy_websocket_precommit_progress_timeout_ms()
+                        } else {
+                            runtime_proxy_stream_idle_timeout_ms()
+                        })),
                     )
-                    .context("failed to restore runtime websocket idle timeout")?;
+                    .context("failed to restore runtime websocket upstream timeout")?;
                 }
             }
             Ok(WsMessage::Close(frame)) => {
@@ -6281,6 +6333,43 @@ pub(super) fn attempt_runtime_websocket_request(
             }
             Err(err) => {
                 websocket_session.reset();
+                if !committed
+                    && reuse_existing_session
+                    && precommit_hold_count > 0
+                    && runtime_websocket_timeout_error(&err)
+                {
+                    let elapsed_ms = precommit_started_at.elapsed().as_millis();
+                    let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "websocket_precommit_hold_timeout profile={profile_name} elapsed_ms={elapsed_ms} threshold_ms={timeout_ms} reuse={reuse_existing_session} hold_count={precommit_hold_count}"
+                        ),
+                    );
+                    let transport_error = anyhow::anyhow!(
+                        "runtime websocket upstream remained in pre-commit hold beyond the progress deadline after {elapsed_ms} ms: {err}"
+                    );
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Websocket,
+                        "websocket_precommit_hold_timeout",
+                        &transport_error,
+                    );
+                    if let Some(started_at) = reuse_started_at {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "websocket_reuse_watchdog profile={profile_name} event=precommit_hold_timeout elapsed_ms={} committed={committed}",
+                                started_at.elapsed().as_millis()
+                            ),
+                        );
+                    }
+                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                        profile_name: profile_name.to_string(),
+                        event: "precommit_hold_timeout",
+                    });
+                }
                 if !committed && !first_upstream_frame_seen && runtime_websocket_timeout_error(&err)
                 {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
