@@ -1706,7 +1706,7 @@ pub(super) fn runtime_response_bound_profile(
         runtime_proxy_log(
             shared,
             format!(
-                "selection_skip_affinity route={} affinity=previous_response profile={} reason=continuation_stale response_id={previous_response_id}",
+                "selection_keep_affinity route={} affinity=previous_response profile={} reason=continuation_stale response_id={previous_response_id}",
                 runtime_route_kind_label(route_kind),
                 profile_name.as_deref().unwrap_or("-"),
             ),
@@ -1716,7 +1716,6 @@ pub(super) fn runtime_response_bound_profile(
             &runtime,
             &format!("continuation_stale:{previous_response_id}"),
         );
-        return Ok(None);
     }
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
@@ -3260,7 +3259,11 @@ pub(super) fn runtime_previous_response_affinity_is_trusted(
         RuntimeContinuationBindingKind::Response,
     )
     .get(previous_response_id)
-    .is_none_or(|status| status.state == RuntimeContinuationBindingLifecycle::Verified))
+    .is_none_or(|status| {
+        status.state == RuntimeContinuationBindingLifecycle::Verified
+            || (status.state == RuntimeContinuationBindingLifecycle::Warm
+                && status.last_verified_at.is_some())
+    }))
 }
 
 pub(super) fn runtime_previous_response_affinity_is_bound(

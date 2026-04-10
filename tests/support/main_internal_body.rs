@@ -12225,7 +12225,7 @@ fn response_affinity_skips_dead_continuation_status() {
 }
 
 #[test]
-fn response_affinity_skips_stale_verified_continuation_status() {
+fn response_affinity_keeps_stale_verified_continuation_status_bound() {
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
@@ -12313,7 +12313,7 @@ fn response_affinity_skips_stale_verified_continuation_status() {
 
     let owner = runtime_response_bound_profile(&shared, "resp-main", RuntimeRouteKind::Responses)
         .expect("response binding lookup should succeed");
-    assert_eq!(owner, None);
+    assert_eq!(owner.as_deref(), Some("main"));
     assert_eq!(
         shared
             .runtime
@@ -23336,6 +23336,202 @@ fn runtime_proxy_releases_previous_response_affinity_for_websocket_requests_when
     assert_eq!(
         backend.responses_accounts(),
         vec!["second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        !state.response_profile_bindings.contains_key("resp-main")
+            && state
+                .response_profile_bindings
+                .get("resp-second")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert!(!persisted.response_profile_bindings.contains_key("resp-main"));
+    assert_eq!(
+        persisted
+            .response_profile_bindings
+            .get("resp-second")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .statuses
+            .response
+            .get("resp-main")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+    });
+    assert_eq!(
+        continuations
+            .statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn runtime_proxy_releases_stale_previous_response_affinity_for_websocket_requests_when_owner_snapshot_is_exhausted()
+{
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let stale_at = now - RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS - 1;
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: stale_at,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-main".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 1,
+                        last_touched_at: Some(stale_at),
+                        last_verified_at: Some(stale_at),
+                        last_verified_route: Some("websocket".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_remaining_percent: 0,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 90,
+                weekly_reset_at: now + 86_400,
+            },
+        )]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-main\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for stale exhausted-owner continuation payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads for stale exhausted-owner fresh fallback: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "stale previous_response fallback should stay pre-commit: {payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert!(
+        upstream_requests
+            .last()
+            .is_some_and(|request| !request.contains("\"previous_response_id\":\"resp-main\"")),
+        "stale exhausted-owner fallback should strip previous_response_id before the final websocket attempt: {upstream_requests:?}"
     );
 
     let persisted = wait_for_state(&paths, |state| {
