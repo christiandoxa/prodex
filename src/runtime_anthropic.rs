@@ -1104,6 +1104,11 @@ pub(super) fn runtime_proxy_translate_anthropic_tool(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let tool_name = tool
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if tool_type
         .is_some_and(|value| runtime_proxy_anthropic_unversioned_tool_type(value) == "mcp_toolset")
         && let Some(translated) = runtime_proxy_translate_anthropic_mcp_tool(tool, mcp_servers)?
@@ -1111,15 +1116,11 @@ pub(super) fn runtime_proxy_translate_anthropic_tool(
         server_tools.mcp = true;
         return Ok((translated, server_tools));
     }
-    if let Some(canonical_name) =
-        tool_type.and_then(runtime_proxy_anthropic_server_tool_name_from_type)
+    if let Some(canonical_name) = tool_type
+        .and_then(runtime_proxy_anthropic_server_tool_name_from_type)
+        .or_else(|| tool_name.and_then(runtime_proxy_anthropic_builtin_server_tool_name))
     {
-        let tool_name = tool
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(canonical_name);
+        let tool_name = tool_name.unwrap_or(canonical_name);
         server_tools.register(tool_name, canonical_name);
         if canonical_name == "web_search" {
             let mut translated = serde_json::Map::new();
@@ -1731,7 +1732,8 @@ pub(super) fn runtime_proxy_translate_anthropic_tool_result_payload(
 
     match block.get("content") {
         Some(serde_json::Value::String(text)) => {
-            output_text = text.clone();
+            output_text = runtime_proxy_normalize_anthropic_tool_result_text(text)
+                .unwrap_or_else(|| text.clone());
         }
         Some(serde_json::Value::Array(items)) => {
             let (translated_output, translated_images) =
@@ -2175,6 +2177,191 @@ pub(super) fn runtime_proxy_translate_anthropic_tool_result_content(
     }
 
     (serde_json::Value::Object(output).to_string(), image_parts)
+}
+
+pub(super) fn runtime_proxy_extract_balanced_json_array_bounds(
+    text: &str,
+    start: usize,
+) -> Option<(usize, usize)> {
+    if text.as_bytes().get(start).copied() != Some(b'[') {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (offset, ch) in text[start..].char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+            match ch {
+                '\\' => escape = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = start + offset + ch.len_utf8();
+                    return Some((start, end));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+pub(super) fn runtime_proxy_anthropic_web_search_query_from_tool_result_text(
+    text: &str,
+) -> Option<String> {
+    let prefix = "Web search results for query:";
+    let remainder = text.trim().strip_prefix(prefix)?.trim_start();
+    let first_line = remainder.lines().next()?.trim();
+    if first_line.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = first_line.strip_prefix('"')
+        && let Some(end_quote) = stripped.find('"')
+    {
+        let query = stripped[..end_quote].trim();
+        if !query.is_empty() {
+            return Some(query.to_string());
+        }
+    }
+
+    let query = first_line.trim_matches('"').trim();
+    (!query.is_empty()).then(|| query.to_string())
+}
+
+pub(super) fn runtime_proxy_anthropic_web_search_urls_from_tool_result_text(
+    text: &str,
+) -> (Vec<String>, usize) {
+    let mut urls = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut search_from = 0usize;
+    let mut last_array_end = 0usize;
+
+    while let Some(links_offset) = text[search_from..].find("Links:") {
+        let links_start = search_from + links_offset;
+        let Some(array_offset) = text[links_start..].find('[') else {
+            search_from = links_start.saturating_add("Links:".len());
+            continue;
+        };
+        let array_start = links_start + array_offset;
+        let Some((_, array_end)) =
+            runtime_proxy_extract_balanced_json_array_bounds(text, array_start)
+        else {
+            break;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text[array_start..array_end])
+            && let Some(items) = value.as_array()
+        {
+            for item in items {
+                let Some(url) = item
+                    .get("url")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                if seen.insert(url.to_string()) {
+                    urls.push(url.to_string());
+                }
+            }
+        }
+        last_array_end = array_end;
+        search_from = array_end;
+    }
+
+    (urls, last_array_end)
+}
+
+pub(super) fn runtime_proxy_compact_web_search_tool_result_summary(summary: &str) -> String {
+    let mut compact_lines = Vec::new();
+    let mut saw_content = false;
+
+    for raw_line in summary.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            if saw_content
+                && compact_lines
+                    .last()
+                    .is_some_and(|line: &String| !line.is_empty())
+            {
+                compact_lines.push(String::new());
+            }
+            continue;
+        }
+        if trimmed == "No links found." || trimmed.starts_with("Link:") {
+            continue;
+        }
+        if trimmed == "Sources:"
+            || trimmed.starts_with("REMINDER:")
+            || trimmed.starts_with("Kalau mau, saya bisa lanjutkan")
+            || trimmed.starts_with("If you'd like")
+            || trimmed.starts_with("If you want,")
+        {
+            break;
+        }
+        compact_lines.push(trimmed.to_string());
+        saw_content = true;
+    }
+
+    while compact_lines.last().is_some_and(|line| line.is_empty()) {
+        compact_lines.pop();
+    }
+
+    compact_lines.join("\n")
+}
+
+pub(super) fn runtime_proxy_normalize_anthropic_tool_result_text(text: &str) -> Option<String> {
+    let query = runtime_proxy_anthropic_web_search_query_from_tool_result_text(text)?;
+    let (urls, last_array_end) =
+        runtime_proxy_anthropic_web_search_urls_from_tool_result_text(text);
+    let summary_source = if last_array_end > 0 {
+        &text[last_array_end..]
+    } else {
+        text
+    };
+    let summary = runtime_proxy_compact_web_search_tool_result_summary(summary_source);
+    if urls.is_empty() && summary.is_empty() {
+        return None;
+    }
+
+    let mut output = serde_json::Map::new();
+    output.insert("query".to_string(), serde_json::Value::String(query));
+    if !summary.is_empty() {
+        output.insert("text".to_string(), serde_json::Value::String(summary));
+    }
+    if !urls.is_empty() {
+        output.insert(
+            "content_blocks".to_string(),
+            serde_json::Value::Array(
+                urls.into_iter()
+                    .map(|url| {
+                        serde_json::json!({
+                            "type": "web_search_result",
+                            "url": url,
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+
+    Some(serde_json::Value::Object(output).to_string())
 }
 
 pub(super) fn runtime_proxy_translate_anthropic_tool_result(
@@ -4359,6 +4546,159 @@ pub(super) fn runtime_response_body_looks_like_sse(body: &[u8]) -> bool {
     prefix.starts_with(b"event:") || prefix.starts_with(b"data:")
 }
 
+pub(super) fn runtime_buffered_response_ids(parts: &RuntimeBufferedResponseParts) -> Vec<String> {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&parts.body) {
+        return extract_runtime_response_ids_from_value(&value);
+    }
+
+    let mut response_ids = Vec::new();
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+    let push_data_lines = |data_lines: &mut Vec<String>, response_ids: &mut Vec<String>| {
+        if let Some(value) = parse_runtime_sse_payload(data_lines) {
+            for response_id in extract_runtime_response_ids_from_value(&value) {
+                push_runtime_response_id(response_ids, Some(&response_id));
+            }
+        }
+        data_lines.clear();
+    };
+
+    for byte in &parts.body {
+        line.push(*byte);
+        if *byte != b'\n' {
+            continue;
+        }
+        let line_text = String::from_utf8_lossy(&line);
+        let trimmed = line_text.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            push_data_lines(&mut data_lines, &mut response_ids);
+            line.clear();
+            continue;
+        }
+        if let Some(payload) = trimmed.strip_prefix("data:") {
+            data_lines.push(payload.trim_start().to_string());
+        }
+        line.clear();
+    }
+    if !line.is_empty() {
+        let line_text = String::from_utf8_lossy(&line);
+        let trimmed = line_text.trim_end_matches(['\r', '\n']);
+        if let Some(payload) = trimmed.strip_prefix("data:") {
+            data_lines.push(payload.trim_start().to_string());
+        }
+    }
+    push_data_lines(&mut data_lines, &mut response_ids);
+    response_ids
+}
+
+pub(super) fn runtime_request_for_anthropic_server_tool_followup(
+    request: &RuntimeProxyRequest,
+    previous_response_id: &str,
+) -> Result<RuntimeProxyRequest> {
+    let mut value = serde_json::from_slice::<serde_json::Value>(&request.body)
+        .context("failed to parse translated Anthropic request body")?;
+    let object = value
+        .as_object_mut()
+        .context("translated Anthropic request body must be a JSON object")?;
+    object.remove("input");
+    object.remove("tool_choice");
+    object.insert(
+        "previous_response_id".to_string(),
+        serde_json::Value::String(previous_response_id.to_string()),
+    );
+    object.insert("stream".to_string(), serde_json::Value::Bool(false));
+    let body = serde_json::to_vec(&value)
+        .context("failed to serialize Anthropic server-tool follow-up request")?;
+    Ok(RuntimeProxyRequest {
+        method: request.method.clone(),
+        path_and_query: request.path_and_query.clone(),
+        headers: request.headers.clone(),
+        body,
+    })
+}
+
+pub(super) fn runtime_anthropic_message_needs_server_tool_followup(
+    value: &serde_json::Value,
+) -> bool {
+    let Some(content) = value.get("content").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+
+    let mut saw_server_tool_use = false;
+    for block in content {
+        match block.get("type").and_then(serde_json::Value::as_str) {
+            Some("server_tool_use") => saw_server_tool_use = true,
+            Some("web_search_tool_result") => {}
+            _ => return false,
+        }
+    }
+
+    saw_server_tool_use
+}
+
+pub(super) fn runtime_anthropic_message_server_tool_usage(
+    value: &serde_json::Value,
+) -> RuntimeAnthropicServerToolUsage {
+    let usage = value
+        .get("usage")
+        .and_then(|usage| usage.get("server_tool_use"));
+    RuntimeAnthropicServerToolUsage {
+        web_search_requests: usage
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        web_fetch_requests: usage
+            .and_then(|server_tool_use| server_tool_use.get("web_fetch_requests"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        code_execution_requests: usage
+            .and_then(|server_tool_use| server_tool_use.get("code_execution_requests"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        tool_search_requests: usage
+            .and_then(|server_tool_use| server_tool_use.get("tool_search_requests"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+    }
+}
+
+pub(super) fn runtime_anthropic_message_from_buffered_responses_parts_with_carried_usage(
+    parts: &RuntimeBufferedResponseParts,
+    request: &RuntimeAnthropicMessagesRequest,
+    carried_usage: RuntimeAnthropicServerToolUsage,
+) -> Result<serde_json::Value> {
+    let content_type = runtime_buffered_response_content_type(parts)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let looks_like_sse = content_type.contains("text/event-stream")
+        || runtime_response_body_looks_like_sse(&parts.body);
+    if looks_like_sse {
+        return runtime_anthropic_response_from_sse_bytes_with_carried_usage(
+            &parts.body,
+            &request.requested_model,
+            request.want_thinking,
+            carried_usage.web_search_requests,
+            carried_usage.web_fetch_requests,
+            carried_usage.code_execution_requests,
+            carried_usage.tool_search_requests,
+            Some(&request.server_tools),
+        );
+    }
+
+    let value = serde_json::from_slice::<serde_json::Value>(&parts.body)
+        .context("failed to parse buffered Responses JSON body")?;
+    Ok(runtime_anthropic_response_from_json_value_with_carried_usage(
+        &value,
+        &request.requested_model,
+        request.want_thinking,
+        carried_usage.web_search_requests,
+        carried_usage.web_fetch_requests,
+        carried_usage.code_execution_requests,
+        carried_usage.tool_search_requests,
+        Some(&request.server_tools),
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     body: &[u8],
@@ -5181,24 +5521,107 @@ pub(super) fn translate_runtime_responses_reply_to_anthropic(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
     if request.server_tools.needs_buffered_translation() {
-        let parts = match response {
+        let mut parts = match response {
             RuntimeResponsesReply::Buffered(parts) => parts,
             RuntimeResponsesReply::Streaming(response) => {
                 buffer_runtime_streaming_response_parts(response)?
             }
         };
-        if std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some() {
+        let mut carried_usage = RuntimeAnthropicServerToolUsage {
+            web_search_requests: request.carried_web_search_requests,
+            web_fetch_requests: request.carried_web_fetch_requests,
+            code_execution_requests: request.carried_code_execution_requests,
+            tool_search_requests: request.carried_tool_search_requests,
+        };
+
+        for followup_attempt in 0..=RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT {
+            if std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some() {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http anthropic_translated_upstream status={} content_type={:?} followup_attempt={} body_snippet={}",
+                        parts.status,
+                        runtime_buffered_response_content_type(&parts),
+                        followup_attempt,
+                        runtime_proxy_body_snippet(&parts.body, 2048),
+                    ),
+                );
+            }
+
+            if parts.status >= 400 {
+                return Ok(RuntimeResponsesReply::Buffered(
+                    runtime_anthropic_error_from_upstream_parts(parts),
+                ));
+            }
+
+            if !runtime_response_body_looks_like_sse(&parts.body)
+                && !runtime_buffered_response_content_type(&parts)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains("text/event-stream")
+                && serde_json::from_slice::<serde_json::Value>(&parts.body)
+                    .ok()
+                    .is_some_and(|value| value.get("error").is_some())
+            {
+                return Ok(RuntimeResponsesReply::Buffered(
+                    runtime_anthropic_error_from_upstream_parts(parts),
+                ));
+            }
+
+            let response_message =
+                runtime_anthropic_message_from_buffered_responses_parts_with_carried_usage(
+                    &parts,
+                    request,
+                    carried_usage,
+                )?;
+            carried_usage = runtime_anthropic_message_server_tool_usage(&response_message);
+
+            if followup_attempt == RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT
+                || !runtime_anthropic_message_needs_server_tool_followup(&response_message)
+            {
+                if request.stream {
+                    return Ok(RuntimeResponsesReply::Buffered(
+                        runtime_anthropic_sse_response_parts_from_message_value(response_message),
+                    ));
+                }
+
+                return Ok(RuntimeResponsesReply::Buffered(
+                    runtime_anthropic_json_response_parts(response_message),
+                ));
+            }
+
+            let Some(previous_response_id) = runtime_buffered_response_ids(&parts).last().cloned()
+            else {
+                if request.stream {
+                    return Ok(RuntimeResponsesReply::Buffered(
+                        runtime_anthropic_sse_response_parts_from_message_value(response_message),
+                    ));
+                }
+                return Ok(RuntimeResponsesReply::Buffered(
+                    runtime_anthropic_json_response_parts(response_message),
+                ));
+            };
+
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http anthropic_translated_upstream status={} content_type={:?} body_snippet={}",
-                    parts.status,
-                    runtime_buffered_response_content_type(&parts),
-                    runtime_proxy_body_snippet(&parts.body, 2048),
+                    "request={request_id} transport=http anthropic_server_tool_followup previous_response_id={previous_response_id} attempt={}",
+                    followup_attempt + 1,
                 ),
             );
+            let followup_request = runtime_request_for_anthropic_server_tool_followup(
+                &request.translated_request,
+                &previous_response_id,
+            )?;
+            parts = match proxy_runtime_responses_request(request_id, &followup_request, shared)? {
+                RuntimeResponsesReply::Buffered(parts) => parts,
+                RuntimeResponsesReply::Streaming(response) => {
+                    buffer_runtime_streaming_response_parts(response)?
+                }
+            };
         }
-        return translate_runtime_buffered_responses_reply_to_anthropic(parts, request);
+
+        unreachable!("anthropic buffered server-tool translation should return inside loop");
     }
 
     match response {

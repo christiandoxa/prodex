@@ -550,6 +550,7 @@ enum RuntimeProxyBackendMode {
     HttpOnly,
     HttpOnlyUnauthorizedMain,
     HttpOnlyBufferedJson,
+    HttpOnlyAnthropicWebSearchFollowup,
     HttpOnlyInitialBodyStall,
     HttpOnlySlowStream,
     HttpOnlyStallAfterSeveralChunks,
@@ -588,6 +589,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_buffered_json() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyBufferedJson)
+    }
+
+    fn start_http_anthropic_web_search_followup() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyAnthropicWebSearchFollowup)
     }
 
     fn start_http_slow_stream() -> Self {
@@ -1078,6 +1083,93 @@ fn handle_runtime_proxy_backend_request(
                         })
                         .to_string(),
                         Some("turn-second".to_string()),
+                        None,
+                        None,
+                    )
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyAnthropicWebSearchFollowup
+                    ) && previous_response_id.as_deref() == Some("resp_ws_followup_1") =>
+                {
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        serde_json::json!({
+                            "id": "resp_ws_followup_2",
+                            "object": "response",
+                            "status": "completed",
+                            "usage": {
+                                "input_tokens": 18,
+                                "output_tokens": 9
+                            },
+                            "tool_usage": {
+                                "web_search": {
+                                    "num_requests": 1
+                                }
+                            },
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "content": [
+                                        {
+                                            "type": "output_text",
+                                            "text": "Ringkasan terbaru reksadana Indonesia."
+                                        }
+                                    ]
+                                }
+                            ]
+                        })
+                        .to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyAnthropicWebSearchFollowup
+                    ) =>
+                {
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        serde_json::json!({
+                            "id": "resp_ws_followup_1",
+                            "object": "response",
+                            "status": "completed",
+                            "usage": {
+                                "input_tokens": 12,
+                                "output_tokens": 6
+                            },
+                            "tool_usage": {
+                                "web_search": {
+                                    "num_requests": 1
+                                }
+                            },
+                            "output": [
+                                {
+                                    "type": "web_search_call",
+                                    "id": "ws_1",
+                                    "status": "completed",
+                                    "action": {
+                                        "type": "search",
+                                        "queries": ["berita terbaru reksadana Indonesia"],
+                                        "sources": [
+                                            {
+                                                "type": "url",
+                                                "url": "https://example.com/news",
+                                                "title": "Example News"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        })
+                        .to_string(),
+                        None,
                         None,
                         None,
                     )
@@ -28971,6 +29063,107 @@ fn translate_runtime_anthropic_messages_request_maps_versioned_web_fetch_server_
 }
 
 #[test]
+fn translate_runtime_anthropic_messages_request_compacts_verbose_web_search_tool_result_text() {
+    let raw_output = concat!(
+        "Web search results for query: \"berita reksadana terbaru Indonesia April 2026\"\n\n",
+        "Links: [{\"url\":\"https://example.com/a\"},{\"url\":\"https://example.com/b\"}]\n\n",
+        "Links: [{\"url\":\"https://example.com/b\"},{\"url\":\"https://example.com/c\"}]\n\n",
+        "No links found.\n\n",
+        "Saya sudah melakukan web search untuk kueri itu. Hasil paling relevan yang saya temukan:\n",
+        "1. Contoh hasil pertama\n",
+        "Link: https://example.com/a\n\n",
+        "Kalau mau, saya bisa lanjutkan dengan rangkuman detail.\n\n",
+        "REMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks."
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_ws_1",
+                            "name": "WebSearch",
+                            "input": {
+                                "query": "berita reksadana terbaru Indonesia April 2026"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_ws_1",
+                            "content": raw_output
+                        }
+                    ]
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    let input = body
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .expect("input array should exist");
+
+    assert_eq!(input.len(), 2);
+    assert_eq!(
+        input[1].get("type").and_then(serde_json::Value::as_str),
+        Some("function_call_output")
+    );
+
+    let output = input[1]
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .expect("tool result output should be a string");
+    assert!(
+        output.len() < raw_output.len(),
+        "normalized output should be smaller than the raw verbose payload"
+    );
+    let output: serde_json::Value =
+        serde_json::from_str(output).expect("normalized output should be valid JSON");
+    assert_eq!(
+        output.get("query").and_then(serde_json::Value::as_str),
+        Some("berita reksadana terbaru Indonesia April 2026")
+    );
+    assert_eq!(
+        output
+            .get("content_blocks")
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items.iter()
+                    .filter_map(|item| item.get("url").and_then(serde_json::Value::as_str))
+                    .collect::<Vec<_>>()
+            }),
+        Some(vec![
+            "https://example.com/a",
+            "https://example.com/b",
+            "https://example.com/c"
+        ])
+    );
+    assert_eq!(
+        output.get("text").and_then(serde_json::Value::as_str),
+        Some(
+            "Saya sudah melakukan web search untuk kueri itu. Hasil paling relevan yang saya temukan:\n1. Contoh hasil pertama"
+        )
+    );
+}
+
+#[test]
 fn runtime_proxy_anthropic_reasoning_effort_normalizes_output_config_levels() {
     let cases = [
         ("gpt-5.4", "low", Some("low")),
@@ -29187,6 +29380,95 @@ fn translate_runtime_anthropic_messages_request_maps_web_search_server_tool() {
             .and_then(|location| location.get("country"))
             .and_then(serde_json::Value::as_str),
         Some("ID")
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_maps_claude_web_search_tool_name() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "tool_choice": {
+                "type": "tool",
+                "name": "WebSearch"
+            },
+            "tools": [
+                {
+                    "name": "WebSearch",
+                    "description": "Search the web for current information.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string"
+                            },
+                            "allowed_domains": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "blocked_domains": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Cari berita terbaru"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+
+    assert_eq!(
+        body.get("tool_choice").and_then(serde_json::Value::as_str),
+        Some("required")
+    );
+    assert_eq!(
+        body.get("include")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|include| include.first())
+            .and_then(serde_json::Value::as_str),
+        Some("web_search_call.action.sources")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("web_search")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("name")),
+        None
     );
 }
 
@@ -30856,6 +31138,134 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
     let body = response.text().expect("stream body should decode");
     assert!(body.contains("event: message_start"));
     assert!(body.contains("event: message_stop"));
+}
+
+#[test]
+fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_anthropic_web_search_followup();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/v1/messages?beta=true",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("x-api-key", "dummy")
+        .header("anthropic-version", "2023-06-01")
+        .header("User-Agent", "claude-cli/test")
+        .body(
+            serde_json::json!({
+                "model": "claude-sonnet-4-6",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Cari berita terbaru reksadana Indonesia"
+                    }
+                ],
+                "tools": [
+                    {
+                        "name": "WebSearch",
+                        "description": "Search the web.",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": ["query"]
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("anthropic proxy request should succeed");
+
+    assert!(
+        response.status().is_success(),
+        "unexpected status: {}",
+        response.status()
+    );
+    let body: serde_json::Value = response.json().expect("anthropic response should parse");
+    assert_eq!(
+        body.get("stop_reason").and_then(serde_json::Value::as_str),
+        Some("end_turn")
+    );
+    assert_eq!(
+        body.get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.last())
+            .and_then(|item| item.get("text"))
+            .and_then(serde_json::Value::as_str),
+        Some("Ringkasan terbaru reksadana Indonesia.")
+    );
+    assert_eq!(
+        body.get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+
+    let requests = backend.responses_bodies();
+    assert_eq!(requests.len(), 2, "proxy should issue a follow-up continuation");
+
+    let first_request: serde_json::Value =
+        serde_json::from_str(&requests[0]).expect("first request should parse");
+    assert_eq!(
+        first_request.get("input")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    let second_request: serde_json::Value =
+        serde_json::from_str(&requests[1]).expect("second request should parse");
+    assert_eq!(
+        second_request
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str),
+        Some("resp_ws_followup_1")
+    );
+    assert!(
+        second_request.get("input").is_none(),
+        "follow-up request should not replay the original input"
+    );
+    assert_eq!(
+        second_request.get("stream").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 }
 
 #[test]
