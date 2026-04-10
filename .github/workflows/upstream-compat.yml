@@ -1,0 +1,56 @@
+name: upstream compatibility watchdog
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-compat-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run upstream compatibility watchdog
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/upstream-compat-report.json"
+          if node scripts/compat/watch-upstream.mjs --report "${report}"; then
+            {
+              echo "## Upstream compatibility"
+              echo ""
+              node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); console.log('Checked Codex ' + report.current.codex.latestRelease.tag_name + ' and Claude ' + report.current.claude.latestRelease.tag_name + '.');" "${report}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          else
+            {
+              echo "## Upstream compatibility"
+              echo ""
+              echo "Drift detected. Inspect the report artifact and the job log for exact diffs."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-compat-report
+          path: ${{ runner.temp }}/upstream-compat-report.json
+          if-no-files-found: ignore

@@ -1,0 +1,66 @@
+{
+  "codex": {
+    "latestRelease": {
+      "tag_name": "rust-v0.118.0",
+      "name": "0.118.0",
+      "published_at": "2026-03-31T17:02:18Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.118.0",
+      "body_head": [
+        "## New Features",
+        "- Windows sandbox runs can now enforce proxy-only networking with OS-level egress rules, instead of relying on environment variables alone. (#12220)",
+        "- App-server clients can now start ChatGPT sign-in with a device code flow, which helps when browser callback login is unreliable or unavailable. (#15525)",
+        "- `codex exec` now supports the prompt-plus-stdin workflow, so you can pipe input and still pass a separate prompt on the command line. (#15917)",
+        "- Custom model providers can now fetch and refresh short-lived bearer tokens dynamically, instead of being limited to static credentials from config or environment variables. (#16286, #16287, #16288)",
+        "## Bug Fixes",
+        "- Project-local `.codex` files are now protected even on first creation, closing a gap where the initial write could bypass normal approval checks. (#15067)",
+        "- Linux sandbox launches are more reliable because Codex once again finds a trusted system `bwrap` on normal multi-entry `PATH`s. (#15791, #15973)"
+      ]
+    }
+  },
+  "claude": {
+    "latestRelease": {
+      "tag_name": "v2.1.100",
+      "name": "v2.1.100",
+      "published_at": "2026-04-10T05:16:35Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.100"
+    },
+    "docs": [
+      {
+        "url": "https://docs.anthropic.com/en/docs/claude-code/settings",
+        "title": "Claude Code settings - Claude Code Docs",
+        "description": "Configure Claude Code with global and project-level settings, and environment variables.",
+        "required_contains": [
+          "settings.json",
+          "CLAUDE.md",
+          "hooks",
+          "permissions",
+          "MCP"
+        ]
+      },
+      {
+        "url": "https://docs.anthropic.com/en/docs/claude-code/setup",
+        "title": "Advanced setup - Claude Code Docs",
+        "description": "System requirements, platform-specific installation, version management, and uninstallation for Claude Code.",
+        "required_contains": [
+          "System requirements",
+          "platform-specific installation",
+          "version management",
+          "uninstallation",
+          "Claude Code"
+        ]
+      },
+      {
+        "url": "https://docs.anthropic.com/en/docs/claude-code/github-actions",
+        "title": "Claude Code GitHub Actions - Claude Code Docs",
+        "description": "Learn about integrating Claude Code into your development workflow with Claude Code GitHub Actions",
+        "required_contains": [
+          "GitHub Actions",
+          "workflow",
+          "development workflow",
+          "integrate",
+          "Claude Code"
+        ]
+      }
+    ]
+  }
+}
