@@ -31555,6 +31555,39 @@ fn runtime_anthropic_sse_reader_emits_web_search_usage_in_message_delta() {
 }
 
 #[test]
+fn runtime_anthropic_sse_reader_preserves_mcp_tool_result_error_flag() {
+    let upstream = concat!(
+        "event: response.output_item.done\r\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"mcp_call\",\"id\":\"mcp_1\",\"name\":\"delete_file\",\"server_label\":\"local_fs\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/prodex/old.txt\\\"}\",\"error\":\"permission denied\"}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"output\":[{\"type\":\"mcp_call\",\"id\":\"mcp_1\",\"name\":\"delete_file\",\"server_label\":\"local_fs\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/prodex/old.txt\\\"}\",\"error\":\"permission denied\"}]}}\r\n",
+        "\r\n"
+    )
+    .as_bytes()
+    .to_vec();
+    let mut reader = RuntimeAnthropicSseReader::new(
+        Box::new(Cursor::new(upstream)),
+        "claude-sonnet-4-6".to_string(),
+        false,
+        0,
+        0,
+        0,
+        0,
+        RuntimeAnthropicServerTools::default(),
+    );
+    let mut emitted = Vec::new();
+    reader
+        .read_to_end(&mut emitted)
+        .expect("translated SSE stream should read");
+    let body = String::from_utf8(emitted).expect("translated SSE body should decode");
+
+    assert!(body.contains("\"mcp_tool_result\""));
+    assert!(body.contains("\"permission denied\""));
+    assert!(body.contains("\"is_error\":true"));
+}
+
+#[test]
 fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();

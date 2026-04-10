@@ -205,17 +205,10 @@ jobs:
       contents: write
 
     steps:
-      - name: Check out main
+      - name: Check out release ref
         uses: actions/checkout@v6
         with:
-          ref: main
           fetch-depth: 0
-
-      - name: Install Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          package-manager-cache: false
 
       - name: Resolve release metadata
         id: release
@@ -250,6 +243,18 @@ jobs:
             echo "tag=${version}"
             echo "target_sha=${target_sha}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
 
       - name: Sync versioned install snippets
         shell: bash

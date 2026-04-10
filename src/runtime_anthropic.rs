@@ -5089,18 +5089,34 @@ impl RuntimeAnthropicSseReader {
                 );
             }
             block_type if block_type.ends_with("_tool_result") => {
+                let mut content_block = serde_json::Map::new();
+                content_block.insert(
+                    "type".to_string(),
+                    serde_json::Value::String(block_type.to_string()),
+                );
+                content_block.insert(
+                    "tool_use_id".to_string(),
+                    block
+                        .get("tool_use_id")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::String(format!("{block_type}_call"))),
+                );
+                content_block.insert(
+                    "content".to_string(),
+                    block
+                        .get("content")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                if let Some(is_error) = block.get("is_error").cloned() {
+                    content_block.insert("is_error".to_string(), is_error);
+                }
                 self.push_event(
                     "content_block_start",
                     serde_json::json!({
                         "type": "content_block_start",
                         "index": self.content_index,
-                        "content_block": {
-                            "type": block_type,
-                            "tool_use_id": block.get("tool_use_id").cloned().unwrap_or_else(|| {
-                                serde_json::Value::String(format!("{block_type}_call"))
-                            }),
-                            "content": block.get("content").cloned().unwrap_or(serde_json::Value::Null),
-                        }
+                        "content_block": serde_json::Value::Object(content_block),
                     }),
                 );
             }
