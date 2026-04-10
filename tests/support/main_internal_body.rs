@@ -15257,6 +15257,142 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
 }
 
 #[test]
+fn runtime_proxy_releases_quota_blocked_function_call_output_previous_response_affinity_for_http()
+{
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let now = Local::now().timestamp();
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-main".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 1,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("responses".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body(
+            r#"{"previous_response_id":"resp-main","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
+        )
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert!(
+        body.contains("\"resp-second\""),
+        "unexpected HTTP continuation fallback body: {body}"
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "quota-blocked function_call_output continuation should degrade before surfacing usage limit: {body}"
+    );
+    assert!(
+        !body.contains("\"previous_response_not_found\""),
+        "function_call_output fallback should stay pre-commit: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    let request_bodies = backend.responses_bodies();
+    assert_eq!(
+        request_bodies
+            .iter()
+            .filter(|body| body.contains("\"previous_response_id\":\"resp-main\""))
+            .count(),
+        1,
+        "fresh fallback should not resend the old previous_response_id to another profile"
+    );
+    assert!(
+        request_bodies.iter().any(|body| {
+            body.contains("\"call_id\":\"call_123\"")
+                && body.contains("\"function_call_output\"")
+                && !body.contains("\"previous_response_id\":\"resp-main\"")
+        }),
+        "fresh fallback should preserve function_call_output payloads while dropping previous_response_id: {request_bodies:?}"
+    );
+}
+
+#[test]
 fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owner_snapshot_hits_critical_floor(
 ) {
     let temp_dir = TestDir::new();
@@ -19276,6 +19412,169 @@ fn runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_bef
             .get("resp-main")
             .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn runtime_proxy_websocket_releases_quota_blocked_function_call_output_previous_response_affinity()
+{
+    let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    let first_response_id = first_payloads
+        .iter()
+        .flat_map(|payload| extract_runtime_response_ids_from_payload(payload))
+        .last()
+        .expect("first websocket response should expose a response id");
+    assert_eq!(first_response_id, "resp-main");
+
+    socket
+        .send(WsMessage::Text(
+            format!(
+                "{{\"previous_response_id\":\"{first_response_id}\",\"input\":[{{\"type\":\"function_call_output\",\"call_id\":\"call_123\",\"output\":\"ok\"}}]}}"
+            )
+            .into(),
+        ))
+        .expect("second runtime proxy websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads after quota-blocked function_call_output continuation fallback: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("You've hit your usage limit")),
+        "quota-blocked function_call_output continuation should not surface usage limit: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "function_call_output fallback should stay pre-commit: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert_eq!(
+        upstream_requests.len(),
+        3,
+        "expected initial request, quota-blocked continuation, and fresh fallback"
+    );
+    assert_eq!(
+        upstream_requests
+            .iter()
+            .filter(|request| request.contains("\"previous_response_id\":\"resp-main\""))
+            .count(),
+        1,
+        "fresh fallback should not resend the old previous_response_id to another profile"
+    );
+    assert!(
+        upstream_requests.iter().any(|request| {
+            request.contains("\"call_id\":\"call_123\"")
+                && request.contains("\"function_call_output\"")
+                && !request.contains("\"previous_response_id\":\"resp-main\"")
+        }),
+        "fresh fallback should preserve function_call_output payloads while dropping previous_response_id: {upstream_requests:?}"
     );
 }
 

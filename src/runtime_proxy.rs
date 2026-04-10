@@ -3315,7 +3315,7 @@ pub(super) fn runtime_quota_blocked_affinity_is_releasable(
     turn_state_profile: Option<&str>,
     session_profile: Option<&str>,
     trusted_previous_response_affinity: bool,
-    request_requires_previous_response_affinity: bool,
+    _request_requires_previous_response_affinity: bool,
 ) -> bool {
     if strict_affinity_profile.is_some_and(|profile_name| profile_name == candidate_name)
         || turn_state_profile.is_some_and(|profile_name| profile_name == candidate_name)
@@ -3328,10 +3328,22 @@ pub(super) fn runtime_quota_blocked_affinity_is_releasable(
     if trusted_previous_response_affinity
         && pinned_profile.is_some_and(|profile_name| profile_name == candidate_name)
     {
-        return !request_requires_previous_response_affinity;
+        // Pre-commit quota or overload means the owning response chain is temporarily unavailable,
+        // so a fresh fallback may safely drop previous_response affinity even for *_call_output.
+        return true;
     }
 
     true
+}
+
+pub(super) fn runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+    previous_response_id: Option<&str>,
+    trusted_previous_response_affinity: bool,
+    previous_response_fresh_fallback_used: bool,
+) -> bool {
+    previous_response_id.is_some()
+        && trusted_previous_response_affinity
+        && !previous_response_fresh_fallback_used
 }
 
 pub(super) fn runtime_quota_precommit_floor_percent(route_kind: RuntimeRouteKind) -> i64 {
@@ -4384,12 +4396,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request_text) =
-                                runtime_request_text_without_previous_response_id(&request_text)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request_text) =
+                            runtime_request_text_without_previous_response_id(&request_text)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -4473,12 +4485,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request_text) =
-                                runtime_request_text_without_previous_response_id(&request_text)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request_text) =
+                            runtime_request_text_without_previous_response_id(&request_text)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -4669,12 +4681,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request_text) =
-                                runtime_request_text_without_previous_response_id(&request_text)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request_text) =
+                            runtime_request_text_without_previous_response_id(&request_text)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -4911,12 +4923,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request_text) =
-                                runtime_request_text_without_previous_response_id(&request_text)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request_text) =
+                            runtime_request_text_without_previous_response_id(&request_text)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -5158,12 +5170,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request_text) =
-                                runtime_request_text_without_previous_response_id(&request_text)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request_text) =
+                            runtime_request_text_without_previous_response_id(&request_text)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -5349,12 +5361,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                 }
-                if previous_response_id.is_some()
-                    && trusted_previous_response_affinity
-                    && !previous_response_fresh_fallback_used
-                    && !request_requires_previous_response_affinity
-                    && let Some(fresh_request_text) =
-                        runtime_request_text_without_previous_response_id(&request_text)
+                if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                    previous_response_id.as_deref(),
+                    trusted_previous_response_affinity,
+                    previous_response_fresh_fallback_used,
+                ) && let Some(fresh_request_text) =
+                    runtime_request_text_without_previous_response_id(&request_text)
                 {
                     runtime_proxy_log(
                         shared,
@@ -5437,12 +5449,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                     return Ok(());
                 }
-                if previous_response_id.is_some()
-                    && trusted_previous_response_affinity
-                    && !previous_response_fresh_fallback_used
-                    && !request_requires_previous_response_affinity
-                    && let Some(fresh_request_text) =
-                        runtime_request_text_without_previous_response_id(&request_text)
+                if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                    previous_response_id.as_deref(),
+                    trusted_previous_response_affinity,
+                    previous_response_fresh_fallback_used,
+                ) && let Some(fresh_request_text) =
+                    runtime_request_text_without_previous_response_id(&request_text)
                 {
                     runtime_proxy_log(
                         shared,
@@ -5539,12 +5551,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                 }
-                if previous_response_id.is_some()
-                    && trusted_previous_response_affinity
-                    && !previous_response_fresh_fallback_used
-                    && !request_requires_previous_response_affinity
-                    && let Some(fresh_request_text) =
-                        runtime_request_text_without_previous_response_id(&request_text)
+                if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                    previous_response_id.as_deref(),
+                    trusted_previous_response_affinity,
+                    previous_response_fresh_fallback_used,
+                ) && let Some(fresh_request_text) =
+                    runtime_request_text_without_previous_response_id(&request_text)
                 {
                     runtime_proxy_log(
                         shared,
@@ -8157,12 +8169,12 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request) =
-                                runtime_request_without_previous_response_affinity(&request)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request) =
+                            runtime_request_without_previous_response_affinity(&request)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -8345,12 +8357,12 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request) =
-                                runtime_request_without_previous_response_affinity(&request)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request) =
+                            runtime_request_without_previous_response_affinity(&request)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -8618,12 +8630,12 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request) =
-                                runtime_request_without_previous_response_affinity(&request)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request) =
+                            runtime_request_without_previous_response_affinity(&request)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -8806,12 +8818,12 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if previous_response_id.is_some()
-                            && trusted_previous_response_affinity
-                            && !previous_response_fresh_fallback_used
-                            && !request_requires_previous_response_affinity
-                            && let Some(fresh_request) =
-                                runtime_request_without_previous_response_affinity(&request)
+                        if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                            previous_response_id.as_deref(),
+                            trusted_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                        ) && let Some(fresh_request) =
+                            runtime_request_without_previous_response_affinity(&request)
                         {
                             runtime_proxy_log(
                                 shared,
@@ -9032,12 +9044,12 @@ pub(super) fn proxy_runtime_responses_request(
                         ),
                     );
                 }
-                if previous_response_id.is_some()
-                    && trusted_previous_response_affinity
-                    && !previous_response_fresh_fallback_used
-                    && !request_requires_previous_response_affinity
-                    && let Some(fresh_request) =
-                        runtime_request_without_previous_response_affinity(&request)
+                if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                    previous_response_id.as_deref(),
+                    trusted_previous_response_affinity,
+                    previous_response_fresh_fallback_used,
+                ) && let Some(fresh_request) =
+                    runtime_request_without_previous_response_affinity(&request)
                 {
                     runtime_proxy_log(
                         shared,
@@ -9131,12 +9143,12 @@ pub(super) fn proxy_runtime_responses_request(
                         ),
                     );
                 }
-                if previous_response_id.is_some()
-                    && trusted_previous_response_affinity
-                    && !previous_response_fresh_fallback_used
-                    && !request_requires_previous_response_affinity
-                    && let Some(fresh_request) =
-                        runtime_request_without_previous_response_affinity(&request)
+                if runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+                    previous_response_id.as_deref(),
+                    trusted_previous_response_affinity,
+                    previous_response_fresh_fallback_used,
+                ) && let Some(fresh_request) =
+                    runtime_request_without_previous_response_affinity(&request)
                 {
                     runtime_proxy_log(
                         shared,
