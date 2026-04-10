@@ -103,12 +103,12 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
 
       - name: Attest binary artifact provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact-name }}
           path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
@@ -134,7 +134,7 @@ jobs:
         run: cargo publish --locked --dry-run
 
       - name: Attest crate package provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: target/package/prodex-*.crate
 
@@ -185,7 +185,7 @@ jobs:
             dir:/source -o spdx-json > release-sbom.spdx.json
 
       - name: Upload release SBOM
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-sbom
           path: release-sbom.spdx.json
