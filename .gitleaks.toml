@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic JWT fixture used by parser tests"
+paths = [
+  '''tests/support/main_internal_body\.rs''',
+]
+regexes = [
+  '''eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0\.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn19\.c2ln''',
+]

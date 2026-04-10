@@ -33,6 +33,23 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Scan repository for leaked credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${PWD}:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /repo --no-git --redact --no-banner --config /repo/.gitleaks.toml
+
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 30
