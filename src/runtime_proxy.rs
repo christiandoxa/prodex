@@ -7858,12 +7858,38 @@ pub(super) fn proxy_runtime_anthropic_messages_request(
         &translated_request.translated_request,
         shared,
     )?;
-    translate_runtime_responses_reply_to_anthropic(
+    let translate_started_at = Instant::now();
+    let translated_response = translate_runtime_responses_reply_to_anthropic(
         response,
         &translated_request,
         request_id,
         shared,
-    )
+    )?;
+    match &translated_response {
+        RuntimeResponsesReply::Buffered(parts) => runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http anthropic_translate_complete stream={} needs_buffered_translation={} status={} content_type={} body_bytes={} elapsed_ms={}",
+                translated_request.stream,
+                translated_request.server_tools.needs_buffered_translation(),
+                parts.status,
+                runtime_buffered_response_content_type(parts).unwrap_or("-"),
+                parts.body.len(),
+                translate_started_at.elapsed().as_millis(),
+            ),
+        ),
+        RuntimeResponsesReply::Streaming(response) => runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http anthropic_translate_complete stream={} needs_buffered_translation={} status={} body_streaming=true elapsed_ms={}",
+                translated_request.stream,
+                translated_request.server_tools.needs_buffered_translation(),
+                response.status,
+                translate_started_at.elapsed().as_millis(),
+            ),
+        ),
+    }
+    Ok(translated_response)
 }
 
 pub(super) fn proxy_runtime_responses_request(
@@ -12624,7 +12650,18 @@ pub(super) fn prepare_runtime_proxy_responses_success(
         ),
     );
     if !is_sse {
+        let buffered_started_at = Instant::now();
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http buffered_response_complete profile={profile_name} phase=responses_unary status={} content_type={} body_bytes={} elapsed_ms={}",
+                parts.status,
+                runtime_buffered_response_content_type(&parts).unwrap_or("-"),
+                parts.body.len(),
+                buffered_started_at.elapsed().as_millis(),
+            ),
+        );
         let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
         if !response_ids.is_empty() {
             remember_runtime_response_ids(

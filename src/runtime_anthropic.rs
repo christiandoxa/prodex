@@ -130,7 +130,7 @@ pub(super) struct RuntimeAnthropicRegisteredServerTool {
 }
 
 impl RuntimeAnthropicServerTools {
-    fn needs_buffered_translation(&self) -> bool {
+    pub(super) fn needs_buffered_translation(&self) -> bool {
         self.web_search || self.mcp
     }
 
