@@ -285,6 +285,6 @@ If asked to publish:
 5. run `cargo publish --dry-run`
 6. run `cargo publish`
 
-The `.github/workflows/npm-publish.yml` workflow is expected to create or refresh the matching GitHub Release for the published `prodex-v<version>` tag after the crate and npm publish jobs succeed. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the tagged release commit matches `origin/main`.
+The `.github/workflows/npm-publish.yml` workflow is expected to create or refresh the matching GitHub Release for the published `<version>` tag after the crate and npm publish jobs succeed. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the release commit matches `origin/main`.
 
 If asked to commit, use a conventional commit message.

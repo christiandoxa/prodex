@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "prodex-v*"
+      - "*.*.*"
 
 permissions:
   contents: read
@@ -217,17 +218,49 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          ref_name="${GITHUB_REF_NAME}"
+          ref_type="${GITHUB_REF_TYPE:-branch}"
+          target_sha="${GITHUB_SHA}"
+          if [ "${ref_type}" = "tag" ]; then
+            case "${ref_name}" in
+              "${version}"|"prodex-v${version}") ;;
+              *)
+                echo "release ref ${ref_name} does not match Cargo.toml version ${version}" >&2
+                exit 1
+                ;;
+            esac
+            git fetch origin "refs/tags/${ref_name}:refs/tags/${ref_name}"
+            target_sha="$(git rev-list -n1 "${ref_name}")"
+          elif [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main or a matching version tag" >&2
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "tag=${version}"
+            echo "target_sha=${target_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Sync versioned install snippets
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          version="${tag#prodex-v}"
-          git fetch origin main "refs/tags/${tag}:refs/tags/${tag}"
           main_sha="$(git rev-parse origin/main)"
-          tag_sha="$(git rev-list -n1 "${tag}")"
-          if [ "${tag_sha}" != "${main_sha}" ]; then
-            echo "tag ${tag} is not the current origin/main head; skipping docs sync"
+          release_sha="${{ steps.release.outputs.target_sha }}"
+          version="${{ steps.release.outputs.version }}"
+          if [ "${release_sha}" != "${main_sha}" ]; then
+            echo "release commit ${release_sha} is not the current origin/main head; skipping docs sync"
             exit 0
           fi
           node scripts/npm/sync-docs-version.mjs --version "${version}"
@@ -254,6 +287,40 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          ref_name="${GITHUB_REF_NAME}"
+          ref_type="${GITHUB_REF_TYPE:-branch}"
+          target_sha="${GITHUB_SHA}"
+          if [ "${ref_type}" = "tag" ]; then
+            case "${ref_name}" in
+              "${version}"|"prodex-v${version}") ;;
+              *)
+                echo "release ref ${ref_name} does not match Cargo.toml version ${version}" >&2
+                exit 1
+                ;;
+            esac
+            git fetch origin "refs/tags/${ref_name}:refs/tags/${ref_name}"
+            target_sha="$(git rev-list -n1 "${ref_name}")"
+          elif [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main or a matching version tag" >&2
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "tag=${version}"
+            echo "target_sha=${target_sha}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Download built binaries
         uses: actions/download-artifact@v8
@@ -290,9 +357,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          version="${tag#prodex-v}"
-          title="prodex v${version}"
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          target_sha="${{ steps.release.outputs.target_sha }}"
+          title="${version}"
           notes_file="$(mktemp)"
           cat > "${notes_file}" <<EOF
           prodex ${version}
@@ -305,9 +373,13 @@ jobs:
           \`\`\`
           EOF
           if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release edit "${tag}" \
+              --title "${title}" \
+              --notes-file "${notes_file}"
             gh release upload "${tag}" release-assets/* --clobber
           else
             gh release create "${tag}" release-assets/* \
+              --target "${target_sha}" \
               --title "${title}" \
               --notes-file "${notes_file}" \
               --latest
