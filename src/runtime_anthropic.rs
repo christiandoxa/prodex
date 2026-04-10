@@ -131,7 +131,7 @@ pub(super) struct RuntimeAnthropicRegisteredServerTool {
 
 impl RuntimeAnthropicServerTools {
     pub(super) fn needs_buffered_translation(&self) -> bool {
-        self.web_search || self.mcp
+        self.web_search
     }
 
     pub(super) fn register(&mut self, tool_name: &str, canonical_name: &str) {
@@ -5025,6 +5025,116 @@ impl RuntimeAnthropicSseReader {
         self.content_index += 1;
     }
 
+    fn emit_completed_content_block(&mut self, block: serde_json::Value, has_tool_calls: bool) {
+        let Some(block_type) = block.get("type").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+
+        self.finish_active_tool_use(None, None, None);
+        self.close_thinking_block();
+        self.close_text_block();
+
+        match block_type {
+            "mcp_tool_use" => {
+                let input_json = block
+                    .get("input")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let mut content_block = serde_json::Map::new();
+                content_block.insert(
+                    "type".to_string(),
+                    serde_json::Value::String("mcp_tool_use".to_string()),
+                );
+                content_block.insert(
+                    "id".to_string(),
+                    block
+                        .get("id")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::String("mcp_tool_use".to_string())),
+                );
+                content_block.insert(
+                    "name".to_string(),
+                    block
+                        .get("name")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::String("mcp_tool".to_string())),
+                );
+                content_block.insert(
+                    "server_name".to_string(),
+                    block
+                        .get("server_name")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::Value::String("mcp".to_string())),
+                );
+                content_block.insert("input".to_string(), serde_json::json!({}));
+                self.push_event(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": self.content_index,
+                        "content_block": serde_json::Value::Object(content_block),
+                    }),
+                );
+                self.push_event(
+                    "content_block_delta",
+                    serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": self.content_index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": serde_json::to_string(&input_json)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        }
+                    }),
+                );
+            }
+            block_type if block_type.ends_with("_tool_result") => {
+                self.push_event(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": self.content_index,
+                        "content_block": {
+                            "type": block_type,
+                            "tool_use_id": block.get("tool_use_id").cloned().unwrap_or_else(|| {
+                                serde_json::Value::String(format!("{block_type}_call"))
+                            }),
+                            "content": block.get("content").cloned().unwrap_or(serde_json::Value::Null),
+                        }
+                    }),
+                );
+            }
+            "mcp_approval_request" | "mcp_list_tools" => {
+                self.push_event(
+                    "content_block_start",
+                    serde_json::json!({
+                        "type": "content_block_start",
+                        "index": self.content_index,
+                        "content_block": block,
+                    }),
+                );
+            }
+            _ => return,
+        }
+
+        self.push_event(
+            "content_block_stop",
+            serde_json::json!({
+                "type": "content_block_stop",
+                "index": self.content_index,
+            }),
+        );
+        self.content_index += 1;
+        self.has_content = true;
+        self.has_tool_calls |= has_tool_calls;
+    }
+
+    fn emit_mcp_call_blocks(&mut self, item: &serde_json::Value) {
+        for block in runtime_anthropic_mcp_call_blocks_from_output_item(item) {
+            self.emit_completed_content_block(block, false);
+        }
+    }
+
     fn finish_success(&mut self) {
         if self.terminal_sent {
             return;
@@ -5266,6 +5376,11 @@ impl RuntimeAnthropicSseReader {
                                 runtime_anthropic_web_search_request_count_from_output_item(item);
                         }
                     }
+                    Some("mcp_call") => {
+                        if let Some(item) = value.get("item") {
+                            self.emit_mcp_call_blocks(item);
+                        }
+                    }
                     Some("shell_call") => {
                         if self.active_tool_use.is_none() {
                             let call_id = value
@@ -5314,6 +5429,22 @@ impl RuntimeAnthropicSseReader {
                             Some("computer"),
                             call_id,
                         );
+                    }
+                    Some("mcp_approval_request") => {
+                        if let Some(item) = value.get("item") {
+                            self.emit_completed_content_block(
+                                runtime_anthropic_mcp_approval_request_block_from_output_item(item),
+                                true,
+                            );
+                        }
+                    }
+                    Some("mcp_list_tools") => {
+                        if let Some(item) = value.get("item") {
+                            self.emit_completed_content_block(
+                                runtime_anthropic_mcp_list_tools_block_from_output_item(item),
+                                false,
+                            );
+                        }
                     }
                     _ => {}
                 }

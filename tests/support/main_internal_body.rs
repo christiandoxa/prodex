@@ -552,6 +552,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyUnauthorizedMain,
     HttpOnlyBufferedJson,
     HttpOnlyAnthropicWebSearchFollowup,
+    HttpOnlyAnthropicMcpStream,
     HttpOnlyInitialBodyStall,
     HttpOnlySlowStream,
     HttpOnlyStallAfterSeveralChunks,
@@ -594,6 +595,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_anthropic_web_search_followup() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyAnthropicWebSearchFollowup)
+    }
+
+    fn start_http_anthropic_mcp_stream() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyAnthropicMcpStream)
     }
 
     fn start_http_slow_stream() -> Self {
@@ -1183,6 +1188,29 @@ fn handle_runtime_proxy_backend_request(
                                 }
                             ]
                         })
+                        .to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                "second-account"
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlyAnthropicMcpStream) =>
+                {
+                    (
+                        "HTTP/1.1 200 OK",
+                        "text/event-stream",
+                        concat!(
+                            "event: response.created\r\n",
+                            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_mcp_1\"}}\r\n",
+                            "\r\n",
+                            "event: response.output_item.done\r\n",
+                            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"mcp_call\",\"id\":\"mcp_1\",\"name\":\"list_files\",\"server_label\":\"local_fs\",\"arguments\":\"{\\\"path\\\":\\\"/workspace\\\"}\",\"output\":\"README.md\\nsrc/main.rs\"}}\r\n",
+                            "\r\n",
+                            "event: response.completed\r\n",
+                            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mcp_1\",\"usage\":{\"input_tokens\":14,\"output_tokens\":8},\"output\":[{\"type\":\"mcp_call\",\"id\":\"mcp_1\",\"name\":\"list_files\",\"server_label\":\"local_fs\",\"arguments\":\"{\\\"path\\\":\\\"/workspace\\\"}\",\"output\":\"README.md\\nsrc/main.rs\"}]}}\r\n",
+                            "\r\n"
+                        )
                         .to_string(),
                         None,
                         None,
@@ -22621,6 +22649,16 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_http() {
         backend.responses_accounts(),
         vec!["second-account".to_string(), "second-account".to_string()]
     );
+    let request_headers = backend.responses_headers();
+    assert_eq!(request_headers.len(), 2, "backend should see both HTTP attempts");
+    assert_eq!(
+        request_headers
+            .get(1)
+            .and_then(|headers| headers.get("x-codex-turn-state"))
+            .map(String::as_str),
+        Some("turn-second"),
+        "retry should carry the owning turn-state back upstream"
+    );
 }
 
 #[test]
@@ -22707,6 +22745,20 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() 
     assert_eq!(
         backend.responses_accounts(),
         vec!["second-account".to_string(), "second-account".to_string()]
+    );
+    let request_headers = backend.responses_headers();
+    assert_eq!(
+        request_headers.len(),
+        2,
+        "backend should see both websocket attempts"
+    );
+    assert_eq!(
+        request_headers
+            .get(1)
+            .and_then(|headers| headers.get("x-codex-turn-state"))
+            .map(String::as_str),
+        Some("turn-second"),
+        "websocket retry should carry the owning turn-state back upstream"
     );
 }
 
@@ -27193,6 +27245,52 @@ fn translate_runtime_anthropic_messages_request_maps_mcp_toolset_to_responses_mc
 }
 
 #[test]
+fn translate_runtime_anthropic_messages_request_does_not_buffer_mcp_only_toolsets() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-api-key".to_string(), "dummy".to_string()),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+        ],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "stream": true,
+            "mcp_servers": [
+                {
+                    "name": "local_fs",
+                    "url": "https://mcp.example.com/sse"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "mcp_toolset",
+                    "mcp_server_name": "local_fs",
+                    "name": "filesystem"
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "List the workspace files."
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+
+    assert!(
+        !translated.server_tools.needs_buffered_translation(),
+        "mcp-only anthropic requests should stay on the streaming path"
+    );
+}
+
+#[test]
 fn translate_runtime_anthropic_messages_request_falls_back_for_unrepresentable_mcp_toolset_denylist()
 {
     let request = RuntimeProxyRequest {
@@ -31321,6 +31419,7 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
         .header("Content-Type", "application/json")
         .header("x-api-key", "dummy")
         .header("anthropic-version", "2023-06-01")
+        .header("x-claude-code-session-id", "claude-session-42")
         .header("User-Agent", "claude-cli/test")
         .body(
             serde_json::json!({
@@ -31353,6 +31452,118 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
     let body = response.text().expect("stream body should decode");
     assert!(body.contains("event: message_start"));
     assert!(body.contains("event: message_stop"));
+}
+
+#[test]
+fn runtime_proxy_streams_anthropic_mcp_messages_without_buffering() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_anthropic_mcp_stream();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+    let usage = usage_with_main_windows(90, 3600, 90, 604_800);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: Local::now().timestamp(),
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage.clone()),
+                },
+            )]),
+            profile_usage_snapshots: BTreeMap::from([("main".to_string(), snapshot)]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-api-key".to_string(), "dummy".to_string()),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+        ],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "stream": true,
+            "mcp_servers": [
+                {
+                    "name": "local_fs",
+                    "url": "https://mcp.example.com/sse"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "mcp_toolset",
+                    "mcp_server_name": "local_fs",
+                    "name": "filesystem"
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "List the workspace files."
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let response = proxy_runtime_anthropic_messages_request(42, &request, &shared)
+        .expect("anthropic mcp request should succeed");
+
+    let RuntimeResponsesReply::Streaming(response) = response else {
+        panic!("expected streaming anthropic mcp response");
+    };
+    let mut body = String::new();
+    let mut reader = response.body;
+    reader
+        .read_to_string(&mut body)
+        .expect("streaming anthropic mcp body should read");
+    assert!(body.contains("\"mcp_tool_use\""));
+    assert!(body.contains("\"local_fs\""));
+    assert!(body.contains("\"mcp_tool_result\""));
+    assert!(body.contains("\"stop_reason\":\"end_turn\""));
 }
 
 #[test]
