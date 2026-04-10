@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "prodex-v*"
-      - "*.*.*"
+      - "0.*.*"
 
 permissions:
   contents: read
@@ -234,7 +233,7 @@ jobs:
           target_sha="${GITHUB_SHA}"
           if [ "${ref_type}" = "tag" ]; then
             case "${ref_name}" in
-              "${version}"|"prodex-v${version}") ;;
+              "${version}") ;;
               *)
                 echo "release ref ${ref_name} does not match Cargo.toml version ${version}" >&2
                 exit 1
@@ -304,7 +303,7 @@ jobs:
           target_sha="${GITHUB_SHA}"
           if [ "${ref_type}" = "tag" ]; then
             case "${ref_name}" in
-              "${version}"|"prodex-v${version}") ;;
+              "${version}") ;;
               *)
                 echo "release ref ${ref_name} does not match Cargo.toml version ${version}" >&2
                 exit 1
