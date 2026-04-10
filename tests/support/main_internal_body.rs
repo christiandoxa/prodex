@@ -17129,15 +17129,25 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
             .is_some_and(|binding| binding.profile_name == compact_owner_profile)
     });
 
+    let resumed_current_profile = if compact_owner_profile == "second" {
+        "third"
+    } else {
+        "second"
+    };
     let mut resumed_state = AppState::load(&paths).expect("state should reload");
-    resumed_state.active_profile = Some("third".to_string());
+    resumed_state.active_profile = Some(resumed_current_profile.to_string());
     resumed_state
         .save(&paths)
         .expect("failed to save resumed state");
 
-    let resumed_proxy =
-        start_runtime_rotation_proxy(&paths, &resumed_state, "third", backend.base_url(), false)
-            .expect("resumed runtime proxy should start");
+    let resumed_proxy = start_runtime_rotation_proxy(
+        &paths,
+        &resumed_state,
+        resumed_current_profile,
+        backend.base_url(),
+        false,
+    )
+    .expect("resumed runtime proxy should start");
     let followup = client
         .post(format!(
             "http://{}/backend-api/codex/responses",
@@ -21074,7 +21084,7 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
         .expect("failed to save initial state");
 
     let client = Client::builder().build().expect("client");
-    let (first_response_id, owner_account) = {
+    let (first_response_id, owner_profile, owner_account) = {
         let proxy =
             start_runtime_rotation_proxy(&paths, &initial_state, "main", backend.base_url(), false)
                 .expect("runtime proxy should start");
@@ -21097,24 +21107,37 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
             .expect("first response should expose a response id");
         let owner_account = runtime_proxy_backend_response_owner_account_id(&first_response_id)
             .expect("first response id should map to a backend account");
+        let owner_profile = runtime_proxy_backend_profile_name_for_response_id(&first_response_id)
+            .expect("first response id should map to a backend profile");
         assert!(
             first_body.contains(&format!("\"{first_response_id}\"")),
             "unexpected first response body after quota rotation: {first_body}"
         );
-        (first_response_id, owner_account)
+        (first_response_id, owner_profile, owner_account)
     };
     let second_response_id = runtime_proxy_backend_next_response_id(Some(&first_response_id))
         .expect("continuation response id should exist");
+    let first_request_count = backend.responses_accounts().len();
 
+    let resumed_current_profile = if owner_profile == "second" {
+        "third"
+    } else {
+        "second"
+    };
     let mut resumed_state = AppState::load(&paths).expect("state should reload");
-    resumed_state.active_profile = Some("third".to_string());
+    resumed_state.active_profile = Some(resumed_current_profile.to_string());
     resumed_state
         .save(&paths)
         .expect("failed to save resumed state");
 
-    let resumed_proxy =
-        start_runtime_rotation_proxy(&paths, &resumed_state, "third", backend.base_url(), false)
-            .expect("resumed runtime proxy should start");
+    let resumed_proxy = start_runtime_rotation_proxy(
+        &paths,
+        &resumed_state,
+        resumed_current_profile,
+        backend.base_url(),
+        false,
+    )
+    .expect("resumed runtime proxy should start");
 
     let second = client
         .post(format!(
@@ -21144,8 +21167,8 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
         &[owner_account.to_string(), owner_account.to_string()]
     );
     assert!(
-        !accounts.iter().any(|account| account == "third-account"),
-        "persisted previous-response affinity should not spill into a different profile after restart: {accounts:?}"
+        accounts[first_request_count..] == vec![owner_account.to_string()],
+        "persisted previous-response affinity should continue on the original owner after restart: {accounts:?}"
     );
 }
 
@@ -23358,8 +23381,13 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
         let expected_response_id =
             runtime_proxy_backend_next_response_id(Some(&previous_response_id))
                 .expect("continuation response id should exist");
+        let resumed_current_profile = if owner_profile == "second" {
+            "third"
+        } else {
+            "second"
+        };
         let mut resumed_state = AppState::load(&paths).expect("state should reload");
-        resumed_state.active_profile = Some("third".to_string());
+        resumed_state.active_profile = Some(resumed_current_profile.to_string());
         resumed_state
             .save(&paths)
             .expect("failed to save resumed state");
@@ -23367,7 +23395,7 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
         let proxy = start_runtime_rotation_proxy(
             &paths,
             &resumed_state,
-            "third",
+            resumed_current_profile,
             backend.base_url(),
             false,
         )
