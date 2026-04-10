@@ -47,6 +47,7 @@ mod quota_support;
 mod runtime_anthropic;
 mod runtime_background;
 mod runtime_broker;
+mod runtime_capabilities;
 mod runtime_claude;
 #[path = "runtime_tuning.rs"]
 mod runtime_config;
@@ -72,6 +73,7 @@ use quota_support::*;
 use runtime_anthropic::*;
 use runtime_background::*;
 use runtime_broker::*;
+use runtime_capabilities::*;
 use runtime_claude::*;
 use runtime_config::*;
 use runtime_doctor::*;
@@ -1544,6 +1546,11 @@ struct RuntimeDoctorSummary {
     previous_response_not_found_by_transport: BTreeMap<String, usize>,
     first_timestamp: Option<String>,
     last_timestamp: Option<String>,
+    compat_warning_count: usize,
+    top_client_family: Option<String>,
+    top_client: Option<String>,
+    top_tool_surface: Option<String>,
+    top_compat_warning: Option<String>,
     selection_pressure: String,
     transport_pressure: String,
     persistence_pressure: String,
@@ -2232,3 +2239,7 @@ impl RuntimeProxyEndpoint {
 #[cfg(test)]
 #[path = "../tests/support/main_internal_harness.rs"]
 mod main_internal_tests;
+
+#[cfg(test)]
+#[path = "../tests/support/compat_replay_body.rs"]
+mod compat_replay_tests;

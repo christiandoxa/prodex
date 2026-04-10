@@ -104,6 +104,26 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
         serde_json::Value::from(summary.last_timestamp.clone()),
     );
     value.insert(
+        "compat_warning_count".to_string(),
+        serde_json::Value::from(summary.compat_warning_count),
+    );
+    value.insert(
+        "top_client_family".to_string(),
+        serde_json::Value::from(summary.top_client_family.clone()),
+    );
+    value.insert(
+        "top_client".to_string(),
+        serde_json::Value::from(summary.top_client.clone()),
+    );
+    value.insert(
+        "top_tool_surface".to_string(),
+        serde_json::Value::from(summary.top_tool_surface.clone()),
+    );
+    value.insert(
+        "top_compat_warning".to_string(),
+        serde_json::Value::from(summary.top_compat_warning.clone()),
+    );
+    value.insert(
         "marker_counts".to_string(),
         serde_json::Value::Object(marker_counts),
     );
@@ -547,6 +567,42 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             runtime_doctor_marker_count(summary, "profile_probe_refresh_error").to_string(),
         ),
         (
+            "Compat samples".to_string(),
+            runtime_doctor_marker_count(summary, "compat_request_surface").to_string(),
+        ),
+        (
+            "Compat warnings".to_string(),
+            summary.compat_warning_count.to_string(),
+        ),
+        (
+            "Client family".to_string(),
+            summary
+                .top_client_family
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Top client".to_string(),
+            summary
+                .top_client
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Tool surface".to_string(),
+            summary
+                .top_tool_surface
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+        ),
+        (
+            "Compat warning".to_string(),
+            summary
+                .top_compat_warning
+                .clone()
+                .unwrap_or_else(|| "-".to_string()),
+        ),
+        (
             "Hot lane".to_string(),
             runtime_doctor_top_facet(summary, "lane").unwrap_or_else(|| "-".to_string()),
         ),
@@ -862,6 +918,11 @@ fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
             .entry("quota_critical_floor_before_send")
             .or_insert(0) += quota_floor_before_send_count;
     }
+    summary.compat_warning_count = runtime_doctor_marker_count(summary, "compat_warning");
+    summary.top_client_family = runtime_doctor_top_facet(summary, "family");
+    summary.top_client = runtime_doctor_top_facet(summary, "client");
+    summary.top_tool_surface = runtime_doctor_top_facet(summary, "tool_surface");
+    summary.top_compat_warning = runtime_doctor_top_facet(summary, "warning");
     summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
 }
 
@@ -1332,6 +1393,19 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
                 "Recent previous_response_id continuity failures were observed: {}.",
                 runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
             )
+        } else if summary.compat_warning_count > 0 {
+            format!(
+                "Recent compatibility warnings were observed for {}: {}.",
+                summary
+                    .top_client
+                    .clone()
+                    .or_else(|| summary.top_client_family.clone())
+                    .unwrap_or_else(|| "unknown client".to_string()),
+                summary
+                    .top_compat_warning
+                    .clone()
+                    .unwrap_or_else(|| "inspect compat_warning markers".to_string())
+            )
         } else if summary.persisted_dead_continuations > 0 {
             format!(
                 "Some persisted continuations are currently dead and will be pruned: {}.",
@@ -1456,6 +1530,12 @@ pub(crate) fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                 "profile",
                 "reason",
                 "transport",
+                "family",
+                "client",
+                "tool_surface",
+                "continuation",
+                "origin",
+                "warning",
                 "quota_source",
                 "quota_band",
                 "five_hour_status",
@@ -1593,6 +1673,8 @@ fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
         "quota_release_profile_affinity",
         "quota_critical_floor_before_send",
         "upstream_usage_limit_passthrough",
+        "compat_request_surface",
+        "compat_warning",
         "websocket_reuse_skip_quota_exhausted",
         "websocket_reuse_watchdog",
         "websocket_precommit_frame_timeout",

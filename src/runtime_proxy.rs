@@ -769,6 +769,8 @@ pub(super) fn handle_runtime_rotation_proxy_request(
             captured.body.len()
         ),
     );
+    let compat_surface = runtime_detect_request_compatibility_surface(&captured, "request", "http");
+    runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
     if is_runtime_anthropic_messages_path(&captured.path_and_query)
         && std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some()
     {
@@ -3928,6 +3930,9 @@ pub(super) fn proxy_runtime_responses_websocket_request(
             runtime_request_turn_state(&handshake_request)
         ),
     );
+    let compat_surface =
+        runtime_detect_request_compatibility_surface(&handshake_request, "handshake", "websocket");
+    runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
     if let Err(err) = run_runtime_proxy_websocket_session(
         request_id,
         &mut local_socket,
@@ -4075,6 +4080,11 @@ pub(super) fn run_runtime_proxy_websocket_session(
                         text.len()
                     ),
                 );
+                let compat_surface = runtime_detect_websocket_message_compatibility_surface(
+                    handshake_request,
+                    text.as_ref(),
+                );
+                runtime_proxy_log_request_compatibility(shared, message_id, &compat_surface);
                 proxy_runtime_websocket_text_message(
                     session_id,
                     message_id,
