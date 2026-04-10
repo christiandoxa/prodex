@@ -542,6 +542,7 @@ struct RuntimeProxyBackend {
     responses_bodies: Arc<Mutex<Vec<String>>>,
     websocket_requests: Arc<Mutex<Vec<String>>>,
     usage_accounts: Arc<Mutex<Vec<String>>>,
+    connection_threads: Arc<Mutex<Vec<JoinHandle<()>>>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -691,12 +692,14 @@ impl RuntimeProxyBackend {
         let responses_bodies = Arc::new(Mutex::new(Vec::new()));
         let websocket_requests = Arc::new(Mutex::new(Vec::new()));
         let usage_accounts = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads = Arc::new(Mutex::new(Vec::new()));
         let shutdown_flag = Arc::clone(&shutdown);
         let responses_accounts_flag = Arc::clone(&responses_accounts);
         let responses_headers_flag = Arc::clone(&responses_headers);
         let responses_bodies_flag = Arc::clone(&responses_bodies);
         let websocket_requests_flag = Arc::clone(&websocket_requests);
         let usage_accounts_flag = Arc::clone(&usage_accounts);
+        let connection_threads_flag = Arc::clone(&connection_threads);
         let thread = thread::spawn(move || {
             while !shutdown_flag.load(Ordering::SeqCst) {
                 match listener.accept() {
@@ -720,7 +723,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketTopLevelResponseId
                         );
-                        thread::spawn(move || {
+                        let handler = thread::spawn(move || {
                             if websocket_enabled
                                 && runtime_proxy_backend_is_websocket_upgrade(&stream)
                             {
@@ -742,6 +745,10 @@ impl RuntimeProxyBackend {
                                 );
                             }
                         });
+                        connection_threads_flag
+                            .lock()
+                            .expect("connection_threads poisoned")
+                            .push(handler);
                     }
                     Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(10));
@@ -759,6 +766,7 @@ impl RuntimeProxyBackend {
             responses_bodies,
             websocket_requests,
             usage_accounts,
+            connection_threads,
             thread: Some(thread),
         }
     }
@@ -808,6 +816,13 @@ impl Drop for RuntimeProxyBackend {
         self.shutdown.store(true, Ordering::SeqCst);
         let _ = TcpStream::connect(self.addr);
         if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        let mut handlers = self
+            .connection_threads
+            .lock()
+            .expect("connection_threads poisoned");
+        while let Some(thread) = handlers.pop() {
             let _ = thread.join();
         }
     }
@@ -19383,9 +19398,6 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     };
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
-        .expect("latest runtime pointer should exist");
-    let log_path = PathBuf::from(log_path.trim());
     let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
     assert_eq!(
         startup_usage_accounts,
@@ -19481,6 +19493,13 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     let mut tail = Vec::new();
     let mut observed = false;
     for _ in 0..160 {
+        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+            .into_iter()
+            .next_back()
+        else {
+            thread::sleep(Duration::from_millis(25));
+            continue;
+        };
         tail = read_runtime_log_tail(&log_path, 32 * 1024)
             .expect("runtime log tail should be readable");
         let text = String::from_utf8_lossy(&tail);
