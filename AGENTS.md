@@ -264,12 +264,27 @@ cargo update
 
 This project has been released frequently.
 
+Release versioning on the `0.x` line is incremental by the minor component unless explicitly requested otherwise:
+
+1. `0.3.0`
+2. `0.4.0`
+3. `0.5.0`
+
+After bumping `Cargo.toml`, sync the npm manifests and versioned install snippets in repo docs with:
+
+```bash
+npm run npm:sync-version
+```
+
 If asked to publish:
 
 1. bump `Cargo.toml`
-2. update `Cargo.lock`
-3. run tests
-4. run `cargo publish --dry-run`
-5. run `cargo publish`
+2. run `npm run npm:sync-version`
+3. update `Cargo.lock`
+4. run tests
+5. run `cargo publish --dry-run`
+6. run `cargo publish`
+
+The `.github/workflows/npm-publish.yml` workflow is expected to create or refresh the matching GitHub Release for the published `prodex-v<version>` tag after the crate and npm publish jobs succeed. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the tagged release commit matches `origin/main`.
 
 If asked to commit, use a conventional commit message.

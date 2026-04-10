@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "npm:version": "node scripts/npm/version.mjs",
-    "npm:sync-version": "node scripts/npm/sync-version.mjs --root npm",
+    "npm:sync-version": "node scripts/npm/sync-version.mjs --root npm && node scripts/npm/sync-docs-version.mjs",
+    "npm:sync-docs-version": "node scripts/npm/sync-docs-version.mjs",
     "npm:stage": "node scripts/npm/stage.mjs",
     "npm:publish": "node scripts/npm/publish.mjs"
   }
