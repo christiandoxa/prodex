@@ -4687,16 +4687,18 @@ pub(super) fn runtime_anthropic_message_from_buffered_responses_parts_with_carri
 
     let value = serde_json::from_slice::<serde_json::Value>(&parts.body)
         .context("failed to parse buffered Responses JSON body")?;
-    Ok(runtime_anthropic_response_from_json_value_with_carried_usage(
-        &value,
-        &request.requested_model,
-        request.want_thinking,
-        carried_usage.web_search_requests,
-        carried_usage.web_fetch_requests,
-        carried_usage.code_execution_requests,
-        carried_usage.tool_search_requests,
-        Some(&request.server_tools),
-    ))
+    Ok(
+        runtime_anthropic_response_from_json_value_with_carried_usage(
+            &value,
+            &request.requested_model,
+            request.want_thinking,
+            carried_usage.web_search_requests,
+            carried_usage.web_fetch_requests,
+            carried_usage.code_execution_requests,
+            carried_usage.tool_search_requests,
+            Some(&request.server_tools),
+        ),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
