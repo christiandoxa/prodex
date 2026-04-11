@@ -56,11 +56,11 @@ Check your installed version:
 prodex --version
 ```
 
-The current local version in this repo is `0.6.0`:
+The current local version in this repo is `0.7.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.6.0
-cargo install prodex --force --version 0.6.0
+npm install -g @christiandoxa/prodex@0.7.0
+cargo install prodex --force --version 0.7.0
 ```
 
 Dependency status in this repo:
