@@ -3322,8 +3322,15 @@ pub(super) fn runtime_quota_blocked_affinity_is_releasable(
     turn_state_profile: Option<&str>,
     session_profile: Option<&str>,
     trusted_previous_response_affinity: bool,
-    _request_requires_previous_response_affinity: bool,
+    request_requires_previous_response_affinity: bool,
 ) -> bool {
+    if request_requires_previous_response_affinity {
+        // Tool outputs carry chain-scoped call ids. Releasing any pre-commit affinity here can
+        // reroute the continuation onto another account/session and provoke upstream 400s such as
+        // "No tool call found for function call output". These requests must fail in place.
+        return false;
+    }
+
     if strict_affinity_profile.is_some_and(|profile_name| profile_name == candidate_name)
         || turn_state_profile.is_some_and(|profile_name| profile_name == candidate_name)
         || (route_kind == RuntimeRouteKind::Compact

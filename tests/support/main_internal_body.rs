@@ -15605,7 +15605,7 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
 }
 
 #[test]
-fn runtime_proxy_releases_quota_blocked_function_call_output_previous_response_affinity_for_http()
+fn runtime_proxy_preserves_quota_blocked_function_call_output_previous_response_affinity_for_http()
 {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_usage_limit_message();
@@ -15706,20 +15706,16 @@ fn runtime_proxy_releases_quota_blocked_function_call_output_previous_response_a
 
     assert_eq!(status, reqwest::StatusCode::OK);
     assert!(
-        body.contains("\"resp-second\""),
-        "unexpected HTTP continuation fallback body: {body}"
+        body.contains("usage limit"),
+        "quota-blocked function_call_output continuation should stay on the owner and surface the upstream quota failure there: {body}"
     );
     assert!(
-        !body.contains("You've hit your usage limit"),
-        "quota-blocked function_call_output continuation should degrade before surfacing usage limit: {body}"
-    );
-    assert!(
-        !body.contains("\"previous_response_not_found\""),
-        "function_call_output fallback should stay pre-commit: {body}"
+        !body.contains("\"resp-second\""),
+        "tool-output continuation must not rotate to another profile after quota-blocked owner failure: {body}"
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string(), "second-account".to_string()]
+        vec!["main-account".to_string()]
     );
     let request_bodies = backend.responses_bodies();
     assert_eq!(
@@ -15728,15 +15724,15 @@ fn runtime_proxy_releases_quota_blocked_function_call_output_previous_response_a
             .filter(|body| body.contains("\"previous_response_id\":\"resp-main\""))
             .count(),
         1,
-        "fresh fallback should not resend the old previous_response_id to another profile"
+        "tool-output continuation should stay pinned to the original previous_response owner"
     );
     assert!(
-        request_bodies.iter().any(|body| {
+        !request_bodies.iter().any(|body| {
             body.contains("\"call_id\":\"call_123\"")
                 && body.contains("\"function_call_output\"")
                 && !body.contains("\"previous_response_id\":\"resp-main\"")
         }),
-        "fresh fallback should preserve function_call_output payloads while dropping previous_response_id: {request_bodies:?}"
+        "tool-output continuation must not be replayed as a fresh request on another profile: {request_bodies:?}"
     );
 }
 
@@ -19774,7 +19770,7 @@ fn runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_bef
 }
 
 #[test]
-fn runtime_proxy_websocket_releases_quota_blocked_function_call_output_previous_response_affinity()
+fn runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity()
 {
     let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
     let temp_dir = TestDir::new();
@@ -19893,30 +19889,24 @@ fn runtime_proxy_websocket_releases_quota_blocked_function_call_output_previous_
     assert!(
         second_payloads
             .iter()
+            .any(|payload| payload.contains("usage limit")),
+        "quota-blocked function_call_output continuation should stay on the owner and surface quota there: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
             .any(|payload| payload.contains("\"resp-second\"")),
-        "unexpected websocket payloads after quota-blocked function_call_output continuation fallback: {second_payloads:?}"
-    );
-    assert!(
-        !second_payloads
-            .iter()
-            .any(|payload| payload.contains("You've hit your usage limit")),
-        "quota-blocked function_call_output continuation should not surface usage limit: {second_payloads:?}"
-    );
-    assert!(
-        !second_payloads
-            .iter()
-            .any(|payload| payload.contains("\"previous_response_not_found\"")),
-        "function_call_output fallback should stay pre-commit: {second_payloads:?}"
+        "tool-output continuation must not rotate to another profile after quota-blocked owner failure: {second_payloads:?}"
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string(), "second-account".to_string()]
+        vec!["main-account".to_string()]
     );
     let upstream_requests = backend.websocket_requests();
     assert_eq!(
         upstream_requests.len(),
-        3,
-        "expected initial request, quota-blocked continuation, and fresh fallback"
+        2,
+        "expected only the initial request and the pinned quota-blocked continuation"
     );
     assert_eq!(
         upstream_requests
@@ -19924,15 +19914,58 @@ fn runtime_proxy_websocket_releases_quota_blocked_function_call_output_previous_
             .filter(|request| request.contains("\"previous_response_id\":\"resp-main\""))
             .count(),
         1,
-        "fresh fallback should not resend the old previous_response_id to another profile"
+        "tool-output continuation should stay pinned to the original previous_response owner"
     );
     assert!(
-        upstream_requests.iter().any(|request| {
+        !upstream_requests.iter().any(|request| {
             request.contains("\"call_id\":\"call_123\"")
                 && request.contains("\"function_call_output\"")
                 && !request.contains("\"previous_response_id\":\"resp-main\"")
         }),
-        "fresh fallback should preserve function_call_output payloads while dropping previous_response_id: {upstream_requests:?}"
+        "tool-output continuation must not be replayed as a fresh websocket request on another profile: {upstream_requests:?}"
+    );
+}
+
+#[test]
+fn runtime_quota_blocked_tool_output_continuations_never_release_affinity() {
+    assert!(
+        !runtime_quota_blocked_affinity_is_releasable(
+            RuntimeRouteKind::Responses,
+            "main",
+            None,
+            Some("main"),
+            None,
+            None,
+            true,
+            true,
+        ),
+        "tool-output continuations with previous_response affinity must stay pinned"
+    );
+    assert!(
+        !runtime_quota_blocked_affinity_is_releasable(
+            RuntimeRouteKind::Websocket,
+            "main",
+            None,
+            None,
+            None,
+            Some("main"),
+            false,
+            true,
+        ),
+        "tool-output continuations with only session affinity must stay pinned"
+    );
+    assert!(
+        runtime_quota_blocked_affinity_is_releasable(
+            RuntimeRouteKind::Websocket,
+            "main",
+            None,
+            None,
+            None,
+            Some("main"),
+            false,
+            false,
+        ),
+        "ordinary session-bound continuations should remain releasable on quota-blocked pre-commit failures"
     );
 }
 
