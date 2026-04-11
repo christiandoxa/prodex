@@ -112,6 +112,11 @@ pub(super) fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxy
         || runtime_proxy_request_prefers_interactive_inflight_wait(request)
 }
 
+pub(super) fn is_runtime_realtime_call_path(path_and_query: &str) -> bool {
+    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
+    path_without_query(normalized_path_and_query.as_ref()).ends_with("/realtime/calls")
+}
+
 pub(super) fn runtime_proxy_request_inflight_wait_budget(
     request: &RuntimeProxyRequest,
     pressure_mode: bool,
@@ -6999,6 +7004,58 @@ pub(super) fn proxy_runtime_standard_request(
         .flatten();
     if !is_runtime_compact_path(&request.path_and_query) {
         let current_profile = runtime_proxy_current_profile(shared)?;
+        if is_runtime_realtime_call_path(&request.path_and_query) {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http realtime_call_owner_pinned profile={current_profile} reason=sideband_auth_uses_current_profile"
+                ),
+            );
+            if runtime_profile_inflight_hard_limited_for_context(
+                shared,
+                &current_profile,
+                "standard_http",
+            )? {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http profile_inflight_saturated profile={current_profile} hard_limit={}",
+                        runtime_proxy_profile_inflight_hard_limit(),
+                    ),
+                );
+                return Ok(build_runtime_proxy_text_response(
+                    503,
+                    "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
+                ));
+            }
+
+            return match attempt_runtime_noncompact_standard_request_with_policy(
+                request_id,
+                request,
+                shared,
+                &current_profile,
+                false,
+            )? {
+                RuntimeStandardAttempt::Success {
+                    profile_name,
+                    response,
+                } => {
+                    commit_runtime_proxy_profile_selection_with_notice(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Standard,
+                    )?;
+                    Ok(response)
+                }
+                RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+                RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
+                    Ok(build_runtime_proxy_text_response(
+                        503,
+                        runtime_proxy_local_selection_failure_message(),
+                    ))
+                }
+            };
+        }
         let preferred_profile = session_profile
             .clone()
             .unwrap_or_else(|| current_profile.clone());
@@ -7583,23 +7640,44 @@ pub(super) fn attempt_runtime_noncompact_standard_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<RuntimeStandardAttempt> {
+    attempt_runtime_noncompact_standard_request_with_policy(
+        request_id,
+        request,
+        shared,
+        profile_name,
+        true,
+    )
+}
+
+pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    enforce_local_precommit_quota_guard: bool,
+) -> Result<RuntimeStandardAttempt> {
     let request_session_id = runtime_request_session_id(request);
-    let (quota_summary, quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Standard)?;
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
-        runtime_proxy_log(
+    if enforce_local_precommit_quota_guard {
+        let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route(
             shared,
-            format!(
-                "request={request_id} transport=http standard_pre_send_skip profile={profile_name} route=standard quota_source={} {}",
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-        return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
-            profile_name: profile_name.to_string(),
-        });
+            profile_name,
+            RuntimeRouteKind::Standard,
+        )?;
+        if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http standard_pre_send_skip profile={profile_name} route=standard quota_source={} {}",
+                    quota_source
+                        .map(runtime_quota_source_label)
+                        .unwrap_or("unknown"),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            return Ok(RuntimeStandardAttempt::LocalSelectionBlocked {
+                profile_name: profile_name.to_string(),
+            });
+        }
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;

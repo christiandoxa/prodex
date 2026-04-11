@@ -988,6 +988,80 @@ fn handle_runtime_proxy_backend_request(
                     None,
                 ),
             }
+        } else if path.ends_with("/backend-api/codex/realtime/calls") {
+            responses_accounts
+                .lock()
+                .expect("responses_accounts poisoned")
+                .push(account_id.clone());
+            responses_headers
+                .lock()
+                .expect("responses_headers poisoned")
+                .push(captured_headers);
+            responses_bodies
+                .lock()
+                .expect("responses_bodies poisoned")
+                .push(request_body);
+            match (account_id.as_str(), mode) {
+                ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                    "HTTP/1.1 429 Too Many Requests",
+                    "application/json",
+                    serde_json::json!({
+                        "error": {
+                            "type": "usage_limit_reached",
+                            "message": "The usage limit has been reached",
+                        },
+                        "status": 429
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("main-account", _) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "status": "ok",
+                        "account_id": "main-account"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("second-account", _) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "status": "ok",
+                        "account_id": "second-account"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                ("third-account", _) => (
+                    "HTTP/1.1 200 OK",
+                    "application/json",
+                    serde_json::json!({
+                        "status": "ok",
+                        "account_id": "third-account"
+                    })
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+                _ => (
+                    "HTTP/1.1 401 Unauthorized",
+                    "application/json",
+                    serde_json::json!({ "error": "unauthorized" }).to_string(),
+                    None,
+                    None,
+                    None,
+                ),
+            }
         } else if path.ends_with("/backend-api/codex/responses") {
             responses_accounts
                 .lock()
@@ -13466,11 +13540,17 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
     assert!(is_runtime_compact_path(
         "/backend-api/codex/responses/compact"
     ));
+    assert!(is_runtime_realtime_call_path(
+        "/backend-api/codex/realtime/calls"
+    ));
     assert!(is_runtime_responses_path(
         "/backend-api/prodex/v0.2.99/responses"
     ));
     assert!(is_runtime_compact_path(
         "/backend-api/prodex/v0.2.99/responses/compact"
+    ));
+    assert!(is_runtime_realtime_call_path(
+        "/backend-api/prodex/v0.2.99/realtime/calls"
     ));
     assert_eq!(
         runtime_proxy_upstream_url(
@@ -13478,6 +13558,13 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
             "/backend-api/codex/responses"
         ),
         "https://chatgpt.com/backend-api/codex/responses"
+    );
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api/prodex/realtime/calls"
+        ),
+        "https://chatgpt.com/backend-api/codex/realtime/calls"
     );
 }
 
@@ -14234,7 +14321,7 @@ fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
             r#"{"source":"resume","session_id":"sess-123"}"#,
         )
         .header("x-codex-beta-features", "remote-sync,realtime")
-        .header("User-Agent", "codex-cli/0.117.0")
+        .header("User-Agent", "codex-cli/test-fixture")
         .body("{\"input\":[]}")
         .send()
         .expect("runtime proxy request should succeed");
@@ -14267,7 +14354,7 @@ fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
     );
     assert_eq!(
         first.get("user-agent").map(String::as_str),
-        Some("codex-cli/0.117.0")
+        Some("codex-cli/test-fixture")
     );
     assert_eq!(
         first.get("chatgpt-account-id").map(String::as_str),
@@ -14330,7 +14417,9 @@ fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
     );
     request.headers_mut().insert(
         "User-Agent",
-        "codex-cli/0.117.0".parse().expect("valid header value"),
+        "codex-cli/test-fixture"
+            .parse()
+            .expect("valid header value"),
     );
 
     let (mut socket, _response) =
@@ -14377,7 +14466,7 @@ fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
     );
     assert_eq!(
         first.get("user-agent").map(String::as_str),
-        Some("codex-cli/0.117.0")
+        Some("codex-cli/test-fixture")
     );
     assert_eq!(
         first.get("chatgpt-account-id").map(String::as_str),
@@ -14880,6 +14969,73 @@ fn runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota() 
 
     assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(body, "Too Many Requests");
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_realtime_call_stays_on_current_profile_when_main_is_quota_blocked() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}{}/realtime/calls",
+            proxy.listen_addr, RUNTIME_PROXY_OPENAI_MOUNT_PATH
+        ))
+        .header("Content-Type", "application/sdp")
+        .body("v=offer\r\n")
+        .send()
+        .expect("runtime proxy realtime call should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        body.contains("usage limit"),
+        "unexpected realtime call response body: {body}"
+    );
     assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
 }
 
@@ -24646,7 +24802,7 @@ fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
     );
     request.headers_mut().insert(
         "User-Agent",
-        "codex-cli/0.117.0".parse().expect("ua header"),
+        "codex-cli/test-fixture".parse().expect("ua header"),
     );
 
     let (mut socket, _response) =
@@ -24717,7 +24873,7 @@ fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
     );
     assert_eq!(
         first.get("user-agent").map(String::as_str),
-        Some("codex-cli/0.117.0")
+        Some("codex-cli/test-fixture")
     );
     assert_eq!(
         first.get("chatgpt-account-id").map(String::as_str),

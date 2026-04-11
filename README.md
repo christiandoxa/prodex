@@ -65,7 +65,7 @@ cargo install prodex --force --version 0.4.0
 
 Dependency status in this repo:
 
-* The npm runtime dependency is tracked from the workspace package manifest for `@openai/codex`
+* The npm runtime dependency follows the `latest` dist-tag declared in the workspace package manifest for `@openai/codex`
 * Run `cargo update` whenever dependency metadata changes so the published lockfile stays in sync
 * Versioned install snippets in this README and `QUICKSTART.md` are synced from `Cargo.toml`
 

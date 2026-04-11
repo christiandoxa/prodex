@@ -218,7 +218,7 @@ fn compat_replay_request_capabilities_detect_claude_code_mcp_stream() {
 #[test]
 fn compat_replay_websocket_capabilities_warn_without_turn_state() {
     let handshake_request =
-        compat_replay_websocket_handshake_request(vec![("User-Agent", "codex-cli/0.118.0")]);
+        compat_replay_websocket_handshake_request(vec![("User-Agent", "codex-cli/test-fixture")]);
     let surface = runtime_detect_websocket_message_compatibility_surface(
         &handshake_request,
         r#"{"previous_response_id":"resp_123","input":[]}"#,

@@ -192,17 +192,6 @@ function renderReport(snapshot, diffs) {
 
 function buildDiffs(baseline, current) {
   const diffs = [];
-  const codexPaths = ["tag_name", "name", "published_at", "html_url", "body_head"];
-  for (const key of codexPaths) {
-    const diff = diffField(
-      `codex.latestRelease.${key}`,
-      baseline.codex.latestRelease[key],
-      current.codex.latestRelease[key],
-    );
-    if (diff) {
-      diffs.push(diff);
-    }
-  }
 
   const claudePaths = ["tag_name", "name", "published_at", "html_url"];
   for (const key of claudePaths) {
@@ -247,6 +236,22 @@ function buildDiffs(baseline, current) {
   return diffs;
 }
 
+function baselineSnapshotFromCurrent(current) {
+  return {
+    claude: {
+      latestRelease: current.claude.latestRelease,
+      docs: current.claude.docs.map(
+        ({ url, title, description, required_contains }) => ({
+          url,
+          title,
+          description,
+          required_contains,
+        }),
+      ),
+    },
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -254,7 +259,7 @@ async function main() {
       [
         "Usage: node scripts/compat/watch-upstream.mjs [--baseline <path>] [--report <path>] [--write-baseline] [--json]",
         "",
-        "Checks upstream Codex and Claude Code releases/docs against a saved baseline.",
+        "Checks Claude Code releases/docs against a saved baseline and reports the current Codex release.",
       ].join("\n") + "\n",
     );
     return;
@@ -275,7 +280,7 @@ async function main() {
   const diffs = buildDiffs(baseline, current);
 
   if (args.writeBaseline) {
-    await fs.writeFile(args.baseline, `${JSON.stringify(current, null, 2)}\n`);
+    await fs.writeFile(args.baseline, `${JSON.stringify(baselineSnapshotFromCurrent(current), null, 2)}\n`);
   }
 
   const report = {

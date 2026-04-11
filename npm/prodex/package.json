@@ -10,7 +10,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@openai/codex": "^0.118.0"
+    "@openai/codex": "latest"
   },
   "optionalDependencies": {
     "@christiandoxa/prodex-linux-x64": "0.4.0",
