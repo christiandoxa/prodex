@@ -273,21 +273,16 @@ pub(super) fn runtime_detect_request_compatibility_surface(
     let (family, client) = runtime_capability_client_labels(request, route);
     surface.family = family;
     surface.client = client;
-    surface.stream = if transport == "websocket" {
-        "streaming"
-    } else if is_runtime_anthropic_messages_path(&request.path_and_query)
+    let anthropic_streaming = is_runtime_anthropic_messages_path(&request.path_and_query)
         && value
             .as_ref()
             .and_then(|value| value.get("stream"))
             .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-    {
-        "streaming"
-    } else if is_runtime_responses_path(&request.path_and_query) {
-        "streaming"
-    } else {
-        "unary"
-    };
+            .unwrap_or(false);
+    let streaming = transport == "websocket"
+        || anthropic_streaming
+        || is_runtime_responses_path(&request.path_and_query);
+    surface.stream = if streaming { "streaming" } else { "unary" };
     surface.continuation = runtime_capability_continuation_label(request);
     surface.request_origin = runtime_capability_request_origin_label(request);
     surface.user_agent = runtime_proxy_request_header_value(&request.headers, "user-agent")

@@ -16,10 +16,10 @@ fn compat_replay_value_scrub(value: &mut Value) {
                 "ts",
                 "pid",
             ] {
-                if let Some(entry) = map.get_mut(key) {
-                    if !entry.is_null() {
-                        *entry = Value::String(format!("<{key}>"));
-                    }
+                if let Some(entry) = map.get_mut(key)
+                    && !entry.is_null()
+                {
+                    *entry = Value::String(format!("<{key}>"));
                 }
             }
 
