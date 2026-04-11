@@ -117,6 +117,11 @@ pub(super) fn is_runtime_realtime_call_path(path_and_query: &str) -> bool {
     path_without_query(normalized_path_and_query.as_ref()).ends_with("/realtime/calls")
 }
 
+pub(super) fn is_runtime_realtime_websocket_path(path_and_query: &str) -> bool {
+    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
+    path_without_query(normalized_path_and_query.as_ref()).ends_with("/realtime")
+}
+
 pub(super) fn runtime_proxy_request_inflight_wait_budget(
     request: &RuntimeProxyRequest,
     pressure_mode: bool,
@@ -1110,14 +1115,9 @@ pub(super) fn runtime_request_session_id_from_turn_metadata(
 }
 
 pub(super) fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
-    request
-        .headers
-        .iter()
-        .find_map(|(name, value)| {
-            name.eq_ignore_ascii_case("session_id")
-                .then(|| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
+    runtime_proxy_request_header_value(&request.headers, "session_id")
+        .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
+        .map(str::to_string)
         .or_else(|| runtime_request_session_id_from_turn_metadata(request))
         .or_else(|| {
             serde_json::from_slice::<serde_json::Value>(&request.body)
@@ -3892,7 +3892,9 @@ pub(super) fn proxy_runtime_responses_websocket_request(
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) {
-    if !is_runtime_responses_path(request.url()) {
+    if !is_runtime_responses_path(request.url())
+        && !is_runtime_realtime_websocket_path(request.url())
+    {
         runtime_proxy_log(
             shared,
             format!(
@@ -3902,7 +3904,7 @@ pub(super) fn proxy_runtime_responses_websocket_request(
         );
         let _ = request.respond(build_runtime_proxy_text_response(
             404,
-            "Runtime websocket proxy only supports Codex responses endpoints.",
+            "Runtime websocket proxy only supports Codex responses and realtime endpoints.",
         ));
         return;
     }
@@ -5835,6 +5837,7 @@ pub(super) fn attempt_runtime_websocket_request(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketAttempt> {
+    let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
     let promote_committed_profile = request_previous_response_id.is_none()
         && request_session_id.is_none()
         && request_turn_state.is_none();
@@ -6038,7 +6041,15 @@ pub(super) fn attempt_runtime_websocket_request(
                     .context("failed to restore runtime websocket upstream timeout")?;
                 }
 
-                let inspected = inspect_runtime_websocket_text_frame(text.as_str());
+                let mut inspected = inspect_runtime_websocket_text_frame(text.as_str());
+                if realtime_websocket
+                    && inspected
+                        .event_type
+                        .as_deref()
+                        .is_some_and(runtime_realtime_websocket_terminal_event_kind)
+                {
+                    inspected.terminal_event = true;
+                }
                 if let Some(turn_state) = inspected.turn_state.as_deref() {
                     remember_runtime_turn_state(
                         shared,
@@ -6981,6 +6992,18 @@ pub(super) fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
             | "response.output_item.added"
             | "response.content_part.added"
             | "response.reasoning_summary_part.added"
+    )
+}
+
+pub(super) fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "session.updated"
+            | "conversation.item.added"
+            | "conversation.item.done"
+            | "response.cancelled"
+            | "response.done"
+            | "error"
     )
 }
 

@@ -574,6 +574,7 @@ enum RuntimeProxyBackendMode {
     WebsocketPreviousResponseNeedsTurnState,
     WebsocketStaleReuseNeedsTurnState,
     WebsocketTopLevelResponseId,
+    WebsocketRealtimeSideband,
 }
 
 impl RuntimeProxyBackend {
@@ -681,6 +682,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketTopLevelResponseId)
     }
 
+    fn start_websocket_realtime_sideband() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketRealtimeSideband)
+    }
+
     fn start_with_mode(mode: RuntimeProxyBackendMode) -> Self {
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("failed to bind runtime proxy backend");
@@ -727,6 +732,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketTopLevelResponseId
+                                | RuntimeProxyBackendMode::WebsocketRealtimeSideband
                         );
                         let handler = thread::spawn(move || {
                             if websocket_enabled
@@ -1857,6 +1863,40 @@ fn handle_runtime_proxy_backend_websocket(
             .push(request.clone());
         request_count += 1;
         let previous_response_id = runtime_request_previous_response_id_from_text(&request);
+
+        if matches!(mode, RuntimeProxyBackendMode::WebsocketRealtimeSideband) {
+            let payload = match request_count {
+                1 => serde_json::json!({
+                    "type": "session.updated",
+                    "session": {
+                        "id": "sess-realtime",
+                        "instructions": "backend prompt"
+                    }
+                }),
+                2 => serde_json::json!({
+                    "type": "conversation.item.added",
+                    "item": {
+                        "id": "item-realtime"
+                    }
+                }),
+                3 => serde_json::json!({
+                    "type": "response.done",
+                    "response": {
+                        "id": "resp-realtime"
+                    }
+                }),
+                _ => serde_json::json!({
+                    "type": "error",
+                    "error": {
+                        "message": "unexpected realtime sideband request"
+                    }
+                }),
+            };
+            websocket
+                .send(WsMessage::Text(payload.to_string().into()))
+                .expect("realtime sideband response should be sent");
+            continue;
+        }
 
         match account_id.as_str() {
             "main-account" => {
@@ -13543,6 +13583,9 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
     assert!(is_runtime_realtime_call_path(
         "/backend-api/codex/realtime/calls"
     ));
+    assert!(is_runtime_realtime_websocket_path(
+        "/backend-api/codex/realtime?call_id=call-123"
+    ));
     assert!(is_runtime_responses_path(
         "/backend-api/prodex/v0.2.99/responses"
     ));
@@ -13550,6 +13593,12 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
         "/backend-api/prodex/v0.2.99/responses/compact"
     ));
     assert!(is_runtime_realtime_call_path(
+        "/backend-api/prodex/v0.2.99/realtime/calls"
+    ));
+    assert!(is_runtime_realtime_websocket_path(
+        "/backend-api/prodex/v0.2.99/realtime?call_id=call-123"
+    ));
+    assert!(!is_runtime_realtime_websocket_path(
         "/backend-api/prodex/v0.2.99/realtime/calls"
     ));
     assert_eq!(
@@ -13565,6 +13614,21 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
             "/backend-api/prodex/realtime/calls"
         ),
         "https://chatgpt.com/backend-api/codex/realtime/calls"
+    );
+}
+
+#[test]
+fn runtime_request_session_id_accepts_realtime_header() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/prodex/realtime/calls".to_string(),
+        headers: vec![("x-session-id".to_string(), " sess-realtime ".to_string())],
+        body: Vec::new(),
+    };
+
+    assert_eq!(
+        runtime_request_session_id(&request),
+        Some("sess-realtime".to_string())
     );
 }
 
@@ -14472,6 +14536,134 @@ fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
         first.get("chatgpt-account-id").map(String::as_str),
         Some("second-account")
     );
+}
+
+#[test]
+fn runtime_proxy_realtime_websocket_uses_realtime_event_boundaries() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket_realtime_sideband();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let mut request = format!(
+        "ws://{}{}/realtime?call_id=call-realtime",
+        proxy.listen_addr, RUNTIME_PROXY_OPENAI_MOUNT_PATH
+    )
+    .into_client_request()
+    .expect("websocket request should build");
+    request.headers_mut().insert(
+        "x-session-id",
+        "sess-realtime".parse().expect("valid session header"),
+    );
+    request.headers_mut().insert(
+        "User-Agent",
+        "codex-cli/test-fixture"
+            .parse()
+            .expect("valid header value"),
+    );
+
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(2));
+
+    let read_text = |socket: &mut WsSocket<MaybeTlsStream<TcpStream>>| -> String {
+        loop {
+            match socket
+                .read()
+                .expect("runtime proxy websocket should stay open")
+            {
+                WsMessage::Text(text) => return text.to_string(),
+                WsMessage::Ping(payload) => {
+                    socket
+                        .send(WsMessage::Pong(payload))
+                        .expect("pong should be sent");
+                }
+                WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+                other => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+    };
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "type": "session.update",
+                "session": {}
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("session.update should be sent");
+    let first = read_text(&mut socket);
+    assert!(first.contains("\"session.updated\""));
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": []
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("conversation.item.create should be sent");
+    let second = read_text(&mut socket);
+    assert!(second.contains("\"conversation.item.added\""));
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "type": "response.create"
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("response.create should be sent");
+    let third = read_text(&mut socket);
+    assert!(third.contains("\"response.done\""));
+
+    let headers = backend.responses_headers();
+    let first_headers = headers
+        .first()
+        .expect("backend should capture websocket request headers");
+    assert_eq!(
+        first_headers.get("x-session-id").map(String::as_str),
+        Some("sess-realtime")
+    );
+    assert_eq!(
+        first_headers.get("chatgpt-account-id").map(String::as_str),
+        Some("second-account")
+    );
+    assert_eq!(backend.websocket_requests().len(), 3);
 }
 
 #[test]
