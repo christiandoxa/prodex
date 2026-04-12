@@ -1,3 +1,5 @@
+use base64::Engine as _;
+
 struct ProfileCommandsTestDir {
     path: PathBuf,
 }
@@ -97,6 +99,28 @@ fn profile_commands_sample_auth_json(profile_name: &str) -> String {
     .to_string()
 }
 
+fn profile_commands_id_token(email: &str) -> String {
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({ "email": email }).to_string());
+    format!("header.{payload}.signature")
+}
+
+fn profile_commands_auth_json_with_email(
+    email: &str,
+    access_token: &str,
+    account_id: &str,
+) -> String {
+    serde_json::json!({
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "access_token": access_token,
+            "account_id": account_id,
+            "id_token": profile_commands_id_token(email)
+        }
+    })
+    .to_string()
+}
+
 fn profile_commands_write_profile_auth(codex_home: &Path, profile_name: &str) {
     create_codex_home_if_missing(codex_home).expect("profile home should exist");
     write_secret_text_file(
@@ -104,6 +128,16 @@ fn profile_commands_write_profile_auth(codex_home: &Path, profile_name: &str) {
         &profile_commands_sample_auth_json(profile_name),
     )
     .expect("auth.json should be written");
+}
+
+fn profile_commands_read_access_token(codex_home: &Path) -> String {
+    serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(codex_home.join("auth.json")).expect("auth.json should be readable"),
+    )
+    .expect("auth.json should parse")["tokens"]["access_token"]
+        .as_str()
+        .expect("access token should be a string")
+        .to_string()
 }
 
 #[test]
@@ -258,7 +292,7 @@ fn profile_import_rejects_existing_profile_names() {
     let existing_home = target_paths.managed_profiles_root.join("main");
     profile_commands_write_profile_auth(&existing_home, "main");
 
-    let existing_state = AppState {
+    let mut existing_state = AppState {
         active_profile: Some("main".to_string()),
         profiles: BTreeMap::from([(
             "main".to_string(),
@@ -282,7 +316,131 @@ fn profile_import_rejects_existing_profile_names() {
         }],
     };
 
-    let err = stage_imported_profiles(&target_paths, &existing_state, &payload)
+    let err = stage_imported_profiles(&target_paths, &mut existing_state, &payload)
         .expect_err("import should reject duplicate profile names");
     assert!(err.to_string().contains("already exists"));
+}
+
+#[test]
+fn profile_import_updates_existing_profile_when_email_matches() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-duplicate-email");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("primary");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
+
+    let mut existing_state = AppState {
+        profiles: BTreeMap::from([(
+            "primary".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("backup-main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "backup-main".to_string(),
+            email: Some("Main@Example.com".to_string()),
+            source_managed: true,
+            auth_json: profile_commands_auth_json_with_email(
+                "main@example.com",
+                "fresh-token",
+                "main-account",
+            ),
+        }],
+    };
+
+    let commit = import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("import should update existing duplicate");
+
+    assert!(commit.imported_names.is_empty());
+    assert_eq!(commit.updated_existing_names, vec!["primary".to_string()]);
+    assert_eq!(existing_state.active_profile.as_deref(), Some("primary"));
+    assert_eq!(existing_state.profiles.len(), 1);
+    assert_eq!(
+        existing_state
+            .profiles
+            .get("primary")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("main@example.com")
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "fresh-token".to_string()
+    );
+    assert!(
+        !target_paths.managed_profiles_root.join("backup-main").exists(),
+        "duplicate import should not create a new managed home"
+    );
+}
+
+#[test]
+fn import_current_updates_existing_profile_token_for_duplicate_email() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let paths = AppPaths::discover().expect("app paths should resolve");
+    let existing_home = paths.managed_profiles_root.join("primary");
+    let current_home = paths.shared_codex_root.clone();
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    create_codex_home_if_missing(&current_home).expect("current home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
+    write_secret_text_file(
+        &current_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "new-token", "main-account"),
+    )
+    .expect("current auth should be written");
+
+    AppState {
+        active_profile: None,
+        profiles: BTreeMap::from([(
+            "primary".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("state should save");
+
+    handle_import_current_profile(ImportCurrentArgs {
+        name: "duplicate".to_string(),
+    })
+    .expect("import-current should update duplicate auth");
+
+    let state = AppState::load(&paths).expect("state should load");
+    assert_eq!(state.active_profile.as_deref(), Some("primary"));
+    assert_eq!(state.profiles.len(), 1);
+    assert_eq!(
+        state.profiles
+            .get("primary")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("main@example.com")
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "new-token".to_string()
+    );
+    assert!(
+        !paths.managed_profiles_root.join("duplicate").exists(),
+        "duplicate import-current should not create a new managed home"
+    );
 }

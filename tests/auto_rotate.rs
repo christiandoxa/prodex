@@ -1350,9 +1350,59 @@ fn login_without_profile_reuses_existing_profile_for_same_email() {
         Some(1)
     );
     assert!(!fixture.prodex_home.join("profiles/primary").exists());
+    assert!(String::from_utf8_lossy(&output.stdout).contains(
+        "Logged in as main@example.com. Updated auth token for existing profile 'primary'."
+    ));
+}
+
+#[test]
+fn login_without_profile_updates_token_only_for_duplicate_email() {
+    let fixture = setup_fixture();
+    let id_token = chatgpt_id_token("main@example.com");
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "active_profile": "primary",
+            "profiles": {
+                "primary": {
+                    "codex_home": fixture.main_home,
+                    "managed": true
+                }
+            }
+        }),
+    );
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[
+            ("TEST_LOGIN_ACCOUNT_ID", "main-account"),
+            ("TEST_LOGIN_ACCESS_TOKEN", "fresh-token"),
+            ("TEST_LOGIN_ID_TOKEN", id_token.as_str()),
+            ("TEST_SESSION_MARKER", "duplicate-login"),
+        ],
+    );
+
     assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("Logged in as main@example.com. Reusing profile 'primary'.")
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let auth_json = fs::read_to_string(fixture.main_home.join("auth.json"))
+        .expect("updated auth.json should exist");
+    assert_eq!(
+        serde_json::from_str::<Value>(&auth_json)
+            .expect("auth.json should parse")["tokens"]["access_token"]
+            .as_str(),
+        Some("fresh-token")
+    );
+    assert!(
+        !fixture
+            .shared_codex_home
+            .join("sessions/duplicate-login.json")
+            .exists(),
+        "duplicate login should not copy session state into the existing profile"
     );
 }
 
@@ -1373,10 +1423,9 @@ fn login_without_profile_looks_up_existing_profiles_in_parallel() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("Logged in as main@example.com. Reusing profile 'main'.")
-    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains(
+        "Logged in as main@example.com. Updated auth token for existing profile 'main'."
+    ));
     assert!(
         fixture.usage_server.max_concurrent_requests() >= 2,
         "login profile lookup never overlapped"

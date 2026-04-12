@@ -29,8 +29,21 @@ fn read_profile_email_from_auth(codex_home: &Path) -> Result<Option<String>> {
     else {
         return Ok(None);
     };
-    let stored_auth: StoredAuth = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", auth_location.display()))?;
+    parse_email_from_auth_json(&content).with_context(|| {
+        format!(
+            "failed to parse account email from {}",
+            auth_location.display()
+        )
+    })
+}
+
+pub(crate) fn parse_email_from_auth_json(raw_auth_json: &str) -> Result<Option<String>> {
+    let stored_auth: StoredAuth =
+        serde_json::from_str(raw_auth_json).context("failed to parse auth JSON")?;
+    parse_email_from_stored_auth(&stored_auth)
+}
+
+fn parse_email_from_stored_auth(stored_auth: &StoredAuth) -> Result<Option<String>> {
     let id_token = stored_auth
         .tokens
         .as_ref()
@@ -43,7 +56,6 @@ fn read_profile_email_from_auth(codex_home: &Path) -> Result<Option<String>> {
     };
 
     parse_email_from_id_token(id_token)
-        .with_context(|| format!("failed to parse id_token in {}", auth_location.display()))
 }
 
 pub(crate) fn parse_email_from_id_token(raw_jwt: &str) -> Result<Option<String>> {
@@ -130,7 +142,7 @@ pub(crate) fn find_profile_by_email(state: &mut AppState, email: &str) -> Result
     Ok(matched_profile)
 }
 
-fn normalize_email(email: &str) -> String {
+pub(crate) fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
 }
 
