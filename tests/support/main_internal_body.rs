@@ -10677,6 +10677,22 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
     let stale_login = paths.root.join(".login-123-1-0");
     fs::create_dir_all(&stale_login).expect("stale login dir should exist");
 
+    let transient_root_files = [
+        runtime_scores_file_path(&paths),
+        runtime_scores_last_good_file_path(&paths),
+        runtime_usage_snapshots_file_path(&paths),
+        runtime_usage_snapshots_last_good_file_path(&paths),
+        runtime_backoffs_file_path(&paths),
+        runtime_backoffs_last_good_file_path(&paths),
+        update_check_cache_file_path(&paths),
+    ];
+    for path in &transient_root_files {
+        fs::write(path, "{}").expect("transient root file should write");
+    }
+
+    let stale_root_temp = paths.root.join("runtime-backoffs.json.999999999.1.0.tmp");
+    fs::write(&stale_root_temp, "tmp").expect("stale root temp should write");
+
     let tracked = paths.managed_profiles_root.join("tracked");
     fs::create_dir_all(&tracked).expect("tracked dir should exist");
     fs::write(tracked.join("auth.json"), "{}").expect("tracked auth should be written");
@@ -10751,15 +10767,28 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
     assert_eq!(summary.stale_runtime_log_pointer_removed, 1);
     assert_eq!(summary.stale_login_dirs_removed, 1);
     assert_eq!(summary.orphan_managed_profile_dirs_removed, 1);
+    assert_eq!(summary.transient_root_files_removed, transient_root_files.len());
+    assert_eq!(summary.stale_root_temp_files_removed, 1);
     assert_eq!(summary.dead_runtime_broker_leases_removed, 2);
     assert_eq!(summary.dead_runtime_broker_registries_removed, 1);
     assert_eq!(
         summary.total_removed(),
-        expected_runtime_logs_removed + 6
+        expected_runtime_logs_removed + transient_root_files.len() + 7
     );
 
     assert!(!pointer.exists(), "stale runtime pointer should be removed");
     assert!(!stale_login.exists(), "stale login dir should be removed");
+    for path in &transient_root_files {
+        assert!(
+            !path.exists(),
+            "transient root file {} should be removed",
+            path.display()
+        );
+    }
+    assert!(
+        !stale_root_temp.exists(),
+        "stale root temp file should be removed"
+    );
     assert!(!orphan.exists(), "orphan managed dir should be removed");
     assert!(tracked.exists(), "tracked managed dir should remain");
     assert_eq!(
@@ -10780,6 +10809,155 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
         "dead lease without registry should be removed"
     );
     assert!(live_lease.exists(), "live lease should remain");
+}
+
+#[test]
+fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+
+    let primary_home = paths.managed_profiles_root.join("primary");
+    let duplicate_home = paths.managed_profiles_root.join("duplicate");
+    fs::create_dir_all(&primary_home).expect("primary home should exist");
+    fs::create_dir_all(&duplicate_home).expect("duplicate home should exist");
+
+    let mut state = AppState {
+        active_profile: Some("duplicate".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "primary".to_string(),
+                ProfileEntry {
+                    codex_home: primary_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "duplicate".to_string(),
+                ProfileEntry {
+                    codex_home: duplicate_home.clone(),
+                    managed: true,
+                    email: Some("Main@Example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            ("primary".to_string(), 10),
+            ("duplicate".to_string(), 5),
+        ]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-1".to_string(),
+            ResponseProfileBinding {
+                profile_name: "primary".to_string(),
+                bound_at: 11,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-1".to_string(),
+            ResponseProfileBinding {
+                profile_name: "primary".to_string(),
+                bound_at: 12,
+            },
+        )]),
+    };
+    state.save(&paths).expect("state should save");
+
+    let continuations = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([(
+            "resp-2".to_string(),
+            ResponseProfileBinding {
+                profile_name: "primary".to_string(),
+                bound_at: 13,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-2".to_string(),
+            ResponseProfileBinding {
+                profile_name: "primary".to_string(),
+                bound_at: 14,
+            },
+        )]),
+        turn_state_bindings: BTreeMap::from([(
+            "turn-2".to_string(),
+            ResponseProfileBinding {
+                profile_name: "primary".to_string(),
+                bound_at: 15,
+            },
+        )]),
+        session_id_bindings: BTreeMap::from([(
+            "sid-2".to_string(),
+            ResponseProfileBinding {
+                profile_name: "primary".to_string(),
+                bound_at: 16,
+            },
+        )]),
+        statuses: RuntimeContinuationStatuses::default(),
+    };
+    save_runtime_continuations_for_profiles(&paths, &continuations, &state.profiles)
+        .expect("continuations should save");
+    save_runtime_continuation_journal_for_profiles(&paths, &continuations, &state.profiles, 123)
+        .expect("continuation journal should save");
+
+    let summary = perform_prodex_cleanup(&paths, &mut state).expect("cleanup should succeed");
+
+    assert_eq!(summary.duplicate_profiles_removed, 1);
+    assert_eq!(summary.duplicate_managed_profile_homes_removed, 1);
+    assert_eq!(state.active_profile.as_deref(), Some("duplicate"));
+    assert_eq!(state.profiles.len(), 1);
+    assert!(state.profiles.contains_key("duplicate"));
+    assert_eq!(state.last_run_selected_at.get("duplicate"), Some(&10));
+    assert_eq!(
+        state.response_profile_bindings["resp-1"].profile_name,
+        "duplicate"
+    );
+    assert_eq!(
+        state.session_profile_bindings["sess-1"].profile_name,
+        "duplicate"
+    );
+    assert!(!primary_home.exists(), "duplicate managed home should be removed");
+    assert!(duplicate_home.exists(), "canonical managed home should remain");
+
+    let saved_state = AppState::load(&paths).expect("saved state should load");
+    assert_eq!(saved_state.active_profile.as_deref(), Some("duplicate"));
+    assert!(saved_state.profiles.contains_key("duplicate"));
+    assert!(!saved_state.profiles.contains_key("primary"));
+
+    let restored_continuations = load_runtime_continuations_with_recovery(&paths, &state.profiles)
+        .expect("continuations should load")
+        .value;
+    assert_eq!(
+        restored_continuations.response_profile_bindings["resp-2"].profile_name,
+        "duplicate"
+    );
+    assert_eq!(
+        restored_continuations.session_profile_bindings["sess-2"].profile_name,
+        "duplicate"
+    );
+    assert_eq!(
+        restored_continuations.turn_state_bindings["turn-2"].profile_name,
+        "duplicate"
+    );
+    assert_eq!(
+        restored_continuations.session_id_bindings["sid-2"].profile_name,
+        "duplicate"
+    );
+
+    let restored_journal =
+        load_runtime_continuation_journal_with_recovery(&paths, &state.profiles)
+            .expect("continuation journal should load")
+            .value;
+    assert_eq!(
+        restored_journal.continuations.response_profile_bindings["resp-2"].profile_name,
+        "duplicate"
+    );
 }
 
 #[test]

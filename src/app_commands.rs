@@ -1100,12 +1100,20 @@ pub(super) fn handle_audit(args: AuditArgs) -> Result<()> {
 
 pub(super) fn handle_cleanup() -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let mut state = AppState::load(&paths)?;
     let runtime_log_dir = runtime_proxy_log_dir();
-    let summary = perform_prodex_cleanup(&paths, &state)?;
+    let summary = perform_prodex_cleanup(&paths, &mut state)?;
 
     let fields = vec![
         ("Prodex root".to_string(), paths.root.display().to_string()),
+        (
+            "Duplicate profiles".to_string(),
+            summary.duplicate_profiles_removed.to_string(),
+        ),
+        (
+            "Duplicate managed homes".to_string(),
+            summary.duplicate_managed_profile_homes_removed.to_string(),
+        ),
         (
             "Runtime logs".to_string(),
             format!(
@@ -1129,6 +1137,14 @@ pub(super) fn handle_cleanup() -> Result<()> {
         (
             "Orphan managed homes".to_string(),
             summary.orphan_managed_profile_dirs_removed.to_string(),
+        ),
+        (
+            "Transient root files".to_string(),
+            summary.transient_root_files_removed.to_string(),
+        ),
+        (
+            "Stale root temp files".to_string(),
+            summary.stale_root_temp_files_removed.to_string(),
         ),
         (
             "Dead broker leases".to_string(),

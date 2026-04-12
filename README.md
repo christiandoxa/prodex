@@ -229,7 +229,7 @@ tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
 
 That pointer path lives in `/tmp` only when you keep the default runtime log directory. If you override the runtime log directory through policy or environment, use `prodex doctor --runtime --json` to read the active `log_path` and live broker metrics.
 
-Use `prodex cleanup` to remove stale local runtime logs, temporary login homes, dead broker leases and registries, plus old orphaned managed profile homes that are no longer tracked in state.
+Use `prodex cleanup` to remove stale local runtime logs, temporary login homes, dead broker leases and registries, transient runtime cache files in `.prodex`, stale root temp files left by interrupted atomic writes, collapse duplicate profiles that resolve to the same account email into one surviving profile, plus old orphaned managed profile homes that are no longer tracked in state.
 
 ## Advanced Runtime Configuration
 
