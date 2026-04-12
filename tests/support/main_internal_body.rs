@@ -61,6 +61,8 @@ fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str) -> Option
         "main-account" => Some("main"),
         "second-account" => Some("second"),
         "third-account" => Some("third"),
+        "fourth-account" => Some("fourth"),
+        "fifth-account" => Some("fifth"),
         _ => None,
     }
 }
@@ -70,6 +72,8 @@ fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &str) -> Opti
         "main" => Some("main-account"),
         "second" => Some("second-account"),
         "third" => Some("third-account"),
+        "fourth" => Some("fourth-account"),
+        "fifth" => Some("fifth-account"),
         _ => None,
     }
 }
@@ -78,6 +82,8 @@ fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Op
     match account_id {
         "second-account" => Some("resp-second"),
         "third-account" => Some("resp-third"),
+        "fourth-account" => Some("resp-fourth"),
+        "fifth-account" => Some("resp-fifth"),
         _ => None,
     }
 }
@@ -87,6 +93,10 @@ fn runtime_proxy_backend_response_owner_account_id(response_id: &str) -> Option<
         Some("second-account")
     } else if response_id == "resp-third" || response_id.starts_with("resp-third-next") {
         Some("third-account")
+    } else if response_id == "resp-fourth" || response_id.starts_with("resp-fourth-next") {
+        Some("fourth-account")
+    } else if response_id == "resp-fifth" || response_id.starts_with("resp-fifth-next") {
+        Some("fifth-account")
     } else {
         None
     }
@@ -561,6 +571,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyCompactOverloaded,
     HttpOnlyUsageLimitMessage,
+    HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
     HttpOnlyPlain429,
     Websocket,
@@ -628,6 +639,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_usage_limit_message() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
+    }
+
+    fn start_http_usage_limit_message_late_ready_fifth() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth)
     }
 
     fn start_http_delayed_quota_after_output_item_added() -> Self {
@@ -891,14 +906,52 @@ fn handle_runtime_proxy_backend_request(
                 .expect("usage_accounts poisoned")
                 .push(account_id.clone());
             let body = match account_id.as_str() {
+                "main-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth
+                    ) =>
+                {
+                    runtime_proxy_usage_body_with_remaining("main@example.com", 0, 0)
+                }
                 "main-account" => runtime_proxy_usage_body("main@example.com"),
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth
+                    ) =>
+                {
+                    runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0)
+                }
                 "second-account" => runtime_proxy_usage_body("second@example.com"),
+                "third-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth
+                    ) =>
+                {
+                    runtime_proxy_usage_body_with_remaining("third@example.com", 0, 0)
+                }
                 "third-account" => runtime_proxy_usage_body("third@example.com"),
+                "fourth-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth
+                    ) =>
+                {
+                    runtime_proxy_usage_body_with_remaining("fourth@example.com", 0, 0)
+                }
+                "fourth-account" => runtime_proxy_usage_body("fourth@example.com"),
+                "fifth-account" => runtime_proxy_usage_body("fifth@example.com"),
                 _ => serde_json::json!({ "error": "unauthorized" }).to_string(),
             };
             let status = if matches!(
                 account_id.as_str(),
-                "main-account" | "second-account" | "third-account"
+                "main-account"
+                    | "second-account"
+                    | "third-account"
+                    | "fourth-account"
+                    | "fifth-account"
             ) {
                 "HTTP/1.1 200 OK"
             } else {
@@ -915,7 +968,11 @@ fn handle_runtime_proxy_backend_request(
                 .expect("responses_headers poisoned")
                 .push(captured_headers);
             match (account_id.as_str(), mode) {
-                ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                (
+                    "main-account",
+                    RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage
+                    | RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth,
+                ) => (
                     "HTTP/1.1 429 Too Many Requests",
                     "application/json",
                     serde_json::json!({
@@ -1008,7 +1065,11 @@ fn handle_runtime_proxy_backend_request(
                 .expect("responses_bodies poisoned")
                 .push(request_body);
             match (account_id.as_str(), mode) {
-                ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                (
+                    "main-account",
+                    RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage
+                    | RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth,
+                ) => (
                     "HTTP/1.1 429 Too Many Requests",
                     "application/json",
                     serde_json::json!({
@@ -1126,7 +1187,11 @@ fn handle_runtime_proxy_backend_request(
                             "\r\n"
                         )
                         .to_string()
-                    } else if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) {
+                    } else if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage
+                            | RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth
+                    ) {
                         concat!(
                             "event: response.failed\r\n",
                             "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
@@ -1549,6 +1614,49 @@ fn handle_runtime_proxy_backend_request(
                             matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                                 .then_some(Duration::from_millis(750)),
                             matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
+                            .then_some(Duration::from_millis(100)),
+                        )
+                    }
+                }
+                "fourth-account" | "fifth-account" => {
+                    let response_id =
+                        runtime_proxy_backend_initial_response_id_for_account(account_id.as_str())
+                            .expect("late-pool account response id should exist");
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson) {
+                        (
+                            "HTTP/1.1 200 OK",
+                            "application/json",
+                            serde_json::json!({
+                                "id": response_id,
+                                "object": "response",
+                                "status": "completed",
+                                "output": []
+                            })
+                            .to_string(),
+                            None,
+                            None,
+                            None,
+                        )
+                    } else {
+                        (
+                            "HTTP/1.1 200 OK",
+                            "text/event-stream",
+                            format!(
+                                concat!(
+                                    "event: response.created\r\n",
+                                    "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                    "\r\n",
+                                    "event: response.completed\r\n",
+                                    "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                    "\r\n"
+                                ),
+                                response_id,
+                                response_id
+                            ),
+                            None,
+                            matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+                                .then_some(Duration::from_millis(750)),
+                            matches!(mode, RuntimeProxyBackendMode::HttpOnlySlowStream)
                                 .then_some(Duration::from_millis(100)),
                         )
                     }
@@ -1587,7 +1695,11 @@ fn handle_runtime_proxy_backend_request(
                 .expect("responses_bodies poisoned")
                 .push(request_body);
             match (account_id.as_str(), mode) {
-                ("main-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+                (
+                    "main-account",
+                    RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage
+                    | RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth,
+                ) => (
                     "HTTP/1.1 429 Too Many Requests",
                     "application/json",
                     serde_json::json!({
@@ -2424,17 +2536,25 @@ fn request_previous_response_id(request: &str) -> Option<String> {
 }
 
 fn runtime_proxy_usage_body(email: &str) -> String {
+    runtime_proxy_usage_body_with_remaining(email, 95, 95)
+}
+
+fn runtime_proxy_usage_body_with_remaining(
+    email: &str,
+    five_hour_remaining: i64,
+    weekly_remaining: i64,
+) -> String {
     serde_json::json!({
         "email": email,
         "plan_type": "plus",
         "rate_limit": {
             "primary_window": {
-                "used_percent": 5,
+                "used_percent": (100 - five_hour_remaining).clamp(0, 100),
                 "reset_at": future_epoch(18_000),
                 "limit_window_seconds": 18_000
             },
             "secondary_window": {
-                "used_percent": 5,
+                "used_percent": (100 - weekly_remaining).clamp(0, 100),
                 "reset_at": future_epoch(604_800),
                 "limit_window_seconds": 604_800
             }
@@ -15217,6 +15337,167 @@ fn runtime_proxy_retries_usage_limited_response_after_output_item_added_on_anoth
         state.active_profile.as_deref() == Some("second")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usage_limit() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message_late_ready_fifth();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/p2");
+    let third_home = temp_dir.path.join("homes/p3");
+    let fourth_home = temp_dir.path.join("homes/p4");
+    let fifth_home = temp_dir.path.join("homes/p5");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+    write_auth_json(&fourth_home.join("auth.json"), "fourth-account");
+    write_auth_json(&fifth_home.join("auth.json"), "fifth-account");
+
+    let usage = usage_with_main_windows(90, 18_000, 90, 604_800);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home,
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "p2".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "p3".to_string(),
+                        ProfileEntry {
+                            codex_home: third_home,
+                            managed: true,
+                            email: Some("third@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "p4".to_string(),
+                        ProfileEntry {
+                            codex_home: fourth_home,
+                            managed: true,
+                            email: Some("fourth@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "p5".to_string(),
+                        ProfileEntry {
+                            codex_home: fifth_home,
+                            managed: true,
+                            email: Some("fifth@example.com".to_string()),
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::from([("main".to_string(), snapshot)]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: serde_json::json!({
+            "input": []
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let response = proxy_runtime_responses_request(45, &request, &shared)
+        .expect("responses request should complete");
+    let RuntimeResponsesReply::Streaming(response) = response else {
+        panic!("expected streaming responses reply");
+    };
+    let mut body = String::new();
+    let mut reader = response.body;
+    reader
+        .read_to_string(&mut body)
+        .expect("streaming responses body should read");
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert!(
+        body.contains("\"resp-fifth\""),
+        "expected late ready pool member to win after deeper scan: body={body} responses={:?} usage={:?} log={log}",
+        backend.responses_accounts(),
+        sorted_backend_usage_accounts(&backend),
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "deep cold-start scan should find the later ready profile before surfacing usage limit: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "fifth-account".to_string()]
+    );
+    let usage_accounts = sorted_backend_usage_accounts(&backend);
+    assert!(
+        usage_accounts
+            .iter()
+            .any(|account| account == "second-account"),
+        "second account should be probed before the later ready profile: {usage_accounts:?}"
+    );
+    assert!(
+        usage_accounts
+            .iter()
+            .any(|account| account == "third-account"),
+        "third account should be probed before the later ready profile: {usage_accounts:?}"
+    );
+    assert!(
+        usage_accounts
+            .iter()
+            .any(|account| account == "fourth-account"),
+        "fourth account should be probed before the later ready profile: {usage_accounts:?}"
+    );
+    assert!(
+        usage_accounts
+            .iter()
+            .any(|account| account == "fifth-account"),
+        "fifth account should eventually be probed and selected: {usage_accounts:?}"
+    );
+
+    assert!(
+        log.contains("candidate_exhausted_continue route=responses"),
+        "responses log should record the extra cold-start scan"
+    );
 }
 
 #[test]

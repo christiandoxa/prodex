@@ -4860,6 +4860,24 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 }
                 return Ok(());
             }
+            let remaining_cold_start_profiles =
+                runtime_remaining_sync_probe_cold_start_profiles_for_route(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Websocket,
+                )?;
+            if remaining_cold_start_profiles > 0 {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} candidate_exhausted_continue route=websocket remaining_cold_start_profiles={remaining_cold_start_profiles}"
+                    ),
+                );
+                if runtime_proxy_sync_probe_pressure_mode_active(shared) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                continue;
+            }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
                 pinned_profile.as_deref(),
@@ -7189,6 +7207,24 @@ pub(super) fn proxy_runtime_standard_request(
             )? {
                 candidate_name
             } else {
+                let remaining_cold_start_profiles =
+                    runtime_remaining_sync_probe_cold_start_profiles_for_route(
+                        shared,
+                        &excluded_profiles,
+                        RuntimeRouteKind::Standard,
+                    )?;
+                if remaining_cold_start_profiles > 0 && session_profile.is_none() {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http candidate_exhausted_continue route=standard remaining_cold_start_profiles={remaining_cold_start_profiles}"
+                        ),
+                    );
+                    if runtime_proxy_sync_probe_pressure_mode_active(shared) {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    continue;
+                }
                 return match last_failure {
                     Some(response) => Ok(response),
                     None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
@@ -7422,6 +7458,27 @@ pub(super) fn proxy_runtime_standard_request(
                     }
                 ),
             );
+            let remaining_cold_start_profiles =
+                runtime_remaining_sync_probe_cold_start_profiles_for_route(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Compact,
+                )?;
+            if remaining_cold_start_profiles > 0
+                && compact_followup_profile.is_none()
+                && session_profile.is_none()
+            {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http candidate_exhausted_continue route=compact remaining_cold_start_profiles={remaining_cold_start_profiles}"
+                    ),
+                );
+                if runtime_proxy_sync_probe_pressure_mode_active(shared) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                continue;
+            }
             return match last_failure {
                 Some(response) => Ok(response),
                 None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
@@ -8636,6 +8693,24 @@ pub(super) fn proxy_runtime_responses_request(
                         runtime_proxy_local_selection_failure_message(),
                     )),
                 });
+            }
+            let remaining_cold_start_profiles =
+                runtime_remaining_sync_probe_cold_start_profiles_for_route(
+                    shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Responses,
+                )?;
+            if remaining_cold_start_profiles > 0 {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http candidate_exhausted_continue route=responses remaining_cold_start_profiles={remaining_cold_start_profiles}"
+                    ),
+                );
+                if runtime_proxy_sync_probe_pressure_mode_active(shared) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                continue;
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
@@ -10052,6 +10127,36 @@ pub(super) fn next_runtime_response_candidate_for_route(
     }
 
     Ok(fallback)
+}
+
+pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    _route_kind: RuntimeRouteKind,
+) -> Result<usize> {
+    let (state, current_profile, cached_reports) = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        (
+            runtime.state.clone(),
+            runtime.current_profile.clone(),
+            runtime.profile_probe_cache.clone(),
+        )
+    };
+
+    Ok(active_profile_selection_order(&state, &current_profile)
+        .into_iter()
+        .filter(|name| !excluded_profiles.contains(name))
+        .filter(|name| {
+            state
+                .profiles
+                .get(name)
+                .is_some_and(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
+        })
+        .filter(|name| !cached_reports.contains_key(name))
+        .count())
 }
 
 pub(super) fn runtime_waitable_inflight_candidates_for_route(
