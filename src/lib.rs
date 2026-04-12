@@ -48,6 +48,7 @@ mod runtime_anthropic;
 mod runtime_background;
 mod runtime_broker;
 mod runtime_capabilities;
+mod runtime_caveman;
 mod runtime_claude;
 #[path = "runtime_tuning.rs"]
 mod runtime_config;
@@ -74,6 +75,7 @@ use runtime_anthropic::*;
 use runtime_background::*;
 use runtime_broker::*;
 use runtime_capabilities::*;
+use runtime_caveman::*;
 use runtime_claude::*;
 use runtime_config::*;
 use runtime_doctor::*;
@@ -302,6 +304,17 @@ Notes:
   Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.
   Use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream Responses reasoning effort.
   Use `PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS=shell,computer` to opt into native client-tool translation on supported models.";
+const CLI_CAVEMAN_AFTER_HELP: &str = "\
+Examples:
+  prodex caveman
+  prodex caveman --profile main
+  prodex caveman exec \"review latest diff in caveman mode\"
+  prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+
+Notes:
+  Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
+  The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
+  Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor
@@ -724,6 +737,12 @@ enum Commands {
     Run(RunArgs),
     #[command(
         trailing_var_arg = true,
+        about = "Run codex through prodex with the Caveman plugin active in a temporary overlay home.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Caveman(CavemanArgs),
+    #[command(
+        trailing_var_arg = true,
         about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
         after_help = CLI_CLAUDE_AFTER_HELP
     )]
@@ -949,6 +968,28 @@ struct ClaudeArgs {
     /// Arguments passed through to `claude` unchanged.
     #[arg(value_name = "CLAUDE_ARG", allow_hyphen_values = true)]
     claude_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+struct CavemanArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    base_url: Option<String>,
+    /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    codex_args: Vec<OsString>,
 }
 
 #[derive(Args, Debug)]
@@ -2087,6 +2128,7 @@ fn run() -> Result<()> {
         Commands::Logout(args) => handle_codex_logout(args),
         Commands::Quota(args) => handle_quota(args),
         Commands::Run(args) => handle_run(args),
+        Commands::Caveman(args) => handle_caveman(args),
         Commands::Claude(args) => handle_claude(args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
     }
@@ -2134,6 +2176,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "logout"
             | "quota"
             | "run"
+            | "caveman"
             | "claude"
             | "help"
             | "__runtime-broker"

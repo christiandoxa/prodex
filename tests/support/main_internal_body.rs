@@ -3995,6 +3995,27 @@ fn bare_prodex_accepts_run_options_before_codex_args() {
 }
 
 #[test]
+fn caveman_command_accepts_passthrough_args() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "caveman",
+        "--profile",
+        "main",
+        "exec",
+        "review this repo",
+    ])
+    .expect("caveman command should parse");
+    let Commands::Caveman(args) = command else {
+        panic!("expected caveman command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(
+        args.codex_args,
+        vec![OsString::from("exec"), OsString::from("review this repo")]
+    );
+}
+
+#[test]
 fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
     let output = render_profile_quota_watch_output(
         "main",
@@ -27017,6 +27038,83 @@ fn claude_command_accepts_passthrough_args() {
             OsString::from("json"),
             OsString::from("hello"),
         ]
+    );
+}
+
+#[test]
+fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.clone(),
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("profiles"),
+        shared_codex_root: temp_dir.path.join(".codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+    };
+    create_codex_home_if_missing(&paths.shared_codex_root).expect("shared codex root");
+    create_codex_home_if_missing(&paths.managed_profiles_root).expect("managed root");
+    let shared_config = paths.shared_codex_root.join("config.toml");
+    fs::write(
+        &shared_config,
+        "model = \"gpt-5\"\n[features]\nsearch_tool = true\n",
+    )
+    .expect("shared config should write");
+
+    let base_home = paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&base_home).expect("base home");
+    runtime_proxy_create_symlink(&shared_config, &base_home.join("config.toml"), false)
+        .expect("config symlink should create");
+    fs::write(base_home.join("auth.json"), "{}").expect("auth file should write");
+
+    let caveman_home =
+        prepare_caveman_launch_home(&paths, &base_home).expect("caveman home should prepare");
+    let temp_config = caveman_home.join("config.toml");
+    let metadata = fs::symlink_metadata(&temp_config).expect("temp config metadata");
+    assert!(
+        !metadata.file_type().is_symlink(),
+        "temporary Caveman config should be detached from the shared config symlink"
+    );
+
+    let rendered_config = fs::read_to_string(&temp_config).expect("temp config should read");
+    assert!(rendered_config.contains("plugins = true"));
+    assert!(rendered_config.contains("codex_hooks = true"));
+    assert!(rendered_config.contains("[marketplaces.prodex-caveman]"));
+    assert!(rendered_config.contains("[plugins.\"caveman@prodex-caveman\"]"));
+    assert!(rendered_config.contains("enabled = true"));
+
+    let shared_rendered = fs::read_to_string(&shared_config).expect("shared config should read");
+    assert!(
+        !shared_rendered.contains("prodex-caveman"),
+        "base shared config must stay unchanged"
+    );
+    assert!(
+        !base_home.join("hooks.json").exists(),
+        "base home should not gain a persistent hooks.json file"
+    );
+
+    let hooks: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(caveman_home.join("hooks.json")).expect("hooks should read"),
+    )
+    .expect("hooks should parse");
+    assert_eq!(
+        hooks["hooks"]["SessionStart"][0]["hooks"][0]["type"],
+        serde_json::Value::String("command".to_string())
+    );
+
+    let marketplace_path =
+        caveman_home.join(".tmp/marketplaces/prodex-caveman/.agents/plugins/marketplace.json");
+    let marketplace_text =
+        fs::read_to_string(&marketplace_path).expect("marketplace manifest should read");
+    assert!(marketplace_text.contains("\"name\": \"prodex-caveman\""));
+    assert!(
+        caveman_home
+            .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/.codex-plugin/plugin.json")
+            .is_file()
+    );
+    assert!(
+        caveman_home
+            .join("plugins/cache/prodex-caveman/caveman/0.1.0/.codex-plugin/plugin.json")
+            .is_file()
     );
 }
 

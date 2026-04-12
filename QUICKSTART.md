@@ -1,8 +1,8 @@
 # Quick Start
 
-One OpenAI profile pool. Two CLIs.
+One OpenAI profile pool. Three entry points.
 
-Use `prodex` for Codex CLI. Use `prodex claude` for Claude Code. Both commands run on top of the same OpenAI-backed Prodex profile pool.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. All three commands run on top of the same OpenAI-backed Prodex profile pool.
 
 ## Requirements
 
@@ -117,7 +117,17 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
 
-## 4. Run Claude Code with `prodex claude`
+## 4. Run Codex with `prodex caveman`
+
+```bash
+prodex caveman
+prodex caveman --profile second
+prodex caveman exec "review this repo in caveman mode"
+```
+
+Use this path when you want Codex itself as the front end but want Caveman mode preloaded from the upstream Caveman plugin. Prodex launches Caveman from a temporary overlay `CODEX_HOME` so the base profile home stays unchanged after the session exits.
+
+## 5. Run Claude Code with `prodex claude`
 
 ```bash
 prodex claude -- -p "summarize this repo"
@@ -145,14 +155,14 @@ PRODEX_CLAUDE_MODEL=gpt-5.4 prodex claude -- -p "hello"
 PRODEX_CLAUDE_MODEL=gpt-5.2 PRODEX_CLAUDE_REASONING_EFFORT=xhigh prodex claude -- -p "hello"
 ```
 
-## 5. Switch profiles explicitly
+## 6. Switch profiles explicitly
 
 ```bash
 prodex use --profile main
 prodex current
 ```
 
-## 6. Debug the runtime
+## 7. Debug the runtime
 
 ```bash
 prodex cleanup
