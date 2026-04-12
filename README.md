@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml/badge.svg)](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml)
 
-Run Codex, Caveman-mode Codex, and Claude Code on top of one OpenAI profile pool.
+Run Codex, Claude Code, and their Caveman-mode variants on top of one OpenAI profile pool.
 
 `prodex` manages isolated `CODEX_HOME` profiles, checks quota before launch, rotates fresh work to another ready profile when needed, and keeps existing continuations attached to the profile that already owns them.
 
@@ -12,13 +12,14 @@ Run Codex, Caveman-mode Codex, and Claude Code on top of one OpenAI profile pool
 - Built-in quota preflight and fresh-request rotation
 - Continuation affinity for existing Codex sessions
 - `prodex caveman` launches Codex with Caveman mode preloaded
+- `prodex claude caveman` launches Claude Code with Caveman mode preloaded
 - `prodex claude` runs Claude Code through the same profile pool
 
 ## Requirements
 
 - At least one logged-in Prodex profile
 - Codex CLI for `prodex` and `prodex caveman`
-- Claude Code (`claude`) for `prodex claude`
+- Claude Code (`claude`) for `prodex claude` and `prodex claude caveman`
 
 Installing `@christiandoxa/prodex` from npm also installs the Codex runtime dependency for you. Claude Code is still a separate CLI.
 
@@ -73,6 +74,7 @@ prodex
 prodex caveman
 prodex exec "review this repo"
 prodex claude -- -p "summarize this repo"
+prodex claude caveman -- -p "summarize this repo briefly"
 ```
 
 `prodex` without a subcommand is shorthand for `prodex run`.
@@ -118,8 +120,15 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 ```bash
 prodex claude -- -p "summarize this repo"
+prodex claude caveman
+prodex claude caveman -- -p "summarize this repo briefly"
+prodex claude --profile second caveman -- -p "review the latest diff briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
+
+Use `prodex claude` for the normal Claude Code path, and use `prodex claude caveman` when you want the same Claude front end with Caveman mode preloaded.
+
+Prefixing Claude args with `caveman` loads the Caveman plugin for that Claude session only while keeping Claude state under Prodex-managed `CLAUDE_CONFIG_DIR`, so the global `~/.claude` state is not the source of truth for the Prodex session.
 
 ### Export, Quota, and Debugging
 

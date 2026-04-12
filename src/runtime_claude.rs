@@ -1,5 +1,67 @@
 use super::*;
 
+const PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME: &str = "caveman";
+
+struct EmbeddedClaudeCavemanFile {
+    relative_path: &'static str,
+    contents: &'static str,
+}
+
+const CLAUDE_CAVEMAN_PLUGIN_FILES: &[EmbeddedClaudeCavemanFile] = &[
+    EmbeddedClaudeCavemanFile {
+        relative_path: ".claude-plugin/plugin.json",
+        contents: include_str!("caveman_assets/claude/.claude-plugin/plugin.json"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "commands/caveman.toml",
+        contents: include_str!("caveman_assets/claude/commands/caveman.toml"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "commands/caveman-commit.toml",
+        contents: include_str!("caveman_assets/claude/commands/caveman-commit.toml"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "commands/caveman-review.toml",
+        contents: include_str!("caveman_assets/claude/commands/caveman-review.toml"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "hooks/caveman-activate.js",
+        contents: include_str!("caveman_assets/claude/hooks/caveman-activate.js"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "hooks/caveman-config.js",
+        contents: include_str!("caveman_assets/claude/hooks/caveman-config.js"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "hooks/caveman-mode-tracker.js",
+        contents: include_str!("caveman_assets/claude/hooks/caveman-mode-tracker.js"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "hooks/caveman-statusline.ps1",
+        contents: include_str!("caveman_assets/claude/hooks/caveman-statusline.ps1"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "hooks/caveman-statusline.sh",
+        contents: include_str!("caveman_assets/claude/hooks/caveman-statusline.sh"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "skills/caveman/SKILL.md",
+        contents: include_str!("caveman_assets/skills/caveman/SKILL.md"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "skills/caveman-commit/SKILL.md",
+        contents: include_str!("caveman_assets/claude/skills/caveman-commit/SKILL.md"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "skills/caveman-help/SKILL.md",
+        contents: include_str!("caveman_assets/claude/skills/caveman-help/SKILL.md"),
+    },
+    EmbeddedClaudeCavemanFile {
+        relative_path: "skills/caveman-review/SKILL.md",
+        contents: include_str!("caveman_assets/claude/skills/caveman-review/SKILL.md"),
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeProxyClaudeModelAlias {
     Opus,
@@ -18,6 +80,7 @@ pub(super) struct RuntimeProxyResponsesModelDescriptor {
 }
 
 pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
+    let (caveman_mode, claude_args) = runtime_proxy_claude_extract_caveman_mode(&args.claude_args);
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
         allow_auto_rotate: !args.no_auto_rotate,
@@ -43,14 +106,18 @@ pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
         &current_dir,
         claude_version.as_deref(),
     )?;
+    let caveman_plugin_dir = caveman_mode
+        .then(|| prepare_runtime_proxy_claude_caveman_plugin_dir(&prepared.paths))
+        .transpose()?;
     let extra_env = runtime_proxy_claude_launch_env(
         runtime_proxy.listen_addr,
         &claude_config_dir,
         &prepared.codex_home,
     );
+    let launch_args = runtime_proxy_claude_launch_args(&claude_args, caveman_plugin_dir.as_deref());
     let status = run_child(
         &claude_bin,
-        &args.claude_args,
+        &launch_args,
         &prepared.codex_home,
         &extra_env,
         runtime_proxy_claude_removed_env(),
@@ -58,6 +125,48 @@ pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
     )?;
     drop(runtime_proxy);
     exit_with_status(status)
+}
+
+pub(super) fn runtime_proxy_claude_extract_caveman_mode(
+    claude_args: &[OsString],
+) -> (bool, Vec<OsString>) {
+    let Some(first) = claude_args.first().and_then(|arg| arg.to_str()) else {
+        return (false, claude_args.to_vec());
+    };
+    if first != "caveman" {
+        return (false, claude_args.to_vec());
+    }
+    (true, claude_args[1..].to_vec())
+}
+
+pub(super) fn runtime_proxy_claude_launch_args(
+    claude_args: &[OsString],
+    plugin_dir: Option<&Path>,
+) -> Vec<OsString> {
+    let mut args = Vec::with_capacity(claude_args.len() + usize::from(plugin_dir.is_some()) * 2);
+    if let Some(plugin_dir) = plugin_dir {
+        args.push(OsString::from("--plugin-dir"));
+        args.push(plugin_dir.as_os_str().to_os_string());
+    }
+    args.extend(claude_args.iter().cloned());
+    args
+}
+
+pub(super) fn prepare_runtime_proxy_claude_caveman_plugin_dir(paths: &AppPaths) -> Result<PathBuf> {
+    let plugin_dir = paths
+        .root
+        .join("claude-plugins")
+        .join(PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME);
+    for file in CLAUDE_CAVEMAN_PLUGIN_FILES {
+        let path = plugin_dir.join(file.relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::write(&path, file.contents)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(plugin_dir)
 }
 
 pub(super) fn runtime_proxy_claude_launch_env(

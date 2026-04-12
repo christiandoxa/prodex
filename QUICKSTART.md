@@ -2,7 +2,7 @@
 
 One OpenAI profile pool. Three entry points.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. All three commands run on top of the same OpenAI-backed Prodex profile pool.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and `prodex claude caveman` for Caveman-mode Claude Code. All four commands run on top of the same OpenAI-backed Prodex profile pool.
 
 ## Requirements
 
@@ -131,10 +131,14 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 
 ```bash
 prodex claude -- -p "summarize this repo"
+prodex claude caveman
+prodex claude caveman -- -p "summarize this repo briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
 Use this path when you want Claude Code to be the front end while Prodex still routes requests through your OpenAI-backed profile pool.
+
+Use `prodex claude caveman` when you want the same Claude path but with the upstream Caveman plugin loaded through Claude's session-local `--plugin-dir` support. Prodex keeps the plugin bundle stable under `.prodex`, and the adapted Caveman hooks read and write the Prodex-managed `CLAUDE_CONFIG_DIR` instead of your global `~/.claude`.
 
 What changes on this path:
 

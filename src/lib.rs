@@ -294,11 +294,14 @@ Notes:
 const CLI_CLAUDE_AFTER_HELP: &str = "\
 Examples:
   prodex claude --print \"summarize this repo\"
+  prodex claude caveman
+  prodex claude caveman -- -p \"summarize this repo briefly\"
   prodex claude --profile main --print \"review the latest changes\"
   prodex claude --skip-quota-check -- --help
 
 Notes:
   Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
+  Prefix Claude args with `caveman` to load the Caveman plugin for that session only.
   Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
   Claude defaults to the current Codex model from `config.toml` when available.
   Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.

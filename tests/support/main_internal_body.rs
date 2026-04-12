@@ -27042,6 +27042,91 @@ fn claude_command_accepts_passthrough_args() {
 }
 
 #[test]
+fn claude_caveman_mode_extracts_prefix_and_preserves_passthrough_args() {
+    let (caveman_mode, claude_args) = runtime_proxy_claude_extract_caveman_mode(&[
+        OsString::from("caveman"),
+        OsString::from("-p"),
+        OsString::from("hello"),
+    ]);
+    assert!(caveman_mode);
+    assert_eq!(
+        claude_args,
+        vec![OsString::from("-p"), OsString::from("hello")]
+    );
+
+    let (caveman_mode, claude_args) =
+        runtime_proxy_claude_extract_caveman_mode(&[OsString::from("-p"), OsString::from("hi")]);
+    assert!(!caveman_mode);
+    assert_eq!(
+        claude_args,
+        vec![OsString::from("-p"), OsString::from("hi")]
+    );
+}
+
+#[test]
+fn runtime_proxy_claude_launch_args_prepend_plugin_dir_when_present() {
+    let launch_args = runtime_proxy_claude_launch_args(
+        &[OsString::from("-p"), OsString::from("hello")],
+        Some(Path::new("/tmp/prodex-caveman-plugin")),
+    );
+    assert_eq!(
+        launch_args,
+        vec![
+            OsString::from("--plugin-dir"),
+            OsString::from("/tmp/prodex-caveman-plugin"),
+            OsString::from("-p"),
+            OsString::from("hello"),
+        ]
+    );
+
+    let launch_args = runtime_proxy_claude_launch_args(
+        &[OsString::from("-p"), OsString::from("hello")],
+        None,
+    );
+    assert_eq!(
+        launch_args,
+        vec![OsString::from("-p"), OsString::from("hello")]
+    );
+}
+
+#[test]
+fn prepare_runtime_proxy_claude_caveman_plugin_dir_installs_local_plugin_bundle() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.clone(),
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("profiles"),
+        shared_codex_root: temp_dir.path.join(".codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+    };
+
+    let plugin_dir = prepare_runtime_proxy_claude_caveman_plugin_dir(&paths)
+        .expect("Claude Caveman plugin dir should prepare");
+    assert!(
+        plugin_dir.join(".claude-plugin/plugin.json").is_file(),
+        "plugin manifest should exist"
+    );
+    assert!(
+        plugin_dir.join("commands/caveman.toml").is_file(),
+        "caveman command should exist"
+    );
+    assert!(
+        plugin_dir.join("skills/caveman/SKILL.md").is_file(),
+        "caveman skill should exist"
+    );
+
+    let activate_hook = fs::read_to_string(plugin_dir.join("hooks/caveman-activate.js"))
+        .expect("activation hook should read");
+    assert!(activate_hook.contains("CLAUDE_CONFIG_DIR"));
+    let tracker_hook = fs::read_to_string(plugin_dir.join("hooks/caveman-mode-tracker.js"))
+        .expect("tracker hook should read");
+    assert!(tracker_hook.contains("getClaudeConfigDir"));
+    let statusline = fs::read_to_string(plugin_dir.join("hooks/caveman-statusline.sh"))
+        .expect("statusline script should read");
+    assert!(statusline.contains("CLAUDE_CONFIG_DIR"));
+}
+
+#[test]
 fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {
