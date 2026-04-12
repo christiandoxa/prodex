@@ -423,8 +423,11 @@ pub(super) fn load_runtime_broker_registry(
     if !path.exists() && !backup_path.exists() {
         return Ok(None);
     }
-    let loaded = load_json_file_with_backup::<RuntimeBrokerRegistry>(&path, &backup_path)?;
-    Ok(Some(loaded.value))
+    match load_json_file_with_backup::<RuntimeBrokerRegistry>(&path, &backup_path) {
+        Ok(loaded) => Ok(Some(loaded.value)),
+        Err(_err) if !path.exists() && !backup_path.exists() => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 pub(super) fn save_runtime_broker_registry(
