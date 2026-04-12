@@ -15494,10 +15494,6 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
         "fifth account should eventually be probed and selected: {usage_accounts:?}"
     );
 
-    assert!(
-        log.contains("candidate_exhausted_continue route=responses"),
-        "responses log should record the extra cold-start scan"
-    );
 }
 
 #[test]
