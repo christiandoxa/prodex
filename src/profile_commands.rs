@@ -562,73 +562,214 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
+struct RemovedProfileRecord {
+    name: String,
+    managed: bool,
+    deleted_home: bool,
+    codex_home: PathBuf,
+}
+
+fn persist_pruned_profile_runtime_sidecars(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Result<()> {
+    let continuations_exist = runtime_continuations_file_path(paths).exists()
+        || runtime_continuations_last_good_file_path(paths).exists();
+    if continuations_exist {
+        let continuations = load_runtime_continuations_with_recovery(paths, profiles)?.value;
+        save_runtime_continuations_for_profiles(paths, &continuations, profiles)?;
+    }
+
+    let journal_exists = runtime_continuation_journal_file_path(paths).exists()
+        || runtime_continuation_journal_last_good_file_path(paths).exists();
+    if journal_exists {
+        let journal = load_runtime_continuation_journal_with_recovery(paths, profiles)?.value;
+        save_runtime_continuation_journal_for_profiles(
+            paths,
+            &journal.continuations,
+            profiles,
+            journal.saved_at,
+        )?;
+    }
+
+    Ok(())
+}
+
 pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
 
-    let Some(profile) = state.profiles.remove(&args.name) else {
-        bail!("profile '{}' does not exist", args.name);
+    let target_names = if args.all {
+        state.profiles.keys().cloned().collect::<Vec<_>>()
+    } else {
+        let Some(name) = args.name.as_deref() else {
+            bail!("provide a profile name or pass --all");
+        };
+        if !state.profiles.contains_key(name) {
+            bail!("profile '{}' does not exist", name);
+        }
+        vec![name.to_string()]
     };
 
-    let should_delete_home = profile.managed || args.delete_home;
-    if should_delete_home {
-        if !profile.managed && args.delete_home {
+    if args.all && args.delete_home {
+        let external_profiles = target_names
+            .iter()
+            .filter(|name| {
+                state
+                    .profiles
+                    .get(*name)
+                    .is_some_and(|profile| !profile.managed)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !external_profiles.is_empty() {
             bail!(
-                "refusing to delete external path {}",
-                profile.codex_home.display()
+                "--delete-home with --all refuses to delete external profiles: {}",
+                external_profiles.join(", ")
             );
-        }
-        if profile.codex_home.exists() {
-            fs::remove_dir_all(&profile.codex_home)
-                .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
         }
     }
 
-    state.last_run_selected_at.remove(&args.name);
+    let removed_names = target_names.iter().cloned().collect::<BTreeSet<_>>();
+    let mut removed_profiles = Vec::with_capacity(target_names.len());
+    for name in &target_names {
+        let profile = state
+            .profiles
+            .remove(name)
+            .with_context(|| format!("profile '{}' disappeared from state", name))?;
+
+        let should_delete_home = profile.managed || args.delete_home;
+        if should_delete_home {
+            if !profile.managed && args.delete_home {
+                bail!(
+                    "refusing to delete external path {}",
+                    profile.codex_home.display()
+                );
+            }
+            if profile.codex_home.exists() {
+                fs::remove_dir_all(&profile.codex_home).with_context(|| {
+                    format!("failed to delete {}", profile.codex_home.display())
+                })?;
+            }
+        }
+
+        removed_profiles.push(RemovedProfileRecord {
+            name: name.clone(),
+            managed: profile.managed,
+            deleted_home: should_delete_home,
+            codex_home: profile.codex_home,
+        });
+    }
+
+    state
+        .last_run_selected_at
+        .retain(|profile_name, _| !removed_names.contains(profile_name));
     state
         .response_profile_bindings
-        .retain(|_, binding| binding.profile_name != args.name);
+        .retain(|_, binding| !removed_names.contains(&binding.profile_name));
     state
         .session_profile_bindings
-        .retain(|_, binding| binding.profile_name != args.name);
+        .retain(|_, binding| !removed_names.contains(&binding.profile_name));
 
-    if state.active_profile.as_deref() == Some(args.name.as_str()) {
+    if state
+        .active_profile
+        .as_deref()
+        .is_some_and(|profile_name| removed_names.contains(profile_name))
+    {
         state.active_profile = state.profiles.keys().next().cloned();
     }
 
     state.save(&paths)?;
+    persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
+
+    if args.all {
+        audit_log_event_best_effort(
+            "profile",
+            "remove",
+            "success",
+            serde_json::json!({
+                "all": true,
+                "removed_count": removed_profiles.len(),
+                "profile_names": removed_profiles.iter().map(|profile| profile.name.clone()).collect::<Vec<_>>(),
+                "deleted_home_count": removed_profiles.iter().filter(|profile| profile.deleted_home).count(),
+                "active_profile": state.active_profile.clone(),
+            }),
+        );
+
+        let mut fields = vec![
+            (
+                "Result".to_string(),
+                format!("Removed {} profile(s).", removed_profiles.len()),
+            ),
+            (
+                "Deleted homes".to_string(),
+                removed_profiles
+                    .iter()
+                    .filter(|profile| profile.deleted_home)
+                    .count()
+                    .to_string(),
+            ),
+            (
+                "Active".to_string(),
+                state
+                    .active_profile
+                    .clone()
+                    .unwrap_or_else(|| "cleared".to_string()),
+            ),
+        ];
+        if !removed_profiles.is_empty() {
+            fields.push((
+                "Profiles".to_string(),
+                removed_profiles
+                    .iter()
+                    .map(|profile| profile.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+        }
+        print_panel("Profiles Removed", &fields);
+        return Ok(());
+    }
+
+    let removed_profile = removed_profiles
+        .into_iter()
+        .next()
+        .expect("single-profile removal should record the removed profile");
     audit_log_event_best_effort(
         "profile",
         "remove",
         "success",
         serde_json::json!({
-            "profile_name": args.name.clone(),
-            "managed": profile.managed,
-            "deleted_home": should_delete_home,
-            "codex_home": profile.codex_home.display().to_string(),
+            "profile_name": removed_profile.name.clone(),
+            "managed": removed_profile.managed,
+            "deleted_home": removed_profile.deleted_home,
+            "codex_home": removed_profile.codex_home.display().to_string(),
             "active_profile": state.active_profile.clone(),
         }),
     );
 
-    let mut fields = vec![(
-        "Result".to_string(),
-        format!("Removed profile '{}'.", args.name),
-    )];
-    fields.push((
-        "Deleted home".to_string(),
-        if args.delete_home {
-            "Yes".to_string()
-        } else {
-            "No".to_string()
-        },
-    ));
-    fields.push((
-        "Active".to_string(),
-        state
-            .active_profile
-            .clone()
-            .unwrap_or_else(|| "cleared".to_string()),
-    ));
+    let fields = vec![
+        (
+            "Result".to_string(),
+            format!("Removed profile '{}'.", removed_profile.name),
+        ),
+        (
+            "Deleted home".to_string(),
+            if removed_profile.deleted_home {
+                "Yes".to_string()
+            } else {
+                "No".to_string()
+            },
+        ),
+        (
+            "Active".to_string(),
+            state
+                .active_profile
+                .clone()
+                .unwrap_or_else(|| "cleared".to_string()),
+        ),
+    ];
     print_panel("Profile Removed", &fields);
 
     Ok(())

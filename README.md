@@ -172,6 +172,7 @@ prodex use --profile main
 prodex current
 prodex logout --profile main
 prodex profile remove second
+prodex profile remove --all
 ```
 
 ### Run with Codex CLI

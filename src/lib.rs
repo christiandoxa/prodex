@@ -259,7 +259,8 @@ Examples:
   prodex profile export backup.json
   prodex profile import backup.json
   prodex profile import-current main
-  prodex profile remove main";
+  prodex profile remove main
+  prodex profile remove --all";
 const CLI_LOGIN_AFTER_HELP: &str = "\
 Examples:
   prodex login
@@ -743,7 +744,7 @@ enum ProfileCommands {
     ImportCurrent(ImportCurrentArgs),
     /// List configured profiles and show which one is active.
     List,
-    /// Remove a profile entry and optionally delete its managed home.
+    /// Remove one profile entry or every profile entry and optionally delete managed homes.
     Remove(RemoveProfileArgs),
     /// Set the active profile used by commands that omit --profile.
     Use(ProfileSelector),
@@ -800,7 +801,15 @@ struct ImportCurrentArgs {
 #[derive(Args, Debug)]
 struct RemoveProfileArgs {
     /// Name of the profile to remove.
-    name: String,
+    #[arg(
+        value_name = "NAME",
+        required_unless_present = "all",
+        conflicts_with = "all"
+    )]
+    name: Option<String>,
+    /// Remove every configured profile.
+    #[arg(long, conflicts_with = "name")]
+    all: bool,
     /// Also delete the managed CODEX_HOME directory from disk.
     #[arg(long)]
     delete_home: bool,

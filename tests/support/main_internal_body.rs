@@ -3956,6 +3956,30 @@ fn logout_command_accepts_profile_flag() {
 }
 
 #[test]
+fn profile_remove_command_accepts_all_flag() {
+    let command =
+        parse_cli_command_from(["prodex", "profile", "remove", "--all"]).expect("remove command");
+    let Commands::Profile(ProfileCommands::Remove(args)) = command else {
+        panic!("expected profile remove command");
+    };
+    assert!(args.all);
+    assert!(args.name.is_none());
+    assert!(!args.delete_home);
+}
+
+#[test]
+fn profile_remove_command_accepts_profile_name() {
+    let command =
+        parse_cli_command_from(["prodex", "profile", "remove", "main"]).expect("remove command");
+    let Commands::Profile(ProfileCommands::Remove(args)) = command else {
+        panic!("expected profile remove command");
+    };
+    assert!(!args.all);
+    assert_eq!(args.name.as_deref(), Some("main"));
+    assert!(!args.delete_home);
+}
+
+#[test]
 fn bare_prodex_accepts_run_options_before_codex_args() {
     let command =
         parse_cli_command_from(["prodex", "--profile", "second", "exec", "review this repo"])
@@ -4379,7 +4403,8 @@ fn remove_profile_deletes_managed_home_by_default() {
     state.save(&paths).expect("state should save");
 
     handle_remove_profile(RemoveProfileArgs {
-        name: "main".to_string(),
+        name: Some("main".to_string()),
+        all: false,
         delete_home: false,
     })
     .expect("managed profile remove should succeed");
@@ -4389,6 +4414,298 @@ fn remove_profile_deletes_managed_home_by_default() {
     assert!(
         !profile_home.exists(),
         "managed profile home should be deleted even without --delete-home"
+    );
+}
+
+#[test]
+fn remove_all_profiles_clears_state_and_continuation_sidecars() {
+    let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profile root should exist");
+    let managed_home = paths.managed_profiles_root.join("main");
+    let external_home = temp_dir.path.join("external-second");
+    fs::create_dir_all(&managed_home).expect("managed profile home should exist");
+    fs::create_dir_all(&external_home).expect("external profile home should exist");
+    fs::write(managed_home.join("auth.json"), "{}").expect("managed auth file should exist");
+    fs::write(external_home.join("auth.json"), "{}").expect("external auth file should exist");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: managed_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: external_home.clone(),
+                    managed: false,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            ("main".to_string(), now - 1),
+            ("second".to_string(), now),
+        ]),
+        response_profile_bindings: BTreeMap::from([
+            (
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "resp-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            ),
+        ]),
+        session_profile_bindings: BTreeMap::from([
+            (
+                "sess-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "sess-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            ),
+        ]),
+    };
+    write_versioned_runtime_sidecar(
+        &runtime_usage_snapshots_file_path(&paths),
+        &runtime_usage_snapshots_last_good_file_path(&paths),
+        0,
+        &BTreeMap::<String, RuntimeProfileUsageSnapshot>::new(),
+    );
+    write_versioned_runtime_sidecar(
+        &runtime_scores_file_path(&paths),
+        &runtime_scores_last_good_file_path(&paths),
+        0,
+        &BTreeMap::<String, RuntimeProfileHealth>::new(),
+    );
+    write_versioned_runtime_sidecar(
+        &runtime_backoffs_file_path(&paths),
+        &runtime_backoffs_last_good_file_path(&paths),
+        0,
+        &RuntimeProfileBackoffs::default(),
+    );
+    state.save(&paths).expect("state should save");
+
+    let continuations = RuntimeContinuationStore {
+        response_profile_bindings: BTreeMap::from([
+            (
+                "resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "resp-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            ),
+        ]),
+        session_profile_bindings: BTreeMap::from([
+            (
+                "sess-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "sess-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            ),
+        ]),
+        turn_state_bindings: BTreeMap::from([
+            (
+                "turn-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "turn-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            ),
+        ]),
+        session_id_bindings: BTreeMap::from([
+            (
+                "sid-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            ),
+            (
+                "sid-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            ),
+        ]),
+        statuses: RuntimeContinuationStatuses::default(),
+    };
+    save_runtime_continuations_for_profiles(&paths, &continuations, &state.profiles)
+        .expect("continuations should save");
+    save_runtime_continuation_journal_for_profiles(&paths, &continuations, &state.profiles, now)
+        .expect("continuation journal should save");
+
+    handle_remove_profile(RemoveProfileArgs {
+        name: None,
+        all: true,
+        delete_home: false,
+    })
+    .expect("bulk profile remove should succeed");
+
+    let reloaded = AppState::load(&paths).expect("state should reload");
+    assert!(reloaded.profiles.is_empty(), "all profiles should be removed");
+    assert!(reloaded.active_profile.is_none(), "active profile should clear");
+    assert!(
+        reloaded.last_run_selected_at.is_empty(),
+        "selection metadata should be cleared"
+    );
+    assert!(
+        reloaded.response_profile_bindings.is_empty(),
+        "response bindings should be cleared"
+    );
+    assert!(
+        reloaded.session_profile_bindings.is_empty(),
+        "session bindings should be cleared"
+    );
+    assert!(
+        !managed_home.exists(),
+        "managed profile home should be deleted during bulk removal"
+    );
+    assert!(
+        external_home.exists(),
+        "external profile home should remain without --delete-home"
+    );
+
+    let restored_continuations = load_runtime_continuations_with_recovery(&paths, &reloaded.profiles)
+        .expect("continuations should load")
+        .value;
+    assert!(
+        restored_continuations.response_profile_bindings.is_empty(),
+        "response continuation bindings should be cleared"
+    );
+    assert!(
+        restored_continuations.session_profile_bindings.is_empty(),
+        "session continuation bindings should be cleared"
+    );
+    assert!(
+        restored_continuations.turn_state_bindings.is_empty(),
+        "turn state bindings should be cleared"
+    );
+    assert!(
+        restored_continuations.session_id_bindings.is_empty(),
+        "session id bindings should be cleared"
+    );
+
+    let restored_journal =
+        load_runtime_continuation_journal_with_recovery(&paths, &reloaded.profiles)
+            .expect("continuation journal should load")
+            .value;
+    assert!(
+        restored_journal
+            .continuations
+            .response_profile_bindings
+            .is_empty(),
+        "journal response bindings should be cleared"
+    );
+    assert!(
+        restored_journal
+            .continuations
+            .session_profile_bindings
+            .is_empty(),
+        "journal session bindings should be cleared"
+    );
+    assert!(
+        restored_journal.continuations.turn_state_bindings.is_empty(),
+        "journal turn state bindings should be cleared"
+    );
+    assert!(
+        restored_journal.continuations.session_id_bindings.is_empty(),
+        "journal session id bindings should be cleared"
+    );
+}
+
+#[test]
+fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
+    let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let external_home = temp_dir.path.join("external-second");
+    fs::create_dir_all(&external_home).expect("external profile home should exist");
+    fs::write(external_home.join("auth.json"), "{}").expect("external auth file should exist");
+
+    AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: external_home.clone(),
+                managed: false,
+                email: Some("second@example.com".to_string()),
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("state should save");
+
+    let err = handle_remove_profile(RemoveProfileArgs {
+        name: None,
+        all: true,
+        delete_home: true,
+    })
+    .expect_err("bulk delete should reject external homes");
+    assert!(
+        err.to_string().contains("refuses to delete external profiles"),
+        "unexpected error: {err:#}"
+    );
+
+    let reloaded = AppState::load(&paths).expect("state should reload");
+    assert!(
+        reloaded.profiles.contains_key("second"),
+        "profile should remain after rejected bulk delete"
+    );
+    assert!(
+        external_home.exists(),
+        "external home should remain after rejected bulk delete"
     );
 }
 

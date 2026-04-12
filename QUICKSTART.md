@@ -97,6 +97,7 @@ Backup or move profiles:
 prodex profile export
 prodex profile export backup.json
 prodex profile import backup.json
+prodex profile remove --all
 ```
 
 `prodex profile export` exports all configured profiles by default and asks whether the bundle should use optional password protection.
