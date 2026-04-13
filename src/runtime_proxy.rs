@@ -1065,6 +1065,32 @@ pub(super) fn runtime_request_requires_previous_response_affinity(
         .unwrap_or(false)
 }
 
+pub(super) fn runtime_websocket_previous_response_requires_previous_response_affinity(
+    trusted_previous_response_affinity: bool,
+    previous_response_id: Option<&str>,
+    request_turn_state: Option<&str>,
+) -> bool {
+    // A websocket continuation without replayable turn state cannot be retried on another
+    // profile once the owning previous_response binding is trusted.
+    trusted_previous_response_affinity
+        && previous_response_id.is_some()
+        && request_turn_state.is_none()
+}
+
+pub(super) fn runtime_websocket_request_requires_locked_previous_response_affinity(
+    request_requires_previous_response_affinity: bool,
+    trusted_previous_response_affinity: bool,
+    previous_response_id: Option<&str>,
+    request_turn_state: Option<&str>,
+) -> bool {
+    request_requires_previous_response_affinity
+        || runtime_websocket_previous_response_requires_previous_response_affinity(
+            trusted_previous_response_affinity,
+            previous_response_id,
+            request_turn_state,
+        )
+}
+
 pub(super) fn runtime_request_text_without_previous_response_id(
     request_text: &str,
 ) -> Option<String> {
@@ -1377,8 +1403,45 @@ pub(super) fn runtime_compact_turn_state_lineage_key(turn_state: &str) -> String
     format!("{RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX}{turn_state}")
 }
 
+pub(super) fn runtime_response_turn_state_lineage_key(
+    response_id: &str,
+    turn_state: &str,
+) -> String {
+    format!(
+        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{response_id}:{turn_state}",
+        response_id.len()
+    )
+}
+
+pub(super) fn runtime_is_response_turn_state_lineage_key(key: &str) -> bool {
+    key.starts_with(RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX)
+}
+
+pub(super) fn runtime_response_turn_state_lineage_parts(key: &str) -> Option<(&str, &str)> {
+    let suffix = key.strip_prefix(RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX)?;
+    let (response_len, rest) = suffix.split_once(':')?;
+    let response_len = response_len.parse::<usize>().ok()?;
+    let response_and_sep = rest.get(..response_len.saturating_add(1))?;
+    if response_and_sep.as_bytes().get(response_len).copied() != Some(b':') {
+        return None;
+    }
+    let response_id = response_and_sep.get(..response_len)?;
+    let turn_state = rest.get(response_len.saturating_add(1)..)?;
+    (!response_id.is_empty() && !turn_state.is_empty()).then_some((response_id, turn_state))
+}
+
 pub(super) fn runtime_is_compact_session_lineage_key(key: &str) -> bool {
     key.starts_with(RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX)
+}
+
+pub(super) fn runtime_external_response_profile_bindings(
+    bindings: &BTreeMap<String, ResponseProfileBinding>,
+) -> BTreeMap<String, ResponseProfileBinding> {
+    bindings
+        .iter()
+        .filter(|(key, _)| !runtime_is_response_turn_state_lineage_key(key))
+        .map(|(key, binding)| (key.clone(), binding.clone()))
+        .collect()
 }
 
 pub(super) fn runtime_external_session_id_bindings(
@@ -2413,22 +2476,41 @@ pub(super) fn release_runtime_compact_lineage(
     Ok(changed)
 }
 
+#[cfg(test)]
 pub(super) fn remember_runtime_response_ids(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     response_ids: &[String],
     verified_route: RuntimeRouteKind,
 ) -> Result<()> {
+    remember_runtime_response_ids_with_turn_state(
+        shared,
+        profile_name,
+        response_ids,
+        None,
+        verified_route,
+    )
+}
+
+pub(super) fn remember_runtime_response_ids_with_turn_state(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    response_ids: &[String],
+    turn_state: Option<&str>,
+    verified_route: RuntimeRouteKind,
+) -> Result<()> {
     if response_ids.is_empty() {
         return Ok(());
     }
 
+    let turn_state = turn_state.map(str::trim).filter(|value| !value.is_empty());
     let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let bound_at = Local::now().timestamp();
     let mut changed = false;
+    let mut response_turn_state_changed = false;
     for response_id in response_ids {
         changed =
             clear_runtime_previous_response_negative_cache(&mut runtime, response_id, profile_name)
@@ -2476,6 +2558,33 @@ pub(super) fn remember_runtime_response_ids(
                 Some(verified_route),
             ) || changed;
         }
+        if let Some(turn_state) = turn_state {
+            let key = runtime_response_turn_state_lineage_key(response_id, turn_state);
+            match runtime.state.response_profile_bindings.get_mut(&key) {
+                Some(binding) if binding.profile_name == profile_name => {
+                    if binding.bound_at < bound_at {
+                        binding.bound_at = bound_at;
+                    }
+                }
+                Some(binding) => {
+                    binding.profile_name = profile_name.to_string();
+                    binding.bound_at = bound_at;
+                    changed = true;
+                    response_turn_state_changed = true;
+                }
+                None => {
+                    runtime.state.response_profile_bindings.insert(
+                        key,
+                        ResponseProfileBinding {
+                            profile_name: profile_name.to_string(),
+                            bound_at,
+                        },
+                    );
+                    changed = true;
+                    response_turn_state_changed = true;
+                }
+            }
+        }
     }
     if changed {
         prune_profile_bindings(
@@ -2496,10 +2605,90 @@ pub(super) fn remember_runtime_response_ids(
                 response_ids.first()
             ),
         );
+        if response_turn_state_changed {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "binding response_turn_state profile={profile_name} count={} first={:?} turn_state={}",
+                    response_ids.len(),
+                    response_ids.first(),
+                    turn_state.unwrap_or("-"),
+                ),
+            );
+        }
     } else {
         drop(runtime);
     }
     Ok(())
+}
+
+pub(super) fn runtime_previous_response_turn_state(
+    shared: &RuntimeRotationProxyShared,
+    previous_response_id: Option<&str>,
+    bound_profile: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(previous_response_id) = previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let prefix = format!(
+        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
+        previous_response_id.len()
+    );
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let mut selected = None::<(i64, String)>;
+    for (key, binding) in runtime
+        .state
+        .response_profile_bindings
+        .range(prefix.clone()..)
+    {
+        if !key.starts_with(&prefix) {
+            break;
+        }
+        if bound_profile.is_some_and(|profile_name| binding.profile_name != profile_name) {
+            continue;
+        }
+        let Some((response_id, turn_state)) = runtime_response_turn_state_lineage_parts(key) else {
+            continue;
+        };
+        if response_id != previous_response_id {
+            continue;
+        }
+        let candidate = (binding.bound_at, turn_state.to_string());
+        if selected
+            .as_ref()
+            .is_none_or(|(current_bound_at, _)| *current_bound_at <= candidate.0)
+        {
+            selected = Some(candidate);
+        }
+    }
+    Ok(selected.map(|(_, turn_state)| turn_state))
+}
+
+pub(super) fn clear_runtime_response_turn_state_lineage(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
+    previous_response_id: &str,
+) -> bool {
+    let prefix = format!(
+        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
+        previous_response_id.len()
+    );
+    let keys = bindings
+        .range(prefix.clone()..)
+        .take_while(|(key, _)| key.starts_with(&prefix))
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    let changed = !keys.is_empty();
+    for key in keys {
+        bindings.remove(&key);
+    }
+    changed
 }
 
 pub(super) fn remember_runtime_successful_previous_response_owner(
@@ -2624,6 +2813,10 @@ pub(super) fn clear_runtime_stale_previous_response_binding(
         .state
         .response_profile_bindings
         .remove(previous_response_id);
+    let _ = clear_runtime_response_turn_state_lineage(
+        &mut runtime.state.response_profile_bindings,
+        previous_response_id,
+    );
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
@@ -2664,6 +2857,10 @@ pub(super) fn release_runtime_quota_blocked_affinity(
             .state
             .response_profile_bindings
             .remove(previous_response_id);
+        let _ = clear_runtime_response_turn_state_lineage(
+            &mut runtime.state.response_profile_bindings,
+            previous_response_id,
+        );
         let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
@@ -2770,6 +2967,10 @@ pub(super) fn release_runtime_previous_response_affinity(
             .state
             .response_profile_bindings
             .remove(previous_response_id);
+        let _ = clear_runtime_response_turn_state_lineage(
+            &mut runtime.state.response_profile_bindings,
+            previous_response_id,
+        );
         let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
@@ -3325,9 +3526,9 @@ pub(super) fn runtime_quota_blocked_affinity_is_releasable(
     request_requires_previous_response_affinity: bool,
 ) -> bool {
     if request_requires_previous_response_affinity {
-        // Tool outputs carry chain-scoped call ids. Releasing any pre-commit affinity here can
-        // reroute the continuation onto another account/session and provoke upstream 400s such as
-        // "No tool call found for function call output". These requests must fail in place.
+        // Some continuations cannot be replayed safely on another account/session. Tool outputs
+        // carry chain-scoped call ids, and websocket previous_response continuations without turn
+        // state would silently degrade into fresh requests. These requests must fail in place.
         return false;
     }
 
@@ -4178,6 +4379,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
         request_metadata.requires_previous_response_affinity;
     let mut previous_response_id = request_metadata.previous_response_id.clone();
     let mut request_turn_state = runtime_request_turn_state(&handshake_request);
+    let request_session_id_header_present =
+        runtime_proxy_request_header_value(&handshake_request.headers, "session_id").is_some();
     let request_session_id = runtime_request_session_id(&handshake_request)
         .or_else(|| request_metadata.session_id.clone());
     let mut bound_profile = previous_response_id
@@ -4192,6 +4395,23 @@ pub(super) fn proxy_runtime_websocket_text_message(
         previous_response_id.as_deref(),
         bound_profile.as_deref(),
     )?;
+    if request_turn_state.is_none()
+        && let Some(turn_state) = runtime_previous_response_turn_state(
+            shared,
+            previous_response_id.as_deref(),
+            bound_profile.as_deref(),
+        )?
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket route=responses previous_response_turn_state_rehydrated response_id={} profile={} turn_state={turn_state}",
+                previous_response_id.as_deref().unwrap_or("-"),
+                bound_profile.as_deref().unwrap_or("-"),
+            ),
+        );
+        request_turn_state = Some(turn_state);
+    }
     let mut turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
@@ -4217,16 +4437,28 @@ pub(super) fn proxy_runtime_websocket_text_message(
             ),
         );
     }
+    let bound_session_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
+        && turn_state_profile.is_none()
+        && compact_followup_profile.is_none()
+    {
+        request_session_id
+            .as_deref()
+            .map(|session_id| runtime_session_bound_profile(shared, session_id))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let mut session_profile = if previous_response_id.is_none()
         && bound_profile.is_none()
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
     {
-        websocket_session.profile_name.clone().or(request_session_id
-            .as_deref()
-            .map(|session_id| runtime_session_bound_profile(shared, session_id))
-            .transpose()?
-            .flatten())
+        websocket_session
+            .profile_name
+            .clone()
+            .or(bound_session_profile.clone())
     } else {
         None
     };
@@ -4271,7 +4503,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
-                && !request_requires_previous_response_affinity
+                && !runtime_websocket_request_requires_locked_previous_response_affinity(
+                    request_requires_previous_response_affinity,
+                    trusted_previous_response_affinity,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                )
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -4364,6 +4601,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     websocket_session,
                     &current_profile,
                     request_turn_state.as_deref(),
+                    previous_response_id.is_none()
+                        && bound_profile.is_none()
+                        && request_turn_state.is_none()
+                        && turn_state_profile.is_none()
+                        && compact_followup_profile.is_none()
+                        && !(request_session_id_header_present || bound_session_profile.is_some()),
                 )? {
                     RuntimeWebsocketAttempt::Delivered => return Ok(()),
                     RuntimeWebsocketAttempt::QuotaBlocked {
@@ -4381,7 +4624,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            request_requires_previous_response_affinity,
+                            runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            ),
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
@@ -4498,7 +4746,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            request_requires_previous_response_affinity,
+                            runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            ),
                         ) {
                             runtime_proxy_log(
                                 shared,
@@ -4590,7 +4843,14 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                        if !has_turn_state_retry
+                            && !runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            )
+                        {
                             let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
@@ -4661,7 +4921,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            request_requires_previous_response_affinity,
+                            runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            ),
                         ) {
                             send_runtime_proxy_websocket_error(
                                 local_socket,
@@ -4798,7 +5063,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
             if previous_response_id.is_some()
                 && saw_previous_response_not_found
                 && !previous_response_fresh_fallback_used
-                && !request_requires_previous_response_affinity
+                && !runtime_websocket_request_requires_locked_previous_response_affinity(
+                    request_requires_previous_response_affinity,
+                    trusted_previous_response_affinity,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                )
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -4909,6 +5179,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     websocket_session,
                     &current_profile,
                     request_turn_state.as_deref(),
+                    previous_response_id.is_none()
+                        && bound_profile.is_none()
+                        && request_turn_state.is_none()
+                        && turn_state_profile.is_none()
+                        && compact_followup_profile.is_none()
+                        && !(request_session_id_header_present || bound_session_profile.is_some()),
                 )? {
                     RuntimeWebsocketAttempt::Delivered => return Ok(()),
                     RuntimeWebsocketAttempt::QuotaBlocked {
@@ -4926,7 +5202,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            request_requires_previous_response_affinity,
+                            runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            ),
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
@@ -5043,7 +5324,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            request_requires_previous_response_affinity,
+                            runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            ),
                         ) {
                             runtime_proxy_log(
                                 shared,
@@ -5099,7 +5385,14 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                        if !has_turn_state_retry
+                            && !runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            )
+                        {
                             let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
@@ -5169,7 +5462,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            request_requires_previous_response_affinity,
+                            runtime_websocket_request_requires_locked_previous_response_affinity(
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                            ),
                         ) {
                             send_runtime_proxy_websocket_error(
                                 local_socket,
@@ -5330,6 +5628,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
             websocket_session,
             &candidate_name,
             turn_state_override,
+            previous_response_id.is_none()
+                && bound_profile.is_none()
+                && request_turn_state.is_none()
+                && turn_state_profile.is_none()
+                && compact_followup_profile.is_none()
+                && !(request_session_id_header_present || bound_session_profile.is_some()),
         )? {
             RuntimeWebsocketAttempt::Delivered => return Ok(()),
             RuntimeWebsocketAttempt::QuotaBlocked {
@@ -5360,7 +5664,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     turn_state_profile.as_deref(),
                     session_profile.as_deref(),
                     trusted_previous_response_affinity,
-                    request_requires_previous_response_affinity,
+                    runtime_websocket_request_requires_locked_previous_response_affinity(
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        previous_response_id.as_deref(),
+                        request_turn_state.as_deref(),
+                    ),
                 ) {
                     runtime_proxy_log(
                         shared,
@@ -5480,7 +5789,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     turn_state_profile.as_deref(),
                     session_profile.as_deref(),
                     trusted_previous_response_affinity,
-                    request_requires_previous_response_affinity,
+                    runtime_websocket_request_requires_locked_previous_response_affinity(
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        previous_response_id.as_deref(),
+                        request_turn_state.as_deref(),
+                    ),
                 ) {
                     runtime_proxy_log(
                         shared,
@@ -5551,7 +5865,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     turn_state_profile.as_deref(),
                     session_profile.as_deref(),
                     trusted_previous_response_affinity,
-                    request_requires_previous_response_affinity,
+                    runtime_websocket_request_requires_locked_previous_response_affinity(
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        previous_response_id.as_deref(),
+                        request_turn_state.as_deref(),
+                    ),
                 ) {
                     send_runtime_proxy_websocket_error(
                         local_socket,
@@ -5704,7 +6023,12 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     continue;
                 }
                 if reuse_failed_bound_previous_response
-                    && !request_requires_previous_response_affinity
+                    && !runtime_websocket_request_requires_locked_previous_response_affinity(
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        previous_response_id.as_deref(),
+                        request_turn_state.as_deref(),
+                    )
                     && let Some(fresh_request_text) =
                         runtime_request_text_without_previous_response_id(&request_text)
                 {
@@ -5795,7 +6119,14 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
-                if !has_turn_state_retry && !request_requires_previous_response_affinity {
+                if !has_turn_state_retry
+                    && !runtime_websocket_request_requires_locked_previous_response_affinity(
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        previous_response_id.as_deref(),
+                        request_turn_state.as_deref(),
+                    )
+                {
                     let _ = clear_runtime_stale_previous_response_binding(
                         shared,
                         &profile_name,
@@ -5861,11 +6192,9 @@ pub(super) fn attempt_runtime_websocket_request(
     websocket_session: &mut RuntimeWebsocketSessionState,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    promote_committed_profile: bool,
 ) -> Result<RuntimeWebsocketAttempt> {
     let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
-    let promote_committed_profile = request_previous_response_id.is_none()
-        && request_session_id.is_none()
-        && request_turn_state.is_none();
     let (initial_quota_summary, initial_quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
     if (request_previous_response_id.is_some()
@@ -6199,6 +6528,7 @@ pub(super) fn attempt_runtime_websocket_request(
                         request_previous_response_id,
                         request_session_id,
                         request_turn_state,
+                        upstream_turn_state.as_deref(),
                         &mut previous_response_owner_recorded,
                     )?;
                 }
@@ -6209,6 +6539,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     request_previous_response_id,
                     request_session_id,
                     request_turn_state,
+                    upstream_turn_state.as_deref(),
                     &inspected.response_ids,
                     &mut previous_response_owner_recorded,
                 )?;
@@ -6287,6 +6618,7 @@ pub(super) fn attempt_runtime_websocket_request(
                         request_previous_response_id,
                         request_session_id,
                         request_turn_state,
+                        upstream_turn_state.as_deref(),
                         &mut previous_response_owner_recorded,
                     )?;
                 }
@@ -6901,6 +7233,7 @@ pub(super) fn remember_runtime_websocket_response_ids(
     request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
+    response_turn_state: Option<&str>,
     response_ids: &[String],
     previous_response_owner_recorded: &mut bool,
 ) -> Result<()> {
@@ -6913,10 +7246,11 @@ pub(super) fn remember_runtime_websocket_response_ids(
         )?;
         *previous_response_owner_recorded = true;
     }
-    remember_runtime_response_ids(
+    remember_runtime_response_ids_with_turn_state(
         shared,
         profile_name,
         response_ids,
+        response_turn_state,
         RuntimeRouteKind::Websocket,
     )?;
     if !response_ids.is_empty() {
@@ -6940,6 +7274,7 @@ pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
     request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
+    response_turn_state: Option<&str>,
     previous_response_owner_recorded: &mut bool,
 ) -> Result<()> {
     for frame in buffered_frames.drain(..) {
@@ -6949,6 +7284,7 @@ pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
             request_previous_response_id,
             request_session_id,
             request_turn_state,
+            response_turn_state,
             &frame.response_ids,
             previous_response_owner_recorded,
         )?;
@@ -8102,6 +8438,23 @@ pub(super) fn proxy_runtime_responses_request(
         previous_response_id.as_deref(),
         bound_profile.as_deref(),
     )?;
+    if request_turn_state.is_none()
+        && let Some(turn_state) = runtime_previous_response_turn_state(
+            shared,
+            previous_response_id.as_deref(),
+            bound_profile.as_deref(),
+        )?
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http route=responses previous_response_turn_state_rehydrated response_id={} profile={} turn_state={turn_state}",
+                previous_response_id.as_deref().unwrap_or("-"),
+                bound_profile.as_deref().unwrap_or("-"),
+            ),
+        );
+        request_turn_state = Some(turn_state);
+    }
     let mut turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
@@ -9616,6 +9969,7 @@ pub(super) fn attempt_runtime_responses_request(
         runtime_request_previous_response_id(request).as_deref(),
         request_session_id.as_deref(),
         runtime_request_turn_state(request).as_deref(),
+        turn_state_override,
         response,
         shared,
         profile_name,
@@ -12848,12 +13202,14 @@ pub(super) fn prepare_runtime_proxy_responses_success(
     request_previous_response_id: Option<&str>,
     request_session_id: Option<&str>,
     request_turn_state: Option<&str>,
+    turn_state_override: Option<&str>,
     response: reqwest::Response,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     inflight_guard: RuntimeProfileInFlightGuard,
 ) -> Result<RuntimeResponsesAttempt> {
-    let turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
+    let response_header_turn_state =
+        runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     remember_runtime_successful_previous_response_owner(
         shared,
         profile_name,
@@ -12866,12 +13222,6 @@ pub(super) fn prepare_runtime_proxy_responses_success(
         request_session_id,
         RuntimeRouteKind::Responses,
     )?;
-    remember_runtime_turn_state(
-        shared,
-        profile_name,
-        turn_state.as_deref(),
-        RuntimeRouteKind::Responses,
-    )?;
     let is_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -12881,12 +13231,21 @@ pub(super) fn prepare_runtime_proxy_responses_success(
         shared,
         format!(
             "request={request_id} transport=http prepare_success profile={profile_name} sse={is_sse} turn_state={:?}",
-            turn_state
+            response_header_turn_state
         ),
     );
     if !is_sse {
         let buffered_started_at = Instant::now();
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
+        let response_turn_state = response_header_turn_state
+            .or_else(|| turn_state_override.map(str::to_string))
+            .or_else(|| extract_runtime_turn_state_from_body_bytes(&parts.body));
+        remember_runtime_turn_state(
+            shared,
+            profile_name,
+            response_turn_state.as_deref(),
+            RuntimeRouteKind::Responses,
+        )?;
         runtime_proxy_log(
             shared,
             format!(
@@ -12899,10 +13258,11 @@ pub(super) fn prepare_runtime_proxy_responses_success(
         );
         let response_ids = extract_runtime_response_ids_from_body_bytes(&parts.body);
         if !response_ids.is_empty() {
-            remember_runtime_response_ids(
+            remember_runtime_response_ids_with_turn_state(
                 shared,
                 profile_name,
                 &response_ids,
+                response_turn_state.as_deref(),
                 RuntimeRouteKind::Responses,
             )?;
             let _ = release_runtime_compact_lineage(
@@ -12938,10 +13298,11 @@ pub(super) fn prepare_runtime_proxy_responses_success(
     );
     let lookahead = inspect_runtime_sse_lookahead(&mut prefetch, &shared.log_path, request_id)?;
 
-    let (prelude, response_ids) = match lookahead {
+    let (prelude, response_ids, lookahead_turn_state) = match lookahead {
         RuntimeSseInspection::Commit {
             prelude,
             response_ids,
+            turn_state,
         } => {
             runtime_proxy_log(
                 shared,
@@ -12951,7 +13312,7 @@ pub(super) fn prepare_runtime_proxy_responses_success(
                     response_ids.len()
                 ),
             );
-            (prelude, response_ids)
+            (prelude, response_ids, turn_state)
         }
         RuntimeSseInspection::QuotaBlocked(prelude) => {
             runtime_proxy_log(
@@ -12995,14 +13356,24 @@ pub(super) fn prepare_runtime_proxy_responses_success(
                     shared: shared.clone(),
                     _inflight_guard: Some(inflight_guard),
                 }),
-                turn_state,
+                turn_state: response_header_turn_state,
             });
         }
     };
-    remember_runtime_response_ids(
+    let response_turn_state = response_header_turn_state
+        .or_else(|| turn_state_override.map(str::to_string))
+        .or(lookahead_turn_state);
+    remember_runtime_turn_state(
+        shared,
+        profile_name,
+        response_turn_state.as_deref(),
+        RuntimeRouteKind::Responses,
+    )?;
+    remember_runtime_response_ids_with_turn_state(
         shared,
         profile_name,
         &response_ids,
+        response_turn_state.as_deref(),
         RuntimeRouteKind::Responses,
     )?;
     if !response_ids.is_empty() {
@@ -13026,6 +13397,7 @@ pub(super) fn prepare_runtime_proxy_responses_success(
                 profile_name.to_string(),
                 &prelude,
                 &response_ids,
+                response_turn_state.as_deref(),
             )),
             request_id,
             profile_name: profile_name.to_string(),
@@ -13047,7 +13419,16 @@ impl RuntimeSseTapState {
             let line_text = String::from_utf8_lossy(&self.line);
             let trimmed = line_text.trim_end_matches(['\r', '\n']);
             if trimmed.is_empty() {
-                self.remember_response_ids(shared, profile_name, RuntimeRouteKind::Responses);
+                let event = parse_runtime_sse_event(&self.data_lines);
+                if let Some(turn_state) = event.turn_state {
+                    self.turn_state = Some(turn_state);
+                }
+                self.remember_response_ids(
+                    shared,
+                    profile_name,
+                    &event.response_ids,
+                    RuntimeRouteKind::Responses,
+                );
                 self.data_lines.clear();
                 self.line.clear();
                 continue;
@@ -13061,23 +13442,71 @@ impl RuntimeSseTapState {
     }
 
     fn finish(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
-        self.remember_response_ids(shared, profile_name, RuntimeRouteKind::Responses);
+        let event = parse_runtime_sse_event(&self.data_lines);
+        if let Some(turn_state) = event.turn_state {
+            self.turn_state = Some(turn_state);
+        }
+        self.remember_response_ids(
+            shared,
+            profile_name,
+            &event.response_ids,
+            RuntimeRouteKind::Responses,
+        );
     }
 
     fn remember_response_ids(
         &mut self,
         shared: &RuntimeRotationProxyShared,
         profile_name: &str,
+        response_ids: &[String],
         verified_route: RuntimeRouteKind,
     ) {
-        let fresh_ids = extract_runtime_response_ids_from_sse(&self.data_lines)
-            .into_iter()
-            .filter(|response_id| self.remembered_response_ids.insert(response_id.clone()))
+        let fresh_ids = response_ids
+            .iter()
+            .filter(|response_id| self.remembered_response_ids.insert((*response_id).clone()))
+            .cloned()
             .collect::<Vec<_>>();
-        if fresh_ids.is_empty() {
+        let response_ids_needing_turn_state = self
+            .turn_state
+            .as_deref()
+            .map(|_| {
+                self.remembered_response_ids
+                    .iter()
+                    .filter(|response_id| {
+                        self.response_ids_with_turn_state
+                            .insert((*response_id).clone())
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if fresh_ids.is_empty() && response_ids_needing_turn_state.is_empty() {
             return;
         }
-        let _ = remember_runtime_response_ids(shared, profile_name, &fresh_ids, verified_route);
+        if !fresh_ids.is_empty() {
+            let _ = remember_runtime_response_ids_with_turn_state(
+                shared,
+                profile_name,
+                &fresh_ids,
+                self.turn_state.as_deref(),
+                verified_route,
+            );
+        }
+        if !response_ids_needing_turn_state.is_empty() {
+            let rebound_ids = response_ids_needing_turn_state
+                .into_iter()
+                .filter(|response_id| !fresh_ids.contains(response_id))
+                .collect::<Vec<_>>();
+            if !rebound_ids.is_empty() {
+                let _ = remember_runtime_response_ids_with_turn_state(
+                    shared,
+                    profile_name,
+                    &rebound_ids,
+                    self.turn_state.as_deref(),
+                    verified_route,
+                );
+            }
+        }
     }
 }
 
@@ -13161,9 +13590,14 @@ impl RuntimeSseTapReader {
         profile_name: String,
         prelude: &[u8],
         remembered_response_ids: &[String],
+        turn_state: Option<&str>,
     ) -> Self {
         let mut state = RuntimeSseTapState {
             remembered_response_ids: remembered_response_ids.iter().cloned().collect(),
+            response_ids_with_turn_state: turn_state
+                .map(|_| remembered_response_ids.iter().cloned().collect())
+                .unwrap_or_default(),
+            turn_state: turn_state.map(str::to_string),
             ..RuntimeSseTapState::default()
         };
         state.observe(&shared, &profile_name, prelude);
@@ -13838,7 +14272,10 @@ pub(super) fn inspect_runtime_sse_lookahead(
             Ok(RuntimePrefetchChunk::Data(chunk)) => {
                 buffered.extend_from_slice(&chunk);
                 match inspect_runtime_sse_buffer(&buffered)? {
-                    RuntimeSseInspectionProgress::Commit { response_ids } => {
+                    RuntimeSseInspectionProgress::Commit {
+                        response_ids,
+                        turn_state,
+                    } => {
                         runtime_proxy_log_to_path(
                             log_path,
                             &format!(
@@ -13850,6 +14287,7 @@ pub(super) fn inspect_runtime_sse_lookahead(
                         return Ok(RuntimeSseInspection::Commit {
                             prelude: buffered,
                             response_ids,
+                            turn_state,
                         });
                     }
                     RuntimeSseInspectionProgress::Hold { .. } => {}
@@ -13914,8 +14352,14 @@ pub(super) fn inspect_runtime_sse_lookahead(
     }
 
     match inspect_runtime_sse_buffer(&buffered)? {
-        RuntimeSseInspectionProgress::Commit { response_ids }
-        | RuntimeSseInspectionProgress::Hold { response_ids } => {
+        RuntimeSseInspectionProgress::Commit {
+            response_ids,
+            turn_state,
+        }
+        | RuntimeSseInspectionProgress::Hold {
+            response_ids,
+            turn_state,
+        } => {
             if !buffered.is_empty() {
                 runtime_proxy_log_to_path(
                     log_path,
@@ -13929,6 +14373,7 @@ pub(super) fn inspect_runtime_sse_lookahead(
             Ok(RuntimeSseInspection::Commit {
                 prelude: buffered,
                 response_ids,
+                turn_state,
             })
         }
         RuntimeSseInspectionProgress::QuotaBlocked => {
@@ -13945,6 +14390,7 @@ pub(super) fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseIn
     let mut data_lines = Vec::new();
     let mut response_ids = BTreeSet::new();
     let mut saw_commit_ready_event = false;
+    let mut turn_state = None::<String>;
 
     for byte in buffered {
         line.push(*byte);
@@ -13963,6 +14409,9 @@ pub(super) fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseIn
                 return Ok(RuntimeSseInspectionProgress::PreviousResponseNotFound);
             }
             response_ids.extend(event.response_ids);
+            if event.turn_state.is_some() {
+                turn_state = event.turn_state;
+            }
             if !data_lines.is_empty()
                 && !event
                     .event_type
@@ -13985,10 +14434,12 @@ pub(super) fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseIn
     if saw_commit_ready_event {
         Ok(RuntimeSseInspectionProgress::Commit {
             response_ids: response_ids.into_iter().collect(),
+            turn_state,
         })
     } else {
         Ok(RuntimeSseInspectionProgress::Hold {
             response_ids: response_ids.into_iter().collect(),
+            turn_state,
         })
     }
 }
@@ -14104,13 +14555,8 @@ pub(super) fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSse
         .is_some(),
         response_ids: extract_runtime_response_ids_from_value(&value),
         event_type: runtime_response_event_type_from_value(&value),
+        turn_state: extract_runtime_turn_state_from_value(&value),
     }
-}
-
-pub(super) fn extract_runtime_response_ids_from_sse(data_lines: &[String]) -> Vec<String> {
-    parse_runtime_sse_payload(data_lines)
-        .map(|value| extract_runtime_response_ids_from_value(&value))
-        .unwrap_or_default()
 }
 
 pub(super) fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
@@ -14386,6 +14832,12 @@ pub(super) fn extract_runtime_response_ids_from_body_bytes(body: &[u8]) -> Vec<S
         .ok()
         .map(|value| extract_runtime_response_ids_from_value(&value))
         .unwrap_or_default()
+}
+
+pub(super) fn extract_runtime_turn_state_from_body_bytes(body: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| extract_runtime_turn_state_from_value(&value))
 }
 
 pub(super) fn push_runtime_response_id(response_ids: &mut Vec<String>, id: Option<&str>) {

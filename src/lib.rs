@@ -1650,6 +1650,7 @@ struct RuntimeDoctorSummary {
 
 const RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX: &str = "__compact_session__:";
 const RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX: &str = "__compact_turn_state__:";
+const RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX: &str = "__response_turn_state__:";
 
 #[derive(Debug, Clone, Default)]
 struct RuntimeDoctorProfileSummary {
@@ -1871,6 +1872,7 @@ enum RuntimeSseInspection {
     Commit {
         prelude: Vec<u8>,
         response_ids: Vec<String>,
+        turn_state: Option<String>,
     },
     QuotaBlocked(Vec<u8>),
     PreviousResponseNotFound(Vec<u8>),
@@ -1878,8 +1880,14 @@ enum RuntimeSseInspection {
 
 #[derive(Debug)]
 enum RuntimeSseInspectionProgress {
-    Hold { response_ids: Vec<String> },
-    Commit { response_ids: Vec<String> },
+    Hold {
+        response_ids: Vec<String>,
+        turn_state: Option<String>,
+    },
+    Commit {
+        response_ids: Vec<String>,
+        turn_state: Option<String>,
+    },
     QuotaBlocked,
     PreviousResponseNotFound,
 }
@@ -1890,6 +1898,7 @@ struct RuntimeParsedSseEvent {
     previous_response_not_found: bool,
     response_ids: Vec<String>,
     event_type: Option<String>,
+    turn_state: Option<String>,
 }
 
 #[derive(Default)]
@@ -1897,6 +1906,8 @@ struct RuntimeSseTapState {
     line: Vec<u8>,
     data_lines: Vec<String>,
     remembered_response_ids: BTreeSet<String>,
+    response_ids_with_turn_state: BTreeSet<String>,
+    turn_state: Option<String>,
 }
 
 #[allow(clippy::large_enum_variant)]

@@ -709,7 +709,9 @@ pub(super) fn runtime_continuation_store_from_app_state(
     state: &AppState,
 ) -> RuntimeContinuationStore {
     RuntimeContinuationStore {
-        response_profile_bindings: state.response_profile_bindings.clone(),
+        response_profile_bindings: runtime_external_response_profile_bindings(
+            &state.response_profile_bindings,
+        ),
         session_profile_bindings: state.session_profile_bindings.clone(),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: runtime_external_session_id_bindings(&state.session_profile_bindings),
@@ -746,6 +748,25 @@ pub(super) fn compact_runtime_continuation_store(
         .retain(|key, binding| {
             runtime_continuation_binding_should_retain(binding, response_statuses.get(key), now)
         });
+    let response_turn_state_keys = continuations
+        .response_profile_bindings
+        .keys()
+        .filter(|key| runtime_is_response_turn_state_lineage_key(key))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in response_turn_state_keys {
+        let Some((response_id, _)) = runtime_response_turn_state_lineage_parts(&key) else {
+            continuations.response_profile_bindings.remove(&key);
+            continue;
+        };
+        if continuations
+            .response_profile_bindings
+            .get(response_id)
+            .is_none_or(|binding| !profiles.contains_key(&binding.profile_name))
+        {
+            continuations.response_profile_bindings.remove(&key);
+        }
+    }
     continuations.turn_state_bindings.retain(|key, binding| {
         runtime_continuation_binding_should_retain(binding, turn_state_statuses.get(key), now)
     });
@@ -1056,7 +1077,9 @@ pub(super) fn save_runtime_state_snapshot_if_latest(
             &merged.profiles,
         );
         let mut merged = merged;
-        merged.response_profile_bindings = merged_continuations.response_profile_bindings.clone();
+        merged.response_profile_bindings = runtime_external_response_profile_bindings(
+            &merged_continuations.response_profile_bindings,
+        );
         merged.session_profile_bindings = merged_continuations.session_profile_bindings.clone();
         let json =
             serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;

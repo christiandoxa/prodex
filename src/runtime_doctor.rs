@@ -1100,7 +1100,9 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
     summary.persisted_transport_backoffs = backoffs.value.transport_backoff_until.len();
     summary.persisted_route_circuits = backoffs.value.route_circuit_open_until.len();
     summary.persisted_usage_snapshots = usage_snapshots.value.len();
-    summary.persisted_response_bindings = continuations.value.response_profile_bindings.len();
+    summary.persisted_response_bindings =
+        runtime_external_response_profile_bindings(&continuations.value.response_profile_bindings)
+            .len();
     summary.persisted_session_bindings = continuations.value.session_profile_bindings.len();
     summary.persisted_turn_state_bindings = continuations.value.turn_state_bindings.len();
     summary.persisted_session_id_bindings = continuations.value.session_id_bindings.len();

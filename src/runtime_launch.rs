@@ -321,7 +321,10 @@ pub(super) fn start_runtime_rotation_proxy_with_listen_addr(
     );
     let persisted_profile_scores_count = persisted_profile_scores.value.len();
     let persisted_usage_snapshots_count = persisted_usage_snapshots.value.len();
-    let persisted_response_binding_count = restored_continuations.response_profile_bindings.len();
+    let persisted_response_binding_count = runtime_external_response_profile_bindings(
+        &restored_continuations.response_profile_bindings,
+    )
+    .len();
     let persisted_session_binding_count = restored_continuations.session_profile_bindings.len();
     let persisted_turn_state_binding_count = restored_continuations.turn_state_bindings.len();
     let persisted_session_id_binding_count = restored_runtime_session_id_bindings.len();
