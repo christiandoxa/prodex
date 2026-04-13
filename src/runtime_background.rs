@@ -1122,50 +1122,66 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
 
         for (_, job) in jobs {
             queue.active.fetch_add(1, Ordering::SeqCst);
-            runtime_proxy_log(
-                &job.shared,
-                format!("profile_probe_refresh_start profile={}", job.profile_name),
-            );
-            let auth = read_auth_summary(&job.codex_home);
-            let result = if auth.quota_compatible {
-                fetch_usage(&job.codex_home, Some(job.upstream_base_url.as_str()))
-                    .map_err(|err| err.to_string())
-            } else {
-                Err("auth mode is not quota-compatible".to_string())
-            };
-            let apply_result = apply_runtime_profile_probe_result(
-                &job.shared,
-                &job.profile_name,
-                auth,
-                result.clone(),
-            );
-            match result {
-                Ok(_) => runtime_proxy_log(
-                    &job.shared,
-                    if let Err(err) = apply_result {
-                        format!(
-                            "profile_probe_refresh_error profile={} lag_ms={} error=state_update:{err:#}",
-                            job.profile_name,
-                            job.queued_at.elapsed().as_millis()
-                        )
-                    } else {
-                        format!(
-                            "profile_probe_refresh_ok profile={} lag_ms={}",
-                            job.profile_name,
-                            job.queued_at.elapsed().as_millis()
-                        )
-                    },
-                ),
-                Err(err) => runtime_proxy_log(
-                    &job.shared,
-                    format!(
-                        "profile_probe_refresh_error profile={} lag_ms={} error={err}",
-                        job.profile_name,
-                        job.queued_at.elapsed().as_millis()
-                    ),
-                ),
-            }
+            let log_path = job.shared.log_path.clone();
+            let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_runtime_probe_refresh_job(job)
+            }));
             queue.active.fetch_sub(1, Ordering::SeqCst);
+            if let Err(panic_payload) = panic_result {
+                let panic_message = if let Some(message) = panic_payload.downcast_ref::<&str>() {
+                    (*message).to_string()
+                } else if let Some(message) = panic_payload.downcast_ref::<String>() {
+                    message.clone()
+                } else {
+                    "unknown panic payload".to_string()
+                };
+                runtime_proxy_log_to_path(
+                    &log_path,
+                    &format!("profile_probe_refresh_panic error={panic_message}"),
+                );
+            }
         }
+    }
+}
+
+fn run_runtime_probe_refresh_job(job: RuntimeProbeRefreshJob) {
+    runtime_proxy_log(
+        &job.shared,
+        format!("profile_probe_refresh_start profile={}", job.profile_name),
+    );
+    let auth = read_auth_summary(&job.codex_home);
+    let result = if auth.quota_compatible {
+        fetch_usage(&job.codex_home, Some(job.upstream_base_url.as_str()))
+            .map_err(|err| err.to_string())
+    } else {
+        Err("auth mode is not quota-compatible".to_string())
+    };
+    let apply_result =
+        apply_runtime_profile_probe_result(&job.shared, &job.profile_name, auth, result.clone());
+    match result {
+        Ok(_) => runtime_proxy_log(
+            &job.shared,
+            if let Err(err) = apply_result {
+                format!(
+                    "profile_probe_refresh_error profile={} lag_ms={} error=state_update:{err:#}",
+                    job.profile_name,
+                    job.queued_at.elapsed().as_millis()
+                )
+            } else {
+                format!(
+                    "profile_probe_refresh_ok profile={} lag_ms={}",
+                    job.profile_name,
+                    job.queued_at.elapsed().as_millis()
+                )
+            },
+        ),
+        Err(err) => runtime_proxy_log(
+            &job.shared,
+            format!(
+                "profile_probe_refresh_error profile={} lag_ms={} error={err}",
+                job.profile_name,
+                job.queued_at.elapsed().as_millis()
+            ),
+        ),
     }
 }
