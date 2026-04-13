@@ -1598,6 +1598,26 @@ pub(super) fn runtime_compact_followup_bound_profile(
     Ok(None)
 }
 
+pub(super) fn runtime_compact_turn_state_followup_bound_profile(
+    shared: &RuntimeRotationProxyShared,
+    turn_state: Option<&str>,
+) -> Result<Option<String>> {
+    Ok(
+        runtime_compact_followup_bound_profile(shared, turn_state, None)?
+            .map(|(profile_name, _)| profile_name),
+    )
+}
+
+pub(super) fn runtime_compact_session_followup_bound_profile(
+    shared: &RuntimeRotationProxyShared,
+    session_id: Option<&str>,
+) -> Result<Option<String>> {
+    Ok(
+        runtime_compact_followup_bound_profile(shared, None, session_id)?
+            .map(|(profile_name, _)| profile_name),
+    )
+}
+
 pub(super) fn runtime_previous_response_negative_cache_key(
     previous_response_id: &str,
     profile_name: &str,
@@ -4417,15 +4437,24 @@ pub(super) fn proxy_runtime_websocket_text_message(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
+    let bound_session_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
+        && turn_state_profile.is_none()
+    {
+        request_session_id
+            .as_deref()
+            .map(|session_id| runtime_session_bound_profile(shared, session_id))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let mut compact_followup_profile = if previous_response_id.is_none()
         && bound_profile.is_none()
         && turn_state_profile.is_none()
     {
-        runtime_compact_followup_bound_profile(
-            shared,
-            request_turn_state.as_deref(),
-            request_session_id.as_deref(),
-        )?
+        runtime_compact_turn_state_followup_bound_profile(shared, request_turn_state.as_deref())?
+            .map(|profile_name| (profile_name, "turn_state"))
     } else {
         None
     };
@@ -4437,19 +4466,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
             ),
         );
     }
-    let bound_session_profile = if previous_response_id.is_none()
+    let compact_session_profile = if previous_response_id.is_none()
         && bound_profile.is_none()
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
+        && bound_session_profile.is_none()
+        && websocket_session.profile_name.is_none()
     {
-        request_session_id
-            .as_deref()
-            .map(|session_id| runtime_session_bound_profile(shared, session_id))
-            .transpose()?
-            .flatten()
+        runtime_compact_session_followup_bound_profile(shared, request_session_id.as_deref())?
     } else {
         None
     };
+    if let Some(profile_name) = compact_session_profile.as_ref() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} websocket_session={session_id} compact_followup_owner profile={profile_name} source=session_id"
+            ),
+        );
+    }
     let mut session_profile = if previous_response_id.is_none()
         && bound_profile.is_none()
         && turn_state_profile.is_none()
@@ -4459,6 +4494,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
             .profile_name
             .clone()
             .or(bound_session_profile.clone())
+            .or(compact_session_profile.clone())
     } else {
         None
     };
@@ -8460,15 +8496,24 @@ pub(super) fn proxy_runtime_responses_request(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
+    let bound_session_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
+        && turn_state_profile.is_none()
+    {
+        request_session_id
+            .as_deref()
+            .map(|session_id| runtime_session_bound_profile(shared, session_id))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let mut compact_followup_profile = if previous_response_id.is_none()
         && bound_profile.is_none()
         && turn_state_profile.is_none()
     {
-        runtime_compact_followup_bound_profile(
-            shared,
-            request_turn_state.as_deref(),
-            request_session_id.as_deref(),
-        )?
+        runtime_compact_turn_state_followup_bound_profile(shared, request_turn_state.as_deref())?
+            .map(|profile_name| (profile_name, "turn_state"))
     } else {
         None
     };
@@ -8480,16 +8525,30 @@ pub(super) fn proxy_runtime_responses_request(
             ),
         );
     }
+    let compact_session_profile = if previous_response_id.is_none()
+        && bound_profile.is_none()
+        && turn_state_profile.is_none()
+        && compact_followup_profile.is_none()
+        && bound_session_profile.is_none()
+    {
+        runtime_compact_session_followup_bound_profile(shared, request_session_id.as_deref())?
+    } else {
+        None
+    };
+    if let Some(profile_name) = compact_session_profile.as_ref() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_followup_owner profile={profile_name} source=session_id"
+            ),
+        );
+    }
     let mut session_profile = if previous_response_id.is_none()
         && bound_profile.is_none()
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
     {
-        request_session_id
-            .as_deref()
-            .map(|session_id| runtime_session_bound_profile(shared, session_id))
-            .transpose()?
-            .flatten()
+        bound_session_profile.or(compact_session_profile)
     } else {
         None
     };
