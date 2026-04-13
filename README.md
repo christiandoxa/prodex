@@ -40,8 +40,8 @@ cargo install prodex
 Version-pinned install:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.12.0
-cargo install prodex --force --version 0.12.0
+npm install -g @christiandoxa/prodex@0.13.0
+cargo install prodex --force --version 0.13.0
 ```
 
 ## Quick Start
