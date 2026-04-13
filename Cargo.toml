@@ -16,12 +16,12 @@ clap = { version = "4.6.0", features = ["derive"] }
 dirs = "6.0.0"
 fs2 = "0.4.3"
 getrandom = "0.4.2"
-pbkdf2 = "0.13.0-rc.10"
+pbkdf2 = "0.12.2"
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 rpassword = "7.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-sha2 = "0.11.0"
+sha2 = "0.10.9"
 tiny_http = "0.12.0"
 tokio = { version = "1.51.1", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"
