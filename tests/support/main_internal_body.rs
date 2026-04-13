@@ -20977,6 +20977,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let now = Local::now().timestamp();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     let third_home = temp_dir.path.join("homes/third");
@@ -21012,7 +21013,9 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
                 },
             ),
         ]),
-        last_run_selected_at: BTreeMap::new(),
+        // Keep third on cooldown so the first post-quota fresh pick lands on second and this
+        // test deterministically exercises the reuse watchdog path before rotating to third.
+        last_run_selected_at: BTreeMap::from([("third".to_string(), now)]),
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
     };
@@ -21155,6 +21158,7 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let now = Local::now().timestamp();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     let third_home = temp_dir.path.join("homes/third");
@@ -21190,7 +21194,9 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
                 },
             ),
         ]),
-        last_run_selected_at: BTreeMap::new(),
+        // Keep third on cooldown so the first post-quota fresh pick lands on second and this
+        // test deterministically exercises the reuse watchdog path before rotating to third.
+        last_run_selected_at: BTreeMap::from([("third".to_string(), now)]),
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
     };
