@@ -5482,12 +5482,12 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
         Some("main".to_string())
     );
     assert_eq!(
-        runtime_compact_followup_bound_profile(&shared, Some("turn-compact"), None)
+        runtime_compact_route_followup_bound_profile(&shared, Some("turn-compact"), None)
             .expect("compact turn-state lookup should succeed"),
         Some(("main".to_string(), "turn_state"))
     );
     assert_eq!(
-        runtime_compact_followup_bound_profile(&shared, None, Some("session-compact"))
+        runtime_compact_route_followup_bound_profile(&shared, None, Some("session-compact"))
             .expect("compact session lookup should succeed"),
         Some(("main".to_string(), "session_id"))
     );
@@ -5677,6 +5677,22 @@ fn precommit_budget_exhausts_by_attempt_limit_or_elapsed_time() {
         true,
         false
     ));
+}
+
+#[test]
+fn noncompact_session_priority_ignores_compact_session_profile() {
+    assert_eq!(
+        runtime_noncompact_session_priority_profile(Some("main"), Some("main")),
+        None
+    );
+    assert_eq!(
+        runtime_noncompact_session_priority_profile(Some("second"), Some("main")),
+        Some("second")
+    );
+    assert_eq!(
+        runtime_noncompact_session_priority_profile(Some("main"), None),
+        Some("main")
+    );
 }
 
 #[test]
@@ -23835,6 +23851,119 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
     );
 }
 
+fn start_runtime_proxy_with_compact_session_owner(
+    backend: &RuntimeProxyBackend,
+    compact_owner_status: RuntimeQuotaWindowStatus,
+    compact_owner_remaining_percent: i64,
+) -> (TestDir, RuntimeRotationProxy) {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            session_id_bindings: BTreeMap::from([(
+                runtime_compact_session_lineage_key("sess-main"),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                session_id: BTreeMap::from([(
+                    runtime_compact_session_lineage_key("sess-main"),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("compact".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([
+            (
+                "main".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: compact_owner_status,
+                    five_hour_remaining_percent: compact_owner_remaining_percent,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            ),
+            (
+                "second".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                    five_hour_remaining_percent: 80,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            ),
+        ]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    (temp_dir, proxy)
+}
+
 #[test]
 fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_http() {
     let backend = RuntimeProxyBackend::start();
@@ -24140,6 +24269,44 @@ fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_
 }
 
 #[test]
+fn runtime_proxy_rotates_after_upstream_quota_from_compact_session_owner_http() {
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let (_temp_dir, proxy) = start_runtime_proxy_with_compact_session_owner(
+        &backend,
+        RuntimeQuotaWindowStatus::Ready,
+        80,
+    );
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("session_id", "sess-main")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected body: {body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "normal request should rotate after compact session owner returns upstream quota: {body}"
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "quota from compact session owner should not interrupt the user workflow: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
 fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_http() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
@@ -24265,6 +24432,70 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_htt
     assert!(
         body.contains("\"resp-second\""),
         "turn metadata session_id should not hard-pin normal responses request to exhausted compact owner: {body}"
+    );
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_ignores_body_session_for_ready_compact_followup_affinity_http() {
+    let backend = RuntimeProxyBackend::start();
+    let (_temp_dir, proxy) = start_runtime_proxy_with_compact_session_owner(
+        &backend,
+        RuntimeQuotaWindowStatus::Ready,
+        80,
+    );
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body(r#"{"session_id":"sess-main","input":[]}"#)
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected body: {body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "body session_id should not select healthy compact owner on normal responses request: {body}"
+    );
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_ignores_turn_metadata_session_for_ready_compact_followup_affinity_http() {
+    let backend = RuntimeProxyBackend::start();
+    let (_temp_dir, proxy) = start_runtime_proxy_with_compact_session_owner(
+        &backend,
+        RuntimeQuotaWindowStatus::Ready,
+        80,
+    );
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header(
+            "x-codex-turn-metadata",
+            r#"{"source":"resume","session_id":"sess-main"}"#,
+        )
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected body: {body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "turn metadata session_id should not select healthy compact owner on normal responses request: {body}"
     );
     assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
 }

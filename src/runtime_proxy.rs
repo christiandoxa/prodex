@@ -1140,14 +1140,43 @@ pub(super) fn runtime_request_session_id_from_turn_metadata(
         .and_then(|value| runtime_request_session_id_from_value(&value))
 }
 
-pub(super) fn runtime_request_explicit_session_id(request: &RuntimeProxyRequest) -> Option<String> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct RuntimeExplicitSessionId(String);
+
+impl RuntimeExplicitSessionId {
+    pub(super) fn from_header_value(value: &str) -> Option<Self> {
+        let value = value.trim();
+        (!value.is_empty()).then(|| Self(value.to_string()))
+    }
+
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(super) fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::ops::Deref for RuntimeExplicitSessionId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+pub(super) fn runtime_request_explicit_session_id(
+    request: &RuntimeProxyRequest,
+) -> Option<RuntimeExplicitSessionId> {
     runtime_proxy_request_header_value(&request.headers, "session_id")
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
-        .map(str::to_string)
+        .and_then(RuntimeExplicitSessionId::from_header_value)
 }
 
 pub(super) fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_request_explicit_session_id(request)
+        .map(RuntimeExplicitSessionId::into_string)
         .or_else(|| runtime_request_session_id_from_turn_metadata(request))
         .or_else(|| {
             serde_json::from_slice::<serde_json::Value>(&request.body)
@@ -1566,7 +1595,7 @@ pub(super) fn runtime_touch_compact_lineage_binding(
     profile_name
 }
 
-pub(super) fn runtime_compact_followup_bound_profile(
+fn runtime_compact_followup_bound_profile_raw(
     shared: &RuntimeRotationProxyShared,
     turn_state: Option<&str>,
     session_id: Option<&str>,
@@ -1602,24 +1631,34 @@ pub(super) fn runtime_compact_followup_bound_profile(
     Ok(None)
 }
 
+pub(super) fn runtime_compact_route_followup_bound_profile(
+    shared: &RuntimeRotationProxyShared,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<Option<(String, &'static str)>> {
+    runtime_compact_followup_bound_profile_raw(shared, turn_state, session_id)
+}
+
 pub(super) fn runtime_compact_turn_state_followup_bound_profile(
     shared: &RuntimeRotationProxyShared,
     turn_state: Option<&str>,
 ) -> Result<Option<String>> {
     Ok(
-        runtime_compact_followup_bound_profile(shared, turn_state, None)?
+        runtime_compact_followup_bound_profile_raw(shared, turn_state, None)?
             .map(|(profile_name, _)| profile_name),
     )
 }
 
 pub(super) fn runtime_compact_session_followup_bound_profile(
     shared: &RuntimeRotationProxyShared,
-    session_id: Option<&str>,
+    session_id: Option<&RuntimeExplicitSessionId>,
 ) -> Result<Option<String>> {
-    Ok(
-        runtime_compact_followup_bound_profile(shared, None, session_id)?
-            .map(|(profile_name, _)| profile_name),
-    )
+    Ok(runtime_compact_followup_bound_profile_raw(
+        shared,
+        None,
+        session_id.map(|value| value.as_str()),
+    )?
+    .map(|(profile_name, _)| profile_name))
 }
 
 pub(super) fn runtime_previous_response_negative_cache_key(
@@ -3149,6 +3188,17 @@ pub(super) fn runtime_wait_affinity_owner<'a>(
         .or(session_profile)
 }
 
+pub(super) fn runtime_noncompact_session_priority_profile<'a>(
+    session_profile: Option<&'a str>,
+    compact_session_profile: Option<&str>,
+) -> Option<&'a str> {
+    if compact_session_profile.is_some_and(|profile_name| session_profile == Some(profile_name)) {
+        None
+    } else {
+        session_profile
+    }
+}
+
 pub(super) fn runtime_proxy_allows_direct_current_profile_fallback(
     previous_response_id: Option<&str>,
     pinned_profile: Option<&str>,
@@ -4407,7 +4457,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
         runtime_proxy_request_header_value(&handshake_request.headers, "session_id").is_some();
     let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
     let request_session_id = explicit_request_session_id
-        .clone()
+        .as_ref()
+        .map(|session_id| session_id.as_str().to_string())
         .or_else(|| request_metadata.session_id.clone());
     let mut bound_profile = previous_response_id
         .as_deref()
@@ -4481,7 +4532,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
     {
         runtime_compact_session_followup_bound_profile(
             shared,
-            explicit_request_session_id.as_deref(),
+            explicit_request_session_id.as_ref(),
         )?
     } else {
         None
@@ -4534,7 +4585,10 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
-                session_profile.as_deref(),
+                runtime_noncompact_session_priority_profile(
+                    session_profile.as_deref(),
+                    compact_session_profile.as_deref(),
+                ),
             ),
             pressure_mode,
         ) {
@@ -4620,7 +4674,10 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
-                session_profile.as_deref(),
+                runtime_noncompact_session_priority_profile(
+                    session_profile.as_deref(),
+                    compact_session_profile.as_deref(),
+                ),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
@@ -5198,7 +5255,10 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
-                session_profile.as_deref(),
+                runtime_noncompact_session_priority_profile(
+                    session_profile.as_deref(),
+                    compact_session_profile.as_deref(),
+                ),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
@@ -7698,7 +7758,7 @@ pub(super) fn proxy_runtime_standard_request(
     }
 
     let current_profile = runtime_proxy_current_profile(shared)?;
-    let mut compact_followup_profile = runtime_compact_followup_bound_profile(
+    let mut compact_followup_profile = runtime_compact_route_followup_bound_profile(
         shared,
         request_turn_state.as_deref(),
         request_session_id.as_deref(),
@@ -8543,7 +8603,7 @@ pub(super) fn proxy_runtime_responses_request(
     {
         runtime_compact_session_followup_bound_profile(
             shared,
-            explicit_request_session_id.as_deref(),
+            explicit_request_session_id.as_ref(),
         )?
     } else {
         None
@@ -8561,7 +8621,9 @@ pub(super) fn proxy_runtime_responses_request(
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
     {
-        bound_session_profile.or(compact_session_profile)
+        bound_session_profile
+            .clone()
+            .or(compact_session_profile.clone())
     } else {
         None
     };
@@ -8591,7 +8653,10 @@ pub(super) fn proxy_runtime_responses_request(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
-                session_profile.as_deref(),
+                runtime_noncompact_session_priority_profile(
+                    session_profile.as_deref(),
+                    compact_session_profile.as_deref(),
+                ),
             ),
             pressure_mode,
         ) {
@@ -8663,7 +8728,10 @@ pub(super) fn proxy_runtime_responses_request(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
-                session_profile.as_deref(),
+                runtime_noncompact_session_priority_profile(
+                    session_profile.as_deref(),
+                    compact_session_profile.as_deref(),
+                ),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
@@ -9049,7 +9117,10 @@ pub(super) fn proxy_runtime_responses_request(
                     pinned_profile.as_deref(),
                     request_turn_state.as_deref(),
                     turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
+                    runtime_noncompact_session_priority_profile(
+                        session_profile.as_deref(),
+                        compact_session_profile.as_deref(),
+                    ),
                 ),
                 runtime_wait_affinity_owner(
                     compact_followup_profile
@@ -9057,7 +9128,10 @@ pub(super) fn proxy_runtime_responses_request(
                         .map(|(profile_name, _)| profile_name.as_str()),
                     pinned_profile.as_deref(),
                     turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
+                    runtime_noncompact_session_priority_profile(
+                        session_profile.as_deref(),
+                        compact_session_profile.as_deref(),
+                    ),
                     trusted_previous_response_affinity,
                 ),
             )? {
@@ -9142,7 +9216,10 @@ pub(super) fn proxy_runtime_responses_request(
                 pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
                 turn_state_profile.as_deref(),
-                session_profile.as_deref(),
+                runtime_noncompact_session_priority_profile(
+                    session_profile.as_deref(),
+                    compact_session_profile.as_deref(),
+                ),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
@@ -9537,7 +9614,10 @@ pub(super) fn proxy_runtime_responses_request(
                     pinned_profile.as_deref(),
                     request_turn_state.as_deref(),
                     turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
+                    runtime_noncompact_session_priority_profile(
+                        session_profile.as_deref(),
+                        compact_session_profile.as_deref(),
+                    ),
                 ),
                 runtime_wait_affinity_owner(
                     compact_followup_profile
@@ -9545,7 +9625,10 @@ pub(super) fn proxy_runtime_responses_request(
                         .map(|(profile_name, _)| profile_name.as_str()),
                     pinned_profile.as_deref(),
                     turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
+                    runtime_noncompact_session_priority_profile(
+                        session_profile.as_deref(),
+                        compact_session_profile.as_deref(),
+                    ),
                     trusted_previous_response_affinity,
                 ),
             )? {
