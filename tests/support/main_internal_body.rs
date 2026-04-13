@@ -14286,6 +14286,25 @@ fn runtime_request_explicit_session_id_ignores_body_session_id() {
 }
 
 #[test]
+fn runtime_request_explicit_session_id_ignores_turn_metadata_session_id() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: vec![(
+            "x-codex-turn-metadata".to_string(),
+            r#"{"source":"resume","session_id":"sess-metadata"}"#.to_string(),
+        )],
+        body: Vec::new(),
+    };
+
+    assert_eq!(runtime_request_explicit_session_id(&request), None);
+    assert_eq!(
+        runtime_request_session_id(&request),
+        Some("sess-metadata".to_string())
+    );
+}
+
+#[test]
 fn runtime_proxy_broker_key_uses_stable_mount_path() {
     let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false);
 
@@ -24118,6 +24137,304 @@ fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_
         vec!["second-account".to_string()],
         "normal websocket request should not be pinned to the exhausted compact owner"
     );
+}
+
+#[test]
+fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_http() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            session_id_bindings: BTreeMap::from([(
+                runtime_compact_session_lineage_key("sess-main"),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                session_id: BTreeMap::from([(
+                    runtime_compact_session_lineage_key("sess-main"),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("compact".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([
+            (
+                "main".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                    five_hour_remaining_percent: 0,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            ),
+            (
+                "second".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                    five_hour_remaining_percent: 80,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            ),
+        ]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("x-codex-turn-metadata", r#"{"source":"resume","session_id":"sess-main"}"#)
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected body: {body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "turn metadata session_id should not hard-pin normal responses request to exhausted compact owner: {body}"
+    );
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_websocket() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            session_id_bindings: BTreeMap::from([(
+                runtime_compact_session_lineage_key("sess-main"),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                session_id: BTreeMap::from([(
+                    runtime_compact_session_lineage_key("sess-main"),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("compact".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([
+            (
+                "main".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                    five_hour_remaining_percent: 0,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            ),
+            (
+                "second".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                    five_hour_remaining_percent: 80,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            ),
+        ]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
+        .into_client_request()
+        .expect("websocket request should build");
+    request.headers_mut().insert(
+        "x-codex-turn-metadata",
+        r#"{"source":"resume","session_id":"sess-main"}"#
+            .parse()
+            .expect("valid header value"),
+    );
+
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for turn-metadata compact-affinity payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "turn metadata session_id should not hard-pin normal websocket request to exhausted compact owner: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"code\":\"service_unavailable\"")),
+        "turn metadata session_id should not force local 503 on normal websocket request: {payloads:?}"
+    );
+    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
 }
 
 #[test]

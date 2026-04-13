@@ -1144,15 +1144,16 @@ pub(super) fn runtime_request_explicit_session_id(request: &RuntimeProxyRequest)
     runtime_proxy_request_header_value(&request.headers, "session_id")
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
         .map(str::to_string)
-        .or_else(|| runtime_request_session_id_from_turn_metadata(request))
 }
 
 pub(super) fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
-    runtime_request_explicit_session_id(request).or_else(|| {
-        serde_json::from_slice::<serde_json::Value>(&request.body)
-            .ok()
-            .and_then(|value| runtime_request_session_id_from_value(&value))
-    })
+    runtime_request_explicit_session_id(request)
+        .or_else(|| runtime_request_session_id_from_turn_metadata(request))
+        .or_else(|| {
+            serde_json::from_slice::<serde_json::Value>(&request.body)
+                .ok()
+                .and_then(|value| runtime_request_session_id_from_value(&value))
+        })
 }
 
 pub(super) fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
