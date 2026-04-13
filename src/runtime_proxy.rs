@@ -1103,6 +1103,137 @@ pub(super) fn runtime_request_text_without_previous_response_id(
     serde_json::to_string(&value).ok()
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) fn reset_runtime_previous_response_fresh_fallback_state(
+    previous_response_id: &mut Option<String>,
+    request_turn_state: &mut Option<String>,
+    previous_response_fresh_fallback_used: &mut bool,
+    saw_previous_response_not_found: &mut bool,
+    previous_response_retry_candidate: &mut Option<String>,
+    previous_response_retry_index: &mut usize,
+    candidate_turn_state_retry_profile: &mut Option<String>,
+    candidate_turn_state_retry_value: &mut Option<String>,
+    trusted_previous_response_affinity: &mut bool,
+    bound_profile: &mut Option<String>,
+    pinned_profile: &mut Option<String>,
+    turn_state_profile: &mut Option<String>,
+    session_profile: &mut Option<String>,
+    excluded_profiles: &mut BTreeSet<String>,
+    last_failure: &mut Option<RuntimeUpstreamFailureResponse>,
+    selection_started_at: &mut Instant,
+    selection_attempts: &mut usize,
+) {
+    *previous_response_id = None;
+    *request_turn_state = None;
+    *previous_response_fresh_fallback_used = true;
+    *saw_previous_response_not_found = false;
+    *previous_response_retry_candidate = None;
+    *previous_response_retry_index = 0;
+    *candidate_turn_state_retry_profile = None;
+    *candidate_turn_state_retry_value = None;
+    *trusted_previous_response_affinity = false;
+    *bound_profile = None;
+    *pinned_profile = None;
+    *turn_state_profile = None;
+    *session_profile = None;
+    excluded_profiles.clear();
+    *last_failure = None;
+    *selection_started_at = Instant::now();
+    *selection_attempts = 0;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_runtime_responses_previous_response_fresh_fallback(
+    request: &mut RuntimeProxyRequest,
+    fresh_request: RuntimeProxyRequest,
+    previous_response_id: &mut Option<String>,
+    request_turn_state: &mut Option<String>,
+    previous_response_fresh_fallback_used: &mut bool,
+    saw_previous_response_not_found: &mut bool,
+    previous_response_retry_candidate: &mut Option<String>,
+    previous_response_retry_index: &mut usize,
+    candidate_turn_state_retry_profile: &mut Option<String>,
+    candidate_turn_state_retry_value: &mut Option<String>,
+    trusted_previous_response_affinity: &mut bool,
+    bound_profile: &mut Option<String>,
+    pinned_profile: &mut Option<String>,
+    turn_state_profile: &mut Option<String>,
+    session_profile: &mut Option<String>,
+    excluded_profiles: &mut BTreeSet<String>,
+    last_failure: &mut Option<RuntimeUpstreamFailureResponse>,
+    selection_started_at: &mut Instant,
+    selection_attempts: &mut usize,
+) {
+    *request = fresh_request;
+    reset_runtime_previous_response_fresh_fallback_state(
+        previous_response_id,
+        request_turn_state,
+        previous_response_fresh_fallback_used,
+        saw_previous_response_not_found,
+        previous_response_retry_candidate,
+        previous_response_retry_index,
+        candidate_turn_state_retry_profile,
+        candidate_turn_state_retry_value,
+        trusted_previous_response_affinity,
+        bound_profile,
+        pinned_profile,
+        turn_state_profile,
+        session_profile,
+        excluded_profiles,
+        last_failure,
+        selection_started_at,
+        selection_attempts,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_runtime_websocket_previous_response_fresh_fallback(
+    request_text: &mut String,
+    fresh_request_text: String,
+    handshake_request: &mut RuntimeProxyRequest,
+    websocket_reuse_fresh_retry_profiles: &mut BTreeSet<String>,
+    previous_response_id: &mut Option<String>,
+    request_turn_state: &mut Option<String>,
+    previous_response_fresh_fallback_used: &mut bool,
+    saw_previous_response_not_found: &mut bool,
+    previous_response_retry_candidate: &mut Option<String>,
+    previous_response_retry_index: &mut usize,
+    candidate_turn_state_retry_profile: &mut Option<String>,
+    candidate_turn_state_retry_value: &mut Option<String>,
+    trusted_previous_response_affinity: &mut bool,
+    bound_profile: &mut Option<String>,
+    pinned_profile: &mut Option<String>,
+    turn_state_profile: &mut Option<String>,
+    session_profile: &mut Option<String>,
+    excluded_profiles: &mut BTreeSet<String>,
+    last_failure: &mut Option<RuntimeUpstreamFailureResponse>,
+    selection_started_at: &mut Instant,
+    selection_attempts: &mut usize,
+) {
+    *request_text = fresh_request_text;
+    *handshake_request = runtime_request_without_turn_state_header(handshake_request);
+    websocket_reuse_fresh_retry_profiles.clear();
+    reset_runtime_previous_response_fresh_fallback_state(
+        previous_response_id,
+        request_turn_state,
+        previous_response_fresh_fallback_used,
+        saw_previous_response_not_found,
+        previous_response_retry_candidate,
+        previous_response_retry_index,
+        candidate_turn_state_retry_profile,
+        candidate_turn_state_retry_value,
+        trusted_previous_response_affinity,
+        bound_profile,
+        pinned_profile,
+        turn_state_profile,
+        session_profile,
+        excluded_profiles,
+        last_failure,
+        selection_started_at,
+        selection_attempts,
+    );
+}
+
 pub(super) fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
     request.headers.iter().find_map(|(name, value)| {
         name.eq_ignore_ascii_case("x-codex-turn-state")
@@ -4617,26 +4748,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=precommit_budget_exhausted"
                     ),
                 );
-                request_text = fresh_request_text;
-                handshake_request = runtime_request_without_turn_state_header(&handshake_request);
-                previous_response_id = None;
-                request_turn_state = None;
-                previous_response_fresh_fallback_used = true;
-                saw_previous_response_not_found = false;
-                previous_response_retry_candidate = None;
-                previous_response_retry_index = 0;
-                candidate_turn_state_retry_profile = None;
-                candidate_turn_state_retry_value = None;
-                trusted_previous_response_affinity = false;
-                bound_profile = None;
-                pinned_profile = None;
-                turn_state_profile = None;
-                session_profile = None;
-                websocket_reuse_fresh_retry_profiles.clear();
-                excluded_profiles.clear();
-                last_failure = None;
-                selection_started_at = Instant::now();
-                selection_attempts = 0;
+                apply_runtime_websocket_previous_response_fresh_fallback(
+                    &mut request_text,
+                    fresh_request_text,
+                    &mut handshake_request,
+                    &mut websocket_reuse_fresh_retry_profiles,
+                    &mut previous_response_id,
+                    &mut request_turn_state,
+                    &mut previous_response_fresh_fallback_used,
+                    &mut saw_previous_response_not_found,
+                    &mut previous_response_retry_candidate,
+                    &mut previous_response_retry_index,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut trusted_previous_response_affinity,
+                    &mut bound_profile,
+                    &mut pinned_profile,
+                    &mut turn_state_profile,
+                    &mut session_profile,
+                    &mut excluded_profiles,
+                    &mut last_failure,
+                    &mut selection_started_at,
+                    &mut selection_attempts,
+                );
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -4783,27 +4917,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
                                 ),
                             );
-                            request_text = fresh_request_text;
-                            handshake_request =
-                                runtime_request_without_turn_state_header(&handshake_request);
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            websocket_reuse_fresh_retry_profiles.clear();
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_websocket_previous_response_fresh_fallback(
+                                &mut request_text,
+                                fresh_request_text,
+                                &mut handshake_request,
+                                &mut websocket_reuse_fresh_retry_profiles,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -4877,27 +5013,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=upstream_overloaded via=direct_current_profile_fallback"
                                 ),
                             );
-                            request_text = fresh_request_text;
-                            handshake_request =
-                                runtime_request_without_turn_state_header(&handshake_request);
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            websocket_reuse_fresh_retry_profiles.clear();
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_websocket_previous_response_fresh_fallback(
+                                &mut request_text,
+                                fresh_request_text,
+                                &mut handshake_request,
+                                &mut websocket_reuse_fresh_retry_profiles,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5085,27 +5223,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
                                 ),
                             );
-                            request_text = fresh_request_text;
-                            handshake_request =
-                                runtime_request_without_turn_state_header(&handshake_request);
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            websocket_reuse_fresh_retry_profiles.clear();
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_websocket_previous_response_fresh_fallback(
+                                &mut request_text,
+                                fresh_request_text,
+                                &mut handshake_request,
+                                &mut websocket_reuse_fresh_retry_profiles,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5180,26 +5320,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=candidate_exhausted"
                     ),
                 );
-                request_text = fresh_request_text;
-                handshake_request = runtime_request_without_turn_state_header(&handshake_request);
-                previous_response_id = None;
-                request_turn_state = None;
-                previous_response_fresh_fallback_used = true;
-                saw_previous_response_not_found = false;
-                previous_response_retry_candidate = None;
-                previous_response_retry_index = 0;
-                candidate_turn_state_retry_profile = None;
-                candidate_turn_state_retry_value = None;
-                trusted_previous_response_affinity = false;
-                bound_profile = None;
-                pinned_profile = None;
-                turn_state_profile = None;
-                session_profile = None;
-                websocket_reuse_fresh_retry_profiles.clear();
-                excluded_profiles.clear();
-                last_failure = None;
-                selection_started_at = Instant::now();
-                selection_attempts = 0;
+                apply_runtime_websocket_previous_response_fresh_fallback(
+                    &mut request_text,
+                    fresh_request_text,
+                    &mut handshake_request,
+                    &mut websocket_reuse_fresh_retry_profiles,
+                    &mut previous_response_id,
+                    &mut request_turn_state,
+                    &mut previous_response_fresh_fallback_used,
+                    &mut saw_previous_response_not_found,
+                    &mut previous_response_retry_candidate,
+                    &mut previous_response_retry_index,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut trusted_previous_response_affinity,
+                    &mut bound_profile,
+                    &mut pinned_profile,
+                    &mut turn_state_profile,
+                    &mut session_profile,
+                    &mut excluded_profiles,
+                    &mut last_failure,
+                    &mut selection_started_at,
+                    &mut selection_attempts,
+                );
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -5364,27 +5507,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
                                 ),
                             );
-                            request_text = fresh_request_text;
-                            handshake_request =
-                                runtime_request_without_turn_state_header(&handshake_request);
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            websocket_reuse_fresh_retry_profiles.clear();
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_websocket_previous_response_fresh_fallback(
+                                &mut request_text,
+                                fresh_request_text,
+                                &mut handshake_request,
+                                &mut websocket_reuse_fresh_retry_profiles,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5628,27 +5773,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
                                 ),
                             );
-                            request_text = fresh_request_text;
-                            handshake_request =
-                                runtime_request_without_turn_state_header(&handshake_request);
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            websocket_reuse_fresh_retry_profiles.clear();
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_websocket_previous_response_fresh_fallback(
+                                &mut request_text,
+                                fresh_request_text,
+                                &mut handshake_request,
+                                &mut websocket_reuse_fresh_retry_profiles,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5830,27 +5977,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=quota_blocked"
                         ),
                     );
-                    request_text = fresh_request_text;
-                    handshake_request =
-                        runtime_request_without_turn_state_header(&handshake_request);
-                    previous_response_id = None;
-                    request_turn_state = None;
-                    previous_response_fresh_fallback_used = true;
-                    saw_previous_response_not_found = false;
-                    previous_response_retry_candidate = None;
-                    previous_response_retry_index = 0;
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                    trusted_previous_response_affinity = false;
-                    bound_profile = None;
-                    session_profile = None;
-                    pinned_profile = None;
-                    turn_state_profile = None;
-                    websocket_reuse_fresh_retry_profiles.clear();
-                    excluded_profiles.clear();
-                    last_failure = None;
-                    selection_started_at = Instant::now();
-                    selection_attempts = 0;
+                    apply_runtime_websocket_previous_response_fresh_fallback(
+                        &mut request_text,
+                        fresh_request_text,
+                        &mut handshake_request,
+                        &mut websocket_reuse_fresh_retry_profiles,
+                        &mut previous_response_id,
+                        &mut request_turn_state,
+                        &mut previous_response_fresh_fallback_used,
+                        &mut saw_previous_response_not_found,
+                        &mut previous_response_retry_candidate,
+                        &mut previous_response_retry_index,
+                        &mut candidate_turn_state_retry_profile,
+                        &mut candidate_turn_state_retry_value,
+                        &mut trusted_previous_response_affinity,
+                        &mut bound_profile,
+                        &mut pinned_profile,
+                        &mut turn_state_profile,
+                        &mut session_profile,
+                        &mut excluded_profiles,
+                        &mut last_failure,
+                        &mut selection_started_at,
+                        &mut selection_attempts,
+                    );
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -5923,27 +6072,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=upstream_overloaded"
                         ),
                     );
-                    request_text = fresh_request_text;
-                    handshake_request =
-                        runtime_request_without_turn_state_header(&handshake_request);
-                    previous_response_id = None;
-                    request_turn_state = None;
-                    previous_response_fresh_fallback_used = true;
-                    saw_previous_response_not_found = false;
-                    previous_response_retry_candidate = None;
-                    previous_response_retry_index = 0;
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                    trusted_previous_response_affinity = false;
-                    bound_profile = None;
-                    session_profile = None;
-                    pinned_profile = None;
-                    turn_state_profile = None;
-                    websocket_reuse_fresh_retry_profiles.clear();
-                    excluded_profiles.clear();
-                    last_failure = None;
-                    selection_started_at = Instant::now();
-                    selection_attempts = 0;
+                    apply_runtime_websocket_previous_response_fresh_fallback(
+                        &mut request_text,
+                        fresh_request_text,
+                        &mut handshake_request,
+                        &mut websocket_reuse_fresh_retry_profiles,
+                        &mut previous_response_id,
+                        &mut request_turn_state,
+                        &mut previous_response_fresh_fallback_used,
+                        &mut saw_previous_response_not_found,
+                        &mut previous_response_retry_candidate,
+                        &mut previous_response_retry_index,
+                        &mut candidate_turn_state_retry_profile,
+                        &mut candidate_turn_state_retry_value,
+                        &mut trusted_previous_response_affinity,
+                        &mut bound_profile,
+                        &mut pinned_profile,
+                        &mut turn_state_profile,
+                        &mut session_profile,
+                        &mut excluded_profiles,
+                        &mut last_failure,
+                        &mut selection_started_at,
+                        &mut selection_attempts,
+                    );
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -6030,27 +6181,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason={reason}"
                         ),
                     );
-                    request_text = fresh_request_text;
-                    handshake_request =
-                        runtime_request_without_turn_state_header(&handshake_request);
-                    previous_response_id = None;
-                    request_turn_state = None;
-                    previous_response_fresh_fallback_used = true;
-                    saw_previous_response_not_found = false;
-                    previous_response_retry_candidate = None;
-                    previous_response_retry_index = 0;
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                    trusted_previous_response_affinity = false;
-                    bound_profile = None;
-                    session_profile = None;
-                    pinned_profile = None;
-                    turn_state_profile = None;
-                    websocket_reuse_fresh_retry_profiles.clear();
-                    excluded_profiles.clear();
-                    last_failure = None;
-                    selection_started_at = Instant::now();
-                    selection_attempts = 0;
+                    apply_runtime_websocket_previous_response_fresh_fallback(
+                        &mut request_text,
+                        fresh_request_text,
+                        &mut handshake_request,
+                        &mut websocket_reuse_fresh_retry_profiles,
+                        &mut previous_response_id,
+                        &mut request_turn_state,
+                        &mut previous_response_fresh_fallback_used,
+                        &mut saw_previous_response_not_found,
+                        &mut previous_response_retry_candidate,
+                        &mut previous_response_retry_index,
+                        &mut candidate_turn_state_retry_profile,
+                        &mut candidate_turn_state_retry_value,
+                        &mut trusted_previous_response_affinity,
+                        &mut bound_profile,
+                        &mut pinned_profile,
+                        &mut turn_state_profile,
+                        &mut session_profile,
+                        &mut excluded_profiles,
+                        &mut last_failure,
+                        &mut selection_started_at,
+                        &mut selection_attempts,
+                    );
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -6143,27 +6296,29 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=websocket_reuse_watchdog"
                         ),
                     );
-                    request_text = fresh_request_text;
-                    handshake_request =
-                        runtime_request_without_turn_state_header(&handshake_request);
-                    previous_response_id = None;
-                    request_turn_state = None;
-                    previous_response_fresh_fallback_used = true;
-                    saw_previous_response_not_found = false;
-                    previous_response_retry_candidate = None;
-                    previous_response_retry_index = 0;
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                    trusted_previous_response_affinity = false;
-                    bound_profile = None;
-                    session_profile = None;
-                    pinned_profile = None;
-                    turn_state_profile = None;
-                    websocket_reuse_fresh_retry_profiles.clear();
-                    excluded_profiles.clear();
-                    last_failure = None;
-                    selection_started_at = Instant::now();
-                    selection_attempts = 0;
+                    apply_runtime_websocket_previous_response_fresh_fallback(
+                        &mut request_text,
+                        fresh_request_text,
+                        &mut handshake_request,
+                        &mut websocket_reuse_fresh_retry_profiles,
+                        &mut previous_response_id,
+                        &mut request_turn_state,
+                        &mut previous_response_fresh_fallback_used,
+                        &mut saw_previous_response_not_found,
+                        &mut previous_response_retry_candidate,
+                        &mut previous_response_retry_index,
+                        &mut candidate_turn_state_retry_profile,
+                        &mut candidate_turn_state_retry_value,
+                        &mut trusted_previous_response_affinity,
+                        &mut bound_profile,
+                        &mut pinned_profile,
+                        &mut turn_state_profile,
+                        &mut session_profile,
+                        &mut excluded_profiles,
+                        &mut last_failure,
+                        &mut selection_started_at,
+                        &mut selection_attempts,
+                    );
                     continue;
                 }
                 if bound_profile.as_deref() == Some(profile_name.as_str()) {
@@ -8680,24 +8835,27 @@ pub(super) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http previous_response_fresh_fallback reason=precommit_budget_exhausted"
                     ),
                 );
-                request = fresh_request;
-                previous_response_id = None;
-                request_turn_state = None;
-                previous_response_fresh_fallback_used = true;
-                saw_previous_response_not_found = false;
-                previous_response_retry_candidate = None;
-                previous_response_retry_index = 0;
-                candidate_turn_state_retry_profile = None;
-                candidate_turn_state_retry_value = None;
-                trusted_previous_response_affinity = false;
-                bound_profile = None;
-                pinned_profile = None;
-                turn_state_profile = None;
-                session_profile = None;
-                excluded_profiles.clear();
-                last_failure = None;
-                selection_started_at = Instant::now();
-                selection_attempts = 0;
+                apply_runtime_responses_previous_response_fresh_fallback(
+                    &mut request,
+                    fresh_request,
+                    &mut previous_response_id,
+                    &mut request_turn_state,
+                    &mut previous_response_fresh_fallback_used,
+                    &mut saw_previous_response_not_found,
+                    &mut previous_response_retry_candidate,
+                    &mut previous_response_retry_index,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut trusted_previous_response_affinity,
+                    &mut bound_profile,
+                    &mut pinned_profile,
+                    &mut turn_state_profile,
+                    &mut session_profile,
+                    &mut excluded_profiles,
+                    &mut last_failure,
+                    &mut selection_started_at,
+                    &mut selection_attempts,
+                );
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -8850,24 +9008,27 @@ pub(super) fn proxy_runtime_responses_request(
                                     "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
                                 ),
                             );
-                            request = fresh_request;
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            session_profile = None;
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_responses_previous_response_fresh_fallback(
+                                &mut request,
+                                fresh_request,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9038,24 +9199,27 @@ pub(super) fn proxy_runtime_responses_request(
                                     "request={request_id} transport=http previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
                                 ),
                             );
-                            request = fresh_request;
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_responses_previous_response_fresh_fallback(
+                                &mut request,
+                                fresh_request,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9150,24 +9314,27 @@ pub(super) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http previous_response_fresh_fallback reason=candidate_exhausted"
                     ),
                 );
-                request = fresh_request;
-                previous_response_id = None;
-                request_turn_state = None;
-                previous_response_fresh_fallback_used = true;
-                saw_previous_response_not_found = false;
-                previous_response_retry_candidate = None;
-                previous_response_retry_index = 0;
-                candidate_turn_state_retry_profile = None;
-                candidate_turn_state_retry_value = None;
-                trusted_previous_response_affinity = false;
-                bound_profile = None;
-                pinned_profile = None;
-                turn_state_profile = None;
-                session_profile = None;
-                excluded_profiles.clear();
-                last_failure = None;
-                selection_started_at = Instant::now();
-                selection_attempts = 0;
+                apply_runtime_responses_previous_response_fresh_fallback(
+                    &mut request,
+                    fresh_request,
+                    &mut previous_response_id,
+                    &mut request_turn_state,
+                    &mut previous_response_fresh_fallback_used,
+                    &mut saw_previous_response_not_found,
+                    &mut previous_response_retry_candidate,
+                    &mut previous_response_retry_index,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut trusted_previous_response_affinity,
+                    &mut bound_profile,
+                    &mut pinned_profile,
+                    &mut turn_state_profile,
+                    &mut session_profile,
+                    &mut excluded_profiles,
+                    &mut last_failure,
+                    &mut selection_started_at,
+                    &mut selection_attempts,
+                );
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -9338,24 +9505,27 @@ pub(super) fn proxy_runtime_responses_request(
                                     "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked via=direct_current_profile_fallback"
                                 ),
                             );
-                            request = fresh_request;
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            session_profile = None;
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_responses_previous_response_fresh_fallback(
+                                &mut request,
+                                fresh_request,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9526,24 +9696,27 @@ pub(super) fn proxy_runtime_responses_request(
                                     "request={request_id} transport=http previous_response_fresh_fallback reason={reason} via=direct_current_profile_fallback"
                                 ),
                             );
-                            request = fresh_request;
-                            previous_response_id = None;
-                            request_turn_state = None;
-                            previous_response_fresh_fallback_used = true;
-                            saw_previous_response_not_found = false;
-                            previous_response_retry_candidate = None;
-                            previous_response_retry_index = 0;
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                            trusted_previous_response_affinity = false;
-                            bound_profile = None;
-                            session_profile = None;
-                            pinned_profile = None;
-                            turn_state_profile = None;
-                            excluded_profiles.clear();
-                            last_failure = None;
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
+                            apply_runtime_responses_previous_response_fresh_fallback(
+                                &mut request,
+                                fresh_request,
+                                &mut previous_response_id,
+                                &mut request_turn_state,
+                                &mut previous_response_fresh_fallback_used,
+                                &mut saw_previous_response_not_found,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                                &mut trusted_previous_response_affinity,
+                                &mut bound_profile,
+                                &mut pinned_profile,
+                                &mut turn_state_profile,
+                                &mut session_profile,
+                                &mut excluded_profiles,
+                                &mut last_failure,
+                                &mut selection_started_at,
+                                &mut selection_attempts,
+                            );
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9758,24 +9931,27 @@ pub(super) fn proxy_runtime_responses_request(
                             "request={request_id} transport=http previous_response_fresh_fallback reason=quota_blocked"
                         ),
                     );
-                    request = fresh_request;
-                    previous_response_id = None;
-                    request_turn_state = None;
-                    previous_response_fresh_fallback_used = true;
-                    saw_previous_response_not_found = false;
-                    previous_response_retry_candidate = None;
-                    previous_response_retry_index = 0;
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                    trusted_previous_response_affinity = false;
-                    bound_profile = None;
-                    pinned_profile = None;
-                    turn_state_profile = None;
-                    session_profile = None;
-                    excluded_profiles.clear();
-                    last_failure = None;
-                    selection_started_at = Instant::now();
-                    selection_attempts = 0;
+                    apply_runtime_responses_previous_response_fresh_fallback(
+                        &mut request,
+                        fresh_request,
+                        &mut previous_response_id,
+                        &mut request_turn_state,
+                        &mut previous_response_fresh_fallback_used,
+                        &mut saw_previous_response_not_found,
+                        &mut previous_response_retry_candidate,
+                        &mut previous_response_retry_index,
+                        &mut candidate_turn_state_retry_profile,
+                        &mut candidate_turn_state_retry_value,
+                        &mut trusted_previous_response_affinity,
+                        &mut bound_profile,
+                        &mut pinned_profile,
+                        &mut turn_state_profile,
+                        &mut session_profile,
+                        &mut excluded_profiles,
+                        &mut last_failure,
+                        &mut selection_started_at,
+                        &mut selection_attempts,
+                    );
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -9857,24 +10033,27 @@ pub(super) fn proxy_runtime_responses_request(
                             "request={request_id} transport=http previous_response_fresh_fallback reason={reason}"
                         ),
                     );
-                    request = fresh_request;
-                    previous_response_id = None;
-                    request_turn_state = None;
-                    previous_response_fresh_fallback_used = true;
-                    saw_previous_response_not_found = false;
-                    previous_response_retry_candidate = None;
-                    previous_response_retry_index = 0;
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                    trusted_previous_response_affinity = false;
-                    bound_profile = None;
-                    pinned_profile = None;
-                    turn_state_profile = None;
-                    session_profile = None;
-                    excluded_profiles.clear();
-                    last_failure = None;
-                    selection_started_at = Instant::now();
-                    selection_attempts = 0;
+                    apply_runtime_responses_previous_response_fresh_fallback(
+                        &mut request,
+                        fresh_request,
+                        &mut previous_response_id,
+                        &mut request_turn_state,
+                        &mut previous_response_fresh_fallback_used,
+                        &mut saw_previous_response_not_found,
+                        &mut previous_response_retry_candidate,
+                        &mut previous_response_retry_index,
+                        &mut candidate_turn_state_retry_profile,
+                        &mut candidate_turn_state_retry_value,
+                        &mut trusted_previous_response_affinity,
+                        &mut bound_profile,
+                        &mut pinned_profile,
+                        &mut turn_state_profile,
+                        &mut session_profile,
+                        &mut excluded_profiles,
+                        &mut last_failure,
+                        &mut selection_started_at,
+                        &mut selection_attempts,
+                    );
                     continue;
                 }
                 excluded_profiles.insert(profile_name);

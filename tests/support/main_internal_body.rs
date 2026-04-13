@@ -24307,6 +24307,75 @@ fn runtime_proxy_rotates_after_upstream_quota_from_compact_session_owner_http() 
 }
 
 #[test]
+fn runtime_proxy_rotates_after_upstream_quota_from_compact_session_owner_websocket() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let (_temp_dir, proxy) = start_runtime_proxy_with_compact_session_owner(
+        &backend,
+        RuntimeQuotaWindowStatus::Ready,
+        80,
+    );
+
+    let mut request = format!("ws://{}/backend-api/codex/responses", proxy.listen_addr)
+        .into_client_request()
+        .expect("websocket request should build");
+    request.headers_mut().insert(
+        "session_id",
+        "sess-main".parse().expect("valid session header"),
+    );
+
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for compact-session quota rotation payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "normal websocket request should rotate after compact session owner returns upstream quota: {payloads:?}"
+    );
+    assert!(
+        !payloads.iter().any(|payload| payload.contains("main quota exhausted")),
+        "quota from compact session owner should not interrupt the websocket workflow: {payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
 fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_http() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
