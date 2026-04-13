@@ -216,8 +216,8 @@ jobs:
               --skip runtime_proxy_absorbs_brief_long_lived_queue_burst \
               --skip runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
               --skip runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
-              --skip runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog \
-              --skip runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
+              --skip runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog \
+              --skip runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_turn_state \
               --skip runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
               --skip runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate \
               --skip runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request \
@@ -237,7 +237,23 @@ jobs:
               --skip runtime_proxy_retries_usage_limited_response_on_another_profile \
               --skip runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback \
               --skip runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
-              --skip runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error
+              --skip runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error \
+              --skip runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota \
+              --skip runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile \
+              --skip runtime_proxy_streams_anthropic_mcp_messages_without_buffering \
+              --skip runtime_proxy_translates_anthropic_messages_to_responses_and_back \
+              --skip runtime_proxy_streams_anthropic_messages_from_buffered_responses \
+              --skip runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_response_when_owner_snapshot_is_exhausted \
+              --skip runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing \
+              --skip runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity \
+              --skip runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests \
+              --skip runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_http_requests \
+              --skip runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_without_turn_state \
+              --skip runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit \
+              --skip runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error \
+              --skip runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_commit \
+              --skip runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile \
+              --skip runtime_proxy_worker_count_env_override_beats_policy_file
           done
 
       - name: Run serialized runtime-sensitive stress tests
@@ -260,8 +276,8 @@ jobs:
             runtime_proxy_absorbs_brief_long_lived_queue_burst \
             runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
             runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
-            runtime_proxy_bound_previous_response_without_turn_state_fails_as_transport_after_websocket_reuse_watchdog \
-            runtime_proxy_stale_websocket_previous_response_reuse_fails_as_transport \
+            runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog \
+            runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_turn_state \
             runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
             runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate \
             runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request \
@@ -281,7 +297,23 @@ jobs:
             runtime_proxy_retries_usage_limited_response_on_another_profile \
             runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback \
             runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
-            runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error
+            runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error \
+            runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota \
+            runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile \
+            runtime_proxy_streams_anthropic_mcp_messages_without_buffering \
+            runtime_proxy_translates_anthropic_messages_to_responses_and_back \
+            runtime_proxy_streams_anthropic_messages_from_buffered_responses \
+            runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_response_when_owner_snapshot_is_exhausted \
+            runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing \
+            runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity \
+            runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests \
+            runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_http_requests \
+            runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_without_turn_state \
+            runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit \
+            runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error \
+            runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_commit \
+            runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile \
+            runtime_proxy_worker_count_env_override_beats_policy_file
           do
             cargo test --lib "main_internal_tests::${test_name}" -- --test-threads=1
           done
