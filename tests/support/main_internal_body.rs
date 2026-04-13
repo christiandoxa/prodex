@@ -14270,6 +14270,22 @@ fn runtime_request_session_id_accepts_realtime_header() {
 }
 
 #[test]
+fn runtime_request_explicit_session_id_ignores_body_session_id() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{"session_id":"sess-body","input":[]}"#.to_vec(),
+    };
+
+    assert_eq!(runtime_request_explicit_session_id(&request), None);
+    assert_eq!(
+        runtime_request_session_id(&request),
+        Some("sess-body".to_string())
+    );
+}
+
+#[test]
 fn runtime_proxy_broker_key_uses_stable_mount_path() {
     let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false);
 

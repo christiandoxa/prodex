@@ -1140,16 +1140,19 @@ pub(super) fn runtime_request_session_id_from_turn_metadata(
         .and_then(|value| runtime_request_session_id_from_value(&value))
 }
 
-pub(super) fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
+pub(super) fn runtime_request_explicit_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "session_id")
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
         .map(str::to_string)
         .or_else(|| runtime_request_session_id_from_turn_metadata(request))
-        .or_else(|| {
-            serde_json::from_slice::<serde_json::Value>(&request.body)
-                .ok()
-                .and_then(|value| runtime_request_session_id_from_value(&value))
-        })
+}
+
+pub(super) fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
+    runtime_request_explicit_session_id(request).or_else(|| {
+        serde_json::from_slice::<serde_json::Value>(&request.body)
+            .ok()
+            .and_then(|value| runtime_request_session_id_from_value(&value))
+    })
 }
 
 pub(super) fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
@@ -4401,7 +4404,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
     let mut request_turn_state = runtime_request_turn_state(&handshake_request);
     let request_session_id_header_present =
         runtime_proxy_request_header_value(&handshake_request.headers, "session_id").is_some();
-    let request_session_id = runtime_request_session_id(&handshake_request)
+    let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
+    let request_session_id = explicit_request_session_id
+        .clone()
         .or_else(|| request_metadata.session_id.clone());
     let mut bound_profile = previous_response_id
         .as_deref()
@@ -4473,7 +4478,10 @@ pub(super) fn proxy_runtime_websocket_text_message(
         && bound_session_profile.is_none()
         && websocket_session.profile_name.is_none()
     {
-        runtime_compact_session_followup_bound_profile(shared, request_session_id.as_deref())?
+        runtime_compact_session_followup_bound_profile(
+            shared,
+            explicit_request_session_id.as_deref(),
+        )?
     } else {
         None
     };
@@ -8461,6 +8469,7 @@ pub(super) fn proxy_runtime_responses_request(
         runtime_request_requires_previous_response_affinity(&request);
     let mut previous_response_id = runtime_request_previous_response_id(&request);
     let mut request_turn_state = runtime_request_turn_state(&request);
+    let explicit_request_session_id = runtime_request_explicit_session_id(&request);
     let request_session_id = runtime_request_session_id(&request);
     let mut bound_profile = previous_response_id
         .as_deref()
@@ -8531,7 +8540,10 @@ pub(super) fn proxy_runtime_responses_request(
         && compact_followup_profile.is_none()
         && bound_session_profile.is_none()
     {
-        runtime_compact_session_followup_bound_profile(shared, request_session_id.as_deref())?
+        runtime_compact_session_followup_bound_profile(
+            shared,
+            explicit_request_session_id.as_deref(),
+        )?
     } else {
         None
     };
