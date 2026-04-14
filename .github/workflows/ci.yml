@@ -184,18 +184,19 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run parallel-safe runtime proxy stress tests
+      - name: Run runtime proxy stress tests
         run: |
           set -euo pipefail
-          # The main test job already covers runtime_proxy_ once. Keep one extra focused
-          # stress pass here, but leave the slow continuation-heavy cases to the dedicated
-          # rerun step below so they are not paid twice in this loop as well. Keep the
-          # process-global and serial-sensitive quota/compact followup cases out of the
-          # shared process so the rest of runtime_proxy_ can use libtest's default
-          # parallelism.
+          # The main runtime-proxy shard already runs in serialized mode. Keep one extra
+          # focused rerun here, but run this stress pass serialized as well: the shared
+          # process subset still leaks background runtime activity under libtest's default
+          # parallelism, and the resulting queue-idle teardown failures bury the real
+          # signal. Leave the explicitly slow continuation-heavy cases to the dedicated
+          # rerun step below so they are not paid twice in this loop.
           for iteration in 1; do
             echo "runtime_proxy_ stress iteration ${iteration}"
             cargo test --lib main_internal_tests::runtime_proxy_ -- \
+              --test-threads=1 \
               --skip runtime_proxy_persists_previous_response_affinity_across_restart \
               --skip runtime_proxy_persists_session_affinity_across_restart_for_compact \
               --skip runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir \

@@ -1182,7 +1182,7 @@ struct ProfileEmailLookupJob {
     codex_home: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RunProfileProbeJob {
     name: String,
     order_index: usize,

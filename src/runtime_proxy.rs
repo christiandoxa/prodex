@@ -4000,6 +4000,22 @@ pub(super) fn runtime_profile_quota_summary_for_route(
         )))
 }
 
+pub(super) fn runtime_snapshot_blocks_same_request_cold_start_probe(
+    snapshot: &RuntimeProfileUsageSnapshot,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && runtime_usage_snapshot_is_usable(snapshot, now)
+        && runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_from_usage_snapshot(snapshot, route_kind),
+            route_kind,
+        )
+        .is_some()
+}
+
 pub(super) fn runtime_previous_response_affinity_is_trusted(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: Option<&str>,
@@ -10510,6 +10526,17 @@ pub(super) fn next_runtime_response_candidate_for_route(
             job.order_index,
         )
     });
+    let request_probe_jobs = cold_start_probe_jobs
+        .iter()
+        .filter(|job| {
+            !cached_usage_snapshots
+                .get(&job.name)
+                .is_some_and(|snapshot| {
+                    runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
+                })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
 
     reports.sort_by_key(|report| report.order_index);
     let mut candidates = ready_profile_candidates(
@@ -10548,28 +10575,28 @@ pub(super) fn next_runtime_response_candidate_for_route(
         .map(|candidate| candidate.order_index)
         .min();
     let should_sync_probe_cold_start = !sync_probe_pressure_mode
-        && !cold_start_probe_jobs.is_empty()
+        && !request_probe_jobs.is_empty()
         && (candidates.is_empty()
             || best_candidate_order_index.is_none()
             || best_candidate_order_index.is_some_and(|best_order_index| {
-                cold_start_probe_jobs
+                request_probe_jobs
                     .iter()
                     .any(|job| job.order_index < best_order_index)
             }));
-    if sync_probe_pressure_mode && !cold_start_probe_jobs.is_empty() {
+    if sync_probe_pressure_mode && !request_probe_jobs.is_empty() {
         runtime_proxy_log(
             shared,
             format!(
                 "selection_skip_sync_probe route={} reason=pressure_mode cold_start_jobs={}",
                 runtime_route_kind_label(route_kind),
-                cold_start_probe_jobs.len(),
+                request_probe_jobs.len(),
             ),
         );
     }
 
     if should_sync_probe_cold_start {
         let base_url = Some(upstream_base_url.clone());
-        let sync_jobs = cold_start_probe_jobs
+        let sync_jobs = request_probe_jobs
             .iter()
             .filter(|job| {
                 candidates.is_empty()
@@ -10950,9 +10977,9 @@ pub(super) fn next_runtime_response_candidate_for_route(
 pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
-    _route_kind: RuntimeRouteKind,
+    route_kind: RuntimeRouteKind,
 ) -> Result<usize> {
-    let (state, current_profile, cached_reports) = {
+    let (state, current_profile, cached_reports, cached_usage_snapshots) = {
         let runtime = shared
             .runtime
             .lock()
@@ -10961,8 +10988,10 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
             runtime.state.clone(),
             runtime.current_profile.clone(),
             runtime.profile_probe_cache.clone(),
+            runtime.profile_usage_snapshots.clone(),
         )
     };
+    let now = Local::now().timestamp();
 
     Ok(active_profile_selection_order(&state, &current_profile)
         .into_iter()
@@ -10974,6 +11003,11 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
                 .is_some_and(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
         })
         .filter(|name| !cached_reports.contains_key(name))
+        .filter(|name| {
+            !cached_usage_snapshots.get(name).is_some_and(|snapshot| {
+                runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
+            })
+        })
         .count())
 }
 
