@@ -10455,6 +10455,50 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
 }
 
 #[test]
+fn sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure() {
+    assert!(
+        !runtime_proxy_sync_probe_pressure_mode_for_route(
+            RuntimeRouteKind::Responses,
+            false,
+            true,
+        ),
+        "responses sync probing should stay enabled under background queue pressure alone"
+    );
+    assert!(
+        !runtime_proxy_sync_probe_pressure_mode_for_route(
+            RuntimeRouteKind::Websocket,
+            false,
+            true,
+        ),
+        "websocket sync probing should stay enabled under background queue pressure alone"
+    );
+    assert!(
+        runtime_proxy_sync_probe_pressure_mode_for_route(
+            RuntimeRouteKind::Compact,
+            false,
+            true,
+        ),
+        "compact sync probing should still defer under background queue pressure"
+    );
+    assert!(
+        runtime_proxy_sync_probe_pressure_mode_for_route(
+            RuntimeRouteKind::Standard,
+            false,
+            true,
+        ),
+        "standard sync probing should still defer under background queue pressure"
+    );
+    assert!(
+        runtime_proxy_sync_probe_pressure_mode_for_route(
+            RuntimeRouteKind::Responses,
+            true,
+            false,
+        ),
+        "local overload should still disable sync probing for responses"
+    );
+}
+
+#[test]
 fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");

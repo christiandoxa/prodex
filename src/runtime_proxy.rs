@@ -235,11 +235,27 @@ pub(super) fn runtime_proxy_pressure_mode_active_for_request_path(
     )
 }
 
-pub(super) fn runtime_proxy_sync_probe_pressure_mode_active(
-    shared: &RuntimeRotationProxyShared,
+pub(super) fn runtime_proxy_sync_probe_pressure_mode_for_route(
+    route_kind: RuntimeRouteKind,
+    local_overload_pressure: bool,
+    background_queue_pressure: bool,
 ) -> bool {
-    runtime_proxy_local_overload_pressure_active(shared)
-        || runtime_proxy_background_queue_pressure_active()
+    runtime_proxy_pressure_mode_for_route(
+        route_kind,
+        local_overload_pressure,
+        background_queue_pressure,
+    )
+}
+
+pub(super) fn runtime_proxy_sync_probe_pressure_mode_active_for_route(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    runtime_proxy_sync_probe_pressure_mode_for_route(
+        route_kind,
+        runtime_proxy_local_overload_pressure_active(shared),
+        runtime_proxy_background_queue_pressure_active(),
+    )
 }
 
 pub(super) fn runtime_proxy_lane_limit_marks_global_overload(lane: RuntimeRouteKind) -> bool {
@@ -3748,7 +3764,10 @@ pub(super) fn runtime_has_alternative_quota_compatible_profile(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<bool> {
-    let allow_disk_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_fallback = !runtime_proxy_sync_probe_pressure_mode_active_for_route(
+        shared,
+        RuntimeRouteKind::Responses,
+    );
     let fallback_profiles = {
         let runtime = shared
             .runtime
@@ -3787,7 +3806,8 @@ pub(super) fn runtime_has_route_eligible_quota_fallback(
 ) -> Result<bool> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
         state,
@@ -3955,7 +3975,8 @@ pub(super) fn runtime_proxy_direct_current_fallback_profile(
         );
         return Ok(None);
     }
-    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     if !runtime_profile_cached_auth_summary_for_selection(
         cached_usage_auth_entry,
         probe_cache_entry,
@@ -4224,8 +4245,11 @@ pub(super) fn runtime_profile_auth_summary_for_selection_with_policy(
     .or_else(|| allow_disk_fallback.then(|| read_auth_summary(codex_home)))
 }
 
-pub(super) fn runtime_proxy_sync_probe_pressure_pause(shared: &RuntimeRotationProxyShared) {
-    if !runtime_proxy_sync_probe_pressure_mode_active(shared) {
+pub(super) fn runtime_proxy_sync_probe_pressure_pause(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+) {
+    if !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind) {
         return;
     }
     let observed_revision = runtime_probe_refresh_revision();
@@ -4610,7 +4634,8 @@ pub(super) fn next_runtime_previous_response_candidate(
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let (state, current_profile, profile_health, profile_usage_auth, profile_probe_cache) = {
         let runtime = shared
             .runtime
@@ -4801,7 +4826,8 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route(
         excluded_profiles,
         route_kind,
     )?;
-    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let current_profile_quota_compatible = runtime_profile_cached_auth_summary_for_selection(
         cached_usage_auth_entry,
         probe_cache_entry,
@@ -5921,7 +5947,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} candidate_exhausted_continue route=websocket remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                runtime_proxy_sync_probe_pressure_pause(shared);
+                runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Websocket);
                 continue;
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
@@ -8303,7 +8329,7 @@ pub(super) fn proxy_runtime_standard_request(
                             "request={request_id} transport=http candidate_exhausted_continue route=standard remaining_cold_start_profiles={remaining_cold_start_profiles}"
                         ),
                     );
-                    runtime_proxy_sync_probe_pressure_pause(shared);
+                    runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Standard);
                     continue;
                 }
                 return Ok(runtime_proxy_final_retryable_http_failure_response(
@@ -8561,7 +8587,7 @@ pub(super) fn proxy_runtime_standard_request(
                         "request={request_id} transport=http candidate_exhausted_continue route=compact remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                runtime_proxy_sync_probe_pressure_pause(shared);
+                runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Compact);
                 continue;
             }
             if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
@@ -9800,7 +9826,7 @@ pub(super) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http candidate_exhausted_continue route=responses remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                runtime_proxy_sync_probe_pressure_pause(shared);
+                runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Responses);
                 continue;
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
@@ -10721,7 +10747,8 @@ pub(super) fn next_runtime_response_candidate_for_route(
 ) -> Result<Option<String>> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let sync_probe_pressure_mode = runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let sync_probe_pressure_mode =
+        runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let allow_disk_auth_fallback = !sync_probe_pressure_mode;
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
@@ -11282,7 +11309,8 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<usize> {
-    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let (state, current_profile, cached_reports, cached_usage_snapshots, profile_usage_auth) = {
         let runtime = shared
             .runtime
