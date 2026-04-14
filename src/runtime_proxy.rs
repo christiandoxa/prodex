@@ -1316,6 +1316,256 @@ pub(super) fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Optio
         })
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct RuntimeResponseRouteAffinity {
+    pub(super) bound_session_profile: Option<String>,
+    pub(super) compact_followup_profile: Option<(String, &'static str)>,
+    pub(super) compact_session_profile: Option<String>,
+    pub(super) session_profile: Option<String>,
+    pub(super) pinned_profile: Option<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn clear_runtime_response_profile_affinity(
+    profile_name: &str,
+    bound_profile: &mut Option<String>,
+    session_profile: &mut Option<String>,
+    candidate_turn_state_retry_profile: &mut Option<String>,
+    candidate_turn_state_retry_value: &mut Option<String>,
+    pinned_profile: &mut Option<String>,
+    previous_response_retry_index: &mut usize,
+    reset_previous_response_retry_index: bool,
+    turn_state_profile: &mut Option<String>,
+    compact_followup_profile: Option<&mut Option<(String, &'static str)>>,
+) {
+    if bound_profile.as_deref() == Some(profile_name) {
+        *bound_profile = None;
+    }
+    if session_profile.as_deref() == Some(profile_name) {
+        *session_profile = None;
+    }
+    if candidate_turn_state_retry_profile.as_deref() == Some(profile_name) {
+        *candidate_turn_state_retry_profile = None;
+        *candidate_turn_state_retry_value = None;
+    }
+    if pinned_profile.as_deref() == Some(profile_name) {
+        *pinned_profile = None;
+        if reset_previous_response_retry_index {
+            *previous_response_retry_index = 0;
+        }
+    }
+    if turn_state_profile.as_deref() == Some(profile_name) {
+        *turn_state_profile = None;
+    }
+    if let Some(compact_followup_profile) = compact_followup_profile {
+        if compact_followup_profile
+            .as_ref()
+            .is_some_and(|(owner, _)| owner == profile_name)
+        {
+            *compact_followup_profile = None;
+        }
+    }
+}
+
+pub(super) fn derive_runtime_response_route_affinity(
+    shared: &RuntimeRotationProxyShared,
+    previous_response_id: Option<&str>,
+    bound_profile: Option<&str>,
+    turn_state_profile: Option<&str>,
+    request_turn_state: Option<&str>,
+    request_session_id: Option<&str>,
+    explicit_request_session_id: Option<&RuntimeExplicitSessionId>,
+    websocket_session_profile: Option<&str>,
+) -> Result<RuntimeResponseRouteAffinity> {
+    let allows_session_affinity =
+        previous_response_id.is_none() && bound_profile.is_none() && turn_state_profile.is_none();
+    let bound_session_profile = if allows_session_affinity {
+        request_session_id
+            .map(|session_id| runtime_session_bound_profile(shared, session_id))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    let compact_followup_profile = if allows_session_affinity {
+        runtime_compact_turn_state_followup_bound_profile(shared, request_turn_state)?
+            .map(|profile_name| (profile_name, "turn_state"))
+    } else {
+        None
+    };
+    let compact_session_profile = if allows_session_affinity
+        && compact_followup_profile.is_none()
+        && bound_session_profile.is_none()
+        && websocket_session_profile.is_none()
+    {
+        runtime_compact_session_followup_bound_profile(shared, explicit_request_session_id)?
+    } else {
+        None
+    };
+    let session_profile = if allows_session_affinity && compact_followup_profile.is_none() {
+        websocket_session_profile
+            .map(str::to_string)
+            .or(bound_session_profile.clone())
+            .or(compact_session_profile.clone())
+    } else {
+        None
+    };
+    let pinned_profile = bound_profile
+        .map(str::to_string)
+        .or(compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, _)| profile_name.clone()));
+
+    Ok(RuntimeResponseRouteAffinity {
+        bound_session_profile,
+        compact_followup_profile,
+        compact_session_profile,
+        session_profile,
+        pinned_profile,
+    })
+}
+
+pub(super) fn log_runtime_response_route_affinity(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    websocket_session_id: Option<u64>,
+    reason: &str,
+    previous_response_id_present: bool,
+    request_turn_state_present: bool,
+    request_session_id_present: bool,
+    explicit_request_session_id_present: bool,
+    affinity: &RuntimeResponseRouteAffinity,
+) {
+    runtime_proxy_log(
+        shared,
+        match websocket_session_id {
+            Some(session_id) => format!(
+                "request={request_id} websocket_session={session_id} route_affinity_recompute_result reason={reason} previous_response_id_present={previous_response_id_present} request_turn_state_present={request_turn_state_present} request_session_id_present={request_session_id_present} explicit_session_id_present={explicit_request_session_id_present} bound_session_profile={:?} compact_followup_profile={:?} compact_session_profile={:?} session_profile={:?} pinned_profile={:?}",
+                affinity.bound_session_profile,
+                affinity.compact_followup_profile,
+                affinity.compact_session_profile,
+                affinity.session_profile,
+                affinity.pinned_profile,
+            ),
+            None => format!(
+                "request={request_id} transport=http route_affinity_recompute_result reason={reason} previous_response_id_present={previous_response_id_present} request_turn_state_present={request_turn_state_present} request_session_id_present={request_session_id_present} explicit_session_id_present={explicit_request_session_id_present} bound_session_profile={:?} compact_followup_profile={:?} compact_session_profile={:?} session_profile={:?} pinned_profile={:?}",
+                affinity.bound_session_profile,
+                affinity.compact_followup_profile,
+                affinity.compact_session_profile,
+                affinity.session_profile,
+                affinity.pinned_profile,
+            ),
+        },
+    );
+    if let Some((profile_name, source)) = affinity.compact_followup_profile.as_ref() {
+        runtime_proxy_log(
+            shared,
+            match websocket_session_id {
+                Some(session_id) => format!(
+                    "request={request_id} websocket_session={session_id} compact_followup_owner profile={profile_name} source={source}"
+                ),
+                None => format!(
+                    "request={request_id} transport=http compact_followup_owner profile={profile_name} source={source}"
+                ),
+            },
+        );
+    }
+    if let Some(profile_name) = affinity.compact_session_profile.as_deref() {
+        runtime_proxy_log(
+            shared,
+            match websocket_session_id {
+                Some(session_id) => format!(
+                    "request={request_id} websocket_session={session_id} compact_followup_owner profile={profile_name} source=session_id"
+                ),
+                None => format!(
+                    "request={request_id} transport=http compact_followup_owner profile={profile_name} source=session_id"
+                ),
+            },
+        );
+    }
+}
+
+pub(super) fn log_runtime_response_route_affinity_recompute(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    websocket_session_id: Option<u64>,
+    reason: &str,
+    previous_response_id_present: bool,
+    request_turn_state_present: bool,
+    request_session_id_present: bool,
+    explicit_request_session_id_present: bool,
+) {
+    runtime_proxy_log(
+        shared,
+        match websocket_session_id {
+            Some(session_id) => format!(
+                "request={request_id} websocket_session={session_id} route_affinity_recompute reason={reason} previous_response_id_present={previous_response_id_present} request_turn_state_present={request_turn_state_present} request_session_id_present={request_session_id_present} explicit_session_id_present={explicit_request_session_id_present}"
+            ),
+            None => format!(
+                "request={request_id} transport=http route_affinity_recompute reason={reason} previous_response_id_present={previous_response_id_present} request_turn_state_present={request_turn_state_present} request_session_id_present={request_session_id_present} explicit_session_id_present={explicit_request_session_id_present}"
+            ),
+        },
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn refresh_and_log_runtime_response_route_affinity(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    websocket_session_id: Option<u64>,
+    reason: &str,
+    previous_response_id: Option<&str>,
+    bound_profile: Option<&str>,
+    turn_state_profile: Option<&str>,
+    request_turn_state: Option<&str>,
+    request_session_id: Option<&str>,
+    explicit_request_session_id: Option<&RuntimeExplicitSessionId>,
+    websocket_session_profile: Option<&str>,
+    bound_session_profile: &mut Option<String>,
+    compact_followup_profile: &mut Option<(String, &'static str)>,
+    compact_session_profile: &mut Option<String>,
+    session_profile: &mut Option<String>,
+    pinned_profile: &mut Option<String>,
+) -> Result<()> {
+    log_runtime_response_route_affinity_recompute(
+        shared,
+        request_id,
+        websocket_session_id,
+        reason,
+        previous_response_id.is_some(),
+        request_turn_state.is_some(),
+        request_session_id.is_some(),
+        explicit_request_session_id.is_some(),
+    );
+    let derived = derive_runtime_response_route_affinity(
+        shared,
+        previous_response_id,
+        bound_profile,
+        turn_state_profile,
+        request_turn_state,
+        request_session_id,
+        explicit_request_session_id,
+        websocket_session_profile,
+    )?;
+    *bound_session_profile = derived.bound_session_profile.clone();
+    *compact_followup_profile = derived.compact_followup_profile.clone();
+    *compact_session_profile = derived.compact_session_profile.clone();
+    *session_profile = derived.session_profile.clone();
+    *pinned_profile = derived.pinned_profile.clone();
+    log_runtime_response_route_affinity(
+        shared,
+        request_id,
+        websocket_session_id,
+        reason,
+        previous_response_id.is_some(),
+        request_turn_state.is_some(),
+        request_session_id.is_some(),
+        explicit_request_session_id.is_some(),
+        &derived,
+    );
+    Ok(())
+}
+
 pub(super) fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
     // These timestamps are stored with second precision. Require strictly more
     // than the interval so a boundary-crossing lookup does not persist nearly a
@@ -4584,9 +4834,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
         request_metadata.requires_previous_response_affinity;
     let mut previous_response_id = request_metadata.previous_response_id.clone();
     let mut request_turn_state = runtime_request_turn_state(&handshake_request);
-    let request_session_id_header_present =
-        runtime_proxy_request_header_value(&handshake_request.headers, "session_id").is_some();
     let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
+    let request_session_id_header_present = explicit_request_session_id.is_some();
     let request_session_id = explicit_request_session_id
         .as_ref()
         .map(|session_id| session_id.as_str().to_string())
@@ -4625,73 +4874,34 @@ pub(super) fn proxy_runtime_websocket_text_message(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let bound_session_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-    {
-        request_session_id
-            .as_deref()
-            .map(|session_id| runtime_session_bound_profile(shared, session_id))
-            .transpose()?
-            .flatten()
-    } else {
-        None
-    };
-    let mut compact_followup_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-    {
-        runtime_compact_turn_state_followup_bound_profile(shared, request_turn_state.as_deref())?
-            .map(|profile_name| (profile_name, "turn_state"))
-    } else {
-        None
-    };
-    if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} websocket_session={session_id} compact_followup_owner profile={profile_name} source={source}"
-            ),
-        );
+    let mut bound_session_profile = None;
+    let mut compact_followup_profile = None;
+    let mut compact_session_profile = None;
+    let mut session_profile = None;
+    let mut pinned_profile = None;
+    macro_rules! recompute_route_affinity {
+        ($reason:expr) => {
+            refresh_and_log_runtime_response_route_affinity(
+                shared,
+                request_id,
+                Some(session_id),
+                $reason,
+                previous_response_id.as_deref(),
+                bound_profile.as_deref(),
+                turn_state_profile.as_deref(),
+                request_turn_state.as_deref(),
+                request_session_id.as_deref(),
+                explicit_request_session_id.as_ref(),
+                websocket_session.profile_name.as_deref(),
+                &mut bound_session_profile,
+                &mut compact_followup_profile,
+                &mut compact_session_profile,
+                &mut session_profile,
+                &mut pinned_profile,
+            )
+        };
     }
-    let compact_session_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-        && compact_followup_profile.is_none()
-        && bound_session_profile.is_none()
-        && websocket_session.profile_name.is_none()
-    {
-        runtime_compact_session_followup_bound_profile(
-            shared,
-            explicit_request_session_id.as_ref(),
-        )?
-    } else {
-        None
-    };
-    if let Some(profile_name) = compact_session_profile.as_ref() {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} websocket_session={session_id} compact_followup_owner profile={profile_name} source=session_id"
-            ),
-        );
-    }
-    let mut session_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-        && compact_followup_profile.is_none()
-    {
-        websocket_session
-            .profile_name
-            .clone()
-            .or(bound_session_profile.clone())
-            .or(compact_session_profile.clone())
-    } else {
-        None
-    };
-    let mut pinned_profile = bound_profile.clone().or(compact_followup_profile
-        .as_ref()
-        .map(|(profile_name, _)| profile_name.clone()));
+    recompute_route_affinity!("initial")?;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -4771,6 +4981,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     &mut selection_started_at,
                     &mut selection_attempts,
                 );
+                recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -4860,12 +5071,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            runtime_websocket_request_requires_locked_previous_response_affinity(
-                                request_requires_previous_response_affinity,
-                                trusted_previous_response_affinity,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                            ),
+                            request_requires_previous_response_affinity,
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
@@ -4877,25 +5083,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -4940,6 +5139,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5036,6 +5236,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5113,31 +5314,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
-                        if compact_followup_profile
-                            .as_ref()
-                            .is_some_and(|(owner, _)| owner == &profile_name)
-                        {
-                            compact_followup_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            Some(&mut compact_followup_profile),
+                        );
                         excluded_profiles.insert(profile_name);
                         last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                         continue;
@@ -5183,25 +5371,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -5246,6 +5427,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5343,6 +5525,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     &mut selection_started_at,
                     &mut selection_attempts,
                 );
+                recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -5450,12 +5633,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             turn_state_profile.as_deref(),
                             session_profile.as_deref(),
                             trusted_previous_response_affinity,
-                            runtime_websocket_request_requires_locked_previous_response_affinity(
-                                request_requires_previous_response_affinity,
-                                trusted_previous_response_affinity,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                            ),
+                            request_requires_previous_response_affinity,
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
@@ -5467,25 +5645,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -5530,6 +5701,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5665,30 +5837,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
-                        if compact_followup_profile
-                            .as_ref()
-                            .is_some_and(|(owner, _)| owner == &profile_name)
-                        {
-                            compact_followup_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            false,
+                            &mut turn_state_profile,
+                            Some(&mut compact_followup_profile),
+                        );
                         excluded_profiles.insert(profile_name);
                         last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
                         continue;
@@ -5734,24 +5894,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            false,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -5796,6 +5950,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -5916,12 +6071,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     turn_state_profile.as_deref(),
                     session_profile.as_deref(),
                     trusted_previous_response_affinity,
-                    runtime_websocket_request_requires_locked_previous_response_affinity(
-                        request_requires_previous_response_affinity,
-                        trusted_previous_response_affinity,
-                        previous_response_id.as_deref(),
-                        request_turn_state.as_deref(),
-                    ),
+                    request_requires_previous_response_affinity,
                 ) {
                     runtime_proxy_log(
                         shared,
@@ -5939,23 +6089,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
                 )?;
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                    previous_response_retry_index = 0;
-                }
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    true,
+                    &mut turn_state_profile,
+                    None,
+                );
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -6000,6 +6145,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         &mut selection_started_at,
                         &mut selection_attempts,
                     );
+                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -6095,6 +6241,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         &mut selection_started_at,
                         &mut selection_attempts,
                     );
+                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -6143,23 +6290,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
                 )?;
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                    previous_response_retry_index = 0;
-                }
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    true,
+                    &mut turn_state_profile,
+                    None,
+                );
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -6204,6 +6346,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         &mut selection_started_at,
                         &mut selection_attempts,
                     );
+                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -6319,25 +6462,21 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         &mut selection_started_at,
                         &mut selection_attempts,
                     );
+                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                    previous_response_retry_index = 0;
-                }
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    true,
+                    &mut turn_state_profile,
+                    None,
+                );
                 excluded_profiles.insert(profile_name);
             }
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
@@ -6409,29 +6548,19 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                 }
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    false,
+                    &mut turn_state_profile,
+                    Some(&mut compact_followup_profile),
+                );
                 trusted_previous_response_affinity = false;
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
-                if compact_followup_profile
-                    .as_ref()
-                    .is_some_and(|(owner, _)| owner == &profile_name)
-                {
-                    compact_followup_profile = None;
-                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
             }
@@ -8522,31 +8651,41 @@ pub(super) fn attempt_runtime_standard_request(
                     err,
                 );
             })?;
-    if !is_runtime_compact_path(&request.path_and_query) || response.status().is_success() {
-        let response_turn_state = is_runtime_compact_path(&request.path_and_query)
+    let compact_request = is_runtime_compact_path(&request.path_and_query);
+    if !compact_request || response.status().is_success() {
+        let response_turn_state = compact_request
             .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
             .flatten();
-        let response =
-            forward_runtime_proxy_response(shared, response, Vec::new()).inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Compact,
-                    "compact_forward_response",
-                    err,
-                );
-            })?;
+        let response = if compact_request {
+            forward_runtime_proxy_response_with_limit(
+                shared,
+                response,
+                Vec::new(),
+                RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES,
+            )
+        } else {
+            forward_runtime_proxy_response(shared, response, Vec::new())
+        }
+        .inspect_err(|err| {
+            note_runtime_profile_transport_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Compact,
+                "compact_forward_response",
+                err,
+            );
+        })?;
         remember_runtime_session_id(
             shared,
             profile_name,
             request_session_id.as_deref(),
-            if is_runtime_compact_path(&request.path_and_query) {
+            if compact_request {
                 RuntimeRouteKind::Compact
             } else {
                 RuntimeRouteKind::Standard
             },
         )?;
-        if is_runtime_compact_path(&request.path_and_query) {
+        if compact_request {
             remember_runtime_compact_lineage(
                 shared,
                 profile_name,
@@ -8721,70 +8860,34 @@ pub(super) fn proxy_runtime_responses_request(
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let bound_session_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-    {
-        request_session_id
-            .as_deref()
-            .map(|session_id| runtime_session_bound_profile(shared, session_id))
-            .transpose()?
-            .flatten()
-    } else {
-        None
-    };
-    let mut compact_followup_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-    {
-        runtime_compact_turn_state_followup_bound_profile(shared, request_turn_state.as_deref())?
-            .map(|profile_name| (profile_name, "turn_state"))
-    } else {
-        None
-    };
-    if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http compact_followup_owner profile={profile_name} source={source}"
-            ),
-        );
+    let mut bound_session_profile = None;
+    let mut compact_followup_profile = None;
+    let mut compact_session_profile = None;
+    let mut session_profile = None;
+    let mut pinned_profile = None;
+    macro_rules! recompute_route_affinity {
+        ($reason:expr) => {
+            refresh_and_log_runtime_response_route_affinity(
+                shared,
+                request_id,
+                None,
+                $reason,
+                previous_response_id.as_deref(),
+                bound_profile.as_deref(),
+                turn_state_profile.as_deref(),
+                request_turn_state.as_deref(),
+                request_session_id.as_deref(),
+                explicit_request_session_id.as_ref(),
+                None,
+                &mut bound_session_profile,
+                &mut compact_followup_profile,
+                &mut compact_session_profile,
+                &mut session_profile,
+                &mut pinned_profile,
+            )
+        };
     }
-    let compact_session_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-        && compact_followup_profile.is_none()
-        && bound_session_profile.is_none()
-    {
-        runtime_compact_session_followup_bound_profile(
-            shared,
-            explicit_request_session_id.as_ref(),
-        )?
-    } else {
-        None
-    };
-    if let Some(profile_name) = compact_session_profile.as_ref() {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http compact_followup_owner profile={profile_name} source=session_id"
-            ),
-        );
-    }
-    let mut session_profile = if previous_response_id.is_none()
-        && bound_profile.is_none()
-        && turn_state_profile.is_none()
-        && compact_followup_profile.is_none()
-    {
-        bound_session_profile
-            .clone()
-            .or(compact_session_profile.clone())
-    } else {
-        None
-    };
-    let mut pinned_profile = bound_profile.clone().or(compact_followup_profile
-        .as_ref()
-        .map(|(profile_name, _)| profile_name.clone()));
+    recompute_route_affinity!("initial")?;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure = None;
     let mut previous_response_retry_candidate: Option<String> = None;
@@ -8856,6 +8959,7 @@ pub(super) fn proxy_runtime_responses_request(
                     &mut selection_started_at,
                     &mut selection_attempts,
                 );
+                recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -8968,25 +9072,18 @@ pub(super) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -9029,6 +9126,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9099,30 +9197,18 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
-                        if compact_followup_profile
-                            .as_ref()
-                            .is_some_and(|(owner, _)| owner == &profile_name)
-                        {
-                            compact_followup_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            false,
+                            &mut turn_state_profile,
+                            Some(&mut compact_followup_profile),
+                        );
                         excluded_profiles.insert(profile_name);
                         last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
                         continue;
@@ -9159,25 +9245,18 @@ pub(super) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -9220,6 +9299,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9335,6 +9415,7 @@ pub(super) fn proxy_runtime_responses_request(
                     &mut selection_started_at,
                     &mut selection_attempts,
                 );
+                recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
             }
             if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
@@ -9465,25 +9546,18 @@ pub(super) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -9526,6 +9600,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9596,30 +9671,18 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
-                        if compact_followup_profile
-                            .as_ref()
-                            .is_some_and(|(owner, _)| owner == &profile_name)
-                        {
-                            compact_followup_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            false,
+                            &mut turn_state_profile,
+                            Some(&mut compact_followup_profile),
+                        );
                         excluded_profiles.insert(profile_name);
                         last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
                         continue;
@@ -9656,25 +9719,18 @@ pub(super) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                            bound_profile = None;
-                        }
-                        if session_profile.as_deref() == Some(profile_name.as_str()) {
-                            session_profile = None;
-                        }
-                        if candidate_turn_state_retry_profile.as_deref()
-                            == Some(profile_name.as_str())
-                        {
-                            candidate_turn_state_retry_profile = None;
-                            candidate_turn_state_retry_value = None;
-                        }
-                        if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                            pinned_profile = None;
-                            previous_response_retry_index = 0;
-                        }
-                        if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                            turn_state_profile = None;
-                        }
+                        clear_runtime_response_profile_affinity(
+                            &profile_name,
+                            &mut bound_profile,
+                            &mut session_profile,
+                            &mut candidate_turn_state_retry_profile,
+                            &mut candidate_turn_state_retry_value,
+                            &mut pinned_profile,
+                            &mut previous_response_retry_index,
+                            true,
+                            &mut turn_state_profile,
+                            None,
+                        );
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -9717,6 +9773,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 &mut selection_started_at,
                                 &mut selection_attempts,
                             );
+                            recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
@@ -9893,23 +9950,18 @@ pub(super) fn proxy_runtime_responses_request(
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
                 )?;
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                    previous_response_retry_index = 0;
-                }
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    true,
+                    &mut turn_state_profile,
+                    None,
+                );
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -9952,6 +10004,7 @@ pub(super) fn proxy_runtime_responses_request(
                         &mut selection_started_at,
                         &mut selection_attempts,
                     );
+                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -9995,23 +10048,18 @@ pub(super) fn proxy_runtime_responses_request(
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
                 )?;
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                    previous_response_retry_index = 0;
-                }
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    true,
+                    &mut turn_state_profile,
+                    None,
+                );
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -10054,6 +10102,7 @@ pub(super) fn proxy_runtime_responses_request(
                         &mut selection_started_at,
                         &mut selection_attempts,
                     );
+                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
@@ -10120,29 +10169,19 @@ pub(super) fn proxy_runtime_responses_request(
                         ),
                     );
                 }
-                if bound_profile.as_deref() == Some(profile_name.as_str()) {
-                    bound_profile = None;
-                }
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if candidate_turn_state_retry_profile.as_deref() == Some(profile_name.as_str()) {
-                    candidate_turn_state_retry_profile = None;
-                    candidate_turn_state_retry_value = None;
-                }
-                if pinned_profile.as_deref() == Some(profile_name.as_str()) {
-                    pinned_profile = None;
-                }
+                clear_runtime_response_profile_affinity(
+                    &profile_name,
+                    &mut bound_profile,
+                    &mut session_profile,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                    &mut pinned_profile,
+                    &mut previous_response_retry_index,
+                    false,
+                    &mut turn_state_profile,
+                    Some(&mut compact_followup_profile),
+                );
                 trusted_previous_response_affinity = false;
-                if turn_state_profile.as_deref() == Some(profile_name.as_str()) {
-                    turn_state_profile = None;
-                }
-                if compact_followup_profile
-                    .as_ref()
-                    .is_some_and(|(owner, _)| owner == &profile_name)
-                {
-                    compact_followup_profile = None;
-                }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
             }
@@ -13530,6 +13569,17 @@ pub(super) fn forward_runtime_proxy_response(
     Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
+pub(super) fn forward_runtime_proxy_response_with_limit(
+    shared: &RuntimeRotationProxyShared,
+    response: reqwest::Response,
+    prelude: Vec<u8>,
+    max_bytes: usize,
+) -> Result<tiny_http::ResponseBox> {
+    let parts =
+        buffer_runtime_proxy_async_response_parts_with_limit(shared, response, prelude, max_bytes)?;
+    Ok(build_runtime_proxy_response_from_parts(parts))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_runtime_proxy_responses_success(
     request_id: u64,
@@ -14780,8 +14830,22 @@ pub(super) fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseIn
 
 pub(super) fn buffer_runtime_proxy_async_response_parts(
     shared: &RuntimeRotationProxyShared,
+    response: reqwest::Response,
+    prelude: Vec<u8>,
+) -> Result<RuntimeBufferedResponseParts> {
+    buffer_runtime_proxy_async_response_parts_with_limit(
+        shared,
+        response,
+        prelude,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+    )
+}
+
+pub(super) fn buffer_runtime_proxy_async_response_parts_with_limit(
+    shared: &RuntimeRotationProxyShared,
     mut response: reqwest::Response,
     prelude: Vec<u8>,
+    max_bytes: usize,
 ) -> Result<RuntimeBufferedResponseParts> {
     let status = response.status().as_u16();
     let mut headers = Vec::new();
@@ -14801,12 +14865,12 @@ pub(super) fn buffer_runtime_proxy_async_response_parts(
             let Some(chunk) = next else {
                 break;
             };
-            if body.len().saturating_add(chunk.len()) > RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES {
+            if body.len().saturating_add(chunk.len()) > max_bytes {
                 return Err(anyhow::Error::new(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
                         "runtime buffered response exceeded safe size limit ({})",
-                        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES
+                        max_bytes
                     ),
                 )));
             }

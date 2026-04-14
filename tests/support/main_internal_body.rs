@@ -570,6 +570,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyResetAfterFirstChunk,
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyCompactOverloaded,
+    HttpOnlyLargeCompactResponse,
     HttpOnlyUsageLimitMessage,
     HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
@@ -635,6 +636,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_compact_overloaded() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactOverloaded)
+    }
+
+    fn start_http_large_compact_response() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyLargeCompactResponse)
     }
 
     fn start_http_usage_limit_message() -> Self {
@@ -1764,6 +1769,25 @@ fn handle_runtime_proxy_backend_request(
                     None,
                     None,
                 ),
+                (_, RuntimeProxyBackendMode::HttpOnlyLargeCompactResponse) => {
+                    let body = serde_json::json!({
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": "x".repeat(RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES + 1024)
+                            }
+                        ]
+                    })
+                    .to_string();
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        body,
+                        Some("compact-turn-main".to_string()),
+                        None,
+                        None,
+                    )
+                }
                 _ => (
                     "HTTP/1.1 200 OK",
                     "application/json",
@@ -17881,6 +17905,64 @@ fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
 }
 
 #[test]
+fn runtime_proxy_allows_large_compact_responses_above_default_buffer_limit() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_large_compact_response();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[],\"instructions\":\"compact\"}")
+        .send()
+        .expect("runtime proxy compact request should complete");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert!(status.is_success(), "unexpected compact status: {status}");
+    assert!(
+        body.len() > RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "test response should exceed the default buffer limit"
+    );
+    assert!(
+        body.contains("\"output\""),
+        "large compact response should be forwarded intact enough to parse as a compact response"
+    );
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+}
+
+#[test]
 fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
@@ -20532,7 +20614,268 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_c
 }
 
 #[test]
-fn runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_without_turn_state() {
+fn runtime_proxy_websocket_x_session_id_affinity_rotates_without_promoting_active_profile() {
+    let backend = RuntimeProxyBackend::start_websocket_delayed_overload_after_prelude();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("client request should build");
+    request.headers_mut().insert(
+        "x-session-id",
+        "sess-ws-overload-alias"
+            .parse()
+            .expect("session header"),
+    );
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-main\""))
+    );
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("second runtime proxy websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("Selected model is at capacity")),
+        "capacity error should not be surfaced after x-session-id bound pre-commit rotate: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        "failed pre-commit frames should not leak across x-session-id rotated retry: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "expected initial request, delayed overload retry on reused session, and rotated retry"
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("main")
+            && state
+                .session_profile_bindings
+                .get("sess-ws-overload-alias")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("main"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-ws-overload-alias")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert!(
+        persisted.last_run_selected_at.is_empty(),
+        "x-session-id bound websocket continuation should not promote the global active profile"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_x_session_id_affinity_rotates_like_session_id_on_overload() {
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-http-overload-alias".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("x-session-id", "sess-http-overload-alias")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected body: {body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "x-session-id bound HTTP continuation should rotate without promoting the global active profile: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+            && state
+                .session_profile_bindings
+                .get("sess-http-overload-alias")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-http-overload-alias")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert!(
+        persisted.last_run_selected_at.contains_key("second"),
+        "x-session-id HTTP continuation should persist the selected profile's last-run marker"
+    );
+}
+
+#[test]
+fn runtime_proxy_websocket_fresh_fallbacks_quota_blocked_previous_response_without_tool_output() {
     let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -20647,26 +20990,29 @@ fn runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_wi
     assert!(
         second_payloads
             .iter()
-            .any(|payload| payload.contains("usage_limit_reached")),
-        "quota-blocked websocket continuation without turn_state should surface the owner failure instead of rotating: {second_payloads:?}"
-    );
-    assert!(
-        !second_payloads
-            .iter()
             .any(|payload| payload.contains("\"resp-second\"")),
-        "non-replayable websocket continuation must not rotate to another profile after quota-blocked owner failure: {second_payloads:?}"
+        "quota-blocked websocket continuation without tool output should fresh-fallback before surfacing quota: {second_payloads:?}"
     );
     assert!(
         !second_payloads
             .iter()
-            .any(|payload| payload.contains("\"previous_response_not_found\"")),
-        "non-replayable websocket continuation should fail in place instead of probing another owner: {second_payloads:?}"
+            .any(|payload| payload.contains("usage_limit_reached")),
+        "quota-blocked owner failure should not leak after fresh fallback: {second_payloads:?}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"msg-main\"")),
+        "pre-commit frames from the failed owner should not leak across fresh fallback: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
     assert_eq!(
         backend.websocket_requests().len(),
-        2,
-        "expected only the initial request and the pinned quota-blocked continuation"
+        3,
+        "expected the initial request, quota-blocked owner continuation, and fresh fallback"
     );
     assert_eq!(
         backend
@@ -20675,7 +21021,7 @@ fn runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_wi
             .filter(|request| request.contains("\"previous_response_id\":\"resp-main\""))
             .count(),
         1,
-        "non-replayable websocket continuation should stay pinned to the original previous_response owner"
+        "the fresh fallback should strip previous_response_id before retrying another profile"
     );
 }
 
@@ -23857,6 +24203,64 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
     );
 }
 
+fn start_runtime_proxy_with_session_binding(
+    backend: &RuntimeProxyBackend,
+    session_id: &str,
+) -> (TestDir, RuntimeRotationProxy) {
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                },
+            ),
+        ]),
+        // Keep second on cooldown so the no-affinity fresh fallback path stays on current third.
+        last_run_selected_at: BTreeMap::from([("second".to_string(), now)]),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            session_id.to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    (temp_dir, proxy)
+}
+
 fn start_runtime_proxy_with_compact_session_owner(
     backend: &RuntimeProxyBackend,
     compact_owner_status: RuntimeQuotaWindowStatus,
@@ -24741,6 +25145,157 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_web
         "turn metadata session_id should not force local 503 on normal websocket request: {payloads:?}"
     );
     assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+}
+
+#[test]
+fn runtime_proxy_reapplies_session_affinity_after_http_previous_response_fresh_fallback() {
+    let backend = RuntimeProxyBackend::start();
+    let (temp_dir, proxy) = start_runtime_proxy_with_session_binding(&backend, "sess-fallback");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body(
+            r#"{"previous_response_id":"resp-missing","session_id":"sess-fallback","input":[]}"#,
+        )
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected body: {body}");
+    assert!(
+        body.contains("\"resp-second\""),
+        "fresh fallback should reapply session affinity to the bound owner: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "third-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ]
+    );
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+            && state
+                .session_profile_bindings
+                .get("sess-fallback")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-fallback")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert!(
+        persisted.last_run_selected_at.contains_key("second"),
+        "fresh HTTP fallback should persist the selected profile's last-run marker"
+    );
+}
+
+#[test]
+fn runtime_proxy_reapplies_session_affinity_after_websocket_previous_response_fresh_fallback() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let (temp_dir, proxy) = start_runtime_proxy_with_session_binding(&backend, "sess-fallback");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text(
+            r#"{"previous_response_id":"resp-missing","session_id":"sess-fallback","input":[]}"#
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for session-affinity fallback payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "fresh websocket fallback should reapply session affinity to the bound owner: {payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec![
+            "third-account".to_string(),
+            "second-account".to_string(),
+            "second-account".to_string(),
+        ]
+    );
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("third")
+            && state
+                .session_profile_bindings
+                .get("sess-fallback")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("third"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-fallback")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert!(
+        persisted.last_run_selected_at.contains_key("second"),
+        "fresh websocket fallback should persist the selected profile's last-run marker"
+    );
 }
 
 #[test]
