@@ -240,6 +240,8 @@ jobs:
               --skip runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error \
               --skip runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota \
               --skip runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile \
+              --skip runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains \
+              --skip runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remains \
               --skip runtime_proxy_streams_anthropic_mcp_messages_without_buffering \
               --skip runtime_proxy_translates_anthropic_messages_to_responses_and_back \
               --skip runtime_proxy_streams_anthropic_messages_from_buffered_responses \
@@ -301,6 +303,8 @@ jobs:
               runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error \
               runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota \
               runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile \
+              runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains \
+              runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remains \
               runtime_proxy_streams_anthropic_mcp_messages_without_buffering \
               runtime_proxy_translates_anthropic_messages_to_responses_and_back \
               runtime_proxy_streams_anthropic_messages_from_buffered_responses \
