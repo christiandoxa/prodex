@@ -544,6 +544,25 @@ fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16,
     (status, body)
 }
 
+fn tiny_http_response_status_content_type_and_body(
+    response: tiny_http::ResponseBox,
+) -> (u16, Option<String>, String) {
+    let status = response.status_code().0;
+    let mut bytes = Vec::new();
+    response
+        .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+        .expect("response should serialize");
+    let text = String::from_utf8(bytes).expect("response bytes should be utf8");
+    let (headers, body) = text
+        .split_once("\r\n\r\n")
+        .unwrap_or((text.as_str(), ""));
+    let content_type = headers.lines().find_map(|line| {
+        line.strip_prefix("Content-Type: ")
+            .map(|value| value.to_string())
+    });
+    (status, content_type, body.to_string())
+}
+
 struct RuntimeProxyBackend {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
@@ -2610,6 +2629,21 @@ fn write_auth_json(path: &Path, account_id: &str) {
         .to_string(),
     )
     .expect("failed to write auth.json");
+}
+
+fn write_api_key_auth_json(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create auth parent dir");
+    }
+    fs::write(
+        path,
+        serde_json::json!({
+            "auth_mode": "api_key",
+            "OPENAI_API_KEY": "test-api-key",
+        })
+        .to_string(),
+    )
+    .expect("failed to write api-key auth.json");
 }
 
 #[test]
@@ -17015,6 +17049,33 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_ht
 }
 
 #[test]
+fn runtime_proxy_expired_critical_snapshot_does_not_block_fresh_cold_start_probe() {
+    let now = Local::now().timestamp();
+    let snapshot = RuntimeProfileUsageSnapshot {
+        checked_at: now,
+        five_hour_status: RuntimeQuotaWindowStatus::Critical,
+        five_hour_remaining_percent: 1,
+        five_hour_reset_at: now - 1,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 70,
+        weekly_reset_at: now + 86_400,
+    };
+
+    assert!(
+        runtime_usage_snapshot_is_usable(&snapshot, now),
+        "fresh critical snapshot should still be considered usable before probe gating"
+    );
+    assert!(
+        !runtime_snapshot_blocks_same_request_cold_start_probe(
+            &snapshot,
+            RuntimeRouteKind::Responses,
+            now
+        ),
+        "expired critical reset_at should not block a fresh responses probe"
+    );
+}
+
+#[test]
 fn runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains() {
     let backend = RuntimeProxyBackend::start_http_usage_limit_message();
     let temp_dir = TestDir::new();
@@ -17108,6 +17169,130 @@ fn runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains() 
         backend.responses_accounts(),
         vec!["main-account".to_string()],
         "exhausted fallback profile should be blocked before send"
+    );
+}
+
+#[test]
+fn runtime_proxy_standard_retryable_failure_falls_back_to_text_plain_for_non_json_callers() {
+    let response = runtime_proxy_final_retryable_http_failure_response(
+        Some((
+            build_runtime_proxy_json_error_response(
+                429,
+                "insufficient_quota",
+                "The usage limit has been reached",
+            ),
+            true,
+        )),
+        false,
+        false,
+    )
+    .expect("standard retryable failure should produce a local response");
+    let (status, content_type, body) = tiny_http_response_status_content_type_and_body(response);
+
+    assert_eq!(status, 503);
+    assert_eq!(
+        content_type.as_deref(),
+        Some("text/plain; charset=utf-8"),
+        "non-JSON callers should keep text/plain fallback bodies"
+    );
+    assert!(
+        body.contains(runtime_proxy_local_selection_failure_message()),
+        "unexpected local fallback body: {body}"
+    );
+}
+
+#[test]
+fn runtime_proxy_standard_retryable_failure_keeps_text_plain_when_inflight_saturated() {
+    let response = runtime_proxy_final_retryable_http_failure_response(None, true, false)
+        .expect("standard inflight saturation should produce a local response");
+    let (status, content_type, body) = tiny_http_response_status_content_type_and_body(response);
+
+    assert_eq!(status, 503);
+    assert_eq!(
+        content_type.as_deref(),
+        Some("text/plain; charset=utf-8"),
+        "inflight saturation should not force JSON fallback for non-JSON callers"
+    );
+    assert!(
+        body.contains("temporarily saturated"),
+        "unexpected inflight saturation body: {body}"
+    );
+}
+
+#[test]
+fn runtime_proxy_only_masks_quota_failures_when_an_alternative_is_quota_compatible() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let api_home = temp_dir.path.join("homes/api");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_api_key_auth_json(&api_home.join("auth.json"));
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "api".to_string(),
+                ProfileEntry {
+                    codex_home: api_home,
+                    managed: true,
+                    email: Some("api@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    assert_eq!(
+        shared
+            .runtime
+            .lock()
+            .expect("runtime lock should be available")
+            .state
+            .profiles
+            .len(),
+        2,
+        "a second configured profile exists"
+    );
+    assert!(
+        !runtime_has_alternative_quota_compatible_profile(&shared, "main")
+            .expect("quota-compatible-alternative lookup should succeed"),
+        "api-key profile should not count as a quota-compatible alternative"
     );
 }
 
