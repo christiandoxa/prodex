@@ -36773,6 +36773,85 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
 }
 
 #[test]
+fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let observed_revision = runtime_probe_refresh_revision();
+    let runtime_guard = shared.runtime.lock().expect("runtime lock should succeed");
+    let apply_shared = shared.clone();
+    let apply_thread = thread::spawn(move || {
+        apply_runtime_profile_probe_result(
+            &apply_shared,
+            "main",
+            AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            Ok(usage_with_main_windows(90, 3600, 90, 604_800)),
+        )
+    });
+    thread::sleep(Duration::from_millis(20));
+
+    assert_eq!(
+        runtime_probe_refresh_revision(),
+        observed_revision,
+        "probe refresh revision should not advance until the runtime lock is released"
+    );
+    assert!(
+        !wait_for_runtime_probe_refresh_since(Duration::from_millis(20), observed_revision),
+        "probe refresh wait should still time out while the apply thread is blocked on runtime state"
+    );
+
+    drop(runtime_guard);
+    apply_thread
+        .join()
+        .expect("apply thread should join")
+        .expect("probe apply should succeed after the runtime lock is released");
+
+    assert!(
+        wait_for_runtime_probe_refresh_since(Duration::from_millis(100), observed_revision),
+        "successful probe apply should wake probe-refresh waiters once fresh data lands"
+    );
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        runtime.profile_probe_cache.contains_key("main"),
+        "probe apply should update the probe cache after waiting for the runtime lock"
+    );
+    assert!(
+        runtime.profile_usage_snapshots.contains_key("main"),
+        "probe apply should update usage snapshots after waiting for the runtime lock"
+    );
+}
+
+#[test]
 fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
     let _budget_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");

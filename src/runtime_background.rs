@@ -995,31 +995,16 @@ pub(super) fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProx
     }
 }
 
-fn apply_runtime_profile_probe_result_with_lock_policy(
+pub(super) fn apply_runtime_profile_probe_result(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
-    try_lock_only: bool,
 ) -> Result<()> {
-    let mut runtime = if try_lock_only {
-        match shared.runtime.try_lock() {
-            Ok(runtime) => runtime,
-            Err(std::sync::TryLockError::WouldBlock) => {
-                note_runtime_probe_refresh_progress();
-                bail!("runtime auto-rotate state is busy");
-            }
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                note_runtime_probe_refresh_progress();
-                bail!("runtime auto-rotate state is poisoned");
-            }
-        }
-    } else {
-        shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-    };
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
     runtime.profile_probe_cache.insert(
         profile_name.to_string(),
@@ -1115,24 +1100,6 @@ fn apply_runtime_profile_probe_result_with_lock_policy(
     Ok(())
 }
 
-pub(super) fn apply_runtime_profile_probe_result(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    auth: AuthSummary,
-    result: std::result::Result<UsageResponse, String>,
-) -> Result<()> {
-    apply_runtime_profile_probe_result_with_lock_policy(shared, profile_name, auth, result, false)
-}
-
-pub(super) fn try_apply_runtime_profile_probe_result(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    auth: AuthSummary,
-    result: std::result::Result<UsageResponse, String>,
-) -> Result<()> {
-    apply_runtime_profile_probe_result_with_lock_policy(shared, profile_name, auth, result, true)
-}
-
 pub(super) fn runtime_profile_usage_snapshot_materially_matches(
     previous: &RuntimeProfileUsageSnapshot,
     next: &RuntimeProfileUsageSnapshot,
@@ -1210,12 +1177,8 @@ fn run_runtime_probe_refresh_job(job: RuntimeProbeRefreshJob) {
     } else {
         Err("auth mode is not quota-compatible".to_string())
     };
-    let apply_result = try_apply_runtime_profile_probe_result(
-        &job.shared,
-        &job.profile_name,
-        auth,
-        result.clone(),
-    );
+    let apply_result =
+        apply_runtime_profile_probe_result(&job.shared, &job.profile_name, auth, result.clone());
     match result {
         Ok(_) => runtime_proxy_log(
             &job.shared,
