@@ -9577,6 +9577,202 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
 }
 
 #[test]
+fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_websocket_fallback() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-123".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::from([(
+            "sess-123".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "second".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 90,
+                five_hour_reset_at: now + 18_000,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 95,
+                weekly_reset_at: now + 604_800,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    assert_eq!(
+        select_runtime_response_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            None,
+            None,
+            None,
+            Some("main"),
+            false,
+            None,
+            RuntimeRouteKind::Websocket,
+        )
+        .expect("candidate lookup should succeed"),
+        Some("second".to_string())
+    );
+}
+
+#[test]
+fn fresh_websocket_fallback_skips_precommit_guarded_backoff_candidates() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([
+            (
+                "main".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                    five_hour_remaining_percent: 90,
+                    five_hour_reset_at: now + 18_000,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 95,
+                    weekly_reset_at: now + 604_800,
+                },
+            ),
+            (
+                "second".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Critical,
+                    five_hour_remaining_percent: 1,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 604_800,
+                },
+            ),
+        ]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    assert_eq!(
+        next_runtime_response_candidate_for_route(
+            &shared,
+            &BTreeSet::from(["main".to_string()]),
+            RuntimeRouteKind::Websocket,
+        )
+        .expect("candidate lookup should succeed"),
+        None
+    );
+}
+
+#[test]
 fn optimistic_current_candidate_skips_open_route_circuit() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -16819,6 +17015,103 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_ht
 }
 
 #[test]
+fn runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains() {
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "second".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Critical,
+                five_hour_remaining_percent: 1,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 90,
+                weekly_reset_at: now + 86_400,
+            },
+        )]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(
+        status,
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        "soft quota failure without ready fallback should degrade locally: {body}"
+    );
+    assert!(
+        body.contains("\"code\":\"service_unavailable\""),
+        "local fallback should surface service_unavailable: {body}"
+    );
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "soft quota failure must not leak usage limit after fallback exhaustion: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()],
+        "exhausted fallback profile should be blocked before send"
+    );
+}
+
+#[test]
 fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_http_requests() {
     let backend = RuntimeProxyBackend::start_http_usage_limit_message();
     let temp_dir = TestDir::new();
@@ -19453,6 +19746,70 @@ fn quota_message_extraction_detects_usage_limit_reached_type() {
         .expect("usage_limit_reached type should be detected");
 
     assert_eq!(message, "The usage limit has been reached");
+}
+
+#[test]
+fn runtime_proxy_final_responses_failure_reply_masks_quota_blocked_upstream_failure() {
+    let response = runtime_proxy_final_responses_failure_reply(
+        Some((
+            RuntimeUpstreamFailureResponse::Http(RuntimeResponsesReply::Buffered(
+                build_runtime_proxy_json_error_parts(
+                    429,
+                    "insufficient_quota",
+                    "The usage limit has been reached",
+                ),
+            )),
+            true,
+        )),
+        false,
+    );
+
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("expected buffered responses reply");
+    };
+    assert_eq!(parts.status, 503, "quota-blocked failure should be masked");
+    let body: serde_json::Value =
+        serde_json::from_slice(&parts.body).expect("response body should parse");
+    assert_eq!(
+        body.get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(serde_json::Value::as_str),
+        Some("service_unavailable")
+    );
+    assert!(
+        !String::from_utf8_lossy(&parts.body).contains("usage limit"),
+        "masked response should not leak upstream quota text"
+    );
+}
+
+#[test]
+fn runtime_proxy_final_responses_failure_reply_preserves_nonquota_upstream_failure() {
+    let response = runtime_proxy_final_responses_failure_reply(
+        Some((
+            RuntimeUpstreamFailureResponse::Http(RuntimeResponsesReply::Buffered(
+                build_runtime_proxy_json_error_parts(
+                    404,
+                    "previous_response_not_found",
+                    "previous response missing upstream",
+                ),
+            )),
+            false,
+        )),
+        false,
+    );
+
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("expected buffered responses reply");
+    };
+    assert_eq!(parts.status, 404, "nonquota failure should pass through");
+    let body: serde_json::Value =
+        serde_json::from_slice(&parts.body).expect("response body should parse");
+    assert_eq!(
+        body.get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(serde_json::Value::as_str),
+        Some("previous_response_not_found")
+    );
 }
 
 #[test]
@@ -27223,6 +27580,131 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_we
             .iter()
             .any(|payload| payload.contains("You've hit your usage limit")),
         "stale critical-floor snapshot should not surface usage limit: {payloads:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remains() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "second".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Critical,
+                five_hour_remaining_percent: 1,
+                five_hour_reset_at: now + 300,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 90,
+                weekly_reset_at: now + 86_400,
+            },
+        )]),
+    )
+    .expect("failed to save runtime usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    let mut saw_service_unavailable = false;
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                if text.contains("\"code\":\"service_unavailable\"") {
+                    saw_service_unavailable = true;
+                }
+                payloads.push(text);
+                if done || saw_service_unavailable {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for masked soft quota payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"code\":\"service_unavailable\"")),
+        "soft quota failure without ready fallback should degrade locally: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("main quota exhausted")),
+        "soft quota failure must not leak upstream websocket quota text: {payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()],
+        "exhausted websocket fallback profile should be blocked before send"
     );
 }
 

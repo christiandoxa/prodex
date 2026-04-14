@@ -1119,7 +1119,7 @@ pub(super) fn reset_runtime_previous_response_fresh_fallback_state(
     turn_state_profile: &mut Option<String>,
     session_profile: &mut Option<String>,
     excluded_profiles: &mut BTreeSet<String>,
-    last_failure: &mut Option<RuntimeUpstreamFailureResponse>,
+    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
     selection_started_at: &mut Instant,
     selection_attempts: &mut usize,
 ) {
@@ -1160,7 +1160,7 @@ pub(super) fn apply_runtime_responses_previous_response_fresh_fallback(
     turn_state_profile: &mut Option<String>,
     session_profile: &mut Option<String>,
     excluded_profiles: &mut BTreeSet<String>,
-    last_failure: &mut Option<RuntimeUpstreamFailureResponse>,
+    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
     selection_started_at: &mut Instant,
     selection_attempts: &mut usize,
 ) {
@@ -1206,7 +1206,7 @@ pub(super) fn apply_runtime_websocket_previous_response_fresh_fallback(
     turn_state_profile: &mut Option<String>,
     session_profile: &mut Option<String>,
     excluded_profiles: &mut BTreeSet<String>,
-    last_failure: &mut Option<RuntimeUpstreamFailureResponse>,
+    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
     selection_started_at: &mut Instant,
     selection_attempts: &mut usize,
 ) {
@@ -3516,6 +3516,100 @@ pub(super) fn runtime_proxy_precommit_budget_exhausted(
     attempts >= attempt_limit || started_at.elapsed() >= budget
 }
 
+pub(super) fn runtime_proxy_final_retryable_http_failure_response(
+    last_failure: Option<(tiny_http::ResponseBox, bool)>,
+    saw_inflight_saturation: bool,
+    json_errors: bool,
+) -> Option<tiny_http::ResponseBox> {
+    match last_failure {
+        Some((response, false)) => Some(response),
+        Some((_response, true)) if saw_inflight_saturation => {
+            Some(build_runtime_proxy_json_error_response(
+                503,
+                "service_unavailable",
+                "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+            ))
+        }
+        Some((_response, true)) => Some(if json_errors {
+            build_runtime_proxy_json_error_response(
+                503,
+                "service_unavailable",
+                runtime_proxy_local_selection_failure_message(),
+            )
+        } else {
+            build_runtime_proxy_text_response(503, runtime_proxy_local_selection_failure_message())
+        }),
+        None if saw_inflight_saturation => Some(build_runtime_proxy_json_error_response(
+            503,
+            "service_unavailable",
+            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+        )),
+        None => None,
+    }
+}
+
+pub(super) fn runtime_proxy_final_responses_failure_reply(
+    last_failure: Option<(RuntimeUpstreamFailureResponse, bool)>,
+    saw_inflight_saturation: bool,
+) -> RuntimeResponsesReply {
+    match last_failure {
+        Some((failure, false)) => match failure {
+            RuntimeUpstreamFailureResponse::Http(response) => response,
+            RuntimeUpstreamFailureResponse::Websocket(_) => {
+                RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+                    503,
+                    "service_unavailable",
+                    runtime_proxy_local_selection_failure_message(),
+                ))
+            }
+        },
+        _ if saw_inflight_saturation => {
+            RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+                503,
+                "service_unavailable",
+                "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+            ))
+        }
+        _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+            503,
+            "service_unavailable",
+            runtime_proxy_local_selection_failure_message(),
+        )),
+    }
+}
+
+pub(super) fn send_runtime_proxy_final_websocket_failure(
+    local_socket: &mut RuntimeLocalWebSocket,
+    last_failure: Option<(RuntimeUpstreamFailureResponse, bool)>,
+    saw_inflight_saturation: bool,
+) -> Result<()> {
+    match last_failure {
+        Some((failure, false)) => match failure {
+            RuntimeUpstreamFailureResponse::Websocket(payload) => {
+                forward_runtime_proxy_websocket_error(local_socket, &payload)
+            }
+            RuntimeUpstreamFailureResponse::Http(_) => send_runtime_proxy_websocket_error(
+                local_socket,
+                503,
+                "service_unavailable",
+                runtime_proxy_local_selection_failure_message(),
+            ),
+        },
+        _ if saw_inflight_saturation => send_runtime_proxy_websocket_error(
+            local_socket,
+            503,
+            "service_unavailable",
+            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
+        ),
+        _ => send_runtime_proxy_websocket_error(
+            local_socket,
+            503,
+            "service_unavailable",
+            runtime_proxy_local_selection_failure_message(),
+        ),
+    }
+}
+
 pub(super) fn runtime_proxy_precommit_budget(
     continuation: bool,
     pressure_mode: bool,
@@ -3624,6 +3718,21 @@ pub(super) fn runtime_has_alternative_quota_compatible_profile(
     Ok(runtime.state.profiles.iter().any(|(name, profile)| {
         name != profile_name && read_auth_summary(&profile.codex_home).quota_compatible
     }))
+}
+
+pub(super) fn runtime_has_configured_alternative_profile(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<bool> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime
+        .state
+        .profiles
+        .keys()
+        .any(|name| name != profile_name))
 }
 
 pub(super) fn refresh_runtime_profile_quota_inline(
@@ -4219,12 +4328,14 @@ pub(super) fn select_runtime_response_candidate_for_route(
             runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
         let compact_session_owner_without_probe =
             route_kind == RuntimeRouteKind::Compact && quota_source.is_none();
-        let websocket_reuse_current_profile = route_kind == RuntimeRouteKind::Websocket
+        let websocket_unknown_current_profile_without_pool_fallback = route_kind
+            == RuntimeRouteKind::Websocket
             && quota_source.is_none()
-            && runtime_proxy_current_profile(shared)? == profile_name;
+            && runtime_proxy_current_profile(shared)? == profile_name
+            && !runtime_has_alternative_quota_compatible_profile(shared, profile_name)?;
         if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source, route_kind)
             || compact_session_owner_without_probe
-            || websocket_reuse_current_profile
+            || websocket_unknown_current_profile_without_pool_fallback
         {
             return Ok(Some(profile_name.to_string()));
         }
@@ -4903,7 +5014,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
     }
     recompute_route_affinity!("initial")?;
     let mut excluded_profiles = BTreeSet::new();
-    let mut last_failure = None;
+    let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
     let mut previous_response_retry_candidate: Option<String> = None;
     let mut previous_response_retry_index = 0usize;
     let mut candidate_turn_state_retry_profile: Option<String> = None;
@@ -4991,27 +5102,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted"
                     ),
                 );
-                match last_failure {
-                    Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
-                        forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                    }
-                    _ if saw_inflight_saturation => {
-                        send_runtime_proxy_websocket_error(
-                            local_socket,
-                            503,
-                            "service_unavailable",
-                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                        )?;
-                    }
-                    _ => {
-                        send_runtime_proxy_websocket_error(
-                            local_socket,
-                            503,
-                            "service_unavailable",
-                            runtime_proxy_local_selection_failure_message(),
-                        )?;
-                    }
-                }
+                send_runtime_proxy_final_websocket_failure(
+                    local_socket,
+                    last_failure,
+                    saw_inflight_saturation,
+                )?;
                 return Ok(());
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
@@ -5142,8 +5237,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
+                        let mask_quota_blocked_failure =
+                            runtime_has_configured_alternative_profile(shared, &profile_name)?;
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        last_failure = Some((
+                            RuntimeUpstreamFailureResponse::Websocket(payload),
+                            mask_quota_blocked_failure,
+                        ));
                         continue;
                     }
                     RuntimeWebsocketAttempt::Overloaded {
@@ -5240,7 +5340,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             continue;
                         }
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                         continue;
                     }
                     RuntimeWebsocketAttempt::PreviousResponseNotFound {
@@ -5272,7 +5373,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 runtime_previous_response_retry_delay(previous_response_retry_index)
                         {
                             previous_response_retry_index += 1;
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                            last_failure =
+                                Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -5327,7 +5429,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             Some(&mut compact_followup_profile),
                         );
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                         continue;
                     }
                     RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
@@ -5435,27 +5538,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     }
                 }
             }
-            match last_failure {
-                Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
-                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                }
-                _ if saw_inflight_saturation => {
-                    send_runtime_proxy_websocket_error(
-                        local_socket,
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )?;
-                }
-                _ => {
-                    send_runtime_proxy_websocket_error(
-                        local_socket,
-                        503,
-                        "service_unavailable",
-                        runtime_proxy_local_selection_failure_message(),
-                    )?;
-                }
-            }
+            send_runtime_proxy_final_websocket_failure(
+                local_socket,
+                last_failure,
+                saw_inflight_saturation,
+            )?;
             return Ok(());
         }
 
@@ -5478,8 +5565,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 format!(
                     "request={request_id} websocket_session={session_id} candidate_exhausted last_failure={}",
                     match &last_failure {
-                        Some(RuntimeUpstreamFailureResponse::Websocket(_)) => "websocket",
-                        Some(RuntimeUpstreamFailureResponse::Http(_)) => "http",
+                        Some((RuntimeUpstreamFailureResponse::Websocket(_), _)) => "websocket",
+                        Some((RuntimeUpstreamFailureResponse::Http(_), _)) => "http",
                         None => "none",
                     }
                 ),
@@ -5535,27 +5622,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted"
                     ),
                 );
-                match last_failure {
-                    Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
-                        forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                    }
-                    _ if saw_inflight_saturation => {
-                        send_runtime_proxy_websocket_error(
-                            local_socket,
-                            503,
-                            "service_unavailable",
-                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                        )?;
-                    }
-                    _ => {
-                        send_runtime_proxy_websocket_error(
-                            local_socket,
-                            503,
-                            "service_unavailable",
-                            runtime_proxy_local_selection_failure_message(),
-                        )?;
-                    }
-                }
+                send_runtime_proxy_final_websocket_failure(
+                    local_socket,
+                    last_failure,
+                    saw_inflight_saturation,
+                )?;
                 return Ok(());
             }
             let remaining_cold_start_profiles =
@@ -5704,8 +5775,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
+                        let mask_quota_blocked_failure =
+                            runtime_has_configured_alternative_profile(shared, &profile_name)?;
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        last_failure = Some((
+                            RuntimeUpstreamFailureResponse::Websocket(payload),
+                            mask_quota_blocked_failure,
+                        ));
                         continue;
                     }
                     RuntimeWebsocketAttempt::Overloaded {
@@ -5763,7 +5839,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             return Ok(());
                         }
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                         continue;
                     }
                     RuntimeWebsocketAttempt::PreviousResponseNotFound {
@@ -5795,7 +5872,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 runtime_previous_response_retry_delay(previous_response_retry_index)
                         {
                             previous_response_retry_index += 1;
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                            last_failure =
+                                Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -5850,7 +5928,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             Some(&mut compact_followup_profile),
                         );
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                         continue;
                     }
                     RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
@@ -5958,27 +6037,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     }
                 }
             }
-            match last_failure {
-                Some(RuntimeUpstreamFailureResponse::Websocket(payload)) => {
-                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
-                }
-                _ if saw_inflight_saturation => {
-                    send_runtime_proxy_websocket_error(
-                        local_socket,
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )?;
-                }
-                _ => {
-                    send_runtime_proxy_websocket_error(
-                        local_socket,
-                        503,
-                        "service_unavailable",
-                        runtime_proxy_local_selection_failure_message(),
-                    )?;
-                }
-            }
+            send_runtime_proxy_final_websocket_failure(
+                local_socket,
+                last_failure,
+                saw_inflight_saturation,
+            )?;
             return Ok(());
         };
         selection_attempts = selection_attempts.saturating_add(1);
@@ -6148,8 +6211,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
+                let mask_quota_blocked_failure =
+                    runtime_has_configured_alternative_profile(shared, &profile_name)?;
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                last_failure = Some((
+                    RuntimeUpstreamFailureResponse::Websocket(payload),
+                    mask_quota_blocked_failure,
+                ));
             }
             RuntimeWebsocketAttempt::Overloaded {
                 profile_name,
@@ -6245,7 +6313,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     continue;
                 }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
             }
             RuntimeWebsocketAttempt::LocalSelectionBlocked {
                 profile_name,
@@ -6506,7 +6574,8 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
-                    last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                    last_failure =
+                        Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -6562,7 +6631,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 );
                 trusted_previous_response_affinity = false;
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeUpstreamFailureResponse::Websocket(payload));
+                last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
             }
         }
     }
@@ -7837,7 +7906,7 @@ pub(super) fn proxy_runtime_standard_request(
         let selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         let mut excluded_profiles = BTreeSet::new();
-        let mut last_failure = None;
+        let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
         let mut saw_inflight_saturation = false;
         let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route(
             shared,
@@ -7903,18 +7972,17 @@ pub(super) fn proxy_runtime_standard_request(
                         selection_started_at.elapsed().as_millis()
                     ),
                 );
-                return match last_failure {
-                    Some(response) => Ok(response),
-                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )),
-                    None => Ok(build_runtime_proxy_text_response(
+                return Ok(runtime_proxy_final_retryable_http_failure_response(
+                    last_failure,
+                    saw_inflight_saturation,
+                    false,
+                )
+                .unwrap_or_else(|| {
+                    build_runtime_proxy_text_response(
                         503,
                         runtime_proxy_local_selection_failure_message(),
-                    )),
-                };
+                    )
+                }));
             }
 
             let candidate_name = if excluded_profiles.is_empty() {
@@ -7950,18 +8018,17 @@ pub(super) fn proxy_runtime_standard_request(
                     }
                     continue;
                 }
-                return match last_failure {
-                    Some(response) => Ok(response),
-                    None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    )),
-                    None => Ok(build_runtime_proxy_text_response(
+                return Ok(runtime_proxy_final_retryable_http_failure_response(
+                    last_failure,
+                    saw_inflight_saturation,
+                    false,
+                )
+                .unwrap_or_else(|| {
+                    build_runtime_proxy_text_response(
                         503,
                         runtime_proxy_local_selection_failure_message(),
-                    )),
-                };
+                    )
+                }));
             };
             selection_attempts = selection_attempts.saturating_add(1);
 
@@ -8022,8 +8089,10 @@ pub(super) fn proxy_runtime_standard_request(
                             ),
                         );
                     }
+                    let mask_quota_blocked_failure =
+                        runtime_has_configured_alternative_profile(shared, &profile_name)?;
                     excluded_profiles.insert(profile_name);
-                    last_failure = Some(response);
+                    last_failure = Some((response, mask_quota_blocked_failure));
                 }
                 RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                     runtime_proxy_log(
@@ -8084,7 +8153,7 @@ pub(super) fn proxy_runtime_standard_request(
     }
     let mut excluded_profiles = BTreeSet::new();
     let mut conservative_overload_retried_profiles = BTreeSet::new();
-    let mut last_failure = None;
+    let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
     let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
@@ -8103,57 +8172,56 @@ pub(super) fn proxy_runtime_standard_request(
                     selection_started_at.elapsed().as_millis()
                 ),
             );
-            return match last_failure {
-                Some(response) => Ok(response),
-                None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+            if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
+                last_failure,
+                saw_inflight_saturation,
+                true,
+            ) {
+                return Ok(response);
+            }
+            if compact_followup_profile.is_some() || session_profile.is_some() {
+                return Ok(build_runtime_proxy_json_error_response(
                     503,
                     "service_unavailable",
-                    "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                )),
-                None if compact_followup_profile.is_some() || session_profile.is_some() => {
+                    runtime_proxy_local_selection_failure_message(),
+                ));
+            }
+            return match attempt_runtime_standard_request(
+                request_id,
+                request,
+                shared,
+                &compact_owner_profile,
+                runtime_candidate_has_hard_affinity(
+                    RuntimeRouteKind::Compact,
+                    &compact_owner_profile,
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    None,
+                    None,
+                    session_profile.as_deref(),
+                    false,
+                ),
+            )? {
+                RuntimeStandardAttempt::Success {
+                    profile_name,
+                    response,
+                } => {
+                    commit_runtime_proxy_profile_selection_with_notice(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Compact,
+                    )?;
+                    Ok(response)
+                }
+                RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+                RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
                     Ok(build_runtime_proxy_json_error_response(
                         503,
                         "service_unavailable",
                         runtime_proxy_local_selection_failure_message(),
                     ))
                 }
-                None => match attempt_runtime_standard_request(
-                    request_id,
-                    request,
-                    shared,
-                    &compact_owner_profile,
-                    runtime_candidate_has_hard_affinity(
-                        RuntimeRouteKind::Compact,
-                        &compact_owner_profile,
-                        compact_followup_profile
-                            .as_ref()
-                            .map(|(profile_name, _)| profile_name.as_str()),
-                        None,
-                        None,
-                        session_profile.as_deref(),
-                        false,
-                    ),
-                )? {
-                    RuntimeStandardAttempt::Success {
-                        profile_name,
-                        response,
-                    } => {
-                        commit_runtime_proxy_profile_selection_with_notice(
-                            shared,
-                            &profile_name,
-                            RuntimeRouteKind::Compact,
-                        )?;
-                        Ok(response)
-                    }
-                    RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
-                    RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
-                        Ok(build_runtime_proxy_json_error_response(
-                            503,
-                            "service_unavailable",
-                            runtime_proxy_local_selection_failure_message(),
-                        ))
-                    }
-                },
             };
         }
         selection_attempts = selection_attempts.saturating_add(1);
@@ -8204,57 +8272,56 @@ pub(super) fn proxy_runtime_standard_request(
                 }
                 continue;
             }
-            return match last_failure {
-                Some(response) => Ok(response),
-                None if saw_inflight_saturation => Ok(build_runtime_proxy_json_error_response(
+            if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
+                last_failure,
+                saw_inflight_saturation,
+                true,
+            ) {
+                return Ok(response);
+            }
+            if compact_followup_profile.is_some() || session_profile.is_some() {
+                return Ok(build_runtime_proxy_json_error_response(
                     503,
                     "service_unavailable",
-                    "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                )),
-                None if compact_followup_profile.is_some() || session_profile.is_some() => {
+                    runtime_proxy_local_selection_failure_message(),
+                ));
+            }
+            return match attempt_runtime_standard_request(
+                request_id,
+                request,
+                shared,
+                &compact_owner_profile,
+                runtime_candidate_has_hard_affinity(
+                    RuntimeRouteKind::Compact,
+                    &compact_owner_profile,
+                    compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    None,
+                    None,
+                    session_profile.as_deref(),
+                    false,
+                ),
+            )? {
+                RuntimeStandardAttempt::Success {
+                    profile_name,
+                    response,
+                } => {
+                    commit_runtime_proxy_profile_selection_with_notice(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Compact,
+                    )?;
+                    Ok(response)
+                }
+                RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+                RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
                     Ok(build_runtime_proxy_json_error_response(
                         503,
                         "service_unavailable",
                         runtime_proxy_local_selection_failure_message(),
                     ))
                 }
-                None => match attempt_runtime_standard_request(
-                    request_id,
-                    request,
-                    shared,
-                    &compact_owner_profile,
-                    runtime_candidate_has_hard_affinity(
-                        RuntimeRouteKind::Compact,
-                        &compact_owner_profile,
-                        compact_followup_profile
-                            .as_ref()
-                            .map(|(profile_name, _)| profile_name.as_str()),
-                        None,
-                        None,
-                        session_profile.as_deref(),
-                        false,
-                    ),
-                )? {
-                    RuntimeStandardAttempt::Success {
-                        profile_name,
-                        response,
-                    } => {
-                        commit_runtime_proxy_profile_selection_with_notice(
-                            shared,
-                            &profile_name,
-                            RuntimeRouteKind::Compact,
-                        )?;
-                        Ok(response)
-                    }
-                    RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
-                    RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
-                        Ok(build_runtime_proxy_json_error_response(
-                            503,
-                            "service_unavailable",
-                            runtime_proxy_local_selection_failure_message(),
-                        ))
-                    }
-                },
             };
         };
 
@@ -8373,7 +8440,7 @@ pub(super) fn proxy_runtime_standard_request(
                             "request={request_id} transport=http compact_overload_conservative_retry profile={profile_name} delay_ms={RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS} reason=non_blocking_retry"
                         ),
                     );
-                    last_failure = Some(response);
+                    last_failure = Some((response, false));
                     continue;
                 }
                 runtime_proxy_log(
@@ -8430,8 +8497,10 @@ pub(super) fn proxy_runtime_standard_request(
                         "compact_overload",
                     );
                 }
+                let mask_quota_blocked_failure =
+                    !overload && runtime_has_configured_alternative_profile(shared, &profile_name)?;
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(response);
+                last_failure = Some((response, mask_quota_blocked_failure));
             }
             RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                 runtime_proxy_log(
@@ -8889,7 +8958,7 @@ pub(super) fn proxy_runtime_responses_request(
     }
     recompute_route_affinity!("initial")?;
     let mut excluded_profiles = BTreeSet::new();
-    let mut last_failure = None;
+    let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
     let mut previous_response_retry_candidate: Option<String> = None;
     let mut previous_response_retry_index = 0usize;
     let mut candidate_turn_state_retry_profile: Option<String> = None;
@@ -8969,21 +9038,10 @@ pub(super) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted"
                     ),
                 );
-                return Ok(match last_failure {
-                    Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
-                    _ if saw_inflight_saturation => {
-                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                            503,
-                            "service_unavailable",
-                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                        ))
-                    }
-                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                        503,
-                        "service_unavailable",
-                        runtime_proxy_local_selection_failure_message(),
-                    )),
-                });
+                return Ok(runtime_proxy_final_responses_failure_reply(
+                    last_failure,
+                    saw_inflight_saturation,
+                ));
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
@@ -9129,8 +9187,13 @@ pub(super) fn proxy_runtime_responses_request(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
+                        let mask_quota_blocked_failure =
+                            runtime_has_configured_alternative_profile(shared, &profile_name)?;
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        last_failure = Some((
+                            RuntimeUpstreamFailureResponse::Http(response),
+                            mask_quota_blocked_failure,
+                        ));
                         continue;
                     }
                     RuntimeResponsesAttempt::PreviousResponseNotFound {
@@ -9162,7 +9225,8 @@ pub(super) fn proxy_runtime_responses_request(
                                 runtime_previous_response_retry_delay(previous_response_retry_index)
                         {
                             previous_response_retry_index += 1;
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                            last_failure =
+                                Some((RuntimeUpstreamFailureResponse::Http(response), false));
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -9210,7 +9274,8 @@ pub(super) fn proxy_runtime_responses_request(
                             Some(&mut compact_followup_profile),
                         );
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Http(response), false));
                         continue;
                     }
                     RuntimeResponsesAttempt::LocalSelectionBlocked {
@@ -9307,21 +9372,10 @@ pub(super) fn proxy_runtime_responses_request(
                     }
                 }
             }
-            return Ok(match last_failure {
-                Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
-                _ if saw_inflight_saturation => {
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    ))
-                }
-                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                    503,
-                    "service_unavailable",
-                    runtime_proxy_local_selection_failure_message(),
-                )),
-            });
+            return Ok(runtime_proxy_final_responses_failure_reply(
+                last_failure,
+                saw_inflight_saturation,
+            ));
         }
 
         let Some(candidate_name) = select_runtime_response_candidate_for_route(
@@ -9343,8 +9397,8 @@ pub(super) fn proxy_runtime_responses_request(
                 format!(
                     "request={request_id} transport=http candidate_exhausted last_failure={}",
                     match &last_failure {
-                        Some(RuntimeUpstreamFailureResponse::Http(_)) => "http",
-                        Some(RuntimeUpstreamFailureResponse::Websocket(_)) => "websocket",
+                        Some((RuntimeUpstreamFailureResponse::Http(_), _)) => "http",
+                        Some((RuntimeUpstreamFailureResponse::Websocket(_), _)) => "websocket",
                         None => "none",
                     }
                 ),
@@ -9425,21 +9479,10 @@ pub(super) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted"
                     ),
                 );
-                return Ok(match last_failure {
-                    Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
-                    _ if saw_inflight_saturation => {
-                        RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                            503,
-                            "service_unavailable",
-                            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                        ))
-                    }
-                    _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                        503,
-                        "service_unavailable",
-                        runtime_proxy_local_selection_failure_message(),
-                    )),
-                });
+                return Ok(runtime_proxy_final_responses_failure_reply(
+                    last_failure,
+                    saw_inflight_saturation,
+                ));
             }
             let remaining_cold_start_profiles =
                 runtime_remaining_sync_probe_cold_start_profiles_for_route(
@@ -9603,8 +9646,13 @@ pub(super) fn proxy_runtime_responses_request(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
+                        let mask_quota_blocked_failure =
+                            runtime_has_configured_alternative_profile(shared, &profile_name)?;
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        last_failure = Some((
+                            RuntimeUpstreamFailureResponse::Http(response),
+                            mask_quota_blocked_failure,
+                        ));
                         continue;
                     }
                     RuntimeResponsesAttempt::PreviousResponseNotFound {
@@ -9636,7 +9684,8 @@ pub(super) fn proxy_runtime_responses_request(
                                 runtime_previous_response_retry_delay(previous_response_retry_index)
                         {
                             previous_response_retry_index += 1;
-                            last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                            last_failure =
+                                Some((RuntimeUpstreamFailureResponse::Http(response), false));
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -9684,7 +9733,8 @@ pub(super) fn proxy_runtime_responses_request(
                             Some(&mut compact_followup_profile),
                         );
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Http(response), false));
                         continue;
                     }
                     RuntimeResponsesAttempt::LocalSelectionBlocked {
@@ -9781,21 +9831,10 @@ pub(super) fn proxy_runtime_responses_request(
                     }
                 }
             }
-            return Ok(match last_failure {
-                Some(RuntimeUpstreamFailureResponse::Http(response)) => response,
-                _ if saw_inflight_saturation => {
-                    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                        503,
-                        "service_unavailable",
-                        "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-                    ))
-                }
-                _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                    503,
-                    "service_unavailable",
-                    runtime_proxy_local_selection_failure_message(),
-                )),
-            });
+            return Ok(runtime_proxy_final_responses_failure_reply(
+                last_failure,
+                saw_inflight_saturation,
+            ));
         };
         selection_attempts = selection_attempts.saturating_add(1);
         let turn_state_override =
@@ -10007,8 +10046,13 @@ pub(super) fn proxy_runtime_responses_request(
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
+                let mask_quota_blocked_failure =
+                    runtime_has_configured_alternative_profile(shared, &profile_name)?;
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                last_failure = Some((
+                    RuntimeUpstreamFailureResponse::Http(response),
+                    mask_quota_blocked_failure,
+                ));
             }
             RuntimeResponsesAttempt::LocalSelectionBlocked {
                 profile_name,
@@ -10134,7 +10178,7 @@ pub(super) fn proxy_runtime_responses_request(
                         runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
-                    last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                    last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -10183,7 +10227,7 @@ pub(super) fn proxy_runtime_responses_request(
                 );
                 trusted_previous_response_affinity = false;
                 excluded_profiles.insert(profile_name);
-                last_failure = Some(RuntimeUpstreamFailureResponse::Http(response));
+                last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
             }
         }
     }
@@ -10647,6 +10691,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
     });
     for (index, candidate) in ready_candidates {
         let inflight = runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight);
+        let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
         if runtime_profile_auth_failure_active_with_auth_cache(
             &profile_health,
             &profile_usage_auth,
@@ -10675,8 +10720,32 @@ pub(super) fn next_runtime_response_candidate_for_route(
             );
             continue;
         }
+        if matches!(
+            route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+        ) && let Some(reason) = runtime_quota_precommit_guard_reason(quota_summary, route_kind)
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason={} inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    reason,
+                    inflight,
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            continue;
+        }
         if inflight >= inflight_soft_limit {
-            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
             runtime_proxy_log(
                 shared,
                 format!(
@@ -10702,7 +10771,6 @@ pub(super) fn next_runtime_response_candidate_for_route(
             &candidate.name,
             route_kind,
         )? {
-            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
             runtime_proxy_log(
                 shared,
                 format!(
@@ -10722,7 +10790,6 @@ pub(super) fn next_runtime_response_candidate_for_route(
             );
             continue;
         }
-        let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
         runtime_proxy_log(
             shared,
             format!(
@@ -10791,12 +10858,37 @@ pub(super) fn next_runtime_response_candidate_for_route(
             );
             continue;
         }
+        let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
+        if matches!(
+            route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+        ) && let Some(reason) = runtime_quota_precommit_guard_reason(quota_summary, route_kind)
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason={} inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    reason,
+                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
+                    runtime_profile_health_sort_key(
+                        &candidate.name,
+                        &profile_health,
+                        now,
+                        route_kind
+                    ),
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            continue;
+        }
         if !reserve_runtime_profile_route_circuit_half_open_probe(
             shared,
             &candidate.name,
             route_kind,
         )? {
-            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
             runtime_proxy_log(
                 shared,
                 format!(
@@ -10816,7 +10908,6 @@ pub(super) fn next_runtime_response_candidate_for_route(
             );
             continue;
         }
-        let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
         runtime_proxy_log(
             shared,
             format!(
