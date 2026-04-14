@@ -463,9 +463,22 @@ pub(super) fn load_runtime_profile_usage_auth_cache_entry(
 pub(super) fn runtime_profile_usage_auth_cache_entry_matches(
     entry: &RuntimeProfileUsageAuthCacheEntry,
 ) -> Result<bool> {
-    let revision = secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
-        .probe_revision(&entry.location)
-        .map_err(anyhow::Error::new)?;
+    let revision = match &entry.location {
+        secret_store::SecretLocation::File(path) => match std::fs::metadata(path) {
+            Ok(metadata) => Some(secret_store::SecretRevision::from_metadata(&metadata)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => {
+                return Err(
+                    anyhow::Error::new(err).context(format!("failed to stat {}", path.display()))
+                );
+            }
+        },
+        secret_store::SecretLocation::Keyring { .. } => {
+            secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+                .probe_revision(&entry.location)
+                .map_err(anyhow::Error::new)?
+        }
+    };
     Ok(revision == entry.revision)
 }
 

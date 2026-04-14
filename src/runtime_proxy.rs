@@ -670,6 +670,36 @@ pub(super) fn runtime_profile_inflight_wait_outcome_since(
     }
 }
 
+pub(super) fn runtime_probe_refresh_wait_outcome_since(
+    timeout: Duration,
+    observed_revision: u64,
+) -> RuntimeProfileInFlightWaitOutcome {
+    if timeout.is_zero() {
+        return RuntimeProfileInFlightWaitOutcome::Timeout;
+    }
+    if runtime_probe_refresh_revision() != observed_revision {
+        return RuntimeProfileInFlightWaitOutcome::InflightRelease;
+    }
+    let queue = runtime_probe_refresh_queue();
+    let (mutex, condvar) = &*queue.wait;
+    let guard = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if runtime_probe_refresh_revision() != observed_revision {
+        return RuntimeProfileInFlightWaitOutcome::InflightRelease;
+    }
+    let (_guard, result) = condvar
+        .wait_timeout(guard, timeout)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if runtime_probe_refresh_revision() != observed_revision {
+        RuntimeProfileInFlightWaitOutcome::InflightRelease
+    } else if result.timed_out() {
+        RuntimeProfileInFlightWaitOutcome::Timeout
+    } else {
+        RuntimeProfileInFlightWaitOutcome::OtherNotify
+    }
+}
+
 #[cfg(test)]
 pub(super) fn wait_for_runtime_profile_inflight_relief_since(
     shared: &RuntimeRotationProxyShared,
@@ -678,6 +708,17 @@ pub(super) fn wait_for_runtime_profile_inflight_relief_since(
 ) -> bool {
     matches!(
         runtime_profile_inflight_wait_outcome_since(shared, timeout, observed_revision),
+        RuntimeProfileInFlightWaitOutcome::InflightRelease
+    )
+}
+
+#[cfg(test)]
+pub(super) fn wait_for_runtime_probe_refresh_since(
+    timeout: Duration,
+    observed_revision: u64,
+) -> bool {
+    matches!(
+        runtime_probe_refresh_wait_outcome_since(timeout, observed_revision),
         RuntimeProfileInFlightWaitOutcome::InflightRelease
     )
 }
@@ -3702,31 +3743,117 @@ pub(super) fn runtime_profile_codex_home(
         .map(|profile| profile.codex_home.clone()))
 }
 
+#[cfg(test)]
 pub(super) fn runtime_has_alternative_quota_compatible_profile(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<bool> {
-    let (profiles, profile_usage_auth, profile_probe_cache) = {
+    let allow_disk_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let fallback_profiles = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let mut fallback_profiles = Vec::new();
+        for (name, profile) in &runtime.state.profiles {
+            if name == profile_name {
+                continue;
+            }
+            if runtime_profile_cached_auth_summary_for_selection(
+                runtime.profile_usage_auth.get(name).cloned(),
+                runtime.profile_probe_cache.get(name).cloned(),
+            )
+            .is_some_and(|summary| summary.quota_compatible)
+            {
+                return Ok(true);
+            }
+            fallback_profiles.push(profile.codex_home.clone());
+        }
+        fallback_profiles
+    };
+    if !allow_disk_fallback {
+        return Ok(false);
+    }
+    Ok(fallback_profiles
+        .into_iter()
+        .any(|codex_home| read_auth_summary(&codex_home).quota_compatible))
+}
+
+pub(super) fn runtime_has_route_eligible_quota_fallback(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let (
+        state,
+        retry_backoff_until,
+        transport_backoff_until,
+        route_circuit_open_until,
+        profile_inflight,
+        profile_health,
+        profile_usage_auth,
+        profile_probe_cache,
+    ) = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
         (
-            runtime.state.profiles.clone(),
+            runtime.state.clone(),
+            runtime.profile_retry_backoff_until.clone(),
+            runtime.profile_transport_backoff_until.clone(),
+            runtime.profile_route_circuit_open_until.clone(),
+            runtime.profile_inflight.clone(),
+            runtime.profile_health.clone(),
             runtime.profile_usage_auth.clone(),
             runtime.profile_probe_cache.clone(),
         )
     };
-    Ok(profiles.iter().any(|(name, profile)| {
-        name != profile_name
-            && runtime_profile_auth_summary_for_selection(
-                name,
-                &profile.codex_home,
-                &profile_usage_auth,
-                &profile_probe_cache,
-            )
-            .quota_compatible
-    }))
+    for (name, profile) in &state.profiles {
+        if name == profile_name || excluded_profiles.contains(name) {
+            continue;
+        }
+        if !runtime_profile_auth_summary_for_selection_with_policy(
+            name,
+            &profile.codex_home,
+            &profile_usage_auth,
+            &profile_probe_cache,
+            allow_disk_auth_fallback,
+        )
+        .quota_compatible
+        {
+            continue;
+        }
+        if runtime_profile_auth_failure_active_with_auth_cache(
+            &profile_health,
+            &profile_usage_auth,
+            name,
+            now,
+        ) {
+            continue;
+        }
+        if runtime_profile_name_in_selection_backoff(
+            name,
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            route_kind,
+            now,
+        ) {
+            continue;
+        }
+        if runtime_profile_inflight_sort_key(name, &profile_inflight) >= inflight_soft_limit {
+            continue;
+        }
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 pub(super) fn refresh_runtime_profile_quota_inline(
@@ -3796,7 +3923,7 @@ pub(super) fn runtime_proxy_direct_current_fallback_profile(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    let (profile_name, codex_home, auth_failure_active, profile_usage_auth, profile_probe_cache) = {
+    let (profile_name, codex_home, auth_failure_active, cached_usage_auth_entry, probe_cache_entry) = {
         let runtime = shared
             .runtime
             .lock()
@@ -3810,8 +3937,8 @@ pub(super) fn runtime_proxy_direct_current_fallback_profile(
             profile_name.clone(),
             profile.codex_home.clone(),
             runtime_profile_auth_failure_active(&runtime, &profile_name, now),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_probe_cache.clone(),
+            runtime.profile_usage_auth.get(&profile_name).cloned(),
+            runtime.profile_probe_cache.get(&profile_name).cloned(),
         )
     };
     if excluded_profiles.contains(&profile_name) {
@@ -3828,12 +3955,21 @@ pub(super) fn runtime_proxy_direct_current_fallback_profile(
         );
         return Ok(None);
     }
-    if !runtime_profile_auth_summary_for_selection(
-        &profile_name,
-        &codex_home,
-        &profile_usage_auth,
-        &profile_probe_cache,
+    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    if !runtime_profile_cached_auth_summary_for_selection(
+        cached_usage_auth_entry,
+        probe_cache_entry,
     )
+    .unwrap_or_else(|| {
+        if allow_disk_auth_fallback {
+            read_auth_summary(&codex_home)
+        } else {
+            AuthSummary {
+                label: "uncached-auth".to_string(),
+                quota_compatible: false,
+            }
+        }
+    })
     .quota_compatible
     {
         return Ok(None);
@@ -4003,6 +4139,32 @@ pub(super) fn runtime_profile_quota_summary_for_route(
         )))
 }
 
+pub(super) fn runtime_profile_cached_auth_summary_for_selection(
+    usage_auth_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
+    probe_entry: Option<RuntimeProfileProbeCacheEntry>,
+) -> Option<AuthSummary> {
+    if let Some(entry) = usage_auth_entry
+        && runtime_profile_usage_auth_cache_entry_matches(&entry).unwrap_or(false)
+    {
+        return Some(AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        });
+    }
+    probe_entry.map(|entry| entry.auth)
+}
+
+pub(super) fn runtime_profile_cached_auth_summary_from_maps_for_selection(
+    profile_name: &str,
+    profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
+    profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
+) -> Option<AuthSummary> {
+    runtime_profile_cached_auth_summary_for_selection(
+        profile_usage_auth.get(profile_name).cloned(),
+        profile_probe_cache.get(profile_name).cloned(),
+    )
+}
+
 pub(super) fn runtime_snapshot_blocks_same_request_cold_start_probe(
     snapshot: &RuntimeProfileUsageSnapshot,
     route_kind: RuntimeRouteKind,
@@ -4019,22 +4181,52 @@ pub(super) fn runtime_snapshot_blocks_same_request_cold_start_probe(
         .is_some()
 }
 
+#[cfg(test)]
 pub(super) fn runtime_profile_auth_summary_for_selection(
     profile_name: &str,
     codex_home: &Path,
     profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
     profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
 ) -> AuthSummary {
-    if profile_usage_auth.contains_key(profile_name) {
-        return AuthSummary {
-            label: "chatgpt".to_string(),
-            quota_compatible: true,
-        };
+    runtime_profile_auth_summary_for_selection_with_policy(
+        profile_name,
+        codex_home,
+        profile_usage_auth,
+        profile_probe_cache,
+        true,
+    )
+}
+
+pub(super) fn runtime_profile_auth_summary_for_selection_with_policy(
+    profile_name: &str,
+    codex_home: &Path,
+    profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
+    profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
+    allow_disk_fallback: bool,
+) -> AuthSummary {
+    runtime_profile_cached_auth_summary_from_maps_for_selection(
+        profile_name,
+        profile_usage_auth,
+        profile_probe_cache,
+    )
+    .unwrap_or_else(|| {
+        if allow_disk_fallback {
+            read_auth_summary(codex_home)
+        } else {
+            AuthSummary {
+                label: "uncached-auth".to_string(),
+                quota_compatible: false,
+            }
+        }
+    })
+}
+
+pub(super) fn runtime_proxy_sync_probe_pressure_pause(shared: &RuntimeRotationProxyShared) {
+    if !runtime_proxy_sync_probe_pressure_mode_active(shared) {
+        return;
     }
-    profile_probe_cache
-        .get(profile_name)
-        .map(|entry| entry.auth.clone())
-        .unwrap_or_else(|| read_auth_summary(codex_home))
+    let observed_revision = runtime_probe_refresh_revision();
+    let _ = runtime_probe_refresh_wait_outcome_since(Duration::from_millis(5), observed_revision);
 }
 
 pub(super) fn runtime_previous_response_affinity_is_trusted(
@@ -4369,7 +4561,12 @@ pub(super) fn select_runtime_response_candidate_for_route(
             == RuntimeRouteKind::Websocket
             && quota_source.is_none()
             && runtime_proxy_current_profile(shared)? == profile_name
-            && !runtime_has_alternative_quota_compatible_profile(shared, profile_name)?;
+            && !runtime_has_route_eligible_quota_fallback(
+                shared,
+                profile_name,
+                excluded_profiles,
+                route_kind,
+            )?;
         if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source, route_kind)
             || compact_session_owner_without_probe
             || websocket_unknown_current_profile_without_pool_fallback
@@ -4410,6 +4607,7 @@ pub(super) fn next_runtime_previous_response_candidate(
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
+    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
     let (state, current_profile, profile_health, profile_usage_auth, profile_probe_cache) = {
         let runtime = shared
             .runtime
@@ -4469,11 +4667,12 @@ pub(super) fn next_runtime_previous_response_candidate(
         let Some(profile) = state.profiles.get(&name) else {
             continue;
         };
-        if !runtime_profile_auth_summary_for_selection(
+        if !runtime_profile_auth_summary_for_selection_with_policy(
             &name,
             &profile.codex_home,
             &profile_usage_auth,
             &profile_probe_cache,
+            allow_disk_auth_fallback,
         )
         .quota_compatible
         {
@@ -4537,8 +4736,8 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route(
         health_score,
         performance_score,
         auth_failure_active,
-        profile_usage_auth,
-        profile_probe_cache,
+        cached_usage_auth_entry,
+        probe_cache_entry,
     ) = {
         let mut runtime = shared
             .runtime
@@ -4583,18 +4782,37 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route(
                 &runtime.current_profile,
                 now,
             ),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_probe_cache.clone(),
+            runtime
+                .profile_usage_auth
+                .get(&runtime.current_profile)
+                .cloned(),
+            runtime
+                .profile_probe_cache
+                .get(&runtime.current_profile)
+                .cloned(),
         )
     };
-    let has_alternative_quota_compatible_profile =
-        runtime_has_alternative_quota_compatible_profile(shared, &current_profile)?;
-    let current_profile_quota_compatible = runtime_profile_auth_summary_for_selection(
+    let has_alternative_quota_compatible_profile = runtime_has_route_eligible_quota_fallback(
+        shared,
         &current_profile,
-        &codex_home,
-        &profile_usage_auth,
-        &profile_probe_cache,
+        excluded_profiles,
+        route_kind,
+    )?;
+    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let current_profile_quota_compatible = runtime_profile_cached_auth_summary_for_selection(
+        cached_usage_auth_entry,
+        probe_cache_entry,
     )
+    .unwrap_or_else(|| {
+        if allow_disk_auth_fallback {
+            read_auth_summary(&codex_home)
+        } else {
+            AuthSummary {
+                label: "uncached-auth".to_string(),
+                quota_compatible: false,
+            }
+        }
+    })
     .quota_compatible;
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
@@ -5290,16 +5508,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
-                        let mask_quota_blocked_failure =
-                            runtime_has_alternative_quota_compatible_profile(
-                                shared,
-                                &profile_name,
-                            )?;
+                        if !runtime_has_route_eligible_quota_fallback(
+                            shared,
+                            &profile_name,
+                            &BTreeSet::new(),
+                            RuntimeRouteKind::Websocket,
+                        )? {
+                            forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                            return Ok(());
+                        }
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some((
-                            RuntimeUpstreamFailureResponse::Websocket(payload),
-                            mask_quota_blocked_failure,
-                        ));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
                         continue;
                     }
                     RuntimeWebsocketAttempt::Overloaded {
@@ -5698,9 +5918,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} candidate_exhausted_continue route=websocket remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                if runtime_proxy_sync_probe_pressure_mode_active(shared) {
-                    thread::sleep(Duration::from_millis(5));
-                }
+                runtime_proxy_sync_probe_pressure_pause(shared);
                 continue;
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
@@ -5831,16 +6049,18 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
-                        let mask_quota_blocked_failure =
-                            runtime_has_alternative_quota_compatible_profile(
-                                shared,
-                                &profile_name,
-                            )?;
+                        if !runtime_has_route_eligible_quota_fallback(
+                            shared,
+                            &profile_name,
+                            &BTreeSet::new(),
+                            RuntimeRouteKind::Websocket,
+                        )? {
+                            forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                            return Ok(());
+                        }
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some((
-                            RuntimeUpstreamFailureResponse::Websocket(payload),
-                            mask_quota_blocked_failure,
-                        ));
+                        last_failure =
+                            Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
                         continue;
                     }
                     RuntimeWebsocketAttempt::Overloaded {
@@ -6270,13 +6490,17 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
-                let mask_quota_blocked_failure =
-                    runtime_has_alternative_quota_compatible_profile(shared, &profile_name)?;
+                if !runtime_has_route_eligible_quota_fallback(
+                    shared,
+                    &profile_name,
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Websocket,
+                )? {
+                    forward_runtime_proxy_websocket_error(local_socket, &payload)?;
+                    return Ok(());
+                }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some((
-                    RuntimeUpstreamFailureResponse::Websocket(payload),
-                    mask_quota_blocked_failure,
-                ));
+                last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
             }
             RuntimeWebsocketAttempt::Overloaded {
                 profile_name,
@@ -6740,8 +6964,12 @@ pub(super) fn attempt_runtime_websocket_request(
             reason,
         });
     }
-    let has_alternative_quota_profile =
-        runtime_has_alternative_quota_compatible_profile(shared, profile_name)?;
+    let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
+        shared,
+        profile_name,
+        &BTreeSet::new(),
+        RuntimeRouteKind::Websocket,
+    )?;
     let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
         shared,
         profile_name,
@@ -8072,9 +8300,7 @@ pub(super) fn proxy_runtime_standard_request(
                             "request={request_id} transport=http candidate_exhausted_continue route=standard remaining_cold_start_profiles={remaining_cold_start_profiles}"
                         ),
                     );
-                    if runtime_proxy_sync_probe_pressure_mode_active(shared) {
-                        thread::sleep(Duration::from_millis(5));
-                    }
+                    runtime_proxy_sync_probe_pressure_pause(shared);
                     continue;
                 }
                 return Ok(runtime_proxy_final_retryable_http_failure_response(
@@ -8148,10 +8374,16 @@ pub(super) fn proxy_runtime_standard_request(
                             ),
                         );
                     }
-                    let mask_quota_blocked_failure =
-                        runtime_has_alternative_quota_compatible_profile(shared, &profile_name)?;
+                    if !runtime_has_route_eligible_quota_fallback(
+                        shared,
+                        &profile_name,
+                        &BTreeSet::new(),
+                        RuntimeRouteKind::Standard,
+                    )? {
+                        return Ok(response);
+                    }
                     excluded_profiles.insert(profile_name);
-                    last_failure = Some((response, mask_quota_blocked_failure));
+                    last_failure = Some((response, true));
                 }
                 RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                     runtime_proxy_log(
@@ -8326,9 +8558,7 @@ pub(super) fn proxy_runtime_standard_request(
                         "request={request_id} transport=http candidate_exhausted_continue route=compact remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                if runtime_proxy_sync_probe_pressure_mode_active(shared) {
-                    thread::sleep(Duration::from_millis(5));
-                }
+                runtime_proxy_sync_probe_pressure_pause(shared);
                 continue;
             }
             if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
@@ -8556,10 +8786,18 @@ pub(super) fn proxy_runtime_standard_request(
                         "compact_overload",
                     );
                 }
-                let mask_quota_blocked_failure = !overload
-                    && runtime_has_alternative_quota_compatible_profile(shared, &profile_name)?;
+                if !overload
+                    && !runtime_has_route_eligible_quota_fallback(
+                        shared,
+                        &profile_name,
+                        &BTreeSet::new(),
+                        RuntimeRouteKind::Compact,
+                    )?
+                {
+                    return Ok(response);
+                }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some((response, mask_quota_blocked_failure));
+                last_failure = Some((response, !overload));
             }
             RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                 runtime_proxy_log(
@@ -9246,16 +9484,16 @@ pub(super) fn proxy_runtime_responses_request(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
-                        let mask_quota_blocked_failure =
-                            runtime_has_alternative_quota_compatible_profile(
-                                shared,
-                                &profile_name,
-                            )?;
+                        if !runtime_has_route_eligible_quota_fallback(
+                            shared,
+                            &profile_name,
+                            &BTreeSet::new(),
+                            RuntimeRouteKind::Responses,
+                        )? {
+                            return Ok(response);
+                        }
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some((
-                            RuntimeUpstreamFailureResponse::Http(response),
-                            mask_quota_blocked_failure,
-                        ));
+                        last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
                         continue;
                     }
                     RuntimeResponsesAttempt::PreviousResponseNotFound {
@@ -9559,9 +9797,7 @@ pub(super) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http candidate_exhausted_continue route=responses remaining_cold_start_profiles={remaining_cold_start_profiles}"
                     ),
                 );
-                if runtime_proxy_sync_probe_pressure_mode_active(shared) {
-                    thread::sleep(Duration::from_millis(5));
-                }
+                runtime_proxy_sync_probe_pressure_pause(shared);
                 continue;
             }
             if runtime_proxy_allows_direct_current_profile_fallback(
@@ -9708,16 +9944,16 @@ pub(super) fn proxy_runtime_responses_request(
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
                         }
-                        let mask_quota_blocked_failure =
-                            runtime_has_alternative_quota_compatible_profile(
-                                shared,
-                                &profile_name,
-                            )?;
+                        if !runtime_has_route_eligible_quota_fallback(
+                            shared,
+                            &profile_name,
+                            &BTreeSet::new(),
+                            RuntimeRouteKind::Responses,
+                        )? {
+                            return Ok(response);
+                        }
                         excluded_profiles.insert(profile_name);
-                        last_failure = Some((
-                            RuntimeUpstreamFailureResponse::Http(response),
-                            mask_quota_blocked_failure,
-                        ));
+                        last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
                         continue;
                     }
                     RuntimeResponsesAttempt::PreviousResponseNotFound {
@@ -10111,13 +10347,16 @@ pub(super) fn proxy_runtime_responses_request(
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
-                let mask_quota_blocked_failure =
-                    runtime_has_alternative_quota_compatible_profile(shared, &profile_name)?;
+                if !runtime_has_route_eligible_quota_fallback(
+                    shared,
+                    &profile_name,
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )? {
+                    return Ok(response);
+                }
                 excluded_profiles.insert(profile_name);
-                last_failure = Some((
-                    RuntimeUpstreamFailureResponse::Http(response),
-                    mask_quota_blocked_failure,
-                ));
+                last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
             }
             RuntimeResponsesAttempt::LocalSelectionBlocked {
                 profile_name,
@@ -10335,8 +10574,12 @@ pub(super) fn attempt_runtime_responses_request(
             reason,
         });
     }
-    let has_alternative_quota_profile =
-        runtime_has_alternative_quota_compatible_profile(shared, profile_name)?;
+    let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
+        shared,
+        profile_name,
+        &BTreeSet::new(),
+        RuntimeRouteKind::Responses,
+    )?;
     let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
         shared,
         profile_name,
@@ -10476,6 +10719,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let sync_probe_pressure_mode = runtime_proxy_sync_probe_pressure_mode_active(shared);
+    let allow_disk_auth_fallback = !sync_probe_pressure_mode;
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
         state,
@@ -10537,11 +10781,12 @@ pub(super) fn next_runtime_response_candidate_for_route(
                 schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
             }
         } else {
-            let auth = runtime_profile_auth_summary_for_selection(
+            let auth = runtime_profile_auth_summary_for_selection_with_policy(
                 &name,
                 &profile.codex_home,
                 &profile_usage_auth,
                 &cached_reports,
+                allow_disk_auth_fallback,
             );
             reports.push(RunProfileProbeReport {
                 name: name.clone(),
@@ -11033,6 +11278,7 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<usize> {
+    let allow_disk_auth_fallback = !runtime_proxy_sync_probe_pressure_mode_active(shared);
     let (state, current_profile, cached_reports, cached_usage_snapshots, profile_usage_auth) = {
         let runtime = shared
             .runtime
@@ -11053,11 +11299,12 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
         .filter(|name| !excluded_profiles.contains(name))
         .filter(|name| {
             state.profiles.get(name).is_some_and(|profile| {
-                runtime_profile_auth_summary_for_selection(
+                runtime_profile_auth_summary_for_selection_with_policy(
                     name,
                     &profile.codex_home,
                     &profile_usage_auth,
                     &cached_reports,
+                    allow_disk_auth_fallback,
                 )
                 .quota_compatible
             })

@@ -382,6 +382,8 @@ pub(super) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
             pending: Mutex::new(BTreeMap::new()),
             wake: Condvar::new(),
             active: Arc::new(AtomicUsize::new(0)),
+            wait: Arc::new((Mutex::new(()), Condvar::new())),
+            revision: Arc::new(AtomicU64::new(0)),
         });
         for _ in 0..runtime_probe_refresh_worker_count() {
             let worker_queue = Arc::clone(&queue);
@@ -425,6 +427,22 @@ pub(super) fn runtime_probe_refresh_queue_backlog() -> usize {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .len()
+}
+
+pub(super) fn runtime_probe_refresh_revision() -> u64 {
+    runtime_probe_refresh_queue()
+        .revision
+        .load(Ordering::SeqCst)
+}
+
+pub(super) fn note_runtime_probe_refresh_progress() {
+    let queue = runtime_probe_refresh_queue();
+    queue.revision.fetch_add(1, Ordering::SeqCst);
+    let (mutex, condvar) = &*queue.wait;
+    let _guard = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    condvar.notify_all();
 }
 
 #[allow(dead_code)]
@@ -997,85 +1015,88 @@ pub(super) fn apply_runtime_profile_probe_result(
         },
     );
 
-    let Ok(usage) = result else {
-        return Ok(());
-    };
-
-    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
-    let previous_snapshot = runtime.profile_usage_snapshots.get(profile_name).cloned();
-    let previous_retry_backoff = runtime
-        .profile_retry_backoff_until
-        .get(profile_name)
-        .copied();
-    let quota_summary =
-        runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
-    let blocking_reset_at =
-        runtime_quota_summary_blocking_reset_at(quota_summary, RuntimeRouteKind::Responses)
-            .filter(|reset_at| *reset_at > now);
-    let quarantine_until =
-        runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Responses).map(
-            |_| {
-                blocking_reset_at.unwrap_or_else(|| {
-                    now.saturating_add(RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS)
-                })
-            },
+    if let Ok(usage) = result {
+        let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+        let previous_snapshot = runtime.profile_usage_snapshots.get(profile_name).cloned();
+        let previous_retry_backoff = runtime
+            .profile_retry_backoff_until
+            .get(profile_name)
+            .copied();
+        let quota_summary =
+            runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
+        let blocking_reset_at =
+            runtime_quota_summary_blocking_reset_at(quota_summary, RuntimeRouteKind::Responses)
+                .filter(|reset_at| *reset_at > now);
+        let quarantine_until =
+            runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Responses).map(
+                |_| {
+                    blocking_reset_at.unwrap_or_else(|| {
+                        now.saturating_add(RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS)
+                    })
+                },
+            );
+        let mut quarantine_applied = None;
+        if let Some(until) = quarantine_until {
+            let next_until = runtime
+                .profile_retry_backoff_until
+                .get(profile_name)
+                .copied()
+                .unwrap_or(until)
+                .max(until);
+            runtime
+                .profile_retry_backoff_until
+                .insert(profile_name.to_string(), next_until);
+            quarantine_applied = Some(next_until);
+        }
+        let snapshot_should_persist = runtime_profile_usage_snapshot_should_persist(
+            previous_snapshot.as_ref(),
+            &snapshot,
+            now,
         );
-    let mut quarantine_applied = None;
-    if let Some(until) = quarantine_until {
-        let next_until = runtime
+        let retry_backoff_changed = runtime
             .profile_retry_backoff_until
             .get(profile_name)
             .copied()
-            .unwrap_or(until)
-            .max(until);
+            != previous_retry_backoff;
         runtime
-            .profile_retry_backoff_until
-            .insert(profile_name.to_string(), next_until);
-        quarantine_applied = Some(next_until);
+            .profile_usage_snapshots
+            .insert(profile_name.to_string(), snapshot);
+        if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "quota_probe_exhausted profile={profile_name} reason=usage_snapshot_exhausted {}",
+                    runtime_quota_summary_log_fields(quota_summary)
+                ),
+            );
+        }
+        if let Some(until) = quarantine_applied
+            && retry_backoff_changed
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message=probe_snapshot",
+                    runtime_route_kind_label(RuntimeRouteKind::Responses),
+                    until,
+                    blocking_reset_at.unwrap_or(i64::MAX),
+                ),
+            );
+            runtime_proxy_log(
+                shared,
+                format!("profile_retry_backoff profile={profile_name} until={until}"),
+            );
+        }
+        if snapshot_should_persist || retry_backoff_changed {
+            schedule_runtime_state_save_from_runtime(
+                shared,
+                &runtime,
+                &format!("usage_snapshot:{profile_name}"),
+            );
+        }
     }
-    let snapshot_should_persist =
-        runtime_profile_usage_snapshot_should_persist(previous_snapshot.as_ref(), &snapshot, now);
-    let retry_backoff_changed = runtime
-        .profile_retry_backoff_until
-        .get(profile_name)
-        .copied()
-        != previous_retry_backoff;
-    runtime
-        .profile_usage_snapshots
-        .insert(profile_name.to_string(), snapshot);
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "quota_probe_exhausted profile={profile_name} reason=usage_snapshot_exhausted {}",
-                runtime_quota_summary_log_fields(quota_summary)
-            ),
-        );
-    }
-    if let Some(until) = quarantine_applied
-        && retry_backoff_changed
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message=probe_snapshot",
-                runtime_route_kind_label(RuntimeRouteKind::Responses),
-                until,
-                blocking_reset_at.unwrap_or(i64::MAX),
-            ),
-        );
-        runtime_proxy_log(
-            shared,
-            format!("profile_retry_backoff profile={profile_name} until={until}"),
-        );
-    }
-    if snapshot_should_persist || retry_backoff_changed {
-        schedule_runtime_state_save_from_runtime(
-            shared,
-            &runtime,
-            &format!("usage_snapshot:{profile_name}"),
-        );
-    }
+    drop(runtime);
+    note_runtime_probe_refresh_progress();
     Ok(())
 }
 

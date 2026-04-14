@@ -1426,6 +1426,8 @@ struct RuntimeProbeRefreshQueue {
     pending: Mutex<BTreeMap<(PathBuf, String), RuntimeProbeRefreshJob>>,
     wake: Condvar,
     active: Arc<AtomicUsize>,
+    wait: Arc<(Mutex<()>, Condvar)>,
+    revision: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone)]

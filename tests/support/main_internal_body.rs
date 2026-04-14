@@ -15769,6 +15769,57 @@ fn runtime_proxy_reloads_auth_json_between_http_requests() {
 }
 
 #[test]
+fn runtime_proxy_reloads_usage_auth_cache_entry_after_auth_json_changes() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    let auth_path = profile_home.join("auth.json");
+    write_auth_json(&auth_path, "main-account");
+
+    let initial = load_runtime_profile_usage_auth_cache_entry(&profile_home)
+        .expect("usage auth cache entry should load");
+    assert!(
+        initial.auth.account_id.as_deref() == Some("main-account"),
+        "initial usage auth should point at the first account id"
+    );
+
+    write_auth_json(&auth_path, "third-account");
+    let refreshed = load_runtime_profile_usage_auth_cache_entry(&profile_home)
+        .expect("usage auth cache entry should reload after auth.json changes");
+    assert!(
+        refreshed.auth.account_id.as_deref() == Some("third-account"),
+        "usage auth cache should reflect the rewritten auth.json"
+    );
+    assert_ne!(
+        initial.auth.account_id, refreshed.auth.account_id,
+        "auth cache entry should reflect the rewritten auth.json"
+    );
+}
+
+#[test]
+fn runtime_proxy_selection_helpers_reject_stale_usage_auth_cache_after_auth_json_changes() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    let auth_path = profile_home.join("auth.json");
+    write_auth_json(&auth_path, "main-account");
+
+    let cached_usage_auth = load_runtime_profile_usage_auth_cache_entry(&profile_home)
+        .expect("usage auth cache entry should load");
+    write_api_key_auth_json(&auth_path);
+
+    let summary = runtime_profile_auth_summary_for_selection(
+        "main",
+        &profile_home,
+        &BTreeMap::from([("main".to_string(), cached_usage_auth)]),
+        &BTreeMap::new(),
+    );
+
+    assert!(
+        !summary.quota_compatible,
+        "stale usage-auth cache should not stay quota-compatible after auth.json changes"
+    );
+}
+
+#[test]
 fn runtime_proxy_retries_quota_blocked_response_on_another_profile() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();
@@ -17227,6 +17278,17 @@ fn runtime_proxy_only_masks_quota_failures_when_an_alternative_is_quota_compatib
     write_auth_json(&main_home.join("auth.json"), "main-account");
     write_api_key_auth_json(&api_home.join("auth.json"));
 
+    let main_usage_auth = load_runtime_profile_usage_auth_cache_entry(&main_home)
+        .expect("main usage auth cache entry should load");
+    assert!(
+        main_usage_auth.auth.account_id.as_deref() == Some("main-account"),
+        "account auth should remain tied to the chatgpt account id"
+    );
+    assert!(
+        load_runtime_profile_usage_auth_cache_entry(&api_home).is_err(),
+        "api-key auth should not load into the usage auth cache"
+    );
+
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -17264,7 +17326,7 @@ fn runtime_proxy_only_masks_quota_failures_when_an_alternative_is_quota_compatib
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         current_profile: "main".to_string(),
-        profile_usage_auth: BTreeMap::new(),
+        profile_usage_auth: BTreeMap::from([("main".to_string(), main_usage_auth)]),
         turn_state_bindings: BTreeMap::new(),
         session_id_bindings: BTreeMap::new(),
         continuation_statuses: RuntimeContinuationStatuses::default(),
@@ -17293,6 +17355,123 @@ fn runtime_proxy_only_masks_quota_failures_when_an_alternative_is_quota_compatib
         !runtime_has_alternative_quota_compatible_profile(&shared, "main")
             .expect("quota-compatible-alternative lookup should succeed"),
         "api-key profile should not count as a quota-compatible alternative"
+    );
+}
+
+#[test]
+fn runtime_proxy_does_not_mask_quota_failure_for_route_ineligible_alternative() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home.clone(),
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home.clone(),
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    load_runtime_profile_usage_auth_cache_entry(&main_home)
+                        .expect("main usage auth cache entry should load"),
+                ),
+                (
+                    "second".to_string(),
+                    load_runtime_profile_usage_auth_cache_entry(&second_home)
+                        .expect("second usage auth cache entry should load"),
+                ),
+            ]),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::from([(
+                runtime_profile_transport_backoff_key("second", RuntimeRouteKind::Responses),
+                Local::now().timestamp() + 300,
+            )]),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: serde_json::json!({
+            "input": []
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let response = proxy_runtime_responses_request(46, &request, &shared)
+        .expect("responses request should complete");
+    let (status, body) = match response {
+        RuntimeResponsesReply::Buffered(parts) => (
+            parts.status,
+            String::from_utf8(parts.body).expect("buffered body should be utf8"),
+        ),
+        RuntimeResponsesReply::Streaming(mut response) => {
+            let mut body = String::new();
+            response
+                .body
+                .read_to_string(&mut body)
+                .expect("streaming body should read");
+            (response.status, body)
+        }
+    };
+
+    assert_eq!(
+        status, 200,
+        "route-ineligible fallback should not mask upstream quota: {body}"
+    );
+    assert!(
+        body.contains("You've hit your usage limit"),
+        "upstream quota failure should pass through when fallback is not route-eligible: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()],
+        "route-ineligible fallback should not receive the quota-blocked request"
     );
 }
 
@@ -36334,6 +36513,109 @@ fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() 
         runtime_profile_inflight_release_revision(&shared),
         observed_revision,
         "active-request release should not change inflight release revision"
+    );
+}
+
+#[test]
+fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
+    let temp_dir = TestDir::new();
+    let _shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let observed_revision = runtime_probe_refresh_revision();
+    note_runtime_probe_refresh_progress();
+
+    let started_at = Instant::now();
+    assert!(wait_for_runtime_probe_refresh_since(
+        Duration::from_millis(100),
+        observed_revision,
+    ));
+    assert!(
+        started_at.elapsed() < ci_timing_upper_bound_ms(20, 100),
+        "probe-refresh wait should not sleep after progress was already observed"
+    );
+}
+
+#[test]
+fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let observed_revision = runtime_probe_refresh_revision();
+    let active_guard = try_acquire_runtime_proxy_active_request_slot(
+        &shared,
+        "http",
+        "/backend-api/codex/responses",
+    )
+    .expect("active request slot should be acquired");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        drop(active_guard);
+    });
+
+    assert!(
+        !wait_for_runtime_probe_refresh_since(Duration::from_millis(100), observed_revision),
+        "lane-release notify should not count as probe-refresh progress"
+    );
+
+    release.join().expect("active-request release thread should join");
+    assert_eq!(
+        runtime_probe_refresh_revision(),
+        observed_revision,
+        "lane-release notify should not change probe refresh revision"
     );
 }
 
