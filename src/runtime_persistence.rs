@@ -460,26 +460,31 @@ pub(super) fn load_runtime_profile_usage_auth_cache_entry(
     })
 }
 
-pub(super) fn runtime_profile_usage_auth_cache_entry_matches(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RuntimeProfileUsageAuthCacheFreshness {
+    Fresh,
+    Stale,
+    Unknown,
+}
+
+pub(super) fn runtime_profile_usage_auth_cache_entry_freshness(
     entry: &RuntimeProfileUsageAuthCacheEntry,
-) -> Result<bool> {
+) -> RuntimeProfileUsageAuthCacheFreshness {
     let revision = match &entry.location {
         secret_store::SecretLocation::File(path) => match std::fs::metadata(path) {
             Ok(metadata) => Some(secret_store::SecretRevision::from_metadata(&metadata)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-            Err(err) => {
-                return Err(
-                    anyhow::Error::new(err).context(format!("failed to stat {}", path.display()))
-                );
-            }
+            Err(_) => return RuntimeProfileUsageAuthCacheFreshness::Unknown,
         },
         secret_store::SecretLocation::Keyring { .. } => {
-            secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
-                .probe_revision(&entry.location)
-                .map_err(anyhow::Error::new)?
+            return RuntimeProfileUsageAuthCacheFreshness::Unknown;
         }
     };
-    Ok(revision == entry.revision)
+    if revision == entry.revision {
+        RuntimeProfileUsageAuthCacheFreshness::Fresh
+    } else {
+        RuntimeProfileUsageAuthCacheFreshness::Stale
+    }
 }
 
 pub(super) fn load_runtime_profile_usage_auth_cache(
@@ -516,22 +521,28 @@ pub(super) fn runtime_profile_usage_auth(
         )
     };
 
+    let reload_auth = || -> Result<UsageAuth> {
+        let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
+        let auth = entry.auth.clone();
+        if let Ok(mut runtime) = shared.runtime.lock() {
+            runtime
+                .profile_usage_auth
+                .insert(profile_name.to_string(), entry);
+        }
+        Ok(auth)
+    };
+
     if let Some(entry) = cached_entry {
-        match runtime_profile_usage_auth_cache_entry_matches(&entry) {
-            Ok(true) => return Ok(entry.auth),
-            Ok(false) => {}
-            Err(_) => return Ok(entry.auth),
+        match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
+            RuntimeProfileUsageAuthCacheFreshness::Fresh => return Ok(entry.auth),
+            RuntimeProfileUsageAuthCacheFreshness::Stale => {}
+            RuntimeProfileUsageAuthCacheFreshness::Unknown => {
+                return reload_auth().or(Ok(entry.auth));
+            }
         }
     }
 
-    let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
-    let auth = entry.auth.clone();
-    if let Ok(mut runtime) = shared.runtime.lock() {
-        runtime
-            .profile_usage_auth
-            .insert(profile_name.to_string(), entry);
-    }
-    Ok(auth)
+    reload_auth()
 }
 
 pub(super) fn runtime_profile_auth_failure_key(profile_name: &str) -> String {
@@ -563,7 +574,10 @@ pub(super) fn runtime_profile_auth_failure_active_with_auth_cache(
     let Some(entry) = profile_usage_auth.get(profile_name) else {
         return true;
     };
-    runtime_profile_usage_auth_cache_entry_matches(entry).unwrap_or(true)
+    matches!(
+        runtime_profile_usage_auth_cache_entry_freshness(entry),
+        RuntimeProfileUsageAuthCacheFreshness::Fresh
+    )
 }
 
 pub(super) fn runtime_profile_auth_failure_active(

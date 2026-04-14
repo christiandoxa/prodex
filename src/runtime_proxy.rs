@@ -3826,7 +3826,7 @@ pub(super) fn runtime_has_route_eligible_quota_fallback(
             &profile_probe_cache,
             allow_disk_auth_fallback,
         )
-        .quota_compatible
+        .is_some_and(|summary| summary.quota_compatible)
         {
             continue;
         }
@@ -4143,13 +4143,17 @@ pub(super) fn runtime_profile_cached_auth_summary_for_selection(
     usage_auth_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
     probe_entry: Option<RuntimeProfileProbeCacheEntry>,
 ) -> Option<AuthSummary> {
-    if let Some(entry) = usage_auth_entry
-        && runtime_profile_usage_auth_cache_entry_matches(&entry).unwrap_or(false)
-    {
-        return Some(AuthSummary {
-            label: "chatgpt".to_string(),
-            quota_compatible: true,
-        });
+    if let Some(entry) = usage_auth_entry {
+        match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
+            RuntimeProfileUsageAuthCacheFreshness::Fresh => {
+                return Some(AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                });
+            }
+            RuntimeProfileUsageAuthCacheFreshness::Stale
+            | RuntimeProfileUsageAuthCacheFreshness::Unknown => {}
+        }
     }
     probe_entry.map(|entry| entry.auth)
 }
@@ -4195,6 +4199,14 @@ pub(super) fn runtime_profile_auth_summary_for_selection(
         profile_probe_cache,
         true,
     )
+    .unwrap_or_else(runtime_profile_uncached_auth_summary_for_selection)
+}
+
+pub(super) fn runtime_profile_uncached_auth_summary_for_selection() -> AuthSummary {
+    AuthSummary {
+        label: "uncached-auth".to_string(),
+        quota_compatible: false,
+    }
 }
 
 pub(super) fn runtime_profile_auth_summary_for_selection_with_policy(
@@ -4203,22 +4215,13 @@ pub(super) fn runtime_profile_auth_summary_for_selection_with_policy(
     profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
     profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
     allow_disk_fallback: bool,
-) -> AuthSummary {
+) -> Option<AuthSummary> {
     runtime_profile_cached_auth_summary_from_maps_for_selection(
         profile_name,
         profile_usage_auth,
         profile_probe_cache,
     )
-    .unwrap_or_else(|| {
-        if allow_disk_fallback {
-            read_auth_summary(codex_home)
-        } else {
-            AuthSummary {
-                label: "uncached-auth".to_string(),
-                quota_compatible: false,
-            }
-        }
-    })
+    .or_else(|| allow_disk_fallback.then(|| read_auth_summary(codex_home)))
 }
 
 pub(super) fn runtime_proxy_sync_probe_pressure_pause(shared: &RuntimeRotationProxyShared) {
@@ -4674,7 +4677,7 @@ pub(super) fn next_runtime_previous_response_candidate(
             &profile_probe_cache,
             allow_disk_auth_fallback,
         )
-        .quota_compatible
+        .is_some_and(|summary| summary.quota_compatible)
         {
             continue;
         }
@@ -10787,7 +10790,8 @@ pub(super) fn next_runtime_response_candidate_for_route(
                 &profile_usage_auth,
                 &cached_reports,
                 allow_disk_auth_fallback,
-            );
+            )
+            .unwrap_or_else(runtime_profile_uncached_auth_summary_for_selection);
             reports.push(RunProfileProbeReport {
                 name: name.clone(),
                 order_index,
@@ -11306,7 +11310,7 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
                     &cached_reports,
                     allow_disk_auth_fallback,
                 )
-                .quota_compatible
+                .is_some_and(|summary| summary.quota_compatible)
             })
         })
         .filter(|name| !cached_reports.contains_key(name))

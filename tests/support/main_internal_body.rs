@@ -5524,31 +5524,33 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
-    assert_eq!(
-        runtime_response_bound_profile(&shared, "resp-1", RuntimeRouteKind::Responses)
-            .expect("response owner lookup should succeed"),
-        Some("main".to_string())
-    );
-    assert_eq!(
-        runtime_turn_state_bound_profile(&shared, "turn-1")
-            .expect("turn state lookup should succeed"),
-        Some("main".to_string())
-    );
-    assert_eq!(
-        runtime_session_bound_profile(&shared, "session-1")
-            .expect("session lookup should succeed"),
-        Some("main".to_string())
-    );
-    assert_eq!(
-        runtime_compact_route_followup_bound_profile(&shared, Some("turn-compact"), None)
-            .expect("compact turn-state lookup should succeed"),
-        Some(("main".to_string(), "turn_state"))
-    );
-    assert_eq!(
-        runtime_compact_route_followup_bound_profile(&shared, None, Some("session-compact"))
-            .expect("compact session lookup should succeed"),
-        Some(("main".to_string(), "session_id"))
-    );
+    for _ in 0..3 {
+        assert_eq!(
+            runtime_response_bound_profile(&shared, "resp-1", RuntimeRouteKind::Responses)
+                .expect("response owner lookup should succeed"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            runtime_turn_state_bound_profile(&shared, "turn-1")
+                .expect("turn state lookup should succeed"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            runtime_session_bound_profile(&shared, "session-1")
+                .expect("session lookup should succeed"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            runtime_compact_route_followup_bound_profile(&shared, Some("turn-compact"), None)
+                .expect("compact turn-state lookup should succeed"),
+            Some(("main".to_string(), "turn_state"))
+        );
+        assert_eq!(
+            runtime_compact_route_followup_bound_profile(&shared, None, Some("session-compact"))
+                .expect("compact session lookup should succeed"),
+            Some(("main".to_string(), "session_id"))
+        );
+    }
     wait_for_runtime_background_queues_idle();
 
     let log = fs::read_to_string(&shared.log_path).unwrap_or_default();
@@ -15769,6 +15771,114 @@ fn runtime_proxy_reloads_auth_json_between_http_requests() {
 }
 
 #[test]
+fn runtime_proxy_selection_and_request_paths_stay_in_sync_after_auth_json_changes() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let main_auth_path = main_home.join("auth.json");
+    write_auth_json(&main_auth_path, "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let initial_usage_auth = load_runtime_profile_usage_auth_cache_entry(&main_home)
+        .expect("usage auth cache entry should load");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let first = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("first runtime proxy request should succeed");
+    assert!(
+        first.status().is_success(),
+        "unexpected first status: {}",
+        first.status()
+    );
+
+    write_api_key_auth_json(&main_auth_path);
+
+    let selection_summary = runtime_profile_auth_summary_for_selection(
+        "main",
+        &main_home,
+        &BTreeMap::from([("main".to_string(), initial_usage_auth)]),
+        &BTreeMap::new(),
+    );
+    assert!(
+        !selection_summary.quota_compatible,
+        "selection path should stop treating stale usage-auth cache as quota-compatible after auth.json changes"
+    );
+    assert!(
+        load_runtime_profile_usage_auth_cache_entry(&main_home).is_err(),
+        "request-path auth cache reload should reject stale quota auth after auth.json changes"
+    );
+
+    let second_start = backend.responses_accounts().len();
+    let second = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("second runtime proxy request should succeed");
+    assert!(
+        second.status().is_success(),
+        "unexpected second status: {}",
+        second.status()
+    );
+    let second_accounts = backend.responses_accounts()[second_start..].to_vec();
+    assert!(
+        second_accounts.iter().any(|account| account == "second-account"),
+        "request path should reach the refreshed quota-compatible profile after auth.json changes: {second_accounts:?}"
+    );
+    assert!(
+        !second_accounts.iter().any(|account| account == "main-account"),
+        "request path should stop using the stale auth profile after auth.json changes: {second_accounts:?}"
+    );
+}
+
+#[test]
 fn runtime_proxy_reloads_usage_auth_cache_entry_after_auth_json_changes() {
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");
@@ -15816,6 +15926,49 @@ fn runtime_proxy_selection_helpers_reject_stale_usage_auth_cache_after_auth_json
     assert!(
         !summary.quota_compatible,
         "stale usage-auth cache should not stay quota-compatible after auth.json changes"
+    );
+}
+
+#[test]
+fn runtime_proxy_unknown_usage_auth_freshness_does_not_pin_auth_failure_backoff() {
+    let now = Local::now().timestamp();
+    let entry = RuntimeProfileUsageAuthCacheEntry {
+        auth: UsageAuth {
+            access_token: "test-token".to_string(),
+            account_id: Some("main-account".to_string()),
+        },
+        location: secret_store::SecretLocation::keyring("prodex", "main-auth"),
+        revision: Some(secret_store::SecretRevision::new(1, None)),
+    };
+    let probe_entry = RuntimeProfileProbeCacheEntry {
+        checked_at: now,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Err("probe failed".to_string()),
+    };
+
+    assert_eq!(
+        runtime_profile_usage_auth_cache_entry_freshness(&entry),
+        RuntimeProfileUsageAuthCacheFreshness::Unknown
+    );
+    assert!(!runtime_profile_auth_failure_active_with_auth_cache(
+        &BTreeMap::from([(
+            runtime_profile_auth_failure_key("main"),
+            RuntimeProfileHealth {
+                score: 1,
+                updated_at: now,
+            },
+        )]),
+        &BTreeMap::from([("main".to_string(), entry.clone())]),
+        "main",
+        now,
+    ));
+    assert!(
+        runtime_profile_cached_auth_summary_for_selection(Some(entry), Some(probe_entry))
+            .is_some_and(|summary| summary.quota_compatible),
+        "selection should still be able to use probe auth when usage-auth freshness is unknown"
     );
 }
 

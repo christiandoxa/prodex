@@ -75,7 +75,7 @@ include!("main_internal_body.rs");
 include!("claude_model_selector_body.rs");
 
 #[test]
-fn runtime_profile_usage_auth_cache_entry_matches_detects_auth_json_changes() {
+fn runtime_profile_usage_auth_cache_entry_freshness_detects_auth_json_changes() {
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");
     let auth_path = profile_home.join("auth.json");
@@ -84,16 +84,16 @@ fn runtime_profile_usage_auth_cache_entry_matches_detects_auth_json_changes() {
     let cached = load_runtime_profile_usage_auth_cache_entry(&profile_home)
         .expect("auth cache entry should load");
     assert!(
-        runtime_profile_usage_auth_cache_entry_matches(&cached)
-            .expect("auth cache entry should match fresh file")
+        runtime_profile_usage_auth_cache_entry_freshness(&cached)
+            == RuntimeProfileUsageAuthCacheFreshness::Fresh
     );
 
     std::thread::sleep(std::time::Duration::from_millis(5));
     write_auth_json(&auth_path, "third-account");
 
     assert!(
-        !runtime_profile_usage_auth_cache_entry_matches(&cached)
-            .expect("auth cache entry should detect auth.json change")
+        runtime_profile_usage_auth_cache_entry_freshness(&cached)
+            == RuntimeProfileUsageAuthCacheFreshness::Stale
     );
 }
 
