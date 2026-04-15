@@ -29,15 +29,33 @@ fn ci_timing_budget_ms(local_ms: u64, ci_ms: u64) -> String {
     }
 }
 
+fn ci_runtime_proxy_timeout_guard(
+    env_key: &'static str,
+    local_ms: u64,
+    ci_ms: u64,
+) -> TestEnvVarGuard {
+    TestEnvVarGuard::set(env_key, &ci_timing_budget_ms(local_ms, ci_ms))
+}
+
+fn ci_runtime_proxy_admission_wait_budget_guard(local_ms: u64, ci_ms: u64) -> TestEnvVarGuard {
+    ci_runtime_proxy_timeout_guard(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        local_ms,
+        ci_ms,
+    )
+}
+
 fn ci_runtime_proxy_websocket_timeout_guards() -> (TestEnvVarGuard, TestEnvVarGuard) {
     (
-        TestEnvVarGuard::set(
+        ci_runtime_proxy_timeout_guard(
             "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
-            &ci_timing_budget_ms(250, 1_000),
+            250,
+            1_000,
         ),
-        TestEnvVarGuard::set(
+        ci_runtime_proxy_timeout_guard(
             "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
-            &ci_timing_budget_ms(120, 1_000),
+            120,
+            1_000,
         ),
     )
 }
@@ -328,6 +346,162 @@ fn runtime_rotation_proxy_shared(
         lane_admission: runtime_proxy_lane_admission_for_global_limit(active_request_limit),
         runtime: Arc::new(Mutex::new(runtime)),
     }
+}
+
+fn runtime_shared_for_cold_start_probe_selection(
+    temp_dir: &TestDir,
+    upstream_base_url: String,
+) -> RuntimeRotationProxyShared {
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    runtime_rotation_proxy_shared(
+        temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home,
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url,
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(80, 300, 80, 86_400)),
+                },
+            )]),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::from([(
+                runtime_profile_auth_failure_key("main"),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: now,
+                },
+            )]),
+        },
+        usize::MAX,
+    )
+}
+
+struct TestProbeRefreshBacklogGuard {
+    keys: Vec<(PathBuf, String)>,
+}
+
+impl Drop for TestProbeRefreshBacklogGuard {
+    fn drop(&mut self) {
+        let queue = runtime_probe_refresh_queue();
+        let mut pending = queue
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for key in &self.keys {
+            pending.remove(key);
+        }
+    }
+}
+
+fn force_runtime_probe_refresh_backlog(
+    shared: &RuntimeRotationProxyShared,
+    backlog: usize,
+) -> TestProbeRefreshBacklogGuard {
+    wait_for_runtime_background_queues_idle();
+    let (state_file, upstream_base_url, root) = {
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        (
+            runtime.paths.state_file.clone(),
+            runtime.upstream_base_url.clone(),
+            runtime.paths.root.clone(),
+        )
+    };
+    let queue = runtime_probe_refresh_queue();
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert!(
+        pending.is_empty(),
+        "probe refresh backlog helper requires an idle queue"
+    );
+    let mut keys = Vec::with_capacity(backlog);
+    for index in 0..backlog {
+        let profile_name = format!("probe-pressure-{index}");
+        let key = (state_file.clone(), profile_name.clone());
+        pending.insert(
+            key.clone(),
+            RuntimeProbeRefreshJob {
+                shared: shared.clone(),
+                profile_name,
+                codex_home: root.join(format!("probe-pressure-{index}")),
+                upstream_base_url: upstream_base_url.clone(),
+                queued_at: Instant::now(),
+            },
+        );
+        keys.push(key);
+    }
+    TestProbeRefreshBacklogGuard { keys }
+}
+
+fn closed_loopback_backend_base_url() -> String {
+    let listener =
+        TcpListener::bind("127.0.0.1:0").expect("closed loopback helper should bind a port");
+    let addr = listener
+        .local_addr()
+        .expect("closed loopback helper should read local address");
+    drop(listener);
+    format!("http://{addr}/backend-api")
+}
+
+fn unresponsive_loopback_backend_listener() -> (TcpListener, String) {
+    let listener =
+        TcpListener::bind("127.0.0.1:0").expect("unresponsive loopback helper should bind");
+    let addr = listener
+        .local_addr()
+        .expect("unresponsive loopback helper should read local address");
+    (listener, format!("http://{addr}/backend-api"))
 }
 
 struct TwoChunkReader {
@@ -1178,8 +1352,10 @@ fn handle_runtime_proxy_backend_request(
             responses_bodies
                 .lock()
                 .expect("responses_bodies poisoned")
-                .push(request_body);
+                .push(request_body.clone());
             let previous_response_id = request_previous_response_id(&request);
+            let body_json = serde_json::from_str::<serde_json::Value>(&request_body)
+                .unwrap_or(serde_json::Value::Null);
             match account_id.as_str() {
                 "main-account" if matches!(mode, RuntimeProxyBackendMode::HttpOnlyPlain429) => (
                     "HTTP/1.1 429 Too Many Requests",
@@ -1285,6 +1461,29 @@ fn handle_runtime_proxy_backend_request(
                         })
                         .to_string(),
                         Some("turn-second".to_string()),
+                        None,
+                        None,
+                    )
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyAnthropicWebSearchFollowup
+                    ) && body_json
+                        .get("stream")
+                        .and_then(serde_json::Value::as_bool)
+                        != Some(true) =>
+                {
+                    (
+                        "HTTP/1.1 400 Bad Request",
+                        "application/json",
+                        serde_json::json!({
+                            "error": {
+                                "message": "{\"detail\":\"Stream must be set to true\"}"
+                            }
+                        })
+                        .to_string(),
+                        None,
                         None,
                         None,
                     )
@@ -10512,6 +10711,122 @@ fn sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure() {
 }
 
 #[test]
+fn responses_and_websocket_sync_probe_cold_start_under_background_probe_queue_pressure() {
+    for route_kind in [RuntimeRouteKind::Responses, RuntimeRouteKind::Websocket] {
+        let temp_dir = TestDir::new();
+        let backend = RuntimeProxyBackend::start();
+        let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, backend.base_url());
+        let pressure_guard = force_runtime_probe_refresh_backlog(
+            &shared,
+            RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD,
+        );
+
+        assert!(runtime_proxy_background_queue_pressure_active());
+        assert!(
+            !runtime_proxy_sync_probe_pressure_mode_active_for_route(&shared, route_kind),
+            "route should keep sync probing enabled under background queue pressure"
+        );
+
+        let candidate = if route_kind == RuntimeRouteKind::Responses {
+            next_runtime_response_candidate(&shared, &BTreeSet::new())
+        } else {
+            next_runtime_response_candidate_for_route(&shared, &BTreeSet::new(), route_kind)
+        }
+        .expect("candidate lookup should succeed");
+        assert_eq!(
+            candidate,
+            Some("second".to_string()),
+            "route should still sync-probe and select the cold-start profile"
+        );
+
+        let usage_accounts = backend.usage_accounts();
+        assert_eq!(
+            usage_accounts,
+            vec!["second-account".to_string()],
+            "sync probing should only hit the newly selected cold-start profile"
+        );
+
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        assert!(
+            runtime.profile_probe_cache.contains_key("second"),
+            "sync probing should refresh the second profile cache"
+        );
+        assert!(
+            runtime.profile_usage_snapshots.contains_key("second"),
+            "sync probing should refresh the second profile usage snapshot"
+        );
+        drop(runtime);
+
+        let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+        assert!(
+            !log.contains(&format!(
+                "selection_skip_sync_probe route={}",
+                runtime_route_kind_label(route_kind)
+            )),
+            "route should not log sync-probe deferral under background queue pressure: {log}"
+        );
+
+        drop(pressure_guard);
+    }
+}
+
+#[test]
+fn compact_and_standard_defer_sync_probe_cold_start_under_background_probe_queue_pressure() {
+    for route_kind in [RuntimeRouteKind::Compact, RuntimeRouteKind::Standard] {
+        let temp_dir = TestDir::new();
+        let (listener, base_url) = unresponsive_loopback_backend_listener();
+        let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, base_url);
+        let pressure_guard = force_runtime_probe_refresh_backlog(
+            &shared,
+            RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD,
+        );
+
+        assert!(runtime_proxy_background_queue_pressure_active());
+        assert!(
+            runtime_proxy_sync_probe_pressure_mode_active_for_route(&shared, route_kind),
+            "route should defer sync probing under background queue pressure"
+        );
+
+        let started_at = Instant::now();
+        let _candidate =
+            next_runtime_response_candidate_for_route(&shared, &BTreeSet::new(), route_kind)
+                .expect("candidate lookup should succeed");
+        assert!(
+            started_at.elapsed() < ci_timing_upper_bound_ms(80, 250),
+            "route should return quickly instead of waiting on a live sync probe"
+        );
+
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        assert!(
+            !runtime.profile_probe_cache.contains_key("second"),
+            "deferred routes should not update the cold-start probe cache inline"
+        );
+        assert!(
+            !runtime.profile_usage_snapshots.contains_key("second"),
+            "deferred routes should not update cold-start usage snapshots inline"
+        );
+        drop(runtime);
+
+        let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+        assert!(
+            log.contains(&format!(
+                "selection_skip_sync_probe route={} reason=pressure_mode",
+                runtime_route_kind_label(route_kind)
+            )),
+            "route should log sync-probe deferral under background queue pressure: {log}"
+        );
+        assert!(
+            log.contains("profile_probe_refresh_queued profile=second reason=queued"),
+            "deferred routes should push the cold-start probe to the background queue: {log}"
+        );
+
+        drop(pressure_guard);
+        drop(listener);
+        wait_for_runtime_background_queues_idle();
+    }
+}
+
+#[test]
 fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -15217,10 +15532,7 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
 
 #[test]
 fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
-    let _budget_guard = TestEnvVarGuard::set(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
-        &ci_timing_budget_ms(200, 1_000),
-    );
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(200, 1_000);
     let temp_dir = TestDir::new();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -15292,10 +15604,7 @@ fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
 
 #[test]
 fn runtime_proxy_anthropic_admission_wait_recovers_after_short_burst() {
-    let _budget_guard = TestEnvVarGuard::set(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
-        &ci_timing_budget_ms(20, 100),
-    );
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(20, 100);
     let temp_dir = TestDir::new();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
@@ -30086,15 +30395,14 @@ fn runtime_proxy_long_lived_classifies_anthropic_messages_as_interactive_streams
 
 #[test]
 fn runtime_proxy_interactive_wait_budget_extends_anthropic_messages() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "21");
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(21, 42);
     assert_eq!(
         runtime_proxy_admission_wait_budget("/backend-api/codex/responses", false),
         Duration::from_millis(21)
     );
     assert_eq!(
         runtime_proxy_admission_wait_budget("/v1/messages?beta=true", false),
-        Duration::from_millis(42)
+        Duration::from_millis(if running_in_ci() { 84 } else { 42 })
     );
 }
 
@@ -31162,6 +31470,88 @@ fn translate_runtime_anthropic_messages_request_preserves_tool_references() {
                     .collect::<Vec<_>>()
             }),
         Some(vec!["WebSearch", "WebFetch", "TodoWrite"])
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_keeps_upstream_streaming_for_non_stream_client_request(
+) {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Cari halaman utama openai.com"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    assert!(
+        !translated.stream,
+        "Anthropic client request should remain buffered locally"
+    );
+
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    assert_eq!(
+        body.get("stream").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "Responses upstream must stay streaming for server-tool follow-up compatibility"
+    );
+}
+
+#[test]
+fn runtime_request_for_anthropic_server_tool_followup_defaults_stream_to_true() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "gpt-5.3-codex",
+            "input": [
+                {
+                    "role": "user",
+                    "content": "Cari halaman utama openai.com"
+                }
+            ],
+            "tool_choice": "auto"
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let followup = runtime_request_for_anthropic_server_tool_followup(&request, "resp_followup_123")
+        .expect("follow-up request should serialize");
+    let body: serde_json::Value =
+        serde_json::from_slice(&followup.body).expect("follow-up body should parse");
+
+    assert_eq!(
+        body.get("previous_response_id")
+            .and_then(serde_json::Value::as_str),
+        Some("resp_followup_123")
+    );
+    assert!(
+        body.get("input").is_none(),
+        "follow-up request should omit original input"
+    );
+    assert!(
+        body.get("tool_choice").is_none(),
+        "follow-up request should omit tool choice"
+    );
+    assert_eq!(
+        body.get("stream").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "follow-up request must request a streaming Responses transport"
     );
 }
 
@@ -34225,7 +34615,7 @@ fn translate_runtime_anthropic_messages_request_maps_web_search_server_tool() {
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_maps_claude_web_search_tool_name() {
+fn translate_runtime_anthropic_messages_request_preserves_claude_web_search_tool_name() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -34280,15 +34670,20 @@ fn translate_runtime_anthropic_messages_request_maps_claude_web_search_tool_name
         .expect("translated body should parse");
 
     assert_eq!(
-        body.get("tool_choice").and_then(serde_json::Value::as_str),
-        Some("required")
+        body.get("tool_choice")
+            .and_then(|tool_choice| tool_choice.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("function")
     );
     assert_eq!(
-        body.get("include")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|include| include.first())
+        body.get("tool_choice")
+            .and_then(|tool_choice| tool_choice.get("name"))
             .and_then(serde_json::Value::as_str),
-        Some("web_search_call.action.sources")
+        Some("WebSearch")
+    );
+    assert!(
+        body.get("include").is_none(),
+        "generic Claude WebSearch tools should not enable Responses web_search include filters"
     );
     assert_eq!(
         body.get("tools")
@@ -34302,14 +34697,95 @@ fn translate_runtime_anthropic_messages_request_maps_claude_web_search_tool_name
             .and_then(|tools| tools.first())
             .and_then(|tool| tool.get("type"))
             .and_then(serde_json::Value::as_str),
-        Some("web_search")
+        Some("function")
     );
     assert_eq!(
         body.get("tools")
             .and_then(serde_json::Value::as_array)
             .and_then(|tools| tools.first())
-            .and_then(|tool| tool.get("name")),
-        None
+            .and_then(|tool| tool.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebSearch")
+    );
+    assert!(
+        !translated.server_tools.needs_buffered_translation(),
+        "generic Claude WebSearch tools must stay on the direct streaming/function path"
+    );
+}
+
+#[test]
+fn translate_runtime_anthropic_messages_request_preserves_claude_web_fetch_tool_name() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "tool_choice": {
+                "type": "tool",
+                "name": "WebFetch"
+            },
+            "tools": [
+                {
+                    "name": "WebFetch",
+                    "description": "Fetch a web page.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string"
+                            },
+                            "prompt": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["url"]
+                    }
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Lihat isi https://example.com"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+
+    assert_eq!(
+        body.get("tool_choice")
+            .and_then(|tool_choice| tool_choice.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("function")
+    );
+    assert_eq!(
+        body.get("tool_choice")
+            .and_then(|tool_choice| tool_choice.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebFetch")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("function")
+    );
+    assert_eq!(
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebFetch")
     );
 }
 
@@ -34485,7 +34961,16 @@ fn runtime_anthropic_response_from_json_value_counts_web_search_tool_use() {
             .and_then(|content| content.first())
             .and_then(|block| block.get("type"))
             .and_then(serde_json::Value::as_str),
-        Some("server_tool_use")
+        Some("tool_use")
+    );
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebSearch")
     );
     assert_eq!(
         response
@@ -34646,6 +35131,219 @@ fn runtime_anthropic_response_from_json_value_uses_registered_server_tool_aliase
             .get("usage")
             .and_then(|usage| usage.get("server_tool_use"))
             .and_then(|server_tool_use| server_tool_use.get("web_fetch_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_json_value_preserves_claude_web_fetch_tool_use() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "tool_choice": {
+                "type": "tool",
+                "name": "WebFetch"
+            },
+            "tools": [
+                {
+                    "name": "WebFetch",
+                    "description": "Fetch a web page.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string"
+                            },
+                            "prompt": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["url"]
+                    }
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Lihat isi https://example.com"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+
+    let response = runtime_anthropic_response_from_json_value_with_carried_usage(
+        &serde_json::json!({
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7
+            },
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_webfetch",
+                    "name": "WebFetch",
+                    "arguments": "{\"url\":\"https://example.com\",\"prompt\":\"Summarize the page\"}"
+                }
+            ]
+        }),
+        &translated.requested_model,
+        translated.want_thinking,
+        translated.carried_web_search_requests,
+        translated.carried_web_fetch_requests,
+        translated.carried_code_execution_requests,
+        translated.carried_tool_search_requests,
+        Some(&translated.server_tools),
+    );
+
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("tool_use")
+    );
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebFetch")
+    );
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("input"))
+            .and_then(|input| input.get("url"))
+            .and_then(serde_json::Value::as_str),
+        Some("https://example.com")
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_fetch_requests"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+}
+
+#[test]
+fn runtime_anthropic_response_from_json_value_preserves_claude_web_search_tool_use() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "tool_choice": {
+                "type": "tool",
+                "name": "WebSearch"
+            },
+            "tools": [
+                {
+                    "name": "WebSearch",
+                    "description": "Search the web for current information.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string"
+                            },
+                            "allowed_domains": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Cari berita terbaru"
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+
+    let response = runtime_anthropic_response_from_json_value_with_carried_usage(
+        &serde_json::json!({
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 7
+            },
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_websearch",
+                    "name": "WebSearch",
+                    "arguments": "{\"query\":\"OpenAI latest news today\",\"allowed_domains\":[\"openai.com\"]}"
+                }
+            ]
+        }),
+        &translated.requested_model,
+        translated.want_thinking,
+        translated.carried_web_search_requests,
+        translated.carried_web_fetch_requests,
+        translated.carried_code_execution_requests,
+        translated.carried_tool_search_requests,
+        Some(&translated.server_tools),
+    );
+
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("tool_use")
+    );
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebSearch")
+    );
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("input"))
+            .and_then(|input| input.get("query"))
+            .and_then(serde_json::Value::as_str),
+        Some("OpenAI latest news today")
+    );
+    assert_eq!(
+        response
+            .get("usage")
+            .and_then(|usage| usage.get("server_tool_use"))
+            .and_then(|server_tool_use| server_tool_use.get("web_search_requests"))
             .and_then(serde_json::Value::as_u64),
         Some(1)
     );
@@ -35391,7 +36089,16 @@ fn runtime_anthropic_response_from_sse_bytes_counts_web_search_tool_use() {
             .and_then(|content| content.first())
             .and_then(|block| block.get("type"))
             .and_then(serde_json::Value::as_str),
-        Some("server_tool_use")
+        Some("tool_use")
+    );
+    assert_eq!(
+        response
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|block| block.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("WebSearch")
     );
     assert_eq!(
         response
@@ -36181,17 +36888,8 @@ fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
                 ],
                 "tools": [
                     {
-                        "name": "WebSearch",
-                        "description": "Search the web.",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": ["query"]
-                        }
+                        "type": "web_search_20260209",
+                        "name": "web_search"
                     }
                 ]
             })
@@ -36251,7 +36949,7 @@ fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
     );
     assert_eq!(
         second_request.get("stream").and_then(serde_json::Value::as_bool),
-        Some(false)
+        Some(true)
     );
 }
 
@@ -36259,8 +36957,7 @@ fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
 fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is_full() {
     let _limit_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT", "4");
     let _lane_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT", "1");
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "1");
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(1, 1);
 
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_slow_stream();
@@ -36380,10 +37077,7 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
 
 #[test]
 fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
-    let _budget_guard = TestEnvVarGuard::set(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
-        &ci_timing_budget_ms(20, 250),
-    );
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(20, 250);
 
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
@@ -36508,10 +37202,7 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
 
 #[test]
 fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
-    let _budget_guard = TestEnvVarGuard::set(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
-        &ci_timing_budget_ms(40, 250),
-    );
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(40, 250);
 
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
@@ -36918,9 +37609,179 @@ fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
 }
 
 #[test]
+fn runtime_probe_refresh_suppresses_nonlocal_upstream_in_tests_and_wakes_waiters() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let backlog_before = runtime_probe_refresh_queue_backlog();
+    let observed_revision = runtime_probe_refresh_revision();
+    schedule_runtime_probe_refresh(&shared, "main", &main_home);
+
+    assert_eq!(
+        runtime_probe_refresh_queue_backlog(),
+        backlog_before,
+        "suppressed nonlocal probe refresh should not add background queue work"
+    );
+    assert!(
+        wait_for_runtime_probe_refresh_since(ci_timing_upper_bound_ms(20, 200), observed_revision),
+        "suppressed nonlocal probe refresh should still wake probe-refresh waiters"
+    );
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        !runtime.profile_probe_cache.contains_key("main"),
+        "suppressed nonlocal probe refresh should not write probe cache state"
+    );
+    drop(runtime);
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("profile_probe_refresh_suppressed profile=main reason=test_nonlocal_upstream"),
+        "suppressed nonlocal probe refresh should be logged"
+    );
+}
+
+#[test]
+fn runtime_probe_refresh_nonlocal_upstream_detection_keeps_loopback_exact() {
+    assert!(
+        runtime_probe_refresh_nonlocal_upstream_for_test("https://chatgpt.com/backend-api"),
+        "nonlocal upstreams should stay suppressed in tests"
+    );
+    assert!(
+        runtime_probe_refresh_nonlocal_upstream_for_test(
+            "https://localhost.example.com/backend-api"
+        ),
+        "host matching should stay exact instead of substring-based"
+    );
+    assert!(
+        !runtime_probe_refresh_nonlocal_upstream_for_test("http://localhost:1234/backend-api"),
+        "localhost loopback should stay allowed in tests"
+    );
+    assert!(
+        !runtime_probe_refresh_nonlocal_upstream_for_test("http://127.0.0.1:1234/backend-api"),
+        "IPv4 loopback should stay allowed in tests"
+    );
+    assert!(
+        !runtime_probe_refresh_nonlocal_upstream_for_test("http://[::1]:1234/backend-api"),
+        "IPv6 loopback should stay allowed in tests"
+    );
+}
+
+#[test]
+fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: closed_loopback_backend_base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let observed_revision = runtime_probe_refresh_revision();
+    schedule_runtime_probe_refresh(&shared, "main", &main_home);
+
+    assert!(
+        wait_for_runtime_probe_refresh_since(ci_timing_upper_bound_ms(250, 1_000), observed_revision),
+        "loopback upstreams should still run through the background refresh path in tests"
+    );
+    wait_for_runtime_background_queues_idle();
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        runtime.profile_probe_cache.contains_key("main"),
+        "loopback probe refresh should still apply a probe result in tests"
+    );
+    drop(runtime);
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        !log.contains("profile_probe_refresh_suppressed profile=main reason=test_nonlocal_upstream"),
+        "loopback probe refresh should not be suppressed in tests"
+    );
+}
+
+#[test]
 fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(20, 20);
 
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");
@@ -37029,10 +37890,7 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
 
 #[test]
 fn runtime_proxy_wait_scopes_to_session_owner_relief() {
-    let _budget_guard = TestEnvVarGuard::set(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
-        &ci_timing_budget_ms(40, 250),
-    );
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(40, 250);
 
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");

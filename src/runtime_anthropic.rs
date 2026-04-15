@@ -1109,6 +1109,12 @@ pub(super) fn runtime_proxy_translate_anthropic_tool(
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let is_claude_named_generic_builtin_tool = tool_type.is_none()
+        && tool.get("input_schema").is_some()
+        && matches!(
+            tool_name.and_then(runtime_proxy_anthropic_builtin_server_tool_name),
+            Some("web_search" | "web_fetch")
+        );
     if tool_type
         .is_some_and(|value| runtime_proxy_anthropic_unversioned_tool_type(value) == "mcp_toolset")
         && let Some(translated) = runtime_proxy_translate_anthropic_mcp_tool(tool, mcp_servers)?
@@ -1118,7 +1124,11 @@ pub(super) fn runtime_proxy_translate_anthropic_tool(
     }
     if let Some(canonical_name) = tool_type
         .and_then(runtime_proxy_anthropic_server_tool_name_from_type)
-        .or_else(|| tool_name.and_then(runtime_proxy_anthropic_builtin_server_tool_name))
+        .or_else(|| {
+            (!is_claude_named_generic_builtin_tool)
+                .then_some(())
+                .and(tool_name.and_then(runtime_proxy_anthropic_builtin_server_tool_name))
+        })
     {
         let tool_name = tool_name.unwrap_or(canonical_name);
         server_tools.register(tool_name, canonical_name);
@@ -2568,15 +2578,7 @@ pub(super) fn translate_runtime_anthropic_messages_request(
         serde_json::Value::String(target_model.clone()),
     );
     translated_body.insert("input".to_string(), serde_json::Value::Array(input));
-    translated_body.insert(
-        "stream".to_string(),
-        serde_json::Value::Bool(
-            value
-                .get("stream")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false),
-        ),
-    );
+    translated_body.insert("stream".to_string(), serde_json::Value::Bool(true));
     translated_body.insert("store".to_string(), serde_json::Value::Bool(false));
     let base_instructions = runtime_proxy_anthropic_system_instructions(&value)?;
     let translated_tools = runtime_proxy_translate_anthropic_tools(
@@ -2831,7 +2833,9 @@ pub(super) fn runtime_anthropic_server_tool_registration_for_call(
             registration.block_type.clone(),
         ));
     }
+    let tool_name = tool_name.trim();
     runtime_proxy_anthropic_builtin_server_tool_name(tool_name)
+        .filter(|canonical_name| *canonical_name == tool_name)
         .map(|name| (name.to_string(), "server_tool_use".to_string()))
 }
 
@@ -2856,7 +2860,11 @@ pub(super) fn runtime_anthropic_output_item_server_tool_usage(
             .get("name")
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
-            .and_then(|name| runtime_anthropic_server_tool_name_for_call(name, server_tools))
+            .and_then(|name| {
+                runtime_anthropic_server_tool_name_for_call(name, server_tools).or_else(|| {
+                    runtime_proxy_anthropic_builtin_server_tool_name(name).map(str::to_string)
+                })
+            })
             .as_deref()
         {
             Some("web_search") => RuntimeAnthropicServerToolUsage {
@@ -4606,7 +4614,11 @@ pub(super) fn runtime_request_for_anthropic_server_tool_followup(
         "previous_response_id".to_string(),
         serde_json::Value::String(previous_response_id.to_string()),
     );
-    object.insert("stream".to_string(), serde_json::Value::Bool(false));
+    let stream = object
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    object.insert("stream".to_string(), serde_json::Value::Bool(stream));
     let body = serde_json::to_vec(&value)
         .context("failed to serialize Anthropic server-tool follow-up request")?;
     Ok(RuntimeProxyRequest {
