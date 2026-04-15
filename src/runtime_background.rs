@@ -844,10 +844,14 @@ pub(super) fn schedule_runtime_probe_refresh(
 }
 
 #[cfg(test)]
-fn runtime_probe_refresh_nonlocal_upstream_for_test(upstream_base_url: &str) -> bool {
-    !(upstream_base_url.contains("://127.0.0.1")
-        || upstream_base_url.contains("://localhost")
-        || upstream_base_url.contains("://[::1]"))
+pub(super) fn runtime_probe_refresh_nonlocal_upstream_for_test(upstream_base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(upstream_base_url) else {
+        return true;
+    };
+    !matches!(
+        url.host_str(),
+        Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]")
+    )
 }
 
 pub(super) fn runtime_profiles_needing_startup_probe_refresh(
