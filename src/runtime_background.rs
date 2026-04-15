@@ -795,6 +795,18 @@ pub(super) fn schedule_runtime_probe_refresh(
         ),
         Err(_) => return,
     };
+    #[cfg(test)]
+    if runtime_probe_refresh_nonlocal_upstream_for_test(&upstream_base_url) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "profile_probe_refresh_suppressed profile={profile_name} reason=test_nonlocal_upstream"
+            ),
+        );
+        note_runtime_probe_refresh_progress();
+        return;
+    }
+
     let queue = runtime_probe_refresh_queue();
     let mut pending = queue
         .pending
@@ -829,6 +841,13 @@ pub(super) fn schedule_runtime_probe_refresh(
             format!("profile_probe_refresh_backpressure profile={profile_name} backlog={backlog}"),
         );
     }
+}
+
+#[cfg(test)]
+fn runtime_probe_refresh_nonlocal_upstream_for_test(upstream_base_url: &str) -> bool {
+    !(upstream_base_url.contains("://127.0.0.1")
+        || upstream_base_url.contains("://localhost")
+        || upstream_base_url.contains("://[::1]"))
 }
 
 pub(super) fn runtime_profiles_needing_startup_probe_refresh(

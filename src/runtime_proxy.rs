@@ -1414,16 +1414,16 @@ pub(super) fn clear_runtime_response_profile_affinity(
     if turn_state_profile.as_deref() == Some(profile_name) {
         *turn_state_profile = None;
     }
-    if let Some(compact_followup_profile) = compact_followup_profile {
-        if compact_followup_profile
+    if let Some(compact_followup_profile) = compact_followup_profile
+        && compact_followup_profile
             .as_ref()
             .is_some_and(|(owner, _)| owner == profile_name)
-        {
-            *compact_followup_profile = None;
-        }
+    {
+        *compact_followup_profile = None;
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn derive_runtime_response_route_affinity(
     shared: &RuntimeRotationProxyShared,
     previous_response_id: Option<&str>,
@@ -1482,6 +1482,7 @@ pub(super) fn derive_runtime_response_route_affinity(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn log_runtime_response_route_affinity(
     shared: &RuntimeRotationProxyShared,
     request_id: u64,
@@ -1542,6 +1543,7 @@ pub(super) fn log_runtime_response_route_affinity(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn log_runtime_response_route_affinity_recompute(
     shared: &RuntimeRotationProxyShared,
     request_id: u64,
@@ -8001,6 +8003,7 @@ pub(super) fn forward_runtime_proxy_websocket_error(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn remember_runtime_websocket_response_ids(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
