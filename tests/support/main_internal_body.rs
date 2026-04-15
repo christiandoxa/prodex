@@ -29,6 +29,19 @@ fn ci_timing_budget_ms(local_ms: u64, ci_ms: u64) -> String {
     }
 }
 
+fn ci_runtime_proxy_websocket_timeout_guards() -> (TestEnvVarGuard, TestEnvVarGuard) {
+    (
+        TestEnvVarGuard::set(
+            "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
+            &ci_timing_budget_ms(250, 1_000),
+        ),
+        TestEnvVarGuard::set(
+            "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
+            &ci_timing_budget_ms(120, 1_000),
+        ),
+    )
+}
+
 fn usage_with_main_windows(
     five_hour_remaining: i64,
     five_hour_reset_offset_seconds: i64,
@@ -16636,6 +16649,7 @@ fn runtime_proxy_preserves_function_call_output_affinity_when_previous_response_
 #[test]
 fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing()
 {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_websocket();
     let paths = AppPaths {
@@ -19346,7 +19360,8 @@ fn runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
+    let startup_usage_accounts =
+        wait_for_backend_usage_accounts(&backend, &["main-account", "second-account"]);
     assert_eq!(
         startup_usage_accounts,
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -21227,6 +21242,7 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit() {
 
 #[test]
 fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_delayed_overload_after_prelude();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -21794,6 +21810,7 @@ fn runtime_proxy_http_x_session_id_affinity_rotates_like_session_id_on_overload(
 
 #[test]
 fn runtime_proxy_websocket_fresh_fallbacks_quota_blocked_previous_response_without_tool_output() {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -21946,6 +21963,7 @@ fn runtime_proxy_websocket_fresh_fallbacks_quota_blocked_previous_response_witho
 #[test]
 fn runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity()
 {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -36362,8 +36380,10 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
 
 #[test]
 fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "20");
+    let _budget_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        &ci_timing_budget_ms(20, 250),
+    );
 
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
@@ -36488,8 +36508,10 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
 
 #[test]
 fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "40");
+    let _budget_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        &ci_timing_budget_ms(40, 250),
+    );
 
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
@@ -37007,8 +37029,10 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
 
 #[test]
 fn runtime_proxy_wait_scopes_to_session_owner_relief() {
-    let _budget_guard =
-        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS", "40");
+    let _budget_guard = TestEnvVarGuard::set(
+        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+        &ci_timing_budget_ms(40, 250),
+    );
 
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
