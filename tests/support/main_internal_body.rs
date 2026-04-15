@@ -30681,13 +30681,14 @@ fn runtime_proxy_long_lived_classifies_anthropic_messages_as_interactive_streams
 #[test]
 fn runtime_proxy_interactive_wait_budget_extends_anthropic_messages() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(21, 42);
+    let base_budget = ci_timing_upper_bound_ms(21, 42);
     assert_eq!(
         runtime_proxy_admission_wait_budget("/backend-api/codex/responses", false),
-        Duration::from_millis(21)
+        base_budget
     );
     assert_eq!(
         runtime_proxy_admission_wait_budget("/v1/messages?beta=true", false),
-        Duration::from_millis(if running_in_ci() { 84 } else { 42 })
+        base_budget * RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER as u32
     );
 }
 
