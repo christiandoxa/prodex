@@ -1927,6 +1927,18 @@ pub(super) fn runtime_external_session_id_bindings(
         .collect()
 }
 
+pub(super) fn runtime_dead_continuation_status_shadowed_by_live_binding(
+    status: Option<&RuntimeContinuationBindingStatus>,
+    binding: Option<&ResponseProfileBinding>,
+) -> bool {
+    matches!(
+        (binding, status),
+        (Some(binding), Some(status))
+            if runtime_continuation_status_is_terminal(status)
+                && runtime_continuation_dead_status_shadowed_by_binding(binding, status)
+    )
+}
+
 pub(super) fn runtime_touch_compact_lineage_binding(
     shared: &RuntimeRotationProxyShared,
     runtime: &mut RuntimeRotationState,
@@ -1979,9 +1991,28 @@ pub(super) fn runtime_touch_compact_lineage_binding(
         );
         return None;
     }
+    let (profile_name, dead_shadowed_by_binding) = {
+        let bindings = if session_binding {
+            &runtime.session_id_bindings
+        } else {
+            &runtime.turn_state_bindings
+        };
+        let binding = bindings
+            .get(key)
+            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name));
+        (
+            binding.map(|binding| binding.profile_name.clone()),
+            runtime_dead_continuation_status_shadowed_by_live_binding(
+                runtime_continuation_status_map(&runtime.continuation_statuses, status_kind)
+                    .get(key),
+                binding,
+            ),
+        )
+    };
     if runtime_continuation_status_map(&runtime.continuation_statuses, status_kind)
         .get(key)
         .is_some_and(runtime_continuation_status_is_terminal)
+        && !dead_shadowed_by_binding
     {
         runtime_proxy_log(
             shared,
@@ -2001,10 +2032,6 @@ pub(super) fn runtime_touch_compact_lineage_binding(
     } else {
         &mut runtime.turn_state_bindings
     };
-    let profile_name = bindings
-        .get(key)
-        .map(|binding| binding.profile_name.clone())
-        .filter(|profile_name| runtime.state.profiles.contains_key(profile_name));
     let mut persist_touch = false;
     if let Some(profile_name) = profile_name.as_deref()
         && let Some(binding) = bindings.get_mut(key)
@@ -2290,12 +2317,25 @@ pub(super) fn runtime_response_bound_profile(
             &format!("continuation_stale:{previous_response_id}"),
         );
     }
+    let dead_shadowed_by_binding = runtime_dead_continuation_status_shadowed_by_live_binding(
+        runtime_continuation_status_map(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::Response,
+        )
+        .get(previous_response_id),
+        runtime
+            .state
+            .response_profile_bindings
+            .get(previous_response_id)
+            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name)),
+    );
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::Response,
     )
     .get(previous_response_id)
     .is_some_and(runtime_continuation_status_is_terminal)
+        && !dead_shadowed_by_binding
     {
         runtime_proxy_log(
             shared,
@@ -2412,12 +2452,24 @@ pub(super) fn runtime_turn_state_bound_profile(
         );
         return Ok(None);
     }
+    let dead_shadowed_by_binding = runtime_dead_continuation_status_shadowed_by_live_binding(
+        runtime_continuation_status_map(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::TurnState,
+        )
+        .get(turn_state),
+        runtime
+            .turn_state_bindings
+            .get(turn_state)
+            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name)),
+    );
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::TurnState,
     )
     .get(turn_state)
     .is_some_and(runtime_continuation_status_is_terminal)
+        && !dead_shadowed_by_binding
     {
         runtime_proxy_log(
             shared,
@@ -2509,12 +2561,24 @@ pub(super) fn runtime_session_bound_profile(
         );
         return Ok(None);
     }
+    let dead_shadowed_by_binding = runtime_dead_continuation_status_shadowed_by_live_binding(
+        runtime_continuation_status_map(
+            &runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::SessionId,
+        )
+        .get(session_id),
+        runtime
+            .session_id_bindings
+            .get(session_id)
+            .filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name)),
+    );
     if runtime_continuation_status_map(
         &runtime.continuation_statuses,
         RuntimeContinuationBindingKind::SessionId,
     )
     .get(session_id)
     .is_some_and(runtime_continuation_status_is_terminal)
+        && !dead_shadowed_by_binding
     {
         runtime_proxy_log(
             shared,
@@ -3348,6 +3412,7 @@ pub(super) fn release_runtime_quota_blocked_affinity(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let mut changed = false;
     let now = Local::now().timestamp();
+    let release_session_affinity = previous_response_id.is_none() && turn_state.is_none();
 
     if let Some(previous_response_id) = previous_response_id
         && runtime
@@ -3389,7 +3454,11 @@ pub(super) fn release_runtime_quota_blocked_affinity(
         changed = true;
     }
 
-    if let Some(session_id) = session_id
+    // Dropping previous_response or turn_state affinity should not also erase an existing
+    // session lineage. Fresh fallback may still need that session owner to preserve compact
+    // context or to reapply soft session affinity on the next selection pass.
+    if release_session_affinity
+        && let Some(session_id) = session_id
         && runtime
             .session_id_bindings
             .get(session_id)
@@ -3458,6 +3527,7 @@ pub(super) fn release_runtime_previous_response_affinity(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let mut changed = false;
     let now = Local::now().timestamp();
+    let release_session_affinity = previous_response_id.is_none() && turn_state.is_none();
 
     if let Some(previous_response_id) = previous_response_id
         && runtime
@@ -3499,7 +3569,8 @@ pub(super) fn release_runtime_previous_response_affinity(
         changed = true;
     }
 
-    if let Some(session_id) = session_id
+    if release_session_affinity
+        && let Some(session_id) = session_id
         && runtime
             .session_id_bindings
             .get(session_id)
