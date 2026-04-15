@@ -225,6 +225,8 @@ impl TestDir {
 
 fn wait_for_runtime_background_queues_idle() {
     let deadline = Instant::now() + ci_timing_upper_bound_ms(5_000, 10_000);
+    let lone_probe_refresh_grace = ci_timing_upper_bound_ms(250, 2_000);
+    let mut lone_probe_refresh_since = None;
     loop {
         let state_save_backlog = runtime_state_save_queue_backlog();
         let state_save_active = runtime_state_save_queue_active();
@@ -236,6 +238,23 @@ fn wait_for_runtime_background_queues_idle() {
         let active = state_save_active + continuation_active + probe_refresh_active;
         if backlog == 0 && active == 0 {
             return;
+        }
+        let only_lingering_probe_refresh = state_save_backlog == 0
+            && state_save_active == 0
+            && continuation_backlog == 0
+            && continuation_active == 0
+            && probe_refresh_backlog == 0
+            && probe_refresh_active > 0;
+        if only_lingering_probe_refresh {
+            let lingering_since = lone_probe_refresh_since.get_or_insert_with(Instant::now);
+            // Tests use isolated state roots, so once every queue has drained and only a
+            // best-effort probe refresh worker is still winding down, the next test can
+            // safely move on instead of burning the full global timeout on unrelated work.
+            if lingering_since.elapsed() >= lone_probe_refresh_grace {
+                return;
+            }
+        } else {
+            lone_probe_refresh_since = None;
         }
         if Instant::now() >= deadline {
             panic!(
