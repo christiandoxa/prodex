@@ -1028,7 +1028,28 @@ pub(super) fn apply_runtime_profile_probe_result(
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let now = Local::now().timestamp();
+    let (log_messages, state_save_args) = apply_runtime_profile_probe_result_to_runtime(
+        &mut runtime,
+        profile_name,
+        auth,
+        result,
+        Local::now().timestamp(),
+    );
+    drop(runtime);
+    emit_runtime_profile_probe_result(shared, log_messages, state_save_args);
+    note_runtime_probe_refresh_progress();
+    Ok(())
+}
+
+fn apply_runtime_profile_probe_result_to_runtime(
+    runtime: &mut RuntimeRotationState,
+    profile_name: &str,
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
+    now: i64,
+) -> (Vec<String>, Option<RuntimeStateSaveArgs>) {
+    let mut log_messages = Vec::new();
+    let mut state_save_args = None;
     runtime.profile_probe_cache.insert(
         profile_name.to_string(),
         RuntimeProfileProbeCacheEntry {
@@ -1085,42 +1106,117 @@ pub(super) fn apply_runtime_profile_probe_result(
             .profile_usage_snapshots
             .insert(profile_name.to_string(), snapshot);
         if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "quota_probe_exhausted profile={profile_name} reason=usage_snapshot_exhausted {}",
-                    runtime_quota_summary_log_fields(quota_summary)
-                ),
-            );
+            log_messages.push(format!(
+                "quota_probe_exhausted profile={profile_name} reason=usage_snapshot_exhausted {}",
+                runtime_quota_summary_log_fields(quota_summary)
+            ));
         }
         if let Some(until) = quarantine_applied
             && retry_backoff_changed
         {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message=probe_snapshot",
-                    runtime_route_kind_label(RuntimeRouteKind::Responses),
-                    until,
-                    blocking_reset_at.unwrap_or(i64::MAX),
-                ),
-            );
-            runtime_proxy_log(
-                shared,
-                format!("profile_retry_backoff profile={profile_name} until={until}"),
-            );
+            log_messages.push(format!(
+                "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message=probe_snapshot",
+                runtime_route_kind_label(RuntimeRouteKind::Responses),
+                until,
+                blocking_reset_at.unwrap_or(i64::MAX),
+            ));
+            log_messages.push(format!(
+                "profile_retry_backoff profile={profile_name} until={until}",
+            ));
         }
         if snapshot_should_persist || retry_backoff_changed {
-            schedule_runtime_state_save_from_runtime(
-                shared,
-                &runtime,
-                &format!("usage_snapshot:{profile_name}"),
-            );
+            state_save_args = Some((
+                runtime.state.clone(),
+                runtime_continuation_store_snapshot(runtime),
+                runtime.profile_health.clone(),
+                runtime.profile_usage_snapshots.clone(),
+                runtime_profile_backoffs_snapshot(runtime),
+                runtime.paths.clone(),
+                format!("usage_snapshot:{profile_name}"),
+            ));
         }
     }
-    drop(runtime);
-    note_runtime_probe_refresh_progress();
-    Ok(())
+
+    (log_messages, state_save_args)
+}
+
+type RuntimeStateSaveArgs = (
+    AppState,
+    RuntimeContinuationStore,
+    BTreeMap<String, RuntimeProfileHealth>,
+    BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    RuntimeProfileBackoffs,
+    AppPaths,
+    String,
+);
+
+fn emit_runtime_profile_probe_result(
+    shared: &RuntimeRotationProxyShared,
+    log_messages: Vec<String>,
+    state_save_args: Option<RuntimeStateSaveArgs>,
+) {
+    for message in log_messages {
+        runtime_proxy_log(shared, message);
+    }
+    if let Some((state, continuations, profile_scores, usage_snapshots, backoffs, paths, reason)) =
+        state_save_args
+    {
+        schedule_runtime_state_save(
+            shared,
+            state,
+            continuations,
+            profile_scores,
+            usage_snapshots,
+            backoffs,
+            paths,
+            &reason,
+        );
+    }
+}
+
+fn runtime_probe_refresh_apply_wait_timeout() -> Duration {
+    Duration::from_millis(if cfg!(test) { 250 } else { 1_000 })
+}
+
+fn apply_runtime_profile_probe_result_with_timeout(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
+    timeout: Duration,
+) -> Result<()> {
+    let started_at = Instant::now();
+    let now = Local::now().timestamp();
+    loop {
+        match shared.runtime.try_lock() {
+            Ok(mut runtime) => {
+                let (log_messages, state_save_args) = apply_runtime_profile_probe_result_to_runtime(
+                    &mut runtime,
+                    profile_name,
+                    auth,
+                    result,
+                    now,
+                );
+                drop(runtime);
+                emit_runtime_profile_probe_result(shared, log_messages, state_save_args);
+                note_runtime_probe_refresh_progress();
+                return Ok(());
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                note_runtime_probe_refresh_progress();
+                return Err(anyhow::anyhow!("runtime auto-rotate state is poisoned"));
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if started_at.elapsed() >= timeout {
+                    note_runtime_probe_refresh_progress();
+                    return Err(anyhow::anyhow!(
+                        "runtime auto-rotate state remained busy during probe apply"
+                    ));
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
 }
 
 pub(super) fn runtime_profile_usage_snapshot_materially_matches(
@@ -1200,8 +1296,13 @@ fn run_runtime_probe_refresh_job(job: RuntimeProbeRefreshJob) {
     } else {
         Err("auth mode is not quota-compatible".to_string())
     };
-    let apply_result =
-        apply_runtime_profile_probe_result(&job.shared, &job.profile_name, auth, result.clone());
+    let apply_result = apply_runtime_profile_probe_result_with_timeout(
+        &job.shared,
+        &job.profile_name,
+        auth,
+        result.clone(),
+        runtime_probe_refresh_apply_wait_timeout(),
+    );
     match result {
         Ok(_) => runtime_proxy_log(
             &job.shared,

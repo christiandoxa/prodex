@@ -224,20 +224,22 @@ impl TestDir {
 }
 
 fn wait_for_runtime_background_queues_idle() {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + ci_timing_upper_bound_ms(5_000, 10_000);
     loop {
-        let backlog = runtime_state_save_queue_backlog()
-            + runtime_continuation_journal_queue_backlog()
-            + runtime_probe_refresh_queue_backlog();
-        let active = runtime_state_save_queue_active()
-            + runtime_continuation_journal_queue_active()
-            + runtime_probe_refresh_queue_active();
+        let state_save_backlog = runtime_state_save_queue_backlog();
+        let state_save_active = runtime_state_save_queue_active();
+        let continuation_backlog = runtime_continuation_journal_queue_backlog();
+        let continuation_active = runtime_continuation_journal_queue_active();
+        let probe_refresh_backlog = runtime_probe_refresh_queue_backlog();
+        let probe_refresh_active = runtime_probe_refresh_queue_active();
+        let backlog = state_save_backlog + continuation_backlog + probe_refresh_backlog;
+        let active = state_save_active + continuation_active + probe_refresh_active;
         if backlog == 0 && active == 0 {
             return;
         }
         if Instant::now() >= deadline {
             panic!(
-                "runtime background queues did not go idle before timeout: backlog={backlog} active={active}"
+                "runtime background queues did not go idle before timeout: backlog={backlog} active={active} state_save_backlog={state_save_backlog} state_save_active={state_save_active} continuation_backlog={continuation_backlog} continuation_active={continuation_active} probe_refresh_backlog={probe_refresh_backlog} probe_refresh_active={probe_refresh_active}"
             );
         }
         thread::sleep(Duration::from_millis(10));
