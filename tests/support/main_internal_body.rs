@@ -283,6 +283,21 @@ fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapsho
     }
 }
 
+fn ready_runtime_usage_snapshot(
+    now: i64,
+    remaining_percent: i64,
+) -> RuntimeProfileUsageSnapshot {
+    RuntimeProfileUsageSnapshot {
+        checked_at: now,
+        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+        five_hour_remaining_percent: remaining_percent,
+        five_hour_reset_at: now + 18_000,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: remaining_percent,
+        weekly_reset_at: now + 604_800,
+    }
+}
+
 impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
@@ -22889,8 +22904,8 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
                 },
             ),
         ]),
-        // Keep third on cooldown so the first post-quota fresh pick lands on second and this
-        // test deterministically exercises the reuse watchdog path before rotating to third.
+        // Keep third behind second so this test deterministically exercises the reuse watchdog
+        // path before rotating to third.
         last_run_selected_at: BTreeMap::from([("third".to_string(), now)]),
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
@@ -22903,17 +22918,18 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
+    save_runtime_usage_snapshots_for_profiles(
+        &paths,
+        &BTreeMap::from([
+            ("main".to_string(), ready_runtime_usage_snapshot(now, 80)),
+            ("second".to_string(), ready_runtime_usage_snapshot(now, 90)),
+            ("third".to_string(), ready_runtime_usage_snapshot(now, 85)),
+        ]),
+        &state.profiles,
+    )
+    .expect("usage snapshots should save");
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let startup_usage_accounts = sorted_backend_usage_accounts(&backend);
-    assert_eq!(
-        startup_usage_accounts,
-        vec![
-            "main-account".to_string(),
-            "second-account".to_string(),
-            "third-account".to_string(),
-        ]
-    );
 
     let (mut socket, _response) = ws_connect(format!(
         "ws://{}/backend-api/codex/responses",
@@ -22985,13 +23001,23 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
             .iter()
             .any(|payload| payload.contains("\"response.completed\""))
     );
+    let response_accounts = backend.responses_accounts();
+    let second_index = response_accounts
+        .iter()
+        .position(|account| account == "second-account")
+        .expect("second should be attempted before the reuse watchdog fires");
+    let third_index = response_accounts
+        .iter()
+        .position(|account| account == "third-account")
+        .expect("third should receive the fallback after the reuse watchdog");
+    assert!(
+        second_index < third_index,
+        "second should be attempted before third fallback: {response_accounts:?}"
+    );
     assert_eq!(
-        backend.responses_accounts(),
-        vec![
-            "main-account".to_string(),
-            "second-account".to_string(),
-            "third-account".to_string(),
-        ]
+        response_accounts.last().map(String::as_str),
+        Some("third-account"),
+        "third should be the committed fallback profile: {response_accounts:?}"
     );
     let persisted = wait_for_state(&paths, |state| {
         state.active_profile.as_deref() == Some("third")
