@@ -48,6 +48,7 @@ mod quota_support;
 mod runtime_anthropic;
 mod runtime_background;
 mod runtime_broker;
+mod runtime_broker_shared;
 mod runtime_capabilities;
 mod runtime_caveman;
 mod runtime_claude;
@@ -56,10 +57,12 @@ mod runtime_config;
 mod runtime_core_shared;
 mod runtime_doctor;
 mod runtime_launch;
+mod runtime_launch_shared;
 mod runtime_metrics;
 mod runtime_persistence;
 mod runtime_policy;
 mod runtime_proxy;
+mod runtime_proxy_shared;
 mod runtime_store;
 mod secret_store;
 mod shared_codex_fs;
@@ -77,6 +80,7 @@ use quota_support::*;
 use runtime_anthropic::*;
 use runtime_background::*;
 use runtime_broker::*;
+use runtime_broker_shared::*;
 use runtime_capabilities::*;
 use runtime_caveman::*;
 use runtime_claude::*;
@@ -84,9 +88,11 @@ use runtime_config::*;
 use runtime_core_shared::*;
 use runtime_doctor::*;
 use runtime_launch::*;
+use runtime_launch_shared::*;
 use runtime_persistence::*;
 use runtime_policy::*;
 use runtime_proxy::*;
+use runtime_proxy_shared::*;
 use runtime_store::*;
 use shared_codex_fs::*;
 use terminal_ui::*;
@@ -1389,119 +1395,6 @@ struct RuntimeRotationProxy {
     owner_lock: Option<StateFileLock>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RuntimeBrokerRegistry {
-    pid: u32,
-    listen_addr: String,
-    started_at: i64,
-    upstream_base_url: String,
-    include_code_review: bool,
-    current_profile: String,
-    instance_token: String,
-    admin_token: String,
-    #[serde(default)]
-    openai_mount_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RuntimeBrokerHealth {
-    pid: u32,
-    started_at: i64,
-    current_profile: String,
-    include_code_review: bool,
-    active_requests: usize,
-    instance_token: String,
-    persistence_role: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RuntimeBrokerLaneMetrics {
-    active: usize,
-    limit: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RuntimeBrokerTrafficMetrics {
-    responses: RuntimeBrokerLaneMetrics,
-    compact: RuntimeBrokerLaneMetrics,
-    websocket: RuntimeBrokerLaneMetrics,
-    standard: RuntimeBrokerLaneMetrics,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RuntimeBrokerContinuationMetrics {
-    response_bindings: usize,
-    turn_state_bindings: usize,
-    session_id_bindings: usize,
-    warm: usize,
-    verified: usize,
-    suspect: usize,
-    dead: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct RuntimeBrokerMetrics {
-    health: RuntimeBrokerHealth,
-    active_request_limit: usize,
-    local_overload_backoff_remaining_seconds: u64,
-    traffic: RuntimeBrokerTrafficMetrics,
-    profile_inflight: BTreeMap<String, usize>,
-    retry_backoffs: usize,
-    transport_backoffs: usize,
-    route_circuits: usize,
-    degraded_profiles: usize,
-    degraded_routes: usize,
-    continuations: RuntimeBrokerContinuationMetrics,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct RuntimeBrokerObservation {
-    broker_key: String,
-    listen_addr: String,
-    metrics: RuntimeBrokerMetrics,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-struct RuntimeBrokerMetadata {
-    broker_key: String,
-    listen_addr: String,
-    started_at: i64,
-    current_profile: String,
-    include_code_review: bool,
-    instance_token: String,
-    admin_token: String,
-}
-
-#[derive(Debug)]
-struct RuntimeBrokerLease {
-    path: PathBuf,
-}
-
-#[derive(Debug)]
-struct RuntimeProxyEndpoint {
-    listen_addr: std::net::SocketAddr,
-    openai_mount_path: String,
-    lease_dir: PathBuf,
-    _lease: Option<RuntimeBrokerLease>,
-}
-
-struct RuntimeLaunchRequest<'a> {
-    profile: Option<&'a str>,
-    allow_auto_rotate: bool,
-    skip_quota_check: bool,
-    base_url: Option<&'a str>,
-    include_code_review: bool,
-    force_runtime_proxy: bool,
-}
-
-struct PreparedRuntimeLaunch {
-    paths: AppPaths,
-    codex_home: PathBuf,
-    managed: bool,
-    runtime_proxy: Option<RuntimeProxyEndpoint>,
-}
-
 type RuntimeLocalWebSocket = WsSocket<Box<dyn TinyReadWrite + Send>>;
 type RuntimeUpstreamWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
 
@@ -1532,283 +1425,6 @@ fn runtime_websocket_timeout_error(err: &WsError) -> bool {
                 io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
             )
     )
-}
-
-enum RuntimeResponsesAttempt {
-    Success {
-        profile_name: String,
-        response: RuntimeResponsesReply,
-    },
-    QuotaBlocked {
-        profile_name: String,
-        response: RuntimeResponsesReply,
-    },
-    PreviousResponseNotFound {
-        profile_name: String,
-        response: RuntimeResponsesReply,
-        turn_state: Option<String>,
-    },
-    LocalSelectionBlocked {
-        profile_name: String,
-        reason: &'static str,
-    },
-}
-
-enum RuntimeStandardAttempt {
-    Success {
-        profile_name: String,
-        response: tiny_http::ResponseBox,
-    },
-    RetryableFailure {
-        profile_name: String,
-        response: tiny_http::ResponseBox,
-        overload: bool,
-    },
-    LocalSelectionBlocked {
-        profile_name: String,
-    },
-}
-
-#[derive(Debug)]
-enum RuntimeSseInspection {
-    Commit {
-        prelude: Vec<u8>,
-        response_ids: Vec<String>,
-        turn_state: Option<String>,
-    },
-    QuotaBlocked(Vec<u8>),
-    PreviousResponseNotFound(Vec<u8>),
-}
-
-#[derive(Debug)]
-enum RuntimeSseInspectionProgress {
-    Hold {
-        response_ids: Vec<String>,
-        turn_state: Option<String>,
-    },
-    Commit {
-        response_ids: Vec<String>,
-        turn_state: Option<String>,
-    },
-    QuotaBlocked,
-    PreviousResponseNotFound,
-}
-
-#[derive(Default)]
-struct RuntimeParsedSseEvent {
-    quota_blocked: bool,
-    previous_response_not_found: bool,
-    response_ids: Vec<String>,
-    event_type: Option<String>,
-    turn_state: Option<String>,
-}
-
-#[derive(Default)]
-struct RuntimeSseTapState {
-    line: Vec<u8>,
-    data_lines: Vec<String>,
-    remembered_response_ids: BTreeSet<String>,
-    response_ids_with_turn_state: BTreeSet<String>,
-    turn_state: Option<String>,
-}
-
-#[allow(clippy::large_enum_variant)]
-enum RuntimeResponsesReply {
-    Buffered(RuntimeBufferedResponseParts),
-    Streaming(RuntimeStreamingResponse),
-}
-
-struct RuntimeStreamingResponse {
-    status: u16,
-    headers: Vec<(String, String)>,
-    body: Box<dyn Read + Send>,
-    request_id: u64,
-    profile_name: String,
-    log_path: PathBuf,
-    shared: RuntimeRotationProxyShared,
-    _inflight_guard: Option<RuntimeProfileInFlightGuard>,
-}
-
-struct RuntimeProfileInFlightGuard {
-    shared: RuntimeRotationProxyShared,
-    profile_name: String,
-    context: &'static str,
-    weight: usize,
-}
-
-struct RuntimeProxyActiveRequestGuard {
-    active_request_count: Arc<AtomicUsize>,
-    lane_active_count: Arc<AtomicUsize>,
-    wait: Arc<(Mutex<()>, Condvar)>,
-}
-
-impl Drop for RuntimeProxyActiveRequestGuard {
-    fn drop(&mut self) {
-        let (mutex, condvar) = &*self.wait;
-        let _guard = mutex
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.active_request_count.fetch_sub(1, Ordering::SeqCst);
-        self.lane_active_count.fetch_sub(1, Ordering::SeqCst);
-        condvar.notify_all();
-    }
-}
-
-impl Drop for RuntimeProfileInFlightGuard {
-    fn drop(&mut self) {
-        if let Ok(mut runtime) = self.shared.runtime.lock() {
-            let remaining =
-                if let Some(count) = runtime.profile_inflight.get_mut(&self.profile_name) {
-                    *count = count.saturating_sub(self.weight);
-                    let remaining = *count;
-                    if remaining == 0 {
-                        runtime.profile_inflight.remove(&self.profile_name);
-                    }
-                    remaining
-                } else {
-                    0
-                };
-            drop(runtime);
-            runtime_proxy_log(
-                &self.shared,
-                format!(
-                    "profile_inflight profile={} count={} weight={} context={} event=release",
-                    self.profile_name, remaining, self.weight, self.context
-                ),
-            );
-            self.shared
-                .lane_admission
-                .inflight_release_revision
-                .fetch_add(1, Ordering::SeqCst);
-            let (mutex, condvar) = &*self.shared.lane_admission.wait;
-            let _guard = mutex
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            condvar.notify_all();
-        }
-    }
-}
-
-enum RuntimePrefetchChunk {
-    Data(Vec<u8>),
-    End,
-    Error(io::ErrorKind, String),
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum RuntimePrefetchSendOutcome {
-    Sent { wait_ms: u128, retries: usize },
-    Disconnected,
-    TimedOut { message: String },
-}
-
-#[derive(Default)]
-struct RuntimePrefetchSharedState {
-    terminal_error: Mutex<Option<(io::ErrorKind, String)>>,
-    queued_bytes: AtomicUsize,
-}
-
-struct RuntimePrefetchStream {
-    receiver: Option<Receiver<RuntimePrefetchChunk>>,
-    shared: Arc<RuntimePrefetchSharedState>,
-    backlog: VecDeque<RuntimePrefetchChunk>,
-    worker_abort: Option<tokio::task::AbortHandle>,
-}
-
-struct RuntimePrefetchReader {
-    receiver: Receiver<RuntimePrefetchChunk>,
-    shared: Arc<RuntimePrefetchSharedState>,
-    backlog: VecDeque<RuntimePrefetchChunk>,
-    pending: Cursor<Vec<u8>>,
-    finished: bool,
-    worker_abort: tokio::task::AbortHandle,
-}
-
-#[derive(Debug)]
-enum RuntimeWebsocketAttempt {
-    Delivered,
-    QuotaBlocked {
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-    },
-    Overloaded {
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-    },
-    LocalSelectionBlocked {
-        profile_name: String,
-        reason: &'static str,
-    },
-    PreviousResponseNotFound {
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-        turn_state: Option<String>,
-    },
-    ReuseWatchdogTripped {
-        profile_name: String,
-        event: &'static str,
-    },
-}
-
-#[allow(clippy::large_enum_variant)]
-enum RuntimeUpstreamFailureResponse {
-    Http(RuntimeResponsesReply),
-    Websocket(RuntimeWebsocketErrorPayload),
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-enum RuntimeWebsocketConnectResult {
-    Connected {
-        socket: RuntimeUpstreamWebSocket,
-        turn_state: Option<String>,
-    },
-    QuotaBlocked(RuntimeWebsocketErrorPayload),
-    Overloaded(RuntimeWebsocketErrorPayload),
-}
-
-#[derive(Debug)]
-struct RuntimeWebsocketTcpConnectSuccess {
-    stream: TcpStream,
-    selected_addr: SocketAddr,
-    resolved_addrs: usize,
-    attempted_addrs: usize,
-}
-
-#[derive(Debug)]
-struct RuntimeWebsocketTcpAttemptResult {
-    addr: SocketAddr,
-    result: io::Result<TcpStream>,
-}
-
-#[derive(Debug, Clone)]
-enum RuntimeWebsocketErrorPayload {
-    Text(String),
-    Binary(Vec<u8>),
-    Empty,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeWebsocketRetryInspectionKind {
-    QuotaBlocked,
-    Overloaded,
-    PreviousResponseNotFound,
-}
-
-#[derive(Debug, Clone, Default)]
-struct RuntimeInspectedWebsocketTextFrame {
-    event_type: Option<String>,
-    turn_state: Option<String>,
-    response_ids: Vec<String>,
-    retry_kind: Option<RuntimeWebsocketRetryInspectionKind>,
-    precommit_hold: bool,
-    terminal_event: bool,
-}
-
-#[derive(Debug)]
-struct RuntimeBufferedWebsocketTextFrame {
-    text: String,
-    response_ids: Vec<String>,
 }
 
 fn runtime_proxy_log(shared: &RuntimeRotationProxyShared, message: impl AsRef<str>) {
@@ -1975,18 +1591,6 @@ fn codex_bin() -> OsString {
 
 fn claude_bin() -> OsString {
     env::var_os("PRODEX_CLAUDE_BIN").unwrap_or_else(|| OsString::from("claude"))
-}
-
-impl Drop for RuntimeBrokerLease {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-impl RuntimeProxyEndpoint {
-    fn create_child_lease(&self, pid: u32) -> Result<RuntimeBrokerLease> {
-        create_runtime_broker_lease_in_dir_for_pid(&self.lease_dir, pid)
-    }
 }
 
 #[cfg(test)]
