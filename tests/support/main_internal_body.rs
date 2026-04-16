@@ -225,8 +225,8 @@ impl TestDir {
 
 fn wait_for_runtime_background_queues_idle() {
     let deadline = Instant::now() + ci_timing_upper_bound_ms(5_000, 10_000);
-    let lone_probe_refresh_grace = ci_timing_upper_bound_ms(250, 2_000);
-    let mut lone_probe_refresh_since = None;
+    let probe_refresh_grace = ci_timing_upper_bound_ms(250, 2_000);
+    let mut lingering_probe_refresh_since = None;
     loop {
         let state_save_backlog = runtime_state_save_queue_backlog();
         let state_save_active = runtime_state_save_queue_active();
@@ -243,18 +243,27 @@ fn wait_for_runtime_background_queues_idle() {
             && state_save_active == 0
             && continuation_backlog == 0
             && continuation_active == 0
-            && probe_refresh_backlog == 0
-            && probe_refresh_active > 0;
+            && (probe_refresh_backlog > 0 || probe_refresh_active > 0);
         if only_lingering_probe_refresh {
-            let lingering_since = lone_probe_refresh_since.get_or_insert_with(Instant::now);
-            // Tests use isolated state roots, so once every queue has drained and only a
-            // best-effort probe refresh worker is still winding down, the next test can
-            // safely move on instead of burning the full global timeout on unrelated work.
-            if lingering_since.elapsed() >= lone_probe_refresh_grace {
+            let lingering_since =
+                lingering_probe_refresh_since.get_or_insert_with(Instant::now);
+            // Tests use isolated state roots, so once every other queue has drained we can
+            // discard stale best-effort probe refresh backlog instead of timing out on work
+            // that belongs to a previous test. Any workers already in flight can finish in the
+            // background without touching the next test's state root.
+            if lingering_since.elapsed() >= probe_refresh_grace {
+                if probe_refresh_backlog > 0 {
+                    let queue = runtime_probe_refresh_queue();
+                    let mut pending = queue
+                        .pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    pending.clear();
+                }
                 return;
             }
         } else {
-            lone_probe_refresh_since = None;
+            lingering_probe_refresh_since = None;
         }
         if Instant::now() >= deadline {
             panic!(
