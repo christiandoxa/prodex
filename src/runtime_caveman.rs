@@ -75,45 +75,52 @@ const CAVEMAN_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
     },
 ];
 
-pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
-    let codex_args = normalize_run_codex_args(&args.codex_args);
-    let include_code_review = is_review_invocation(&codex_args);
-    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
-        profile: args.profile.as_deref(),
-        allow_auto_rotate: !args.no_auto_rotate,
-        skip_quota_check: args.skip_quota_check,
-        base_url: args.base_url.as_deref(),
-        include_code_review,
-        force_runtime_proxy: false,
-    })?;
-    let runtime_proxy = prepared.runtime_proxy;
-    let runtime_args = runtime_proxy
-        .as_ref()
-        .map(|proxy| {
-            if proxy.openai_mount_path == RUNTIME_PROXY_OPENAI_MOUNT_PATH {
-                runtime_proxy_codex_args(proxy.listen_addr, &codex_args)
-            } else {
-                runtime_proxy_codex_args_with_mount_path(
-                    proxy.listen_addr,
-                    &proxy.openai_mount_path,
-                    &codex_args,
-                )
-            }
-        })
-        .unwrap_or(codex_args);
+struct CavemanLaunchStrategy {
+    args: CavemanArgs,
+    codex_args: Vec<OsString>,
+    include_code_review: bool,
+}
 
-    let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
-    let status = run_child(
-        &codex_bin(),
-        &runtime_args,
-        &caveman_home,
-        &[],
-        &[],
-        runtime_proxy.as_ref(),
-    );
-    drop(runtime_proxy);
-    let _ = fs::remove_dir_all(&caveman_home);
-    exit_with_status(status?)
+impl CavemanLaunchStrategy {
+    fn new(args: CavemanArgs) -> Self {
+        let codex_args = normalize_run_codex_args(&args.codex_args);
+        let include_code_review = is_review_invocation(&codex_args);
+        Self {
+            args,
+            codex_args,
+            include_code_review,
+        }
+    }
+}
+
+impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
+    fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
+        RuntimeLaunchRequest {
+            profile: self.args.profile.as_deref(),
+            allow_auto_rotate: !self.args.no_auto_rotate,
+            skip_quota_check: self.args.skip_quota_check,
+            base_url: self.args.base_url.as_deref(),
+            include_code_review: self.include_code_review,
+            force_runtime_proxy: false,
+        }
+    }
+
+    fn build_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) -> Result<RuntimeLaunchPlan> {
+        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
+        let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
+        Ok(RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(codex_bin(), caveman_home.clone()).with_args(runtime_args),
+        )
+        .with_cleanup_path(caveman_home))
+    }
+}
+
+pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
+    execute_runtime_launch(CavemanLaunchStrategy::new(args))
 }
 
 pub(super) fn prepare_caveman_launch_home(

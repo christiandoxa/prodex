@@ -15195,6 +15195,38 @@ fn runtime_proxy_injects_custom_openai_mount_path_overrides() {
 }
 
 #[test]
+fn runtime_proxy_passthrough_args_preserve_user_args_without_proxy() {
+    let user_args = vec![OsString::from("exec"), OsString::from("hello")];
+    assert_eq!(runtime_proxy_codex_passthrough_args(None, &user_args), user_args);
+}
+
+#[test]
+fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
+    let temp_dir = TestDir::new();
+    let endpoint = RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:4455".parse().expect("listen addr"),
+        openai_mount_path: "/backend-api/prodex/v0.2.99".to_string(),
+        lease_dir: temp_dir.path.join("leases"),
+        _lease: None,
+    };
+
+    let rendered = runtime_proxy_codex_passthrough_args(
+        Some(&endpoint),
+        &[OsString::from("exec"), OsString::from("hello")],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert_eq!(rendered[0], "-c");
+    assert_eq!(
+        rendered[3],
+        "openai_base_url=\"http://127.0.0.1:4455/backend-api/prodex/v0.2.99\""
+    );
+    assert_eq!(&rendered[4..], ["exec", "hello"]);
+}
+
+#[test]
 fn runtime_proxy_maps_legacy_versioned_openai_prefix_to_upstream_backend_api() {
     assert_eq!(
         runtime_proxy_upstream_url(
@@ -31064,6 +31096,30 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
 fn runtime_broker_startup_grace_covers_ready_timeout() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "15000");
     assert!(runtime_broker_startup_grace_seconds() >= 16);
+}
+
+#[test]
+fn runtime_broker_command_is_the_only_command_without_update_notice() {
+    let runtime_broker = Commands::RuntimeBroker(RuntimeBrokerArgs {
+        current_profile: "main".to_string(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        broker_key: "broker".to_string(),
+        instance_token: "instance".to_string(),
+        admin_token: "admin".to_string(),
+        listen_addr: None,
+    });
+    let run = Commands::Run(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        base_url: None,
+        codex_args: vec![OsString::from("hello")],
+    });
+
+    assert!(!ProdexCommand::should_show_update_notice(&runtime_broker));
+    assert!(ProdexCommand::should_show_update_notice(&run));
 }
 
 #[test]

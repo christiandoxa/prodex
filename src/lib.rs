@@ -40,6 +40,7 @@ use tungstenite::{
 
 mod app_commands;
 mod audit_log;
+mod command_dispatch;
 mod housekeeping;
 mod profile_commands;
 mod profile_identity;
@@ -67,6 +68,7 @@ mod update_notice;
 
 use app_commands::*;
 use audit_log::*;
+use command_dispatch::*;
 use housekeeping::*;
 use profile_commands::*;
 use profile_identity::*;
@@ -2140,26 +2142,11 @@ pub fn main_entry() {
 
 fn run() -> Result<()> {
     let command = parse_cli_command_or_exit();
-    if !matches!(command, Commands::RuntimeBroker(_)) {
+    if command.should_show_update_notice() {
         let _ = show_update_notice_if_available(&command);
     }
     ensure_runtime_policy_valid()?;
-    match command {
-        Commands::Profile(command) => handle_profile_command(command),
-        Commands::UseProfile(selector) => handle_set_active_profile(selector),
-        Commands::Current => handle_current_profile(),
-        Commands::Info(args) => handle_info(args),
-        Commands::Doctor(args) => handle_doctor(args),
-        Commands::Audit(args) => handle_audit(args),
-        Commands::Cleanup => handle_cleanup(),
-        Commands::Login(args) => handle_codex_login(args),
-        Commands::Logout(args) => handle_codex_logout(args),
-        Commands::Quota(args) => handle_quota(args),
-        Commands::Run(args) => handle_run(args),
-        Commands::Caveman(args) => handle_caveman(args),
-        Commands::Claude(args) => handle_claude(args),
-        Commands::RuntimeBroker(args) => handle_runtime_broker(args),
-    }
+    command.execute()
 }
 
 fn parse_cli_command_or_exit() -> Commands {

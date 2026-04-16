@@ -79,52 +79,79 @@ pub(super) struct RuntimeProxyResponsesModelDescriptor {
     pub(super) supports_xhigh: bool,
 }
 
+struct ClaudeLaunchStrategy {
+    args: ClaudeArgs,
+    claude_args: Vec<OsString>,
+    caveman_mode: bool,
+}
+
+impl ClaudeLaunchStrategy {
+    fn new(args: ClaudeArgs) -> Self {
+        let (caveman_mode, claude_args) =
+            runtime_proxy_claude_extract_caveman_mode(&args.claude_args);
+        Self {
+            args,
+            claude_args,
+            caveman_mode,
+        }
+    }
+}
+
+impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
+    fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
+        RuntimeLaunchRequest {
+            profile: self.args.profile.as_deref(),
+            allow_auto_rotate: !self.args.no_auto_rotate,
+            skip_quota_check: self.args.skip_quota_check,
+            base_url: self.args.base_url.as_deref(),
+            include_code_review: false,
+            force_runtime_proxy: true,
+        }
+    }
+
+    fn build_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) -> Result<RuntimeLaunchPlan> {
+        let runtime_proxy =
+            runtime_proxy.context("Claude Code launch requires a local runtime proxy")?;
+        let claude_bin = claude_bin();
+        let claude_config_dir = prepare_runtime_proxy_claude_config_dir(
+            &prepared.paths,
+            &prepared.codex_home,
+            prepared.managed,
+        )?;
+        let current_dir =
+            env::current_dir().context("failed to determine current directory for Claude Code")?;
+        let claude_version = runtime_proxy_claude_binary_version(&claude_bin);
+        ensure_runtime_proxy_claude_launch_config(
+            &claude_config_dir,
+            &current_dir,
+            claude_version.as_deref(),
+        )?;
+        let caveman_plugin_dir = self
+            .caveman_mode
+            .then(|| prepare_runtime_proxy_claude_caveman_plugin_dir(&prepared.paths))
+            .transpose()?;
+        let launch_args =
+            runtime_proxy_claude_launch_args(&self.claude_args, caveman_plugin_dir.as_deref());
+        let extra_env = runtime_proxy_claude_launch_env(
+            runtime_proxy.listen_addr,
+            &claude_config_dir,
+            &prepared.codex_home,
+        );
+        Ok(RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(claude_bin, prepared.codex_home.clone())
+                .with_args(launch_args)
+                .with_extra_env(extra_env)
+                .with_removed_env(runtime_proxy_claude_removed_env().to_vec()),
+        ))
+    }
+}
+
 pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
-    let (caveman_mode, claude_args) = runtime_proxy_claude_extract_caveman_mode(&args.claude_args);
-    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
-        profile: args.profile.as_deref(),
-        allow_auto_rotate: !args.no_auto_rotate,
-        skip_quota_check: args.skip_quota_check,
-        base_url: args.base_url.as_deref(),
-        include_code_review: false,
-        force_runtime_proxy: true,
-    })?;
-    let runtime_proxy = prepared
-        .runtime_proxy
-        .context("Claude Code launch requires a local runtime proxy")?;
-    let claude_bin = claude_bin();
-    let claude_config_dir = prepare_runtime_proxy_claude_config_dir(
-        &prepared.paths,
-        &prepared.codex_home,
-        prepared.managed,
-    )?;
-    let current_dir =
-        env::current_dir().context("failed to determine current directory for Claude Code")?;
-    let claude_version = runtime_proxy_claude_binary_version(&claude_bin);
-    ensure_runtime_proxy_claude_launch_config(
-        &claude_config_dir,
-        &current_dir,
-        claude_version.as_deref(),
-    )?;
-    let caveman_plugin_dir = caveman_mode
-        .then(|| prepare_runtime_proxy_claude_caveman_plugin_dir(&prepared.paths))
-        .transpose()?;
-    let extra_env = runtime_proxy_claude_launch_env(
-        runtime_proxy.listen_addr,
-        &claude_config_dir,
-        &prepared.codex_home,
-    );
-    let launch_args = runtime_proxy_claude_launch_args(&claude_args, caveman_plugin_dir.as_deref());
-    let status = run_child(
-        &claude_bin,
-        &launch_args,
-        &prepared.codex_home,
-        &extra_env,
-        runtime_proxy_claude_removed_env(),
-        Some(&runtime_proxy),
-    )?;
-    drop(runtime_proxy);
-    exit_with_status(status)
+    execute_runtime_launch(ClaudeLaunchStrategy::new(args))
 }
 
 pub(super) fn runtime_proxy_claude_extract_caveman_mode(

@@ -1,5 +1,120 @@
 use super::*;
 
+#[derive(Debug, Clone)]
+pub(super) struct ChildProcessPlan {
+    pub(super) binary: OsString,
+    pub(super) args: Vec<OsString>,
+    pub(super) codex_home: PathBuf,
+    pub(super) extra_env: Vec<(OsString, OsString)>,
+    pub(super) removed_env: Vec<OsString>,
+}
+
+impl ChildProcessPlan {
+    pub(super) fn new(binary: OsString, codex_home: PathBuf) -> Self {
+        Self {
+            binary,
+            args: Vec::new(),
+            codex_home,
+            extra_env: Vec::new(),
+            removed_env: Vec::new(),
+        }
+    }
+
+    pub(super) fn with_args(mut self, args: Vec<OsString>) -> Self {
+        self.args = args;
+        self
+    }
+
+    pub(super) fn with_extra_env<I, K>(mut self, extra_env: I) -> Self
+    where
+        I: IntoIterator<Item = (K, OsString)>,
+        K: Into<OsString>,
+    {
+        self.extra_env = extra_env
+            .into_iter()
+            .map(|(key, value)| (key.into(), value))
+            .collect();
+        self
+    }
+
+    pub(super) fn with_removed_env<I, K>(mut self, removed_env: I) -> Self
+    where
+        I: IntoIterator<Item = K>,
+        K: Into<OsString>,
+    {
+        self.removed_env = removed_env.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct RuntimeLaunchPlan {
+    pub(super) child: ChildProcessPlan,
+    pub(super) cleanup_paths: Vec<PathBuf>,
+}
+
+impl RuntimeLaunchPlan {
+    pub(super) fn new(child: ChildProcessPlan) -> Self {
+        Self {
+            child,
+            cleanup_paths: Vec::new(),
+        }
+    }
+
+    pub(super) fn with_cleanup_path(mut self, path: PathBuf) -> Self {
+        self.cleanup_paths.push(path);
+        self
+    }
+}
+
+pub(super) trait RuntimeLaunchStrategy {
+    fn runtime_request(&self) -> RuntimeLaunchRequest<'_>;
+    fn build_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) -> Result<RuntimeLaunchPlan>;
+}
+
+pub(super) fn execute_runtime_launch<S>(strategy: S) -> Result<()>
+where
+    S: RuntimeLaunchStrategy,
+{
+    let prepared = prepare_runtime_launch(strategy.runtime_request())?;
+    let runtime_proxy_ref = prepared.runtime_proxy.as_ref();
+    let plan = strategy.build_plan(&prepared, runtime_proxy_ref)?;
+    let runtime_proxy = prepared.runtime_proxy;
+    let status = run_child_plan(&plan.child, runtime_proxy.as_ref());
+    drop(runtime_proxy);
+    cleanup_runtime_launch_plan(&plan);
+    exit_with_status(status?)
+}
+
+pub(super) fn runtime_proxy_codex_passthrough_args(
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    runtime_proxy
+        .map(|proxy| {
+            if proxy.openai_mount_path == RUNTIME_PROXY_OPENAI_MOUNT_PATH {
+                runtime_proxy_codex_args(proxy.listen_addr, user_args)
+            } else {
+                runtime_proxy_codex_args_with_mount_path(
+                    proxy.listen_addr,
+                    &proxy.openai_mount_path,
+                    user_args,
+                )
+            }
+        })
+        .unwrap_or_else(|| user_args.to_vec())
+}
+
+pub(super) fn cleanup_runtime_launch_plan(plan: &RuntimeLaunchPlan) {
+    for path in &plan.cleanup_paths {
+        let _ = fs::remove_dir_all(path);
+    }
+}
+
 pub(super) fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
     let Some(first) = codex_args.first().and_then(|arg| arg.to_str()) else {
         return codex_args.to_vec();

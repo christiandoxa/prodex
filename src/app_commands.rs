@@ -1215,46 +1215,50 @@ pub(super) fn handle_quota(args: QuotaArgs) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn handle_run(args: RunArgs) -> Result<()> {
-    let codex_args = normalize_run_codex_args(&args.codex_args);
-    let allow_auto_rotate = !args.no_auto_rotate;
-    let include_code_review = is_review_invocation(&codex_args);
-    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
-        profile: args.profile.as_deref(),
-        allow_auto_rotate,
-        skip_quota_check: args.skip_quota_check,
-        base_url: args.base_url.as_deref(),
-        include_code_review,
-        force_runtime_proxy: false,
-    })?;
-    let runtime_proxy = prepared.runtime_proxy;
-    let runtime_args = runtime_proxy
-        .as_ref()
-        .map(|proxy| {
-            if proxy.openai_mount_path == RUNTIME_PROXY_OPENAI_MOUNT_PATH {
-                runtime_proxy_codex_args(proxy.listen_addr, &codex_args)
-            } else {
-                runtime_proxy_codex_args_with_mount_path(
-                    proxy.listen_addr,
-                    &proxy.openai_mount_path,
-                    &codex_args,
-                )
-            }
-        })
-        .unwrap_or(codex_args);
+struct RunCommandStrategy {
+    args: RunArgs,
+    codex_args: Vec<OsString>,
+    include_code_review: bool,
+}
 
-    let status = run_child(
-        &codex_bin(),
-        &runtime_args,
-        &prepared.codex_home,
-        &[],
-        &[],
-        runtime_proxy.as_ref(),
-    )?;
-    // `std::process::exit` does not run destructors, so release the broker lease
-    // before mirroring Codex's exit status back to the caller.
-    drop(runtime_proxy);
-    exit_with_status(status)
+impl RunCommandStrategy {
+    fn new(args: RunArgs) -> Self {
+        let codex_args = normalize_run_codex_args(&args.codex_args);
+        let include_code_review = is_review_invocation(&codex_args);
+        Self {
+            args,
+            codex_args,
+            include_code_review,
+        }
+    }
+}
+
+impl RuntimeLaunchStrategy for RunCommandStrategy {
+    fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
+        RuntimeLaunchRequest {
+            profile: self.args.profile.as_deref(),
+            allow_auto_rotate: !self.args.no_auto_rotate,
+            skip_quota_check: self.args.skip_quota_check,
+            base_url: self.args.base_url.as_deref(),
+            include_code_review: self.include_code_review,
+            force_runtime_proxy: false,
+        }
+    }
+
+    fn build_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) -> Result<RuntimeLaunchPlan> {
+        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
+        Ok(RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(codex_bin(), prepared.codex_home.clone()).with_args(runtime_args),
+        ))
+    }
+}
+
+pub(super) fn handle_run(args: RunArgs) -> Result<()> {
+    execute_runtime_launch(RunCommandStrategy::new(args))
 }
 
 pub(super) fn prepare_runtime_launch(
@@ -1595,25 +1599,21 @@ pub(super) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn run_child(
-    binary: &OsString,
-    args: &[OsString],
-    codex_home: &Path,
-    extra_env: &[(&str, OsString)],
-    removed_env: &[&str],
+pub(super) fn run_child_plan(
+    plan: &ChildProcessPlan,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<ExitStatus> {
-    let mut command = Command::new(binary);
-    command.args(args).env("CODEX_HOME", codex_home);
-    for key in removed_env {
+    let mut command = Command::new(&plan.binary);
+    command.args(&plan.args).env("CODEX_HOME", &plan.codex_home);
+    for key in &plan.removed_env {
         command.env_remove(key);
     }
-    for (key, value) in extra_env {
+    for (key, value) in &plan.extra_env {
         command.env(key, value);
     }
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to execute {}", binary.to_string_lossy()))?;
+        .with_context(|| format!("failed to execute {}", plan.binary.to_string_lossy()))?;
     let _child_runtime_broker_lease = match runtime_proxy {
         Some(proxy) => match proxy.create_child_lease(child.id()) {
             Ok(lease) => Some(lease),
@@ -1627,7 +1627,7 @@ pub(super) fn run_child(
     };
     let status = child
         .wait()
-        .with_context(|| format!("failed to wait for {}", binary.to_string_lossy()))?;
+        .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
     Ok(status)
 }
 
