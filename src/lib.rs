@@ -110,6 +110,9 @@ const PRODEX_CLAUDE_DEFAULT_WEB_TOOLS: &[&str] = &["WebSearch", "WebFetch"];
 const PRODEX_CLAUDE_LEGACY_IMPORT_MARKER_NAME: &str = ".prodex-legacy-imported";
 const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
+const CHATGPT_AUTH_REFRESH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CHATGPT_AUTH_REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
+const CHATGPT_AUTH_REFRESH_INTERVAL_DAYS: i64 = 8;
 const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
@@ -153,6 +156,7 @@ const RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 2 
 const RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
     if cfg!(test) { 4 } else { 8 };
 const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else { 150 };
+const RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS: u64 = 5;
 const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
 const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
@@ -214,6 +218,7 @@ const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
 const PRODEX_SECRET_BACKEND_ENV: &str = "PRODEX_SECRET_BACKEND";
 const PRODEX_SECRET_KEYRING_SERVICE_ENV: &str = "PRODEX_SECRET_KEYRING_SERVICE";
+const CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
 const INFO_RUNTIME_LOG_TAIL_BYTES: usize = if cfg!(test) { 64 * 1024 } else { 512 * 1024 };
 const INFO_FORECAST_LOOKBACK_SECONDS: i64 = if cfg!(test) { 3_600 } else { 3 * 60 * 60 };
 const INFO_FORECAST_MIN_SPAN_SECONDS: i64 = if cfg!(test) { 60 } else { 5 * 60 };
@@ -1089,6 +1094,8 @@ struct StoredAuth {
     tokens: Option<StoredTokens>,
     #[serde(rename = "OPENAI_API_KEY")]
     openai_api_key: Option<String>,
+    #[serde(default)]
+    last_refresh: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1096,6 +1103,7 @@ struct StoredTokens {
     access_token: Option<String>,
     account_id: Option<String>,
     id_token: Option<String>,
+    refresh_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

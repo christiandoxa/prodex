@@ -501,6 +501,26 @@ pub(super) fn load_runtime_profile_usage_auth_cache(
         .collect()
 }
 
+pub(super) fn update_runtime_profile_usage_auth_cache_entry(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_auth: Option<&UsageAuth>,
+    entry: RuntimeProfileUsageAuthCacheEntry,
+    reason: &str,
+) -> UsageAuth {
+    let auth = entry.auth.clone();
+    let auth_changed = previous_auth.is_some_and(|previous_auth| previous_auth != &auth);
+    if let Ok(mut runtime) = shared.runtime.lock() {
+        runtime
+            .profile_usage_auth
+            .insert(profile_name.to_string(), entry);
+    }
+    if auth_changed {
+        clear_runtime_profile_auth_failure(shared, profile_name, reason);
+    }
+    auth
+}
+
 pub(super) fn runtime_profile_usage_auth(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -520,21 +540,57 @@ pub(super) fn runtime_profile_usage_auth(
             profile.codex_home.clone(),
         )
     };
+    let cached_previous_auth = cached_entry.as_ref().map(|entry| entry.auth.clone());
 
     let reload_auth = || -> Result<UsageAuth> {
         let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
-        let auth = entry.auth.clone();
-        if let Ok(mut runtime) = shared.runtime.lock() {
-            runtime
-                .profile_usage_auth
-                .insert(profile_name.to_string(), entry);
-        }
-        Ok(auth)
+        Ok(update_runtime_profile_usage_auth_cache_entry(
+            shared,
+            profile_name,
+            cached_previous_auth.as_ref(),
+            entry,
+            "auth_changed",
+        ))
     };
 
     if let Some(entry) = cached_entry {
         match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
-            RuntimeProfileUsageAuthCacheFreshness::Fresh => return Ok(entry.auth),
+            RuntimeProfileUsageAuthCacheFreshness::Fresh => {
+                let now = Local::now().timestamp();
+                if !usage_auth_needs_proactive_refresh(&entry.auth, now) {
+                    return Ok(entry.auth);
+                }
+                return match sync_usage_auth_from_disk_or_refresh(&codex_home, Some(&entry.auth)) {
+                    Ok(outcome) => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "profile_auth_proactive_sync profile={profile_name} source={} changed={}",
+                                usage_auth_sync_source_label(outcome.source),
+                                outcome.auth_changed,
+                            ),
+                        );
+                        let refreshed_entry =
+                            load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
+                        Ok(update_runtime_profile_usage_auth_cache_entry(
+                            shared,
+                            profile_name,
+                            Some(&entry.auth),
+                            refreshed_entry,
+                            &format!("auth_{}", usage_auth_sync_source_label(outcome.source)),
+                        ))
+                    }
+                    Err(err) => {
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "profile_auth_proactive_sync_failed profile={profile_name} error={err}"
+                            ),
+                        );
+                        Ok(entry.auth)
+                    }
+                };
+            }
             RuntimeProfileUsageAuthCacheFreshness::Stale => {}
             RuntimeProfileUsageAuthCacheFreshness::Unknown => {
                 return reload_auth().or(Ok(entry.auth));
@@ -598,6 +654,33 @@ pub(super) fn runtime_profile_auth_failure_score(status: u16) -> u32 {
         401 => RUNTIME_PROFILE_AUTH_FAILURE_401_SCORE,
         _ => RUNTIME_PROFILE_AUTH_FAILURE_403_SCORE,
     }
+}
+
+pub(super) fn clear_runtime_profile_auth_failure(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    reason: &str,
+) {
+    let mut runtime = match shared.runtime.lock() {
+        Ok(runtime) => runtime,
+        Err(_) => return,
+    };
+    if runtime
+        .profile_health
+        .remove(&runtime_profile_auth_failure_key(profile_name))
+        .is_none()
+    {
+        return;
+    }
+    runtime_proxy_log(
+        shared,
+        format!("profile_auth_backoff_cleared profile={profile_name} reason={reason}"),
+    );
+    schedule_runtime_state_save_from_runtime(
+        shared,
+        &runtime,
+        &format!("profile_auth_backoff_cleared:{profile_name}"),
+    );
 }
 
 pub(super) fn note_runtime_profile_auth_failure(

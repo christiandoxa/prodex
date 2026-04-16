@@ -2863,20 +2863,281 @@ fn future_epoch(offset_seconds: i64) -> i64 {
 }
 
 fn write_auth_json(path: &Path, account_id: &str) {
+    write_auth_json_with_tokens(path, "test-token", account_id, None, None);
+}
+
+fn write_auth_json_with_tokens(
+    path: &Path,
+    access_token: &str,
+    account_id: &str,
+    refresh_token: Option<&str>,
+    last_refresh: Option<&str>,
+) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("failed to create auth parent dir");
     }
+    let mut auth_json = serde_json::json!({
+        "tokens": {
+            "access_token": access_token,
+            "account_id": account_id,
+        }
+    });
+    if let Some(refresh_token) = refresh_token {
+        auth_json["tokens"]["refresh_token"] = serde_json::Value::String(refresh_token.to_string());
+    }
+    if let Some(last_refresh) = last_refresh {
+        auth_json["last_refresh"] = serde_json::Value::String(last_refresh.to_string());
+    }
     fs::write(
         path,
-        serde_json::json!({
-            "tokens": {
-                "access_token": "test-token",
-                "account_id": account_id,
-            }
-        })
-        .to_string(),
+        auth_json.to_string(),
     )
     .expect("failed to write auth.json");
+}
+
+fn fake_jwt_with_exp(exp: i64) -> String {
+    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(br#"{"alg":"none","typ":"JWT"}"#);
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(format!(r#"{{"exp":{exp}}}"#));
+    format!("{header}.{payload}.signature")
+}
+
+#[derive(Clone, Copy)]
+enum TokenAwareServerMode {
+    RuntimeStatus,
+    Usage,
+}
+
+struct TokenAwareServer {
+    listen_addr: SocketAddr,
+    shutdown: Arc<AtomicBool>,
+    auth_headers: Arc<Mutex<Vec<String>>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl TokenAwareServer {
+    fn start(
+        mode: TokenAwareServerMode,
+        expected_token: &str,
+        expected_account_id: &str,
+        success_body: String,
+    ) -> Self {
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("failed to bind token-aware server");
+        let listen_addr = listener
+            .local_addr()
+            .expect("failed to read token-aware server address");
+        listener
+            .set_nonblocking(true)
+            .expect("failed to set token-aware server nonblocking");
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let auth_headers = Arc::new(Mutex::new(Vec::new()));
+        let shutdown_flag = Arc::clone(&shutdown);
+        let auth_headers_flag = Arc::clone(&auth_headers);
+        let expected_token = expected_token.to_string();
+        let expected_account_id = expected_account_id.to_string();
+        let thread = thread::spawn(move || {
+            while !shutdown_flag.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_http_request(&mut stream) else {
+                            continue;
+                        };
+                        let path = request
+                            .lines()
+                            .next()
+                            .and_then(|line| line.split_whitespace().nth(1))
+                            .unwrap_or("/");
+                        let authorization = request_header(&request, "Authorization")
+                            .unwrap_or_else(|| "<missing>".to_string());
+                        let account_id = request_header(&request, "ChatGPT-Account-Id")
+                            .unwrap_or_else(|| "<missing>".to_string());
+                        auth_headers_flag
+                            .lock()
+                            .expect("auth_headers poisoned")
+                            .push(authorization.clone());
+
+                        let path_matches = match mode {
+                            TokenAwareServerMode::RuntimeStatus => {
+                                path.ends_with("/backend-api/status")
+                            }
+                            TokenAwareServerMode::Usage => {
+                                path.ends_with("/backend-api/wham/usage")
+                                    || path.ends_with("/api/codex/usage")
+                            }
+                        };
+                        let authorized = authorization == format!("Bearer {expected_token}")
+                            && account_id == expected_account_id;
+                        let (status_line, body) = if path_matches && authorized {
+                            ("HTTP/1.1 200 OK", success_body.clone())
+                        } else if path_matches {
+                            (
+                                "HTTP/1.1 401 Unauthorized",
+                                serde_json::json!({ "error": "unauthorized" }).to_string(),
+                            )
+                        } else {
+                            (
+                                "HTTP/1.1 404 Not Found",
+                                serde_json::json!({ "error": "not_found" }).to_string(),
+                            )
+                        };
+                        let response = format!(
+                            "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.flush();
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Self {
+            listen_addr,
+            shutdown,
+            auth_headers,
+            thread: Some(thread),
+        }
+    }
+
+    fn start_runtime_status(expected_token: &str, expected_account_id: &str) -> Self {
+        Self::start(
+            TokenAwareServerMode::RuntimeStatus,
+            expected_token,
+            expected_account_id,
+            serde_json::json!({
+                "status": "ok",
+                "account_id": expected_account_id,
+            })
+            .to_string(),
+        )
+    }
+
+    fn start_usage(expected_token: &str, expected_account_id: &str, email: &str) -> Self {
+        Self::start(
+            TokenAwareServerMode::Usage,
+            expected_token,
+            expected_account_id,
+            runtime_proxy_usage_body(email),
+        )
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://{}/backend-api", self.listen_addr)
+    }
+
+    fn auth_headers(&self) -> Vec<String> {
+        self.auth_headers
+            .lock()
+            .expect("auth_headers poisoned")
+            .clone()
+    }
+}
+
+impl Drop for TokenAwareServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.listen_addr);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+struct AuthRefreshServer {
+    listen_addr: SocketAddr,
+    shutdown: Arc<AtomicBool>,
+    request_bodies: Arc<Mutex<Vec<String>>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl AuthRefreshServer {
+    fn start(access_token: &str, refresh_token: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind auth refresh server");
+        let listen_addr = listener
+            .local_addr()
+            .expect("failed to read auth refresh server address");
+        listener
+            .set_nonblocking(true)
+            .expect("failed to set auth refresh server nonblocking");
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let request_bodies = Arc::new(Mutex::new(Vec::new()));
+        let shutdown_flag = Arc::clone(&shutdown);
+        let request_bodies_flag = Arc::clone(&request_bodies);
+        let access_token = access_token.to_string();
+        let refresh_token = refresh_token.to_string();
+        let thread = thread::spawn(move || {
+            while !shutdown_flag.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(request) = read_http_request(&mut stream) else {
+                            continue;
+                        };
+                        let body = request
+                            .split_once("\r\n\r\n")
+                            .map(|(_, body)| body.to_string())
+                            .unwrap_or_default();
+                        request_bodies_flag
+                            .lock()
+                            .expect("request_bodies poisoned")
+                            .push(body);
+                        let response_body = serde_json::json!({
+                            "access_token": access_token,
+                            "refresh_token": refresh_token,
+                        })
+                        .to_string();
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            response_body.len(),
+                            response_body
+                        );
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.flush();
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Self {
+            listen_addr,
+            shutdown,
+            request_bodies,
+            thread: Some(thread),
+        }
+    }
+
+    fn url(&self) -> String {
+        format!("http://{}/oauth/token", self.listen_addr)
+    }
+
+    fn request_bodies(&self) -> Vec<String> {
+        self.request_bodies
+            .lock()
+            .expect("request_bodies poisoned")
+            .clone()
+    }
+}
+
+impl Drop for AuthRefreshServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.listen_addr);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 fn write_api_key_auth_json(path: &Path) {
@@ -4618,6 +4879,44 @@ fn custom_base_url_maps_to_codex_usage() {
         usage_url("http://127.0.0.1:8080"),
         "http://127.0.0.1:8080/api/codex/usage"
     );
+}
+
+#[test]
+fn fetch_usage_json_refreshes_access_token_after_401() {
+    let temp_dir = TestDir::new();
+    let usage_server = TokenAwareServer::start_usage("fresh-token", "main-account", "main@example.com");
+    let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
+    let _refresh_guard =
+        TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
+    let codex_home = temp_dir.path.join("homes/main");
+    write_auth_json_with_tokens(
+        &codex_home.join("auth.json"),
+        "stale-token",
+        "main-account",
+        Some("stale-refresh-token"),
+        None,
+    );
+
+    let usage = fetch_usage_json(&codex_home, Some(&usage_server.base_url()))
+        .expect("quota fetch should refresh and succeed");
+
+    assert_eq!(usage["email"], "main@example.com");
+    assert_eq!(
+        usage_server.auth_headers(),
+        vec![
+            "Bearer stale-token".to_string(),
+            "Bearer fresh-token".to_string()
+        ]
+    );
+    assert_eq!(refresh_server.request_bodies().len(), 1);
+
+    let auth_json = fs::read_to_string(codex_home.join("auth.json"))
+        .expect("updated auth.json should be readable");
+    let auth_json: serde_json::Value =
+        serde_json::from_str(&auth_json).expect("updated auth.json should parse");
+    assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
+    assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
+    assert!(auth_json.get("last_refresh").is_some());
 }
 
 #[test]
@@ -16100,6 +16399,163 @@ fn runtime_proxy_preserves_websocket_request_client_metadata_payload() {
 }
 
 #[test]
+fn runtime_profile_usage_auth_proactively_refreshes_expired_access_token() {
+    let temp_dir = TestDir::new();
+    let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
+    let _refresh_guard =
+        TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json_with_tokens(
+        &profile_home.join("auth.json"),
+        &fake_jwt_with_exp(Local::now().timestamp() - 60),
+        "main-account",
+        Some("stale-refresh-token"),
+        None,
+    );
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: load_runtime_profile_usage_auth_cache(&AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            }),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let auth = runtime_profile_usage_auth(&shared, "main")
+        .expect("runtime usage auth should proactively refresh");
+    assert_eq!(auth.access_token, "fresh-token");
+    assert_eq!(auth.refresh_token.as_deref(), Some("fresh-refresh-token"));
+    assert_eq!(refresh_server.request_bodies().len(), 1);
+
+    let auth_json = fs::read_to_string(profile_home.join("auth.json"))
+        .expect("refreshed auth.json should be readable");
+    let auth_json: serde_json::Value =
+        serde_json::from_str(&auth_json).expect("refreshed auth.json should parse");
+    assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
+    assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
+    assert!(auth_json.get("last_refresh").is_some());
+}
+
+#[test]
+fn runtime_proxy_standard_request_refreshes_access_token_after_401() {
+    let temp_dir = TestDir::new();
+    let backend = TokenAwareServer::start_runtime_status("fresh-token", "main-account");
+    let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
+    let _refresh_guard =
+        TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json_with_tokens(
+        &main_home.join("auth.json"),
+        "stale-token",
+        "main-account",
+        Some("stale-refresh-token"),
+        None,
+    );
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    wait_for_runtime_background_queues_idle();
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .get(format!("http://{}/backend-api/status", proxy.listen_addr))
+        .send()
+        .expect("runtime proxy standard request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert!(status.is_success(), "unexpected standard status: {status}");
+    assert!(body.contains("\"status\":\"ok\""));
+    let auth_headers = backend.auth_headers();
+    assert!(
+        auth_headers.len() >= 2,
+        "expected at least the stale and refreshed runtime requests: {auth_headers:?}"
+    );
+    assert_eq!(
+        auth_headers[auth_headers.len() - 2..],
+        ["Bearer stale-token".to_string(), "Bearer fresh-token".to_string()]
+    );
+    assert_eq!(refresh_server.request_bodies().len(), 1);
+
+    let auth_json = fs::read_to_string(main_home.join("auth.json"))
+        .expect("updated auth.json should be readable");
+    let auth_json: serde_json::Value =
+        serde_json::from_str(&auth_json).expect("updated auth.json should parse");
+    assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
+    assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
+}
+
+#[test]
 fn runtime_proxy_reloads_auth_json_between_http_requests() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();
@@ -16338,6 +16794,9 @@ fn runtime_proxy_unknown_usage_auth_freshness_does_not_pin_auth_failure_backoff(
         auth: UsageAuth {
             access_token: "test-token".to_string(),
             account_id: Some("main-account".to_string()),
+            refresh_token: None,
+            expires_at: None,
+            last_refresh: None,
         },
         location: secret_store::SecretLocation::keyring("prodex", "main-auth"),
         revision: Some(secret_store::SecretRevision::new(1, None)),

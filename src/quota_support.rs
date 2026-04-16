@@ -11,10 +11,49 @@ pub(crate) struct AuthSummary {
     pub(crate) quota_compatible: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UsageAuth {
     pub(crate) access_token: String,
     pub(crate) account_id: Option<String>,
+    pub(crate) refresh_token: Option<String>,
+    pub(crate) expires_at: Option<i64>,
+    pub(crate) last_refresh: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsageAuthSyncSource {
+    Reloaded,
+    Refreshed,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UsageAuthSyncOutcome {
+    pub(crate) auth: UsageAuth,
+    pub(crate) source: UsageAuthSyncSource,
+    pub(crate) auth_changed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct JwtExpirationClaims {
+    #[serde(default)]
+    exp: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatgptRefreshRequest<'a> {
+    client_id: &'static str,
+    grant_type: &'static str,
+    refresh_token: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatgptRefreshResponse {
+    #[serde(default)]
+    id_token: Option<String>,
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
 }
 
 #[derive(Debug)]
@@ -135,7 +174,12 @@ pub(crate) fn fetch_usage_json(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<serde_json::Value> {
-    let auth = read_usage_auth(codex_home)?;
+    let mut auth = read_usage_auth(codex_home)?;
+    if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp()) {
+        if let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth)) {
+            auth = outcome.auth;
+        }
+    }
     let usage_url = usage_url(&quota_base_url(base_url));
     let client = Client::builder()
         .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
@@ -143,22 +187,15 @@ pub(crate) fn fetch_usage_json(
         .build()
         .context("failed to build quota HTTP client")?;
 
-    let mut request = client
-        .get(&usage_url)
-        .header("Authorization", format!("Bearer {}", auth.access_token))
-        .header("User-Agent", "codex-cli");
-
-    if let Some(account_id) = auth.account_id.as_deref() {
-        request = request.header("ChatGPT-Account-Id", account_id);
+    let (mut status, mut body) = send_usage_request(&client, &usage_url, &auth)?;
+    if status.as_u16() == 401
+        && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth))
+    {
+        auth = outcome.auth;
+        let refreshed = send_usage_request(&client, &usage_url, &auth)?;
+        status = refreshed.0;
+        body = refreshed.1;
     }
-
-    let response = request
-        .send()
-        .with_context(|| format!("failed to request quota endpoint {}", usage_url))?;
-    let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read quota response body")?;
 
     if !status.is_success() {
         let body_text = format_response_body(&body);
@@ -1310,11 +1347,202 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
         .map(str::trim)
         .filter(|account_id| !account_id.is_empty())
         .map(ToOwned::to_owned);
+    let refresh_token = tokens
+        .refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToOwned::to_owned);
+    let expires_at = parse_jwt_expiration(&access_token).ok().flatten();
+    let last_refresh = stored_auth
+        .last_refresh
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp());
 
     Ok(UsageAuth {
         access_token,
         account_id,
+        refresh_token,
+        expires_at,
+        last_refresh,
     })
+}
+
+pub(crate) fn usage_auth_needs_proactive_refresh(auth: &UsageAuth, now: i64) -> bool {
+    if let Some(expires_at) = auth.expires_at {
+        return expires_at <= now;
+    }
+
+    auth.last_refresh.is_some_and(|last_refresh| {
+        now - last_refresh >= CHATGPT_AUTH_REFRESH_INTERVAL_DAYS * 86_400
+    })
+}
+
+pub(crate) fn usage_auth_sync_source_label(source: UsageAuthSyncSource) -> &'static str {
+    match source {
+        UsageAuthSyncSource::Reloaded => "reloaded",
+        UsageAuthSyncSource::Refreshed => "refreshed",
+    }
+}
+
+pub(crate) fn sync_usage_auth_from_disk_or_refresh(
+    codex_home: &Path,
+    expected_current: Option<&UsageAuth>,
+) -> Result<UsageAuthSyncOutcome> {
+    let latest = read_usage_auth(codex_home)?;
+    let auth_changed = expected_current.is_some_and(|current| current != &latest);
+    if auth_changed {
+        return Ok(UsageAuthSyncOutcome {
+            auth: latest,
+            source: UsageAuthSyncSource::Reloaded,
+            auth_changed: true,
+        });
+    }
+
+    let refresh_token = latest
+        .refresh_token
+        .as_deref()
+        .context("refresh token not found in the stored auth secret")?;
+    refresh_usage_auth_file(codex_home, refresh_token)?;
+
+    let refreshed = read_usage_auth(codex_home)?;
+    let auth_changed = expected_current.is_some_and(|current| current != &refreshed);
+    Ok(UsageAuthSyncOutcome {
+        auth: refreshed,
+        source: UsageAuthSyncSource::Refreshed,
+        auth_changed,
+    })
+}
+
+fn send_usage_request(
+    client: &Client,
+    usage_url: &str,
+    auth: &UsageAuth,
+) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+    let mut request = client
+        .get(usage_url)
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .header("User-Agent", "codex-cli");
+
+    if let Some(account_id) = auth.account_id.as_deref() {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+
+    let response = request
+        .send()
+        .with_context(|| format!("failed to request quota endpoint {}", usage_url))?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .context("failed to read quota response body")?
+        .to_vec();
+    Ok((status, body))
+}
+
+fn parse_jwt_expiration(raw_jwt: &str) -> Result<Option<i64>> {
+    let mut parts = raw_jwt.split('.');
+    let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
+        (Some(header), Some(payload), Some(signature))
+            if !header.is_empty() && !payload.is_empty() && !signature.is_empty() =>
+        {
+            (header, payload, signature)
+        }
+        _ => bail!("invalid JWT format"),
+    };
+
+    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
+        .context("failed to decode JWT payload")?;
+    let claims: JwtExpirationClaims =
+        serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")?;
+    Ok(claims.exp)
+}
+
+fn refresh_usage_auth_endpoint() -> String {
+    env::var(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV)
+        .unwrap_or_else(|_| CHATGPT_AUTH_REFRESH_URL.to_string())
+}
+
+fn refresh_usage_auth_file(codex_home: &Path, refresh_token: &str) -> Result<()> {
+    let auth_location = secret_store::auth_json_path(codex_home);
+    let Some(content) = read_auth_json_text(codex_home)
+        .with_context(|| format!("failed to read {}", auth_location.display()))?
+    else {
+        bail!(
+            "auth secret not found at {}. Run `codex login` first.",
+            auth_location.display()
+        );
+    };
+    let mut auth_json: serde_json::Value = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", auth_location.display()))?;
+    let auth_object = auth_json
+        .as_object_mut()
+        .context("stored auth JSON must be an object")?;
+    let tokens_value = auth_object
+        .entry("tokens".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    let tokens_object = tokens_value
+        .as_object_mut()
+        .context("stored auth tokens must be an object")?;
+
+    let client = Client::builder()
+        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
+        .build()
+        .context("failed to build auth refresh HTTP client")?;
+    let response = client
+        .post(refresh_usage_auth_endpoint())
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "codex-cli")
+        .json(&ChatgptRefreshRequest {
+            client_id: CHATGPT_AUTH_REFRESH_CLIENT_ID,
+            grant_type: "refresh_token",
+            refresh_token,
+        })
+        .send()
+        .context("failed to request ChatGPT auth refresh")?;
+    let status = response.status();
+    let body = response
+        .text()
+        .context("failed to read auth refresh body")?;
+    if !status.is_success() {
+        bail!(
+            "failed to refresh ChatGPT auth (HTTP {}): {}",
+            status.as_u16(),
+            body
+        );
+    }
+
+    let refreshed: ChatgptRefreshResponse =
+        serde_json::from_str(&body).context("failed to parse auth refresh JSON")?;
+    if let Some(id_token) = refreshed.id_token {
+        tokens_object.insert("id_token".to_string(), serde_json::Value::String(id_token));
+    }
+    if let Some(access_token) = refreshed.access_token {
+        tokens_object.insert(
+            "access_token".to_string(),
+            serde_json::Value::String(access_token),
+        );
+    }
+    if let Some(refresh_token) = refreshed.refresh_token {
+        tokens_object.insert(
+            "refresh_token".to_string(),
+            serde_json::Value::String(refresh_token),
+        );
+    }
+    auth_object.insert(
+        "last_refresh".to_string(),
+        serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+    );
+
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(
+            &secret_store::auth_json_location(codex_home),
+            serde_json::to_string_pretty(&auth_json).context("failed to serialize auth JSON")?,
+        )
+        .map_err(anyhow::Error::new)
 }
 
 pub(crate) fn quota_base_url(explicit: Option<&str>) -> String {

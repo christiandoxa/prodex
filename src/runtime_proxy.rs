@@ -646,6 +646,16 @@ pub(super) enum RuntimeProfileInFlightWaitOutcome {
     Timeout,
 }
 
+pub(super) fn runtime_profile_wait_outcome_label(
+    outcome: RuntimeProfileInFlightWaitOutcome,
+) -> &'static str {
+    match outcome {
+        RuntimeProfileInFlightWaitOutcome::InflightRelease => "release",
+        RuntimeProfileInFlightWaitOutcome::OtherNotify => "other_notify",
+        RuntimeProfileInFlightWaitOutcome::Timeout => "timeout",
+    }
+}
+
 pub(super) fn runtime_profile_inflight_wait_outcome_label(
     outcome: RuntimeProfileInFlightWaitOutcome,
 ) -> &'static str {
@@ -4325,8 +4335,23 @@ pub(super) fn runtime_proxy_sync_probe_pressure_pause(
     if !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind) {
         return;
     }
+    let pause_ms = runtime_proxy_sync_probe_pressure_pause_ms();
     let observed_revision = runtime_probe_refresh_revision();
-    let _ = runtime_probe_refresh_wait_outcome_since(Duration::from_millis(5), observed_revision);
+    let started_at = Instant::now();
+    let wait_outcome = runtime_probe_refresh_wait_outcome_since(
+        Duration::from_millis(pause_ms),
+        observed_revision,
+    );
+    runtime_proxy_log(
+        shared,
+        format!(
+            "runtime_proxy_sync_probe_pressure_pause route={} pause_ms={} waited_ms={} outcome={}",
+            runtime_route_kind_label(route_kind),
+            pause_ms,
+            started_at.elapsed().as_millis(),
+            runtime_profile_wait_outcome_label(wait_outcome),
+        ),
+    );
 }
 
 pub(super) fn runtime_previous_response_affinity_is_trusted(
@@ -7685,6 +7710,122 @@ pub(super) fn attempt_runtime_websocket_request(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProfileUnauthorizedRecoveryStep {
+    Reload,
+    Refresh,
+}
+
+fn runtime_try_recover_profile_auth_from_unauthorized(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    step: RuntimeProfileUnauthorizedRecoveryStep,
+) -> bool {
+    let attempt = (|| -> Result<bool> {
+        let (cached_entry, codex_home) = {
+            let runtime = shared
+                .runtime
+                .lock()
+                .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+            let profile = runtime
+                .state
+                .profiles
+                .get(profile_name)
+                .with_context(|| format!("profile '{}' is missing", profile_name))?;
+            (
+                runtime.profile_usage_auth.get(profile_name).cloned(),
+                profile.codex_home.clone(),
+            )
+        };
+
+        let outcome = match step {
+            RuntimeProfileUnauthorizedRecoveryStep::Reload => {
+                let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
+                let auth_changed = cached_entry
+                    .as_ref()
+                    .is_some_and(|cached_entry| cached_entry.auth != entry.auth);
+                if !auth_changed {
+                    return Ok(false);
+                }
+                update_runtime_profile_usage_auth_cache_entry(
+                    shared,
+                    profile_name,
+                    cached_entry.as_ref().map(|entry| &entry.auth),
+                    entry,
+                    "auth_reloaded",
+                );
+                ("reloaded", true)
+            }
+            RuntimeProfileUnauthorizedRecoveryStep::Refresh => {
+                let outcome = sync_usage_auth_from_disk_or_refresh(
+                    &codex_home,
+                    cached_entry.as_ref().map(|entry| &entry.auth),
+                )?;
+                let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
+                update_runtime_profile_usage_auth_cache_entry(
+                    shared,
+                    profile_name,
+                    cached_entry.as_ref().map(|entry| &entry.auth),
+                    entry,
+                    &format!("auth_{}", usage_auth_sync_source_label(outcome.source)),
+                );
+                (
+                    usage_auth_sync_source_label(outcome.source),
+                    outcome.auth_changed,
+                )
+            }
+        };
+
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} profile_auth_recovered profile={profile_name} route={} source={} changed={}",
+                runtime_route_kind_label(route_kind),
+                outcome.0,
+                outcome.1,
+            ),
+        );
+        Ok(true)
+    })();
+
+    match attempt {
+        Ok(recovered) => recovered,
+        Err(err) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} profile_auth_recovery_failed profile={profile_name} route={} error={err}",
+                    runtime_route_kind_label(route_kind),
+                ),
+            );
+            false
+        }
+    }
+}
+
+fn runtime_try_recover_profile_auth_from_unauthorized_steps(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+) -> bool {
+    while let Some(step) = recovery_steps.next() {
+        if runtime_try_recover_profile_auth_from_unauthorized(
+            request_id,
+            shared,
+            profile_name,
+            route_kind,
+            step,
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
 pub(super) fn connect_runtime_proxy_upstream_websocket(
     request_id: u64,
     handshake_request: &RuntimeProxyRequest,
@@ -7697,152 +7838,75 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
         .clone();
-    let auth = runtime_profile_usage_auth(shared, profile_name)?;
     let upstream_url = runtime_proxy_upstream_websocket_url(
         &runtime.upstream_base_url,
         &handshake_request.path_and_query,
     )?;
-    let mut request = upstream_url
-        .as_str()
-        .into_client_request()
-        .with_context(|| format!("failed to build runtime websocket request for {upstream_url}"))?;
+    let mut recovery_steps = [
+        RuntimeProfileUnauthorizedRecoveryStep::Reload,
+        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
+    ]
+    .into_iter();
+    loop {
+        let auth = runtime_profile_usage_auth(shared, profile_name)?;
+        let mut request = upstream_url
+            .as_str()
+            .into_client_request()
+            .with_context(|| {
+                format!("failed to build runtime websocket request for {upstream_url}")
+            })?;
 
-    for (name, value) in &handshake_request.headers {
-        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
-            continue;
+        for (name, value) in &handshake_request.headers {
+            if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+                continue;
+            }
+            if should_skip_runtime_request_header(name) {
+                continue;
+            }
+            let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
+                continue;
+            };
+            let Ok(header_value) = WsHeaderValue::from_str(value) else {
+                continue;
+            };
+            request.headers_mut().insert(header_name, header_value);
         }
-        if should_skip_runtime_request_header(name) {
-            continue;
+        if let Some(turn_state) = turn_state_override {
+            request.headers_mut().insert(
+                WsHeaderName::from_static("x-codex-turn-state"),
+                WsHeaderValue::from_str(turn_state)
+                    .context("failed to encode websocket turn-state header")?,
+            );
         }
-        let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
-            continue;
-        };
-        let Ok(header_value) = WsHeaderValue::from_str(value) else {
-            continue;
-        };
-        request.headers_mut().insert(header_name, header_value);
-    }
-    if let Some(turn_state) = turn_state_override {
-        request.headers_mut().insert(
-            WsHeaderName::from_static("x-codex-turn-state"),
-            WsHeaderValue::from_str(turn_state)
-                .context("failed to encode websocket turn-state header")?,
-        );
-    }
 
-    request.headers_mut().insert(
-        WsHeaderName::from_static("authorization"),
-        WsHeaderValue::from_str(&format!("Bearer {}", auth.access_token))
-            .context("failed to encode websocket authorization header")?,
-    );
-    let user_agent =
-        runtime_proxy_effective_user_agent(&handshake_request.headers).unwrap_or("codex-cli");
-    request.headers_mut().insert(
-        WsHeaderName::from_static("user-agent"),
-        WsHeaderValue::from_str(user_agent).context("failed to encode websocket user-agent")?,
-    );
-    if let Some(account_id) = auth.account_id.as_deref() {
         request.headers_mut().insert(
-            WsHeaderName::from_static("chatgpt-account-id"),
-            WsHeaderValue::from_str(account_id)
-                .context("failed to encode websocket account header")?,
+            WsHeaderName::from_static("authorization"),
+            WsHeaderValue::from_str(&format!("Bearer {}", auth.access_token))
+                .context("failed to encode websocket authorization header")?,
         );
-    }
+        let user_agent =
+            runtime_proxy_effective_user_agent(&handshake_request.headers).unwrap_or("codex-cli");
+        request.headers_mut().insert(
+            WsHeaderName::from_static("user-agent"),
+            WsHeaderValue::from_str(user_agent).context("failed to encode websocket user-agent")?,
+        );
+        if let Some(account_id) = auth.account_id.as_deref() {
+            request.headers_mut().insert(
+                WsHeaderName::from_static("chatgpt-account-id"),
+                WsHeaderValue::from_str(account_id)
+                    .context("failed to encode websocket account header")?,
+            );
+        }
 
-    runtime_proxy_log(
-        shared,
-        format!(
-            "request={request_id} transport=websocket upstream_connect_start profile={profile_name} url={upstream_url} turn_state_override={:?}",
-            turn_state_override
-        ),
-    );
-    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
-        let transport_error = anyhow::anyhow!("injected runtime websocket connect failure");
-        note_runtime_profile_transport_failure(
+        runtime_proxy_log(
             shared,
-            profile_name,
-            RuntimeRouteKind::Websocket,
-            "websocket_connect",
-            &transport_error,
+            format!(
+                "request={request_id} transport=websocket upstream_connect_start profile={profile_name} url={upstream_url} turn_state_override={:?}",
+                turn_state_override
+            ),
         );
-        return Err(transport_error);
-    }
-    let started_at = Instant::now();
-    match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
-        Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
-            Ok(RuntimeWebsocketConnectResult::Connected {
-                socket,
-                turn_state: {
-                    let turn_state = runtime_proxy_tungstenite_header_value(
-                        response.headers(),
-                        "x-codex-turn-state",
-                    );
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=websocket upstream_connect_ok profile={profile_name} status={} addr={} resolved_addrs={} attempted_addrs={} turn_state={:?}",
-                            response.status().as_u16(),
-                            selected_addr,
-                            resolved_addrs,
-                            attempted_addrs,
-                            turn_state
-                        ),
-                    );
-                    note_runtime_profile_latency_observation(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        "connect",
-                        started_at.elapsed().as_millis() as u64,
-                    );
-                    turn_state
-                },
-            })
-        }
-        Err(WsError::Http(response)) => {
-            let status = response.status().as_u16();
-            let body = response.body().clone().unwrap_or_default();
-            if matches!(status, 401 | 403)
-                && (status == 401 || extract_runtime_proxy_quota_message(&body).is_none())
-            {
-                note_runtime_profile_auth_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    status,
-                );
-            }
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=websocket upstream_connect_http profile={profile_name} status={status} body_bytes={}",
-                    body.len()
-                ),
-            );
-            if matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&body).is_some() {
-                return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(
-                    runtime_websocket_error_payload_from_http_body(&body),
-                ));
-            }
-            if extract_runtime_proxy_overload_message(status, &body).is_some() {
-                return Ok(RuntimeWebsocketConnectResult::Overloaded(
-                    runtime_websocket_error_payload_from_http_body(&body),
-                ));
-            }
-            bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
-        }
-        Err(err) => {
-            let failure_kind = runtime_transport_failure_kind_from_ws(&err);
-            log_runtime_upstream_connect_failure(
-                shared,
-                request_id,
-                "websocket",
-                profile_name,
-                failure_kind,
-                &err,
-            );
-            let transport_error =
-                anyhow::anyhow!("failed to connect runtime websocket upstream: {err}");
+        if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
+            let transport_error = anyhow::anyhow!("injected runtime websocket connect failure");
             note_runtime_profile_transport_failure(
                 shared,
                 profile_name,
@@ -7850,7 +7914,106 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 "websocket_connect",
                 &transport_error,
             );
-            Err(transport_error)
+            return Err(transport_error);
+        }
+        let started_at = Instant::now();
+        match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
+            Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
+                return Ok(RuntimeWebsocketConnectResult::Connected {
+                    socket,
+                    turn_state: {
+                        let turn_state = runtime_proxy_tungstenite_header_value(
+                            response.headers(),
+                            "x-codex-turn-state",
+                        );
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=websocket upstream_connect_ok profile={profile_name} status={} addr={} resolved_addrs={} attempted_addrs={} turn_state={:?}",
+                                response.status().as_u16(),
+                                selected_addr,
+                                resolved_addrs,
+                                attempted_addrs,
+                                turn_state
+                            ),
+                        );
+                        note_runtime_profile_latency_observation(
+                            shared,
+                            profile_name,
+                            RuntimeRouteKind::Websocket,
+                            "connect",
+                            started_at.elapsed().as_millis() as u64,
+                        );
+                        turn_state
+                    },
+                });
+            }
+            Err(WsError::Http(response)) => {
+                let status = response.status().as_u16();
+                let body = response.body().clone().unwrap_or_default();
+                if status == 401
+                    && runtime_try_recover_profile_auth_from_unauthorized_steps(
+                        request_id,
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Websocket,
+                        &mut recovery_steps,
+                    )
+                {
+                    continue;
+                }
+                if matches!(status, 401 | 403)
+                    && (status == 401 || extract_runtime_proxy_quota_message(&body).is_none())
+                {
+                    note_runtime_profile_auth_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Websocket,
+                        status,
+                    );
+                }
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=websocket upstream_connect_http profile={profile_name} status={status} body_bytes={}",
+                        body.len()
+                    ),
+                );
+                if matches!(status, 403 | 429)
+                    && extract_runtime_proxy_quota_message(&body).is_some()
+                {
+                    return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(
+                        runtime_websocket_error_payload_from_http_body(&body),
+                    ));
+                }
+                if extract_runtime_proxy_overload_message(status, &body).is_some() {
+                    return Ok(RuntimeWebsocketConnectResult::Overloaded(
+                        runtime_websocket_error_payload_from_http_body(&body),
+                    ));
+                }
+                bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
+            }
+            Err(err) => {
+                let failure_kind = runtime_transport_failure_kind_from_ws(&err);
+                log_runtime_upstream_connect_failure(
+                    shared,
+                    request_id,
+                    "websocket",
+                    profile_name,
+                    failure_kind,
+                    &err,
+                );
+                let transport_error =
+                    anyhow::anyhow!("failed to connect runtime websocket upstream: {err}");
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Websocket,
+                    "websocket_connect",
+                    &transport_error,
+                );
+                return Err(transport_error);
+            }
         }
     }
 }
@@ -8962,111 +9125,154 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
-    let response =
-        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
+    let mut recovery_steps = [
+        RuntimeProfileUnauthorizedRecoveryStep::Reload,
+        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
+    ]
+    .into_iter();
+    loop {
+        let response =
+            send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
+                .inspect_err(|err| {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Standard,
+                        "standard_upstream_request",
+                        err,
+                    );
+                })?;
+        if request.path_and_query.ends_with("/backend-api/wham/usage") {
+            let status = response.status().as_u16();
+            let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+                .inspect_err(|err| {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Standard,
+                        "standard_buffer_usage_response",
+                        err,
+                    );
+                })?;
+            if status == 401
+                && runtime_try_recover_profile_auth_from_unauthorized_steps(
+                    request_id,
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
-                    "standard_upstream_request",
-                    err,
+                    &mut recovery_steps,
+                )
+            {
+                continue;
+            }
+            if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
+                update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
+            }
+            remember_runtime_session_id(
+                shared,
+                profile_name,
+                request_session_id.as_deref(),
+                RuntimeRouteKind::Standard,
+            )?;
+            if matches!(status, 401 | 403) {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    status,
                 );
-            })?;
-    if request.path_and_query.ends_with("/backend-api/wham/usage") {
+            }
+            return Ok(RuntimeStandardAttempt::Success {
+                profile_name: profile_name.to_string(),
+                response: build_runtime_proxy_response_from_parts(parts),
+            });
+        }
+        if response.status().is_success() {
+            remember_runtime_session_id(
+                shared,
+                profile_name,
+                request_session_id.as_deref(),
+                RuntimeRouteKind::Standard,
+            )?;
+            let response = forward_runtime_proxy_response(shared, response, Vec::new())
+                .inspect_err(|err| {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Standard,
+                        "standard_forward_response",
+                        err,
+                    );
+                })?;
+            return Ok(RuntimeStandardAttempt::Success {
+                profile_name: profile_name.to_string(),
+                response,
+            });
+        }
+
+        let status = response.status().as_u16();
         let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
-                    "standard_buffer_usage_response",
+                    "standard_buffer_response",
                     err,
                 );
             })?;
-        if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
-            update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
-        }
-        remember_runtime_session_id(
-            shared,
-            profile_name,
-            request_session_id.as_deref(),
-            RuntimeRouteKind::Standard,
-        )?;
-        return Ok(RuntimeStandardAttempt::Success {
-            profile_name: profile_name.to_string(),
-            response: build_runtime_proxy_response_from_parts(parts),
-        });
-    }
-    if response.status().is_success() {
-        remember_runtime_session_id(
-            shared,
-            profile_name,
-            request_session_id.as_deref(),
-            RuntimeRouteKind::Standard,
-        )?;
-        let response =
-            forward_runtime_proxy_response(shared, response, Vec::new()).inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    "standard_forward_response",
-                    err,
-                );
-            })?;
-        return Ok(RuntimeStandardAttempt::Success {
-            profile_name: profile_name.to_string(),
-            response,
-        });
-    }
-
-    let status = response.status().as_u16();
-    let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
+        if status == 401
+            && runtime_try_recover_profile_auth_from_unauthorized_steps(
+                request_id,
                 shared,
                 profile_name,
                 RuntimeRouteKind::Standard,
-                "standard_buffer_response",
-                err,
+                &mut recovery_steps,
+            )
+        {
+            continue;
+        }
+        let retryable_quota = matches!(status, 403 | 429)
+            && extract_runtime_proxy_quota_message(&parts.body).is_some();
+        if matches!(status, 403 | 429) && !retryable_quota {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http standard_quota_unclassified profile={profile_name} status={status} body_snippet={}",
+                    runtime_proxy_body_snippet(&parts.body, 240),
+                ),
             );
-        })?;
-    let retryable_quota =
-        matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
-    if matches!(status, 403 | 429) && !retryable_quota {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http standard_quota_unclassified profile={profile_name} status={status} body_snippet={}",
-                runtime_proxy_body_snippet(&parts.body, 240),
-            ),
-        );
-    }
-    let response = build_runtime_proxy_response_from_parts(parts);
+        }
+        let response = build_runtime_proxy_response_from_parts(parts);
 
-    if retryable_quota {
-        return Ok(RuntimeStandardAttempt::RetryableFailure {
+        if retryable_quota {
+            return Ok(RuntimeStandardAttempt::RetryableFailure {
+                profile_name: profile_name.to_string(),
+                response,
+                overload: false,
+            });
+        }
+
+        if matches!(status, 401 | 403) {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Standard,
+                status,
+            );
+        }
+
+        remember_runtime_session_id(
+            shared,
+            profile_name,
+            request_session_id.as_deref(),
+            RuntimeRouteKind::Standard,
+        )?;
+        return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
             response,
-            overload: false,
         });
     }
-
-    if matches!(status, 401 | 403) {
-        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
-    }
-
-    remember_runtime_session_id(
-        shared,
-        profile_name,
-        request_session_id.as_deref(),
-        RuntimeRouteKind::Standard,
-    )?;
-    Ok(RuntimeStandardAttempt::Success {
-        profile_name: profile_name.to_string(),
-        response,
-    })
 }
 
 pub(super) fn attempt_runtime_standard_request(
@@ -9109,115 +9315,139 @@ pub(super) fn attempt_runtime_standard_request(
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
-    let response =
-        send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
+    let mut recovery_steps = [
+        RuntimeProfileUnauthorizedRecoveryStep::Reload,
+        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
+    ]
+    .into_iter();
+    loop {
+        let response =
+            send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
+                .inspect_err(|err| {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Compact,
+                        "compact_upstream_request",
+                        err,
+                    );
+                })?;
+        let compact_request = is_runtime_compact_path(&request.path_and_query);
+        if !compact_request || response.status().is_success() {
+            let response_turn_state = compact_request
+                .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
+                .flatten();
+            let response = if compact_request {
+                forward_runtime_proxy_response_with_limit(
+                    shared,
+                    response,
+                    Vec::new(),
+                    RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES,
+                )
+            } else {
+                forward_runtime_proxy_response(shared, response, Vec::new())
+            }
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Compact,
-                    "compact_upstream_request",
+                    "compact_forward_response",
                     err,
                 );
             })?;
-    let compact_request = is_runtime_compact_path(&request.path_and_query);
-    if !compact_request || response.status().is_success() {
-        let response_turn_state = compact_request
-            .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
-            .flatten();
-        let response = if compact_request {
-            forward_runtime_proxy_response_with_limit(
-                shared,
-                response,
-                Vec::new(),
-                RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES,
-            )
-        } else {
-            forward_runtime_proxy_response(shared, response, Vec::new())
-        }
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                "compact_forward_response",
-                err,
-            );
-        })?;
-        remember_runtime_session_id(
-            shared,
-            profile_name,
-            request_session_id.as_deref(),
-            if compact_request {
-                RuntimeRouteKind::Compact
-            } else {
-                RuntimeRouteKind::Standard
-            },
-        )?;
-        if compact_request {
-            remember_runtime_compact_lineage(
+            remember_runtime_session_id(
                 shared,
                 profile_name,
                 request_session_id.as_deref(),
-                response_turn_state.as_deref(),
-                RuntimeRouteKind::Compact,
+                if compact_request {
+                    RuntimeRouteKind::Compact
+                } else {
+                    RuntimeRouteKind::Standard
+                },
             )?;
+            if compact_request {
+                remember_runtime_compact_lineage(
+                    shared,
+                    profile_name,
+                    request_session_id.as_deref(),
+                    response_turn_state.as_deref(),
+                    RuntimeRouteKind::Compact,
+                )?;
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http compact_committed_owner profile={profile_name} session={} turn_state={}",
+                        request_session_id.as_deref().unwrap_or("-"),
+                        response_turn_state.as_deref().unwrap_or("-"),
+                    ),
+                );
+            }
+            return Ok(RuntimeStandardAttempt::Success {
+                profile_name: profile_name.to_string(),
+                response,
+            });
+        }
+
+        let status = response.status().as_u16();
+        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Compact,
+                    "compact_buffer_response",
+                    err,
+                );
+            })?;
+        if status == 401
+            && runtime_try_recover_profile_auth_from_unauthorized_steps(
+                request_id,
+                shared,
+                profile_name,
+                RuntimeRouteKind::Compact,
+                &mut recovery_steps,
+            )
+        {
+            continue;
+        }
+        let retryable_quota = matches!(status, 403 | 429)
+            && extract_runtime_proxy_quota_message(&parts.body).is_some();
+        let retryable_overload =
+            extract_runtime_proxy_overload_message(status, &parts.body).is_some();
+        if matches!(status, 403 | 429) && !retryable_quota {
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http compact_committed_owner profile={profile_name} session={} turn_state={}",
-                    request_session_id.as_deref().unwrap_or("-"),
-                    response_turn_state.as_deref().unwrap_or("-"),
+                    "request={request_id} transport=http compact_quota_unclassified profile={profile_name} status={status} body_snippet={}",
+                    runtime_proxy_body_snippet(&parts.body, 240),
                 ),
             );
         }
+        let response = build_runtime_proxy_response_from_parts(parts);
+
+        if retryable_quota || retryable_overload {
+            return Ok(RuntimeStandardAttempt::RetryableFailure {
+                profile_name: profile_name.to_string(),
+                response,
+                overload: retryable_overload,
+            });
+        }
+
+        if matches!(status, 401 | 403) {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Compact,
+                status,
+            );
+        }
+
         return Ok(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
             response,
         });
     }
-
-    let status = response.status().as_u16();
-    let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                "compact_buffer_response",
-                err,
-            );
-        })?;
-    let retryable_quota =
-        matches!(status, 403 | 429) && extract_runtime_proxy_quota_message(&parts.body).is_some();
-    let retryable_overload = extract_runtime_proxy_overload_message(status, &parts.body).is_some();
-    if matches!(status, 403 | 429) && !retryable_quota {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http compact_quota_unclassified profile={profile_name} status={status} body_snippet={}",
-                runtime_proxy_body_snippet(&parts.body, 240),
-            ),
-        );
-    }
-    let response = build_runtime_proxy_response_from_parts(parts);
-
-    if retryable_quota || retryable_overload {
-        return Ok(RuntimeStandardAttempt::RetryableFailure {
-            profile_name: profile_name.to_string(),
-            response,
-            overload: retryable_overload,
-        });
-    }
-
-    if matches!(status, 401 | 403) {
-        note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Compact, status);
-    }
-
-    Ok(RuntimeStandardAttempt::Success {
-        profile_name: profile_name.to_string(),
-        response,
-    })
 }
 
 pub(super) fn proxy_runtime_anthropic_messages_request(
@@ -10730,88 +10960,110 @@ pub(super) fn attempt_runtime_responses_request(
     }
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
-    let response = send_runtime_proxy_upstream_responses_request(
-        request_id,
-        request,
-        shared,
-        profile_name,
-        turn_state_override,
-    )
-    .inspect_err(|err| {
-        note_runtime_profile_transport_failure(
+    let mut inflight_guard = Some(inflight_guard);
+    let mut recovery_steps = [
+        RuntimeProfileUnauthorizedRecoveryStep::Reload,
+        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
+    ]
+    .into_iter();
+    loop {
+        let response = send_runtime_proxy_upstream_responses_request(
+            request_id,
+            request,
             shared,
             profile_name,
-            RuntimeRouteKind::Responses,
-            "responses_upstream_request",
-            err,
-        );
-    })?;
-    let response_turn_state = runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Responses,
-                    "responses_buffer_response",
-                    err,
-                );
-            })?;
-        let retryable_quota = matches!(status, 403 | 429)
-            && extract_runtime_proxy_quota_message(&parts.body).is_some();
-        let retryable_previous =
-            status == 400 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
-        let response = RuntimeResponsesReply::Buffered(parts);
-
-        if retryable_quota {
-            return Ok(RuntimeResponsesAttempt::QuotaBlocked {
-                profile_name: profile_name.to_string(),
-                response,
-            });
-        }
-        if retryable_previous {
-            return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
-                profile_name: profile_name.to_string(),
-                response,
-                turn_state: response_turn_state,
-            });
-        }
-        if matches!(status, 401 | 403) {
-            note_runtime_profile_auth_failure(
+            turn_state_override,
+        )
+        .inspect_err(|err| {
+            note_runtime_profile_transport_failure(
                 shared,
                 profile_name,
                 RuntimeRouteKind::Responses,
-                status,
+                "responses_upstream_request",
+                err,
             );
-        }
+        })?;
+        let response_turn_state =
+            runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+                .inspect_err(|err| {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Responses,
+                        "responses_buffer_response",
+                        err,
+                    );
+                })?;
+            if status == 401
+                && runtime_try_recover_profile_auth_from_unauthorized_steps(
+                    request_id,
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    &mut recovery_steps,
+                )
+            {
+                continue;
+            }
+            let retryable_quota = matches!(status, 403 | 429)
+                && extract_runtime_proxy_quota_message(&parts.body).is_some();
+            let retryable_previous = status == 400
+                && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+            let response = RuntimeResponsesReply::Buffered(parts);
 
-        return Ok(RuntimeResponsesAttempt::Success {
-            profile_name: profile_name.to_string(),
+            if retryable_quota {
+                return Ok(RuntimeResponsesAttempt::QuotaBlocked {
+                    profile_name: profile_name.to_string(),
+                    response,
+                });
+            }
+            if retryable_previous {
+                return Ok(RuntimeResponsesAttempt::PreviousResponseNotFound {
+                    profile_name: profile_name.to_string(),
+                    response,
+                    turn_state: response_turn_state,
+                });
+            }
+            if matches!(status, 401 | 403) {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    status,
+                );
+            }
+
+            return Ok(RuntimeResponsesAttempt::Success {
+                profile_name: profile_name.to_string(),
+                response,
+            });
+        }
+        return prepare_runtime_proxy_responses_success(
+            request_id,
+            runtime_request_previous_response_id(request).as_deref(),
+            request_session_id.as_deref(),
+            runtime_request_turn_state(request).as_deref(),
+            turn_state_override,
             response,
-        });
-    }
-    prepare_runtime_proxy_responses_success(
-        request_id,
-        runtime_request_previous_response_id(request).as_deref(),
-        request_session_id.as_deref(),
-        runtime_request_turn_state(request).as_deref(),
-        turn_state_override,
-        response,
-        shared,
-        profile_name,
-        inflight_guard,
-    )
-    .inspect_err(|err| {
-        note_runtime_profile_transport_failure(
             shared,
             profile_name,
-            RuntimeRouteKind::Responses,
-            "responses_prepare_success",
-            err,
-        );
-    })
+            inflight_guard
+                .take()
+                .expect("responses inflight guard should be present"),
+        )
+        .inspect_err(|err| {
+            note_runtime_profile_transport_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Responses,
+                "responses_prepare_success",
+                err,
+            );
+        });
+    }
 }
 
 pub(super) fn next_runtime_response_candidate_for_route(
@@ -13918,14 +14170,6 @@ pub(super) fn send_runtime_proxy_upstream_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
-    if matches!(response.status().as_u16(), 401 | 403) && response.status().as_u16() == 401 {
-        note_runtime_profile_auth_failure(
-            shared,
-            profile_name,
-            runtime_proxy_request_lane(&request.path_and_query, false),
-            response.status().as_u16(),
-        );
-    }
     note_runtime_profile_latency_observation(
         shared,
         profile_name,
@@ -14032,14 +14276,6 @@ pub(super) fn send_runtime_proxy_upstream_responses_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
         ),
     );
-    if matches!(response.status().as_u16(), 401 | 403) && response.status().as_u16() == 401 {
-        note_runtime_profile_auth_failure(
-            shared,
-            profile_name,
-            RuntimeRouteKind::Responses,
-            response.status().as_u16(),
-        );
-    }
     note_runtime_profile_latency_observation(
         shared,
         profile_name,
