@@ -8,323 +8,636 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
-pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Value {
-    let marker_counts = summary
-        .marker_counts
-        .iter()
-        .map(|(marker, count)| ((*marker).to_string(), serde_json::Value::from(*count)))
-        .collect::<serde_json::Map<String, serde_json::Value>>();
-    let marker_last_fields = summary
-        .marker_last_fields
-        .iter()
-        .map(|(marker, fields)| {
-            let fields = fields
-                .iter()
-                .map(|(key, value)| (key.clone(), serde_json::Value::from(value.clone())))
-                .collect::<serde_json::Map<String, serde_json::Value>>();
-            ((*marker).to_string(), serde_json::Value::Object(fields))
+const RUNTIME_DOCTOR_FACETS: &[&str] = &[
+    "lane",
+    "route",
+    "profile",
+    "reason",
+    "transport",
+    "family",
+    "client",
+    "tool_surface",
+    "continuation",
+    "origin",
+    "warning",
+    "quota_source",
+    "quota_band",
+    "five_hour_status",
+    "weekly_status",
+    "affinity",
+    "context",
+    "event",
+    "stage",
+    "state",
+    "source",
+];
+
+const RUNTIME_DOCTOR_MARKERS: &[&str] = &[
+    "runtime_proxy_queue_overloaded",
+    "runtime_proxy_active_limit_reached",
+    "runtime_proxy_lane_limit_reached",
+    "runtime_proxy_overload_backoff",
+    "runtime_proxy_admission_wait_started",
+    "runtime_proxy_admission_recovered",
+    "runtime_proxy_queue_wait_started",
+    "runtime_proxy_queue_recovered",
+    "profile_inflight_saturated",
+    "upstream_connect_timeout",
+    "upstream_connect_dns_error",
+    "upstream_tls_handshake_error",
+    "upstream_connect_error",
+    "precommit_budget_exhausted",
+    "profile_retry_backoff",
+    "profile_transport_backoff",
+    "profile_circuit_open",
+    "profile_circuit_half_open_probe",
+    "profile_health",
+    "profile_latency",
+    "profile_bad_pairing",
+    "previous_response_not_found",
+    "previous_response_negative_cache",
+    "compact_committed_owner",
+    "compact_followup_owner",
+    "compact_fresh_fallback_blocked",
+    "compact_pressure_shed",
+    "compact_lineage_released",
+    "selection_pick",
+    "selection_skip_current",
+    "selection_skip_affinity",
+    "responses_pre_send_skip",
+    "websocket_pre_send_skip",
+    "quota_release_profile_affinity",
+    "quota_critical_floor_before_send",
+    "upstream_usage_limit_passthrough",
+    "compat_request_surface",
+    "compat_warning",
+    "websocket_reuse_skip_quota_exhausted",
+    "websocket_reuse_watchdog",
+    "websocket_precommit_frame_timeout",
+    "stream_read_error",
+    "local_writer_error",
+    "first_upstream_chunk",
+    "first_local_chunk",
+    "state_save_ok",
+    "state_save_skipped",
+    "state_save_error",
+    "state_save_queued",
+    "continuation_journal_save_ok",
+    "continuation_journal_save_error",
+    "continuation_journal_save_queued",
+    "runtime_proxy_restore_counts",
+    "runtime_proxy_startup_audit",
+    "profile_probe_refresh_queued",
+    "profile_probe_refresh_start",
+    "profile_probe_refresh_ok",
+    "profile_probe_refresh_error",
+    "quota_blocked_affinity_released",
+];
+
+const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
+    ("Queue overload", "runtime_proxy_queue_overloaded"),
+    ("Active limit", "runtime_proxy_active_limit_reached"),
+    ("Lane limit", "runtime_proxy_lane_limit_reached"),
+    ("Overload backoff", "runtime_proxy_overload_backoff"),
+    ("Pre-commit budget", "precommit_budget_exhausted"),
+    ("Responses pre-send skips", "responses_pre_send_skip"),
+    ("Websocket pre-send skips", "websocket_pre_send_skip"),
+    (
+        "Quota critical floor pre-send",
+        "quota_critical_floor_before_send",
+    ),
+    (
+        "Upstream usage-limit passthrough",
+        "upstream_usage_limit_passthrough",
+    ),
+    ("Retry backoff", "profile_retry_backoff"),
+    ("Transport backoff", "profile_transport_backoff"),
+    ("Route circuits", "profile_circuit_open"),
+    ("Health penalties", "profile_health"),
+    ("Latency penalties", "profile_latency"),
+    ("Bad pairing", "profile_bad_pairing"),
+    ("Prev not found", "previous_response_not_found"),
+    ("Prev negative cache", "previous_response_negative_cache"),
+    ("Compact guard", "compact_fresh_fallback_blocked"),
+    ("Compact shed", "compact_pressure_shed"),
+    ("Selection picks", "selection_pick"),
+    ("Selection skips", "selection_skip_current"),
+    ("WS reuse watchdog", "websocket_reuse_watchdog"),
+    (
+        "WS first-frame timeouts",
+        "websocket_precommit_frame_timeout",
+    ),
+    ("Stream read errors", "stream_read_error"),
+    ("Writer errors", "local_writer_error"),
+    ("State save errors", "state_save_error"),
+    ("Cont journal err", "continuation_journal_save_error"),
+    ("State save ok", "state_save_ok"),
+    ("Cont journal ok", "continuation_journal_save_ok"),
+    ("State save skipped", "state_save_skipped"),
+    ("Startup audit", "runtime_proxy_startup_audit"),
+    ("Admission recovered", "runtime_proxy_admission_recovered"),
+    ("Queue recovered", "runtime_proxy_queue_recovered"),
+    ("Probe refresh", "profile_probe_refresh_start"),
+    ("Probe refresh errors", "profile_probe_refresh_error"),
+    ("Compat samples", "compat_request_surface"),
+];
+
+const RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS: &[&str] = &[
+    "selection_pick",
+    "selection_skip_current",
+    "selection_skip_affinity",
+    "precommit_budget_exhausted",
+];
+
+const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
+    "stream_read_error",
+    "upstream_connect_timeout",
+    "upstream_connect_dns_error",
+    "upstream_tls_handshake_error",
+    "upstream_connect_error",
+    "profile_transport_backoff",
+    "profile_circuit_open",
+    "profile_circuit_half_open_probe",
+    "websocket_precommit_frame_timeout",
+    "local_writer_error",
+];
+
+const RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS: &[&str] =
+    &["state_save_error", "continuation_journal_save_error"];
+
+const RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS: &[&str] = &["state_save_skipped"];
+
+const RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS: &[&str] =
+    &["profile_probe_refresh_start", "profile_probe_refresh_ok"];
+
+struct RuntimeDoctorJsonBuilder {
+    value: serde_json::Map<String, serde_json::Value>,
+}
+
+impl RuntimeDoctorJsonBuilder {
+    fn new() -> Self {
+        Self {
+            value: serde_json::Map::new(),
+        }
+    }
+
+    fn insert<T: serde::Serialize>(&mut self, key: &str, value: T) -> &mut Self {
+        let value = serde_json::to_value(value)
+            .expect("runtime doctor serialization should always succeed");
+        self.value.insert(key.to_string(), value);
+        self
+    }
+
+    fn build(self) -> serde_json::Value {
+        serde_json::Value::Object(self.value)
+    }
+}
+
+struct RuntimeDoctorFieldBuilder {
+    rows: Vec<(String, String)>,
+}
+
+impl RuntimeDoctorFieldBuilder {
+    fn new() -> Self {
+        Self { rows: Vec::new() }
+    }
+
+    fn push(&mut self, label: &str, value: impl Into<String>) -> &mut Self {
+        self.rows.push((label.to_string(), value.into()));
+        self
+    }
+
+    fn push_marker_count(
+        &mut self,
+        label: &str,
+        summary: &RuntimeDoctorSummary,
+        marker: &'static str,
+    ) -> &mut Self {
+        self.push(
+            label,
+            runtime_doctor_marker_count(summary, marker).to_string(),
+        )
+    }
+
+    fn build(self) -> Vec<(String, String)> {
+        self.rows
+    }
+}
+
+struct RuntimeDoctorDegradedRouteBuilder {
+    routes: Vec<String>,
+}
+
+impl RuntimeDoctorDegradedRouteBuilder {
+    fn new() -> Self {
+        Self { routes: Vec::new() }
+    }
+
+    fn push_route_circuits(&mut self, backoffs: &RuntimeProfileBackoffs, now: i64) -> &mut Self {
+        for (key, until) in &backoffs.route_circuit_open_until {
+            if let Some((route, profile_name)) =
+                runtime_profile_route_key_parts(key, "__route_circuit__:")
+            {
+                let state = if *until > now { "open" } else { "half-open" };
+                self.routes.push(format!(
+                    "{profile_name}/{route} circuit={state} until={until}"
+                ));
+            }
+        }
+        self
+    }
+
+    fn push_transport_backoffs(&mut self, backoffs: &RuntimeProfileBackoffs) -> &mut Self {
+        for (profile_name, until) in &backoffs.transport_backoff_until {
+            if let Some((route, profile_name)) =
+                runtime_profile_transport_backoff_key_parts(profile_name)
+            {
+                self.routes.push(format!(
+                    "{profile_name}/{route} transport_backoff until={until}"
+                ));
+            } else {
+                self.routes.push(format!(
+                    "{profile_name}/transport transport_backoff until={until}"
+                ));
+            }
+        }
+        self
+    }
+
+    fn push_retry_backoffs(&mut self, backoffs: &RuntimeProfileBackoffs) -> &mut Self {
+        for (profile_name, until) in &backoffs.retry_backoff_until {
+            self.routes
+                .push(format!("{profile_name}/retry retry_backoff until={until}"));
+        }
+        self
+    }
+
+    fn push_scores(
+        &mut self,
+        scores: &BTreeMap<String, RuntimeProfileHealth>,
+        now: i64,
+    ) -> &mut Self {
+        for (key, health) in scores {
+            if let Some((route, profile_name)) =
+                runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
+            {
+                let score = runtime_profile_effective_score(
+                    health,
+                    now,
+                    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+                );
+                if score > 0 {
+                    self.routes
+                        .push(format!("{profile_name}/{route} bad_pairing={score}"));
+                }
+                continue;
+            }
+            if let Some((route, profile_name)) =
+                runtime_profile_route_key_parts(key, "__route_health__:")
+            {
+                let score = runtime_profile_effective_health_score(health, now);
+                if score > 0 {
+                    self.routes
+                        .push(format!("{profile_name}/{route} health={score}"));
+                }
+            }
+        }
+        self
+    }
+
+    fn build(mut self) -> Vec<String> {
+        self.routes.sort();
+        self.routes.dedup();
+        self.routes.into_iter().take(8).collect()
+    }
+}
+
+struct RuntimeDoctorCollector {
+    paths: Option<AppPaths>,
+    pointer_path: PathBuf,
+    pointed_log_path: Option<PathBuf>,
+    newest_log_path: Option<PathBuf>,
+}
+
+impl RuntimeDoctorCollector {
+    fn discover() -> Self {
+        let pointer_path = runtime_proxy_latest_log_pointer_path();
+        let pointed_log_path = fs::read_to_string(&pointer_path)
+            .ok()
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        Self {
+            paths: AppPaths::discover().ok(),
+            pointer_path,
+            pointed_log_path,
+            newest_log_path: newest_runtime_proxy_log_in_dir(&runtime_proxy_log_dir()),
+        }
+    }
+
+    fn pointer_exists(&self) -> bool {
+        self.pointer_path.exists()
+    }
+
+    fn pointer_target_exists(&self) -> bool {
+        self.pointed_log_path
+            .as_ref()
+            .is_some_and(|path| path.exists())
+    }
+
+    fn pointer_note(&self) -> Option<&'static str> {
+        match (
+            self.pointed_log_path.as_ref(),
+            self.newest_log_path.as_ref(),
+        ) {
+            (Some(pointed), Some(newest)) if pointed.exists() && newest != pointed => {
+                Some("Runtime log pointer was stale; sampled a newer log instead.")
+            }
+            (Some(_), Some(_)) if !self.pointer_target_exists() => {
+                Some("Runtime log pointer target was missing; sampled a newer log instead.")
+            }
+            (Some(_), None) if !self.pointer_target_exists() => {
+                Some("Runtime log pointer target was missing.")
+            }
+            _ => None,
+        }
+    }
+
+    fn log_path(&self) -> Option<PathBuf> {
+        if self.pointer_target_exists() {
+            self.newest_log_path
+                .as_ref()
+                .filter(|path| {
+                    self.pointed_log_path
+                        .as_ref()
+                        .is_some_and(|pointed| *path != pointed)
+                })
+                .cloned()
+                .or_else(|| self.pointed_log_path.clone())
+        } else {
+            self.newest_log_path.clone()
+        }
+    }
+
+    fn collect(self) -> RuntimeDoctorSummary {
+        let log_path = self.log_path();
+        let mut summary = runtime_doctor_summary_from_log(log_path.as_deref());
+        summary.pointer_exists = self.pointer_exists();
+        summary.log_exists = log_path.as_ref().is_some_and(|path| path.exists());
+        summary.log_path = log_path;
+        if let Some(paths) = self.paths.as_ref() {
+            collect_runtime_doctor_state(paths, &mut summary);
+        }
+        runtime_doctor_finalize_summary(&mut summary);
+        runtime_doctor_append_pointer_note(&mut summary, self.pointer_note());
+        summary
+    }
+}
+
+fn runtime_doctor_json_map<K, V, I>(entries: I) -> serde_json::Map<String, serde_json::Value>
+where
+    K: Into<String>,
+    V: serde::Serialize,
+    I: IntoIterator<Item = (K, V)>,
+{
+    entries
+        .into_iter()
+        .map(|(key, value)| {
+            (
+                key.into(),
+                serde_json::to_value(value)
+                    .expect("runtime doctor serialization should always succeed"),
+            )
         })
-        .collect::<serde_json::Map<String, serde_json::Value>>();
-    let facet_counts = summary
-        .facet_counts
-        .iter()
-        .map(|(facet, counts)| {
-            let counts = counts
-                .iter()
-                .map(|(value, count)| (value.clone(), serde_json::Value::from(*count)))
-                .collect::<serde_json::Map<String, serde_json::Value>>();
-            (facet.clone(), serde_json::Value::Object(counts))
-        })
-        .collect::<serde_json::Map<String, serde_json::Value>>();
-    let previous_response_not_found_by_route = summary
-        .previous_response_not_found_by_route
-        .iter()
-        .map(|(route, count)| (route.clone(), serde_json::Value::from(*count)))
-        .collect::<serde_json::Map<String, serde_json::Value>>();
-    let previous_response_not_found_by_transport = summary
-        .previous_response_not_found_by_transport
-        .iter()
-        .map(|(transport, count)| (transport.clone(), serde_json::Value::from(*count)))
-        .collect::<serde_json::Map<String, serde_json::Value>>();
-    let profiles = summary
-        .profiles
-        .iter()
-        .map(|profile| {
+        .collect()
+}
+
+fn runtime_doctor_profile_json(profile: &RuntimeDoctorProfileSummary) -> serde_json::Value {
+    serde_json::json!({
+        "profile": profile.profile,
+        "quota_freshness": profile.quota_freshness,
+        "quota_age_seconds": profile.quota_age_seconds,
+        "retry_backoff_until": profile.retry_backoff_until,
+        "transport_backoff_until": profile.transport_backoff_until,
+        "routes": profile.routes.iter().map(|route| {
             serde_json::json!({
-                "profile": profile.profile,
-                "quota_freshness": profile.quota_freshness,
-                "quota_age_seconds": profile.quota_age_seconds,
-                "retry_backoff_until": profile.retry_backoff_until,
-                "transport_backoff_until": profile.transport_backoff_until,
-                "routes": profile.routes.iter().map(|route| {
-                    serde_json::json!({
-                        "route": route.route,
-                        "circuit_state": route.circuit_state,
-                        "circuit_until": route.circuit_until,
-                        "transport_backoff_until": route.transport_backoff_until,
-                        "health_score": route.health_score,
-                        "bad_pairing_score": route.bad_pairing_score,
-                        "performance_score": route.performance_score,
-                        "quota_band": route.quota_band,
-                        "five_hour_status": route.five_hour_status,
-                        "weekly_status": route.weekly_status,
-                    })
-                }).collect::<Vec<_>>(),
+                "route": route.route,
+                "circuit_state": route.circuit_state,
+                "circuit_until": route.circuit_until,
+                "transport_backoff_until": route.transport_backoff_until,
+                "health_score": route.health_score,
+                "bad_pairing_score": route.bad_pairing_score,
+                "performance_score": route.performance_score,
+                "quota_band": route.quota_band,
+                "five_hour_status": route.five_hour_status,
+                "weekly_status": route.weekly_status,
             })
-        })
-        .collect::<Vec<_>>();
-    let mut value = serde_json::Map::new();
-    value.insert(
-        "log_path".to_string(),
-        serde_json::Value::from(
+        }).collect::<Vec<_>>(),
+    })
+}
+
+pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Value {
+    let mut builder = RuntimeDoctorJsonBuilder::new();
+    builder
+        .insert(
+            "log_path",
             summary
                 .log_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
-        ),
-    );
-    value.insert(
-        "pointer_exists".to_string(),
-        serde_json::Value::from(summary.pointer_exists),
-    );
-    value.insert(
-        "log_exists".to_string(),
-        serde_json::Value::from(summary.log_exists),
-    );
-    value.insert(
-        "line_count".to_string(),
-        serde_json::Value::from(summary.line_count),
-    );
-    value.insert(
-        "first_timestamp".to_string(),
-        serde_json::Value::from(summary.first_timestamp.clone()),
-    );
-    value.insert(
-        "last_timestamp".to_string(),
-        serde_json::Value::from(summary.last_timestamp.clone()),
-    );
-    value.insert(
-        "compat_warning_count".to_string(),
-        serde_json::Value::from(summary.compat_warning_count),
-    );
-    value.insert(
-        "top_client_family".to_string(),
-        serde_json::Value::from(summary.top_client_family.clone()),
-    );
-    value.insert(
-        "top_client".to_string(),
-        serde_json::Value::from(summary.top_client.clone()),
-    );
-    value.insert(
-        "top_tool_surface".to_string(),
-        serde_json::Value::from(summary.top_tool_surface.clone()),
-    );
-    value.insert(
-        "top_compat_warning".to_string(),
-        serde_json::Value::from(summary.top_compat_warning.clone()),
-    );
-    value.insert(
-        "marker_counts".to_string(),
-        serde_json::Value::Object(marker_counts),
-    );
-    value.insert(
-        "marker_last_fields".to_string(),
-        serde_json::Value::Object(marker_last_fields),
-    );
-    value.insert(
-        "facet_counts".to_string(),
-        serde_json::Value::Object(facet_counts),
-    );
-    value.insert(
-        "previous_response_not_found_by_route".to_string(),
-        serde_json::Value::Object(previous_response_not_found_by_route),
-    );
-    value.insert(
-        "previous_response_not_found_by_transport".to_string(),
-        serde_json::Value::Object(previous_response_not_found_by_transport),
-    );
-    value.insert(
-        "last_marker_line".to_string(),
-        serde_json::Value::from(summary.last_marker_line.clone()),
-    );
-    value.insert(
-        "selection_pressure".to_string(),
-        serde_json::Value::from(summary.selection_pressure.clone()),
-    );
-    value.insert(
-        "transport_pressure".to_string(),
-        serde_json::Value::from(summary.transport_pressure.clone()),
-    );
-    value.insert(
-        "persistence_pressure".to_string(),
-        serde_json::Value::from(summary.persistence_pressure.clone()),
-    );
-    value.insert(
-        "quota_freshness_pressure".to_string(),
-        serde_json::Value::from(summary.quota_freshness_pressure.clone()),
-    );
-    value.insert(
-        "startup_audit_pressure".to_string(),
-        serde_json::Value::from(summary.startup_audit_pressure.clone()),
-    );
-    value.insert(
-        "persisted_retry_backoffs".to_string(),
-        serde_json::Value::from(summary.persisted_retry_backoffs),
-    );
-    value.insert(
-        "persisted_transport_backoffs".to_string(),
-        serde_json::Value::from(summary.persisted_transport_backoffs),
-    );
-    value.insert(
-        "persisted_route_circuits".to_string(),
-        serde_json::Value::from(summary.persisted_route_circuits),
-    );
-    value.insert(
-        "persisted_usage_snapshots".to_string(),
-        serde_json::Value::from(summary.persisted_usage_snapshots),
-    );
-    value.insert(
-        "persisted_response_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_response_bindings),
-    );
-    value.insert(
-        "persisted_session_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_session_bindings),
-    );
-    value.insert(
-        "persisted_turn_state_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_turn_state_bindings),
-    );
-    value.insert(
-        "persisted_session_id_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_session_id_bindings),
-    );
-    value.insert(
-        "persisted_verified_continuations".to_string(),
-        serde_json::Value::from(summary.persisted_verified_continuations),
-    );
-    value.insert(
-        "persisted_warm_continuations".to_string(),
-        serde_json::Value::from(summary.persisted_warm_continuations),
-    );
-    value.insert(
-        "persisted_suspect_continuations".to_string(),
-        serde_json::Value::from(summary.persisted_suspect_continuations),
-    );
-    value.insert(
-        "persisted_dead_continuations".to_string(),
-        serde_json::Value::from(summary.persisted_dead_continuations),
-    );
-    value.insert(
-        "persisted_continuation_journal_response_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_continuation_journal_response_bindings),
-    );
-    value.insert(
-        "persisted_continuation_journal_session_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_continuation_journal_session_bindings),
-    );
-    value.insert(
-        "persisted_continuation_journal_turn_state_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_continuation_journal_turn_state_bindings),
-    );
-    value.insert(
-        "persisted_continuation_journal_session_id_bindings".to_string(),
-        serde_json::Value::from(summary.persisted_continuation_journal_session_id_bindings),
-    );
-    value.insert(
-        "state_save_queue_backlog".to_string(),
-        serde_json::Value::from(summary.state_save_queue_backlog),
-    );
-    value.insert(
-        "state_save_lag_ms".to_string(),
-        serde_json::Value::from(summary.state_save_lag_ms),
-    );
-    value.insert(
-        "continuation_journal_save_backlog".to_string(),
-        serde_json::Value::from(summary.continuation_journal_save_backlog),
-    );
-    value.insert(
-        "continuation_journal_save_lag_ms".to_string(),
-        serde_json::Value::from(summary.continuation_journal_save_lag_ms),
-    );
-    value.insert(
-        "profile_probe_refresh_backlog".to_string(),
-        serde_json::Value::from(summary.profile_probe_refresh_backlog),
-    );
-    value.insert(
-        "profile_probe_refresh_lag_ms".to_string(),
-        serde_json::Value::from(summary.profile_probe_refresh_lag_ms),
-    );
-    value.insert(
-        "continuation_journal_saved_at".to_string(),
-        serde_json::Value::from(summary.continuation_journal_saved_at),
-    );
-    value.insert(
-        "suspect_continuation_bindings".to_string(),
-        serde_json::Value::from(summary.suspect_continuation_bindings.clone()),
-    );
-    value.insert(
-        "stale_persisted_usage_snapshots".to_string(),
-        serde_json::Value::from(summary.stale_persisted_usage_snapshots),
-    );
-    value.insert(
-        "recovered_state_file".to_string(),
-        serde_json::Value::from(summary.recovered_state_file),
-    );
-    value.insert(
-        "recovered_continuations_file".to_string(),
-        serde_json::Value::from(summary.recovered_continuations_file),
-    );
-    value.insert(
-        "recovered_continuation_journal_file".to_string(),
-        serde_json::Value::from(summary.recovered_continuation_journal_file),
-    );
-    value.insert(
-        "recovered_scores_file".to_string(),
-        serde_json::Value::from(summary.recovered_scores_file),
-    );
-    value.insert(
-        "recovered_usage_snapshots_file".to_string(),
-        serde_json::Value::from(summary.recovered_usage_snapshots_file),
-    );
-    value.insert(
-        "recovered_backoffs_file".to_string(),
-        serde_json::Value::from(summary.recovered_backoffs_file),
-    );
-    value.insert(
-        "last_good_backups_present".to_string(),
-        serde_json::Value::from(summary.last_good_backups_present),
-    );
-    value.insert(
-        "degraded_routes".to_string(),
-        serde_json::Value::from(summary.degraded_routes.clone()),
-    );
-    value.insert(
-        "orphan_managed_dirs".to_string(),
-        serde_json::Value::from(summary.orphan_managed_dirs.clone()),
-    );
-    value.insert(
-        "failure_class_counts".to_string(),
-        serde_json::Value::from(
+        )
+        .insert("pointer_exists", summary.pointer_exists)
+        .insert("log_exists", summary.log_exists)
+        .insert("line_count", summary.line_count)
+        .insert("first_timestamp", summary.first_timestamp.clone())
+        .insert("last_timestamp", summary.last_timestamp.clone())
+        .insert("compat_warning_count", summary.compat_warning_count)
+        .insert("top_client_family", summary.top_client_family.clone())
+        .insert("top_client", summary.top_client.clone())
+        .insert("top_tool_surface", summary.top_tool_surface.clone())
+        .insert("top_compat_warning", summary.top_compat_warning.clone())
+        .insert(
+            "marker_counts",
+            runtime_doctor_json_map(
+                summary
+                    .marker_counts
+                    .iter()
+                    .map(|(marker, count)| ((*marker).to_string(), *count)),
+            ),
+        )
+        .insert(
+            "marker_last_fields",
+            runtime_doctor_json_map(summary.marker_last_fields.iter().map(|(marker, fields)| {
+                (
+                    (*marker).to_string(),
+                    runtime_doctor_json_map(fields.clone()),
+                )
+            })),
+        )
+        .insert(
+            "facet_counts",
+            runtime_doctor_json_map(
+                summary.facet_counts.iter().map(|(facet, counts)| {
+                    (facet.clone(), runtime_doctor_json_map(counts.clone()))
+                }),
+            ),
+        )
+        .insert(
+            "previous_response_not_found_by_route",
+            runtime_doctor_json_map(summary.previous_response_not_found_by_route.clone()),
+        )
+        .insert(
+            "previous_response_not_found_by_transport",
+            runtime_doctor_json_map(summary.previous_response_not_found_by_transport.clone()),
+        )
+        .insert("last_marker_line", summary.last_marker_line.clone())
+        .insert("selection_pressure", summary.selection_pressure.clone())
+        .insert("transport_pressure", summary.transport_pressure.clone())
+        .insert("persistence_pressure", summary.persistence_pressure.clone())
+        .insert(
+            "quota_freshness_pressure",
+            summary.quota_freshness_pressure.clone(),
+        )
+        .insert(
+            "startup_audit_pressure",
+            summary.startup_audit_pressure.clone(),
+        )
+        .insert("persisted_retry_backoffs", summary.persisted_retry_backoffs)
+        .insert(
+            "persisted_transport_backoffs",
+            summary.persisted_transport_backoffs,
+        )
+        .insert("persisted_route_circuits", summary.persisted_route_circuits)
+        .insert(
+            "persisted_usage_snapshots",
+            summary.persisted_usage_snapshots,
+        )
+        .insert(
+            "persisted_response_bindings",
+            summary.persisted_response_bindings,
+        )
+        .insert(
+            "persisted_session_bindings",
+            summary.persisted_session_bindings,
+        )
+        .insert(
+            "persisted_turn_state_bindings",
+            summary.persisted_turn_state_bindings,
+        )
+        .insert(
+            "persisted_session_id_bindings",
+            summary.persisted_session_id_bindings,
+        )
+        .insert(
+            "persisted_verified_continuations",
+            summary.persisted_verified_continuations,
+        )
+        .insert(
+            "persisted_warm_continuations",
+            summary.persisted_warm_continuations,
+        )
+        .insert(
+            "persisted_suspect_continuations",
+            summary.persisted_suspect_continuations,
+        )
+        .insert(
+            "persisted_dead_continuations",
+            summary.persisted_dead_continuations,
+        )
+        .insert(
+            "persisted_continuation_journal_response_bindings",
+            summary.persisted_continuation_journal_response_bindings,
+        )
+        .insert(
+            "persisted_continuation_journal_session_bindings",
+            summary.persisted_continuation_journal_session_bindings,
+        )
+        .insert(
+            "persisted_continuation_journal_turn_state_bindings",
+            summary.persisted_continuation_journal_turn_state_bindings,
+        )
+        .insert(
+            "persisted_continuation_journal_session_id_bindings",
+            summary.persisted_continuation_journal_session_id_bindings,
+        )
+        .insert("state_save_queue_backlog", summary.state_save_queue_backlog)
+        .insert("state_save_lag_ms", summary.state_save_lag_ms)
+        .insert(
+            "continuation_journal_save_backlog",
+            summary.continuation_journal_save_backlog,
+        )
+        .insert(
+            "continuation_journal_save_lag_ms",
+            summary.continuation_journal_save_lag_ms,
+        )
+        .insert(
+            "profile_probe_refresh_backlog",
+            summary.profile_probe_refresh_backlog,
+        )
+        .insert(
+            "profile_probe_refresh_lag_ms",
+            summary.profile_probe_refresh_lag_ms,
+        )
+        .insert(
+            "continuation_journal_saved_at",
+            summary.continuation_journal_saved_at,
+        )
+        .insert(
+            "suspect_continuation_bindings",
+            summary.suspect_continuation_bindings.clone(),
+        )
+        .insert(
+            "stale_persisted_usage_snapshots",
+            summary.stale_persisted_usage_snapshots,
+        )
+        .insert("recovered_state_file", summary.recovered_state_file)
+        .insert(
+            "recovered_continuations_file",
+            summary.recovered_continuations_file,
+        )
+        .insert(
+            "recovered_continuation_journal_file",
+            summary.recovered_continuation_journal_file,
+        )
+        .insert("recovered_scores_file", summary.recovered_scores_file)
+        .insert(
+            "recovered_usage_snapshots_file",
+            summary.recovered_usage_snapshots_file,
+        )
+        .insert("recovered_backoffs_file", summary.recovered_backoffs_file)
+        .insert(
+            "last_good_backups_present",
+            summary.last_good_backups_present,
+        )
+        .insert("degraded_routes", summary.degraded_routes.clone())
+        .insert("orphan_managed_dirs", summary.orphan_managed_dirs.clone())
+        .insert(
+            "failure_class_counts",
+            runtime_doctor_json_map(summary.failure_class_counts.clone()),
+        )
+        .insert(
+            "profiles",
             summary
-                .failure_class_counts
+                .profiles
                 .iter()
-                .map(|(class, count)| (class.clone(), serde_json::Value::from(*count)))
-                .collect::<serde_json::Map<String, serde_json::Value>>(),
-        ),
-    );
-    value.insert("profiles".to_string(), serde_json::Value::from(profiles));
-    value.insert(
-        "diagnosis".to_string(),
-        serde_json::Value::from(summary.diagnosis.clone()),
-    );
-    serde_json::Value::Object(value)
+                .map(runtime_doctor_profile_json)
+                .collect::<Vec<_>>(),
+        )
+        .insert("diagnosis", summary.diagnosis.clone());
+    builder.build()
 }
 
 pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
     let pointer_path = runtime_proxy_latest_log_pointer_path();
     let summary = collect_runtime_doctor_summary();
     runtime_doctor_fields_for_summary(&summary, &pointer_path)
+}
+
+fn runtime_doctor_format_option<T: ToString>(value: Option<T>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 pub(crate) fn runtime_doctor_fields_for_summary(
@@ -346,16 +659,6 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             )
         })
         .unwrap_or_else(|| "-".to_string());
-    let format_usize = |value: Option<usize>| {
-        value
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    };
-    let format_u64 = |value: Option<u64>| {
-        value
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    };
     let suspect_continuations = if summary.suspect_continuation_bindings.is_empty() {
         "-".to_string()
     } else {
@@ -365,10 +668,10 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             summary.suspect_continuation_bindings.join(", ")
         )
     };
-
-    vec![
-        (
-            "Log pointer".to_string(),
+    let mut fields = RuntimeDoctorFieldBuilder::new();
+    fields
+        .push(
+            "Log pointer",
             format!(
                 "{} ({})",
                 pointer_path.display(),
@@ -378,288 +681,143 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                     "missing"
                 }
             ),
-        ),
-        ("Latest log".to_string(), latest_log),
-        (
-            "Log sample".to_string(),
-            format!("{} lines", summary.line_count),
-        ),
-        (
-            "Queue overload".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_queue_overloaded").to_string(),
-        ),
-        (
-            "Active limit".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_active_limit_reached").to_string(),
-        ),
-        (
-            "Lane limit".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_lane_limit_reached").to_string(),
-        ),
-        (
-            "Overload backoff".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_overload_backoff").to_string(),
-        ),
-        (
-            "Connect failures".to_string(),
-            (runtime_doctor_marker_count(summary, "upstream_connect_timeout")
-                + runtime_doctor_marker_count(summary, "upstream_connect_error"))
-            .to_string(),
-        ),
-        (
-            "Pre-commit budget".to_string(),
-            runtime_doctor_marker_count(summary, "precommit_budget_exhausted").to_string(),
-        ),
-        (
-            "Responses pre-send skips".to_string(),
-            runtime_doctor_marker_count(summary, "responses_pre_send_skip").to_string(),
-        ),
-        (
-            "Websocket pre-send skips".to_string(),
-            runtime_doctor_marker_count(summary, "websocket_pre_send_skip").to_string(),
-        ),
-        (
-            "Quota critical floor pre-send".to_string(),
-            runtime_doctor_marker_count(summary, "quota_critical_floor_before_send").to_string(),
-        ),
-        (
-            "Upstream usage-limit passthrough".to_string(),
-            runtime_doctor_marker_count(summary, "upstream_usage_limit_passthrough").to_string(),
-        ),
-        (
-            "Retry backoff".to_string(),
-            runtime_doctor_marker_count(summary, "profile_retry_backoff").to_string(),
-        ),
-        (
-            "Transport backoff".to_string(),
-            runtime_doctor_marker_count(summary, "profile_transport_backoff").to_string(),
-        ),
-        (
-            "Route circuits".to_string(),
-            runtime_doctor_marker_count(summary, "profile_circuit_open").to_string(),
-        ),
-        (
-            "Health penalties".to_string(),
-            runtime_doctor_marker_count(summary, "profile_health").to_string(),
-        ),
-        (
-            "Latency penalties".to_string(),
-            runtime_doctor_marker_count(summary, "profile_latency").to_string(),
-        ),
-        (
-            "Bad pairing".to_string(),
-            runtime_doctor_marker_count(summary, "profile_bad_pairing").to_string(),
-        ),
-        (
-            "Prev not found".to_string(),
-            runtime_doctor_marker_count(summary, "previous_response_not_found").to_string(),
-        ),
-        (
-            "Prev not found routes".to_string(),
-            runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route),
-        ),
-        (
-            "Prev not found xport".to_string(),
-            runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_transport),
-        ),
-        (
-            "Prev negative cache".to_string(),
-            runtime_doctor_marker_count(summary, "previous_response_negative_cache").to_string(),
-        ),
-        (
-            "Compact guard".to_string(),
-            runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked").to_string(),
-        ),
-        (
-            "Compact shed".to_string(),
-            runtime_doctor_marker_count(summary, "compact_pressure_shed").to_string(),
-        ),
-        (
-            "Selection picks".to_string(),
-            runtime_doctor_marker_count(summary, "selection_pick").to_string(),
-        ),
-        (
-            "Selection skips".to_string(),
-            runtime_doctor_marker_count(summary, "selection_skip_current").to_string(),
-        ),
-        (
-            "WS reuse watchdog".to_string(),
-            runtime_doctor_marker_count(summary, "websocket_reuse_watchdog").to_string(),
-        ),
-        (
-            "WS first-frame timeouts".to_string(),
-            runtime_doctor_marker_count(summary, "websocket_precommit_frame_timeout").to_string(),
-        ),
-        (
-            "Stream read errors".to_string(),
-            runtime_doctor_marker_count(summary, "stream_read_error").to_string(),
-        ),
-        (
-            "Writer errors".to_string(),
-            runtime_doctor_marker_count(summary, "local_writer_error").to_string(),
-        ),
-        (
-            "State save backlog".to_string(),
-            format_usize(summary.state_save_queue_backlog),
-        ),
-        (
-            "State save lag".to_string(),
-            format_u64(summary.state_save_lag_ms),
-        ),
-        (
-            "Cont journal backlog".to_string(),
-            format_usize(summary.continuation_journal_save_backlog),
-        ),
-        (
-            "Cont journal lag".to_string(),
-            format_u64(summary.continuation_journal_save_lag_ms),
-        ),
-        (
-            "Probe backlog".to_string(),
-            format_usize(summary.profile_probe_refresh_backlog),
-        ),
-        (
-            "Probe lag".to_string(),
-            format_u64(summary.profile_probe_refresh_lag_ms),
-        ),
-        (
-            "State save errors".to_string(),
-            runtime_doctor_marker_count(summary, "state_save_error").to_string(),
-        ),
-        (
-            "Cont journal err".to_string(),
-            runtime_doctor_marker_count(summary, "continuation_journal_save_error").to_string(),
-        ),
-        (
-            "State save ok".to_string(),
-            runtime_doctor_marker_count(summary, "state_save_ok").to_string(),
-        ),
-        (
-            "Cont journal ok".to_string(),
-            runtime_doctor_marker_count(summary, "continuation_journal_save_ok").to_string(),
-        ),
-        (
-            "State save skipped".to_string(),
-            runtime_doctor_marker_count(summary, "state_save_skipped").to_string(),
-        ),
-        (
-            "Startup audit".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_startup_audit").to_string(),
-        ),
-        (
-            "Startup pressure".to_string(),
-            summary.startup_audit_pressure.clone(),
-        ),
-        (
-            "Admission recovered".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_admission_recovered").to_string(),
-        ),
-        (
-            "Queue recovered".to_string(),
-            runtime_doctor_marker_count(summary, "runtime_proxy_queue_recovered").to_string(),
-        ),
-        (
-            "Probe refresh".to_string(),
-            runtime_doctor_marker_count(summary, "profile_probe_refresh_start").to_string(),
-        ),
-        (
-            "Probe refresh errors".to_string(),
-            runtime_doctor_marker_count(summary, "profile_probe_refresh_error").to_string(),
-        ),
-        (
-            "Compat samples".to_string(),
-            runtime_doctor_marker_count(summary, "compat_request_surface").to_string(),
-        ),
-        (
-            "Compat warnings".to_string(),
-            summary.compat_warning_count.to_string(),
-        ),
-        (
-            "Client family".to_string(),
-            summary
-                .top_client_family
-                .clone()
-                .unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Top client".to_string(),
-            summary
-                .top_client
-                .clone()
-                .unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Tool surface".to_string(),
-            summary
-                .top_tool_surface
-                .clone()
-                .unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Compat warning".to_string(),
-            summary
-                .top_compat_warning
-                .clone()
-                .unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Hot lane".to_string(),
-            runtime_doctor_top_facet(summary, "lane").unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Hot route".to_string(),
-            runtime_doctor_top_facet(summary, "route").unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Hot profile".to_string(),
-            runtime_doctor_top_facet(summary, "profile").unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Hot reason".to_string(),
-            runtime_doctor_top_facet(summary, "reason").unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Quota source".to_string(),
-            runtime_doctor_top_facet(summary, "quota_source").unwrap_or_else(|| "-".to_string()),
-        ),
-        (
-            "Selection pressure".to_string(),
-            summary.selection_pressure.clone(),
-        ),
-        (
-            "Transport pressure".to_string(),
-            summary.transport_pressure.clone(),
-        ),
-        (
-            "Persistence pressure".to_string(),
-            summary.persistence_pressure.clone(),
-        ),
-        (
-            "Quota freshness".to_string(),
-            summary.quota_freshness_pressure.clone(),
-        ),
-        (
-            "Failure classes".to_string(),
+        )
+        .push("Latest log", latest_log)
+        .push("Log sample", format!("{} lines", summary.line_count));
+    for (label, marker) in RUNTIME_DOCTOR_COUNT_FIELD_ROWS {
+        fields.push_marker_count(label, summary, marker);
+        if *marker == "runtime_proxy_overload_backoff" {
+            fields.push(
+                "Connect failures",
+                (runtime_doctor_marker_count(summary, "upstream_connect_timeout")
+                    + runtime_doctor_marker_count(summary, "upstream_connect_error"))
+                .to_string(),
+            );
+        }
+        if *marker == "previous_response_not_found" {
+            fields
+                .push(
+                    "Prev not found routes",
+                    runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route),
+                )
+                .push(
+                    "Prev not found xport",
+                    runtime_doctor_count_breakdown(
+                        &summary.previous_response_not_found_by_transport,
+                    ),
+                );
+        }
+        if *marker == "local_writer_error" {
+            fields
+                .push(
+                    "State save backlog",
+                    runtime_doctor_format_option(summary.state_save_queue_backlog),
+                )
+                .push(
+                    "State save lag",
+                    runtime_doctor_format_option(summary.state_save_lag_ms),
+                )
+                .push(
+                    "Cont journal backlog",
+                    runtime_doctor_format_option(summary.continuation_journal_save_backlog),
+                )
+                .push(
+                    "Cont journal lag",
+                    runtime_doctor_format_option(summary.continuation_journal_save_lag_ms),
+                )
+                .push(
+                    "Probe backlog",
+                    runtime_doctor_format_option(summary.profile_probe_refresh_backlog),
+                )
+                .push(
+                    "Probe lag",
+                    runtime_doctor_format_option(summary.profile_probe_refresh_lag_ms),
+                );
+        }
+        if *marker == "runtime_proxy_startup_audit" {
+            fields.push("Startup pressure", summary.startup_audit_pressure.clone());
+        }
+        if *marker == "compat_request_surface" {
+            fields
+                .push("Compat warnings", summary.compat_warning_count.to_string())
+                .push(
+                    "Client family",
+                    summary
+                        .top_client_family
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Top client",
+                    summary
+                        .top_client
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Tool surface",
+                    summary
+                        .top_tool_surface
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Compat warning",
+                    summary
+                        .top_compat_warning
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Hot lane",
+                    runtime_doctor_top_facet(summary, "lane").unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Hot route",
+                    runtime_doctor_top_facet(summary, "route").unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Hot profile",
+                    runtime_doctor_top_facet(summary, "profile").unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Hot reason",
+                    runtime_doctor_top_facet(summary, "reason").unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Quota source",
+                    runtime_doctor_top_facet(summary, "quota_source")
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+        }
+    }
+    fields
+        .push("Selection pressure", summary.selection_pressure.clone())
+        .push("Transport pressure", summary.transport_pressure.clone())
+        .push("Persistence pressure", summary.persistence_pressure.clone())
+        .push("Quota freshness", summary.quota_freshness_pressure.clone())
+        .push(
+            "Failure classes",
             runtime_doctor_count_breakdown(&summary.failure_class_counts),
-        ),
-        (
-            "Persisted backoffs".to_string(),
+        )
+        .push(
+            "Persisted backoffs",
             format!(
                 "retry={} transport={} circuits={}",
                 summary.persisted_retry_backoffs,
                 summary.persisted_transport_backoffs,
                 summary.persisted_route_circuits
             ),
-        ),
-        (
-            "Persisted snapshots".to_string(),
+        )
+        .push(
+            "Persisted snapshots",
             format!(
                 "{} total, {} stale",
                 summary.persisted_usage_snapshots, summary.stale_persisted_usage_snapshots
             ),
-        ),
-        (
-            "Persisted continuations".to_string(),
+        )
+        .push(
+            "Persisted continuations",
             format!(
                 "responses={} sessions={} turns={} session_ids={}",
                 summary.persisted_response_bindings,
@@ -667,9 +825,9 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                 summary.persisted_turn_state_bindings,
                 summary.persisted_session_id_bindings
             ),
-        ),
-        (
-            "Continuation states".to_string(),
+        )
+        .push(
+            "Continuation states",
             format!(
                 "verified={} warm={} suspect={} dead={}",
                 summary.persisted_verified_continuations,
@@ -677,9 +835,9 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                 summary.persisted_suspect_continuations,
                 summary.persisted_dead_continuations
             ),
-        ),
-        (
-            "Continuation journal".to_string(),
+        )
+        .push(
+            "Continuation journal",
             format!(
                 "responses={} sessions={} turns={} session_ids={} saved_at={}",
                 summary.persisted_continuation_journal_response_bindings,
@@ -691,9 +849,9 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                     .map(|epoch| format_precise_reset_time(Some(epoch)))
                     .unwrap_or_else(|| "-".to_string())
             ),
-        ),
-        (
-            "Recovered state".to_string(),
+        )
+        .push(
+            "Recovered state",
             format!(
                 "state={} continuations={} journal={} scores={} usage={} backoffs={} backups={}",
                 summary.recovered_state_file,
@@ -704,33 +862,33 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                 summary.recovered_backoffs_file,
                 summary.last_good_backups_present
             ),
-        ),
-        (
-            "Degraded routes".to_string(),
+        )
+        .push(
+            "Degraded routes",
             if summary.degraded_routes.is_empty() {
                 "-".to_string()
             } else {
                 summary.degraded_routes.join(" | ")
             },
-        ),
-        (
-            "Orphan dirs".to_string(),
+        )
+        .push(
+            "Orphan dirs",
             if summary.orphan_managed_dirs.is_empty() {
                 "-".to_string()
             } else {
                 summary.orphan_managed_dirs.join(", ")
             },
-        ),
-        ("Suspect continuations".to_string(), suspect_continuations),
-        (
-            "Last marker".to_string(),
+        )
+        .push("Suspect continuations", suspect_continuations)
+        .push(
+            "Last marker",
             summary
                 .last_marker_line
                 .clone()
                 .unwrap_or_else(|| "-".to_string()),
-        ),
-        ("Diagnosis".to_string(), summary.diagnosis.clone()),
-    ]
+        )
+        .push("Diagnosis", summary.diagnosis.clone());
+    fields.build()
 }
 
 pub(crate) fn runtime_doctor_marker_count(
@@ -738,6 +896,15 @@ pub(crate) fn runtime_doctor_marker_count(
     marker: &'static str,
 ) -> usize {
     summary.marker_counts.get(marker).copied().unwrap_or(0)
+}
+
+fn runtime_doctor_has_any_markers(
+    summary: &RuntimeDoctorSummary,
+    markers: &[&'static str],
+) -> bool {
+    markers
+        .iter()
+        .any(|marker| runtime_doctor_marker_count(summary, marker) > 0)
 }
 
 fn runtime_doctor_facet_count(summary: &RuntimeDoctorSummary, facet: &str, value: &str) -> usize {
@@ -1185,102 +1352,21 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
         &backoffs.value,
         now,
     );
-
-    let mut degraded_routes = Vec::new();
-    for (key, until) in &backoffs.value.route_circuit_open_until {
-        if let Some((route, profile_name)) =
-            runtime_profile_route_key_parts(key, "__route_circuit__:")
-        {
-            let state = if *until > now { "open" } else { "half-open" };
-            degraded_routes.push(format!(
-                "{profile_name}/{route} circuit={state} until={until}"
-            ));
-        }
-    }
-    for (profile_name, until) in &backoffs.value.transport_backoff_until {
-        if let Some((route, profile_name)) =
-            runtime_profile_transport_backoff_key_parts(profile_name)
-        {
-            degraded_routes.push(format!(
-                "{profile_name}/{route} transport_backoff until={until}"
-            ));
-        } else {
-            degraded_routes.push(format!(
-                "{profile_name}/transport transport_backoff until={until}"
-            ));
-        }
-    }
-    for (profile_name, until) in &backoffs.value.retry_backoff_until {
-        degraded_routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
-    }
-    for (key, health) in &scores.value {
-        if let Some((route, profile_name)) =
-            runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
-        {
-            let score = runtime_profile_effective_score(
-                health,
-                now,
-                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-            );
-            if score > 0 {
-                degraded_routes.push(format!("{profile_name}/{route} bad_pairing={score}"));
-            }
-            continue;
-        }
-        if let Some((route, profile_name)) =
-            runtime_profile_route_key_parts(key, "__route_health__:")
-        {
-            let score = runtime_profile_effective_health_score(health, now);
-            if score > 0 {
-                degraded_routes.push(format!("{profile_name}/{route} health={score}"));
-            }
-        }
-    }
-    degraded_routes.sort();
-    degraded_routes.dedup();
-    summary.degraded_routes = degraded_routes.into_iter().take(8).collect();
+    let mut degraded_routes = RuntimeDoctorDegradedRouteBuilder::new();
+    degraded_routes
+        .push_route_circuits(&backoffs.value, now)
+        .push_transport_backoffs(&backoffs.value)
+        .push_retry_backoffs(&backoffs.value)
+        .push_scores(&scores.value, now);
+    summary.degraded_routes = degraded_routes.build();
 }
 
 pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
-    let paths = AppPaths::discover().ok();
-    let pointer_path = runtime_proxy_latest_log_pointer_path();
-    let pointer_content = fs::read_to_string(&pointer_path).ok();
-    let pointed_log_path = pointer_content
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    let newest_log_path = newest_runtime_proxy_log_in_dir(&runtime_proxy_log_dir());
-    let pointer_exists = pointer_path.exists();
-    let pointer_target_exists = pointed_log_path.as_ref().is_some_and(|path| path.exists());
-    let pointer_note = match (pointed_log_path.as_ref(), newest_log_path.as_ref()) {
-        (Some(pointed), Some(newest)) if pointed.exists() && newest != pointed => {
-            Some("Runtime log pointer was stale; sampled a newer log instead.")
-        }
-        (Some(_), Some(_)) if !pointer_target_exists => {
-            Some("Runtime log pointer target was missing; sampled a newer log instead.")
-        }
-        (Some(_), None) if !pointer_target_exists => {
-            Some("Runtime log pointer target was missing.")
-        }
-        _ => None,
-    };
-    let log_path = if pointer_target_exists {
-        newest_log_path
-            .as_ref()
-            .filter(|path| {
-                pointed_log_path
-                    .as_ref()
-                    .is_some_and(|pointed| *path != pointed)
-            })
-            .cloned()
-            .or(pointed_log_path.clone())
-    } else {
-        newest_log_path.clone()
-    };
-    let log_exists = log_path.as_ref().is_some_and(|path| path.exists());
+    RuntimeDoctorCollector::discover().collect()
+}
 
-    let mut summary = if let Some(log_path) = log_path.as_ref().filter(|path| path.exists()) {
+fn runtime_doctor_summary_from_log(log_path: Option<&Path>) -> RuntimeDoctorSummary {
+    if let Some(log_path) = log_path.filter(|path| path.exists()) {
         match read_runtime_log_tail(log_path, RUNTIME_PROXY_DOCTOR_TAIL_BYTES) {
             Ok(tail) => summarize_runtime_log_tail(&tail),
             Err(err) => RuntimeDoctorSummary {
@@ -1290,49 +1376,38 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
         }
     } else {
         RuntimeDoctorSummary::default()
-    };
-
-    summary.pointer_exists = pointer_exists;
-    summary.log_exists = log_exists;
-    summary.log_path = log_path;
-    if let Some(paths) = paths.as_ref() {
-        collect_runtime_doctor_state(paths, &mut summary);
     }
-    summary.selection_pressure = if runtime_doctor_marker_count(&summary, "selection_pick") > 0
-        || runtime_doctor_marker_count(&summary, "selection_skip_current") > 0
-        || runtime_doctor_marker_count(&summary, "selection_skip_affinity") > 0
-        || runtime_doctor_marker_count(&summary, "precommit_budget_exhausted") > 0
-    {
+}
+
+fn runtime_doctor_selection_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS) {
         "elevated".to_string()
     } else {
         "low".to_string()
-    };
-    summary.transport_pressure = if runtime_doctor_marker_count(&summary, "stream_read_error") > 0
-        || runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
-        || runtime_doctor_marker_count(&summary, "upstream_connect_dns_error") > 0
-        || runtime_doctor_marker_count(&summary, "upstream_tls_handshake_error") > 0
-        || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
-        || runtime_doctor_marker_count(&summary, "profile_transport_backoff") > 0
-        || runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0
-        || runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe") > 0
-        || runtime_doctor_marker_count(&summary, "websocket_precommit_frame_timeout") > 0
-        || runtime_doctor_marker_count(&summary, "local_writer_error") > 0
-    {
+    }
+}
+
+fn runtime_doctor_transport_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS) {
         "elevated".to_string()
     } else {
         "low".to_string()
-    };
-    summary.persistence_pressure = if runtime_doctor_marker_count(&summary, "state_save_error") > 0
-        || runtime_doctor_marker_count(&summary, "continuation_journal_save_error") > 0
-    {
+    }
+}
+
+fn runtime_doctor_persistence_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS) {
         "elevated".to_string()
-    } else if runtime_doctor_marker_count(&summary, "state_save_skipped") > 0 {
+    } else if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS) {
         "active".to_string()
     } else {
         "low".to_string()
-    };
-    summary.startup_audit_pressure = if !summary.orphan_managed_dirs.is_empty()
-        || runtime_doctor_marker_count(&summary, "runtime_proxy_startup_audit") > 0
+    }
+}
+
+fn runtime_doctor_startup_audit_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if !summary.orphan_managed_dirs.is_empty()
+        || runtime_doctor_marker_count(summary, "runtime_proxy_startup_audit") > 0
             && summary
                 .marker_last_fields
                 .get("runtime_proxy_startup_audit")
@@ -1343,137 +1418,156 @@ pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
                         || fields
                             .get("orphan_managed_dirs")
                             .is_some_and(|value| value != "0")
-                }) {
+                })
+    {
         "elevated".to_string()
     } else {
         "low".to_string()
-    };
-    summary.quota_freshness_pressure = if summary.stale_persisted_usage_snapshots > 0
-        || runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0
-        || runtime_doctor_top_facet(&summary, "quota_source")
+    }
+}
+
+fn runtime_doctor_quota_freshness_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if summary.stale_persisted_usage_snapshots > 0
+        || runtime_doctor_marker_count(summary, "profile_probe_refresh_error") > 0
+        || runtime_doctor_top_facet(summary, "quota_source")
             .is_some_and(|value| value.starts_with("persisted_snapshot "))
     {
         "stale_risk".to_string()
-    } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0
-        || runtime_doctor_marker_count(&summary, "profile_probe_refresh_ok") > 0
-    {
+    } else if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS) {
         "active".to_string()
     } else {
         "low".to_string()
-    };
-    if summary.diagnosis.is_empty() {
-        summary.diagnosis = if !summary.pointer_exists {
-            "No runtime log pointer has been created yet.".to_string()
-        } else if !summary.log_exists {
-            "Latest runtime log path does not exist.".to_string()
-        } else if summary.line_count == 0 {
-            "Latest runtime log is empty.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff") > 0 {
-            "Recent local proxy overload backoff was triggered.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_lane_limit_reached") > 0 {
-            "Recent per-lane admission limit was triggered.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_active_limit_reached") > 0 {
-            "Recent global active-request admission limit was triggered.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded") > 0 {
-            "Recent proxy saturation detected before commit.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "profile_circuit_open") > 0 {
-            "Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "profile_circuit_half_open_probe") > 0 {
-            "Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "websocket_precommit_frame_timeout") > 0 {
-            "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "profile_inflight_saturated") > 0 {
-            "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "profile_bad_pairing") > 0 {
-            "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "compact_fresh_fallback_blocked") > 0 {
-            "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "compact_pressure_shed") > 0 {
-            "Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "previous_response_not_found") > 0 {
-            format!(
-                "Recent previous_response_id continuity failures were observed: {}.",
-                runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
-            )
-        } else if summary.compat_warning_count > 0 {
-            format!(
-                "Recent compatibility warnings were observed for {}: {}.",
-                summary
-                    .top_client
-                    .clone()
-                    .or_else(|| summary.top_client_family.clone())
-                    .unwrap_or_else(|| "unknown client".to_string()),
-                summary
-                    .top_compat_warning
-                    .clone()
-                    .unwrap_or_else(|| "inspect compat_warning markers".to_string())
-            )
-        } else if summary.persisted_dead_continuations > 0 {
-            format!(
-                "Some persisted continuations are currently dead and will be pruned: {}.",
-                summary.persisted_dead_continuations
-            )
-        } else if !summary.suspect_continuation_bindings.is_empty() {
-            format!(
-                "Some persisted continuations are currently suspect: {}.",
-                summary.suspect_continuation_bindings.join(", ")
-            )
-        } else if runtime_doctor_marker_count(&summary, "websocket_reuse_watchdog") > 0 {
-            "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "selection_pick") > 0
-            || runtime_doctor_marker_count(&summary, "selection_skip_current") > 0
-        {
-            "Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "precommit_budget_exhausted") > 0 {
-            "Recent candidate selection exhausted before commit.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "upstream_usage_limit_passthrough") > 0
-            || runtime_doctor_marker_count(&summary, "responses_pre_send_skip") > 0
-            || runtime_doctor_marker_count(&summary, "websocket_pre_send_skip") > 0
-            || runtime_doctor_marker_count(&summary, "quota_critical_floor_before_send") > 0
-        {
-            "Recent quota hardening skipped near-exhausted sends or passed through upstream usage-limit responses.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "stream_read_error") > 0 {
-            "Recent upstream stream read failure detected after commit.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "local_writer_error") > 0 {
-            "Recent local writer failure detected while forwarding an upstream stream.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "upstream_connect_timeout") > 0
-            || runtime_doctor_marker_count(&summary, "upstream_connect_dns_error") > 0
-            || runtime_doctor_marker_count(&summary, "upstream_tls_handshake_error") > 0
-            || runtime_doctor_marker_count(&summary, "upstream_connect_error") > 0
-        {
-            "Recent upstream connect failures detected.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "state_save_error") > 0 {
-            "Recent runtime state save failures detected.".to_string()
-        } else if !summary.degraded_routes.is_empty() {
-            format!(
-                "Persisted degraded runtime routes are still active: {}",
-                summary.degraded_routes.join(", ")
-            )
-        } else if !summary.orphan_managed_dirs.is_empty() {
-            format!(
-                "Orphan managed profile directories were detected: {}",
-                summary.orphan_managed_dirs.join(", ")
-            )
-        } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_error") > 0 {
-            "Recent background quota refresh failures detected; fresh selection may rely on stale quota snapshots.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "profile_probe_refresh_start") > 0 {
-            "Background quota refresh activity was detected; inspect the last marker for the most recent profile refresh.".to_string()
-        } else if runtime_doctor_marker_count(&summary, "first_upstream_chunk") > 0
-            && runtime_doctor_marker_count(&summary, "first_local_chunk") == 0
-        {
-            "Likely writer stall: upstream produced data but the local writer did not emit a first chunk in the sampled tail."
-                .to_string()
-        } else {
-            "No recent overload or stream-failure markers were detected in the sampled runtime tail."
-                .to_string()
-        };
     }
+}
+
+fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
+    if !summary.pointer_exists {
+        "No runtime log pointer has been created yet.".to_string()
+    } else if !summary.log_exists {
+        "Latest runtime log path does not exist.".to_string()
+    } else if summary.line_count == 0 {
+        "Latest runtime log is empty.".to_string()
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_overload_backoff") > 0 {
+        "Recent local proxy overload backoff was triggered.".to_string()
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_lane_limit_reached") > 0 {
+        "Recent per-lane admission limit was triggered.".to_string()
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_active_limit_reached") > 0 {
+        "Recent global active-request admission limit was triggered.".to_string()
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_queue_overloaded") > 0 {
+        "Recent proxy saturation detected before commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_circuit_open") > 0 {
+        "Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_circuit_half_open_probe") > 0 {
+        "Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_precommit_frame_timeout") > 0 {
+        "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0 {
+        "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_bad_pairing") > 0 {
+        "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
+    } else if runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked") > 0 {
+        "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
+    } else if runtime_doctor_marker_count(summary, "compact_pressure_shed") > 0 {
+        "Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic.".to_string()
+    } else if runtime_doctor_marker_count(summary, "previous_response_not_found") > 0 {
+        format!(
+            "Recent previous_response_id continuity failures were observed: {}.",
+            runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
+        )
+    } else if summary.compat_warning_count > 0 {
+        format!(
+            "Recent compatibility warnings were observed for {}: {}.",
+            summary
+                .top_client
+                .clone()
+                .or_else(|| summary.top_client_family.clone())
+                .unwrap_or_else(|| "unknown client".to_string()),
+            summary
+                .top_compat_warning
+                .clone()
+                .unwrap_or_else(|| "inspect compat_warning markers".to_string())
+        )
+    } else if summary.persisted_dead_continuations > 0 {
+        format!(
+            "Some persisted continuations are currently dead and will be pruned: {}.",
+            summary.persisted_dead_continuations
+        )
+    } else if !summary.suspect_continuation_bindings.is_empty() {
+        format!(
+            "Some persisted continuations are currently suspect: {}.",
+            summary.suspect_continuation_bindings.join(", ")
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_reuse_watchdog") > 0 {
+        "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
+    } else if runtime_doctor_marker_count(summary, "selection_pick") > 0
+        || runtime_doctor_marker_count(summary, "selection_skip_current") > 0
+    {
+        "Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped.".to_string()
+    } else if runtime_doctor_marker_count(summary, "precommit_budget_exhausted") > 0 {
+        "Recent candidate selection exhausted before commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "upstream_usage_limit_passthrough") > 0
+        || runtime_doctor_marker_count(summary, "responses_pre_send_skip") > 0
+        || runtime_doctor_marker_count(summary, "websocket_pre_send_skip") > 0
+        || runtime_doctor_marker_count(summary, "quota_critical_floor_before_send") > 0
+    {
+        "Recent quota hardening skipped near-exhausted sends or passed through upstream usage-limit responses.".to_string()
+    } else if runtime_doctor_marker_count(summary, "stream_read_error") > 0 {
+        "Recent upstream stream read failure detected after commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "local_writer_error") > 0 {
+        "Recent local writer failure detected while forwarding an upstream stream.".to_string()
+    } else if runtime_doctor_marker_count(summary, "upstream_connect_timeout") > 0
+        || runtime_doctor_marker_count(summary, "upstream_connect_dns_error") > 0
+        || runtime_doctor_marker_count(summary, "upstream_tls_handshake_error") > 0
+        || runtime_doctor_marker_count(summary, "upstream_connect_error") > 0
+    {
+        "Recent upstream connect failures detected.".to_string()
+    } else if runtime_doctor_marker_count(summary, "state_save_error") > 0 {
+        "Recent runtime state save failures detected.".to_string()
+    } else if !summary.degraded_routes.is_empty() {
+        format!(
+            "Persisted degraded runtime routes are still active: {}",
+            summary.degraded_routes.join(", ")
+        )
+    } else if !summary.orphan_managed_dirs.is_empty() {
+        format!(
+            "Orphan managed profile directories were detected: {}",
+            summary.orphan_managed_dirs.join(", ")
+        )
+    } else if runtime_doctor_marker_count(summary, "profile_probe_refresh_error") > 0 {
+        "Recent background quota refresh failures detected; fresh selection may rely on stale quota snapshots.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_probe_refresh_start") > 0 {
+        "Background quota refresh activity was detected; inspect the last marker for the most recent profile refresh.".to_string()
+    } else if runtime_doctor_marker_count(summary, "first_upstream_chunk") > 0
+        && runtime_doctor_marker_count(summary, "first_local_chunk") == 0
+    {
+        "Likely writer stall: upstream produced data but the local writer did not emit a first chunk in the sampled tail."
+            .to_string()
+    } else {
+        "No recent overload or stream-failure markers were detected in the sampled runtime tail."
+            .to_string()
+    }
+}
+
+fn runtime_doctor_finalize_summary(summary: &mut RuntimeDoctorSummary) {
+    summary.selection_pressure = runtime_doctor_selection_pressure(summary);
+    summary.transport_pressure = runtime_doctor_transport_pressure(summary);
+    summary.persistence_pressure = runtime_doctor_persistence_pressure(summary);
+    summary.startup_audit_pressure = runtime_doctor_startup_audit_pressure(summary);
+    summary.quota_freshness_pressure = runtime_doctor_quota_freshness_pressure(summary);
+    if summary.diagnosis.is_empty() {
+        summary.diagnosis = runtime_doctor_default_diagnosis(summary);
+    }
+}
+
+fn runtime_doctor_append_pointer_note(
+    summary: &mut RuntimeDoctorSummary,
+    pointer_note: Option<&str>,
+) {
     if let Some(note) = pointer_note
         && !summary.diagnosis.contains(note)
     {
         summary.diagnosis = format!("{} {}", summary.diagnosis, note);
     }
-    summary
 }
 
 pub(crate) fn read_runtime_log_tail(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
@@ -1526,33 +1620,11 @@ pub(crate) fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                         .or_insert(0) += 1;
                 }
             }
-            for facet in [
-                "lane",
-                "route",
-                "profile",
-                "reason",
-                "transport",
-                "family",
-                "client",
-                "tool_surface",
-                "continuation",
-                "origin",
-                "warning",
-                "quota_source",
-                "quota_band",
-                "five_hour_status",
-                "weekly_status",
-                "affinity",
-                "context",
-                "event",
-                "stage",
-                "state",
-                "source",
-            ] {
-                if let Some(value) = fields.get(facet).cloned() {
+            for facet in RUNTIME_DOCTOR_FACETS {
+                if let Some(value) = fields.get(*facet).cloned() {
                     *summary
                         .facet_counts
-                        .entry(facet.to_string())
+                        .entry((*facet).to_string())
                         .or_default()
                         .entry(value)
                         .or_insert(0) += 1;
@@ -1638,69 +1710,10 @@ fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
 
 fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
     let message = runtime_doctor_line_message(line);
-    [
-        "runtime_proxy_queue_overloaded",
-        "runtime_proxy_active_limit_reached",
-        "runtime_proxy_lane_limit_reached",
-        "runtime_proxy_overload_backoff",
-        "runtime_proxy_admission_wait_started",
-        "runtime_proxy_admission_recovered",
-        "runtime_proxy_queue_wait_started",
-        "runtime_proxy_queue_recovered",
-        "profile_inflight_saturated",
-        "upstream_connect_timeout",
-        "upstream_connect_dns_error",
-        "upstream_tls_handshake_error",
-        "upstream_connect_error",
-        "precommit_budget_exhausted",
-        "profile_retry_backoff",
-        "profile_transport_backoff",
-        "profile_circuit_open",
-        "profile_circuit_half_open_probe",
-        "profile_health",
-        "profile_latency",
-        "profile_bad_pairing",
-        "previous_response_not_found",
-        "previous_response_negative_cache",
-        "compact_committed_owner",
-        "compact_followup_owner",
-        "compact_fresh_fallback_blocked",
-        "compact_pressure_shed",
-        "compact_lineage_released",
-        "selection_pick",
-        "selection_skip_current",
-        "selection_skip_affinity",
-        "responses_pre_send_skip",
-        "websocket_pre_send_skip",
-        "quota_release_profile_affinity",
-        "quota_critical_floor_before_send",
-        "upstream_usage_limit_passthrough",
-        "compat_request_surface",
-        "compat_warning",
-        "websocket_reuse_skip_quota_exhausted",
-        "websocket_reuse_watchdog",
-        "websocket_precommit_frame_timeout",
-        "stream_read_error",
-        "local_writer_error",
-        "first_upstream_chunk",
-        "first_local_chunk",
-        "state_save_ok",
-        "state_save_skipped",
-        "state_save_error",
-        "state_save_queued",
-        "continuation_journal_save_ok",
-        "continuation_journal_save_error",
-        "continuation_journal_save_queued",
-        "runtime_proxy_restore_counts",
-        "runtime_proxy_startup_audit",
-        "profile_probe_refresh_queued",
-        "profile_probe_refresh_start",
-        "profile_probe_refresh_ok",
-        "profile_probe_refresh_error",
-        "quota_blocked_affinity_released",
-    ]
-    .into_iter()
-    .find(|marker| message.contains(marker))
+    RUNTIME_DOCTOR_MARKERS
+        .iter()
+        .copied()
+        .find(|marker| message.contains(marker))
 }
 
 fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {

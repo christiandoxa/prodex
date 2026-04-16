@@ -80,56 +80,78 @@ pub(super) fn runtime_broker_prometheus_snapshot(
     metadata: &RuntimeBrokerMetadata,
     metrics: &RuntimeBrokerMetrics,
 ) -> runtime_metrics::RuntimeBrokerSnapshot {
-    let profile_inflight = metrics
-        .profile_inflight
-        .iter()
-        .map(|(profile, count)| (profile.clone(), *count as u64))
-        .collect();
+    RuntimeBrokerSnapshotBuilder::new(metadata, metrics).build()
+}
 
-    runtime_metrics::RuntimeBrokerSnapshot {
-        broker_key: metadata.broker_key.clone(),
-        listen_addr: metadata.listen_addr.clone(),
-        pid: metrics.health.pid,
-        started_at_unix_seconds: metrics.health.started_at,
-        current_profile: metrics.health.current_profile.clone(),
-        include_code_review: metrics.health.include_code_review,
-        persistence_role: metrics.health.persistence_role.clone(),
-        active_requests: metrics.health.active_requests as u64,
-        active_request_limit: metrics.active_request_limit as u64,
-        local_overload_backoff_remaining_seconds: metrics.local_overload_backoff_remaining_seconds,
-        traffic: runtime_metrics::RuntimeBrokerTrafficMetrics {
-            responses: runtime_metrics::RuntimeBrokerLaneMetrics {
-                active: metrics.traffic.responses.active as u64,
-                limit: metrics.traffic.responses.limit as u64,
-            },
-            compact: runtime_metrics::RuntimeBrokerLaneMetrics {
-                active: metrics.traffic.compact.active as u64,
-                limit: metrics.traffic.compact.limit as u64,
-            },
-            websocket: runtime_metrics::RuntimeBrokerLaneMetrics {
-                active: metrics.traffic.websocket.active as u64,
-                limit: metrics.traffic.websocket.limit as u64,
-            },
-            standard: runtime_metrics::RuntimeBrokerLaneMetrics {
-                active: metrics.traffic.standard.active as u64,
-                limit: metrics.traffic.standard.limit as u64,
-            },
-        },
-        profile_inflight,
-        retry_backoffs: metrics.retry_backoffs as u64,
-        transport_backoffs: metrics.transport_backoffs as u64,
-        route_circuits: metrics.route_circuits as u64,
-        degraded_profiles: metrics.degraded_profiles as u64,
-        degraded_routes: metrics.degraded_routes as u64,
-        continuations: runtime_metrics::RuntimeBrokerContinuationMetrics {
-            response_bindings: metrics.continuations.response_bindings as u64,
-            turn_state_bindings: metrics.continuations.turn_state_bindings as u64,
-            session_id_bindings: metrics.continuations.session_id_bindings as u64,
-            warm: metrics.continuations.warm as u64,
-            verified: metrics.continuations.verified as u64,
-            suspect: metrics.continuations.suspect as u64,
-            dead: metrics.continuations.dead as u64,
-        },
+struct RuntimeBrokerSnapshotBuilder<'a> {
+    metadata: &'a RuntimeBrokerMetadata,
+    metrics: &'a RuntimeBrokerMetrics,
+}
+
+impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
+    fn new(metadata: &'a RuntimeBrokerMetadata, metrics: &'a RuntimeBrokerMetrics) -> Self {
+        Self { metadata, metrics }
+    }
+
+    fn build(&self) -> runtime_metrics::RuntimeBrokerSnapshot {
+        runtime_metrics::RuntimeBrokerSnapshot {
+            broker_key: self.metadata.broker_key.clone(),
+            listen_addr: self.metadata.listen_addr.clone(),
+            pid: self.metrics.health.pid,
+            started_at_unix_seconds: self.metrics.health.started_at,
+            current_profile: self.metrics.health.current_profile.clone(),
+            include_code_review: self.metrics.health.include_code_review,
+            persistence_role: self.metrics.health.persistence_role.clone(),
+            active_requests: self.metrics.health.active_requests as u64,
+            active_request_limit: self.metrics.active_request_limit as u64,
+            local_overload_backoff_remaining_seconds: self
+                .metrics
+                .local_overload_backoff_remaining_seconds,
+            traffic: self.build_traffic(),
+            profile_inflight: self.build_profile_inflight(),
+            retry_backoffs: self.metrics.retry_backoffs as u64,
+            transport_backoffs: self.metrics.transport_backoffs as u64,
+            route_circuits: self.metrics.route_circuits as u64,
+            degraded_profiles: self.metrics.degraded_profiles as u64,
+            degraded_routes: self.metrics.degraded_routes as u64,
+            continuations: self.build_continuations(),
+        }
+    }
+
+    fn build_traffic(&self) -> runtime_metrics::RuntimeBrokerTrafficMetrics {
+        runtime_metrics::RuntimeBrokerTrafficMetrics {
+            responses: Self::build_lane(&self.metrics.traffic.responses),
+            compact: Self::build_lane(&self.metrics.traffic.compact),
+            websocket: Self::build_lane(&self.metrics.traffic.websocket),
+            standard: Self::build_lane(&self.metrics.traffic.standard),
+        }
+    }
+
+    fn build_profile_inflight(&self) -> std::collections::BTreeMap<String, u64> {
+        self.metrics
+            .profile_inflight
+            .iter()
+            .map(|(profile, count)| (profile.clone(), *count as u64))
+            .collect()
+    }
+
+    fn build_continuations(&self) -> runtime_metrics::RuntimeBrokerContinuationMetrics {
+        runtime_metrics::RuntimeBrokerContinuationMetrics {
+            response_bindings: self.metrics.continuations.response_bindings as u64,
+            turn_state_bindings: self.metrics.continuations.turn_state_bindings as u64,
+            session_id_bindings: self.metrics.continuations.session_id_bindings as u64,
+            warm: self.metrics.continuations.warm as u64,
+            verified: self.metrics.continuations.verified as u64,
+            suspect: self.metrics.continuations.suspect as u64,
+            dead: self.metrics.continuations.dead as u64,
+        }
+    }
+
+    fn build_lane(lane: &RuntimeBrokerLaneMetrics) -> runtime_metrics::RuntimeBrokerLaneMetrics {
+        runtime_metrics::RuntimeBrokerLaneMetrics {
+            active: lane.active as u64,
+            limit: lane.limit as u64,
+        }
     }
 }
 

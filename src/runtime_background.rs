@@ -575,48 +575,11 @@ pub(super) fn runtime_continuation_journal_snapshot_from_shared(
 }
 
 pub(super) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) {
-    loop {
-        let jobs = {
-            let mut pending = queue
-                .pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            while pending.is_empty() {
-                pending = queue
-                    .wake
-                    .wait(pending)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-            }
-            loop {
-                let now = Instant::now();
-                let next_ready_at = pending.values().map(|job| job.ready_at).min();
-                let Some(next_ready_at) = next_ready_at else {
-                    break BTreeMap::new();
-                };
-                if next_ready_at <= now {
-                    let due_keys = pending
-                        .iter()
-                        .filter_map(|(key, job)| (job.ready_at <= now).then_some(key.clone()))
-                        .collect::<Vec<_>>();
-                    let mut due = BTreeMap::new();
-                    for key in due_keys {
-                        if let Some(job) = pending.remove(&key) {
-                            due.insert(key, job);
-                        }
-                    }
-                    break due;
-                }
-                let wait_for = next_ready_at.saturating_duration_since(now);
-                let (next_pending, _) = queue
-                    .wake
-                    .wait_timeout(pending, wait_for)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                pending = next_pending;
-            }
-        };
-
-        for (_, job) in jobs {
-            queue.active.fetch_add(1, Ordering::SeqCst);
+    runtime_run_scheduled_save_worker_loop(
+        &queue.pending,
+        &queue.wake,
+        queue.active.as_ref(),
+        |job| {
             let snapshot = match &job.payload {
                 RuntimeStateSavePayload::Snapshot(snapshot) => Ok(snapshot.clone()),
                 RuntimeStateSavePayload::Live(shared) => {
@@ -663,42 +626,18 @@ pub(super) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
                     ),
                 ),
             }
-            queue.active.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
+        },
+    )
 }
 
 pub(super) fn runtime_continuation_journal_save_worker_loop(
     queue: Arc<RuntimeContinuationJournalSaveQueue>,
 ) {
-    loop {
-        let jobs = {
-            let mut pending = queue
-                .pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            while pending.is_empty() {
-                pending = queue
-                    .wake
-                    .wait(pending)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-            }
-            loop {
-                match runtime_take_due_scheduled_jobs(&mut pending, Instant::now()) {
-                    RuntimeDueJobs::Due(jobs) => break jobs,
-                    RuntimeDueJobs::Wait(wait_for) => {
-                        let (next_pending, _) = queue
-                            .wake
-                            .wait_timeout(pending, wait_for)
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        pending = next_pending;
-                    }
-                }
-            }
-        };
-
-        for (_, job) in jobs {
-            queue.active.fetch_add(1, Ordering::SeqCst);
+    runtime_run_scheduled_save_worker_loop(
+        &queue.pending,
+        &queue.wake,
+        queue.active.as_ref(),
+        |job| {
             let snapshot = match &job.payload {
                 RuntimeContinuationJournalSavePayload::Snapshot(snapshot) => Ok(snapshot.clone()),
                 RuntimeContinuationJournalSavePayload::Live(shared) => {
@@ -732,7 +671,56 @@ pub(super) fn runtime_continuation_journal_save_worker_loop(
                     ),
                 ),
             }
-            queue.active.fetch_sub(1, Ordering::SeqCst);
+        },
+    )
+}
+
+fn runtime_wait_for_due_scheduled_jobs<K, J>(
+    pending: &Mutex<BTreeMap<K, J>>,
+    wake: &Condvar,
+) -> BTreeMap<K, J>
+where
+    K: Ord + Clone,
+    J: RuntimeScheduledSaveJob,
+{
+    let mut pending = pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    while pending.is_empty() {
+        pending = wake
+            .wait(pending)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+    loop {
+        match runtime_take_due_scheduled_jobs(&mut pending, Instant::now()) {
+            RuntimeDueJobs::Due(jobs) => break jobs,
+            RuntimeDueJobs::Wait(wait_for) => {
+                let (next_pending, _) = wake
+                    .wait_timeout(pending, wait_for)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                pending = next_pending;
+            }
+        }
+    }
+}
+
+fn runtime_run_scheduled_save_worker_loop<K, J, F>(
+    pending: &Mutex<BTreeMap<K, J>>,
+    wake: &Condvar,
+    active: &AtomicUsize,
+    mut run_job: F,
+) -> !
+where
+    K: Ord + Clone,
+    J: RuntimeScheduledSaveJob,
+    F: FnMut(J),
+{
+    loop {
+        let jobs = runtime_wait_for_due_scheduled_jobs(pending, wake);
+        for (_, job) in jobs {
+            active.fetch_add(1, Ordering::SeqCst);
+            run_job(job);
+            active.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -890,35 +878,14 @@ pub(super) fn run_runtime_probe_jobs_inline(
         Err(_) => return,
     };
     let probe_reports = map_parallel(jobs, |(profile_name, codex_home)| {
-        let auth = read_auth_summary(&codex_home);
-        let result = if auth.quota_compatible {
-            fetch_usage(&codex_home, Some(upstream_base_url.as_str()))
-                .map_err(|err| err.to_string())
-        } else {
-            Err("auth mode is not quota-compatible".to_string())
-        };
-        (profile_name, auth, result)
+        (
+            profile_name,
+            RuntimeProbeRefreshAttempt::collect(&codex_home, upstream_base_url.as_str()),
+        )
     });
-    for (profile_name, auth, result) in probe_reports {
-        let apply_result =
-            apply_runtime_profile_probe_result(shared, &profile_name, auth, result.clone());
-        match result {
-            Ok(_) => runtime_proxy_log(
-                shared,
-                if let Err(err) = apply_result {
-                    format!(
-                        "{context}_error profile={} error=state_update:{err:#}",
-                        profile_name
-                    )
-                } else {
-                    format!("{context}_ok profile={profile_name}")
-                },
-            ),
-            Err(err) => runtime_proxy_log(
-                shared,
-                format!("{context}_error profile={} error={err}", profile_name),
-            ),
-        }
+    let strategy = RuntimeInlineProbeExecutionStrategy { context };
+    for (profile_name, attempt) in probe_reports {
+        attempt.execute_with_strategy(&strategy, shared, &profile_name, Instant::now());
     }
 }
 
@@ -1024,6 +991,7 @@ pub(super) fn apply_runtime_profile_probe_result(
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
 ) -> Result<()> {
+    let _progress = RuntimeProbeProgressObserver::new();
     let mut runtime = shared
         .runtime
         .lock()
@@ -1037,7 +1005,6 @@ pub(super) fn apply_runtime_profile_probe_result(
     );
     drop(runtime);
     emit_runtime_profile_probe_result(shared, log_messages, state_save_args);
-    note_runtime_probe_refresh_progress();
     Ok(())
 }
 
@@ -1185,6 +1152,7 @@ fn apply_runtime_profile_probe_result_with_timeout(
     result: std::result::Result<UsageResponse, String>,
     timeout: Duration,
 ) -> Result<()> {
+    let _progress = RuntimeProbeProgressObserver::new();
     let started_at = Instant::now();
     let now = Local::now().timestamp();
     loop {
@@ -1199,16 +1167,13 @@ fn apply_runtime_profile_probe_result_with_timeout(
                 );
                 drop(runtime);
                 emit_runtime_profile_probe_result(shared, log_messages, state_save_args);
-                note_runtime_probe_refresh_progress();
                 return Ok(());
             }
             Err(std::sync::TryLockError::Poisoned(_)) => {
-                note_runtime_probe_refresh_progress();
                 return Err(anyhow::anyhow!("runtime auto-rotate state is poisoned"));
             }
             Err(std::sync::TryLockError::WouldBlock) => {
                 if started_at.elapsed() >= timeout {
-                    note_runtime_probe_refresh_progress();
                     return Err(anyhow::anyhow!(
                         "runtime auto-rotate state remained busy during probe apply"
                     ));
@@ -1263,9 +1228,8 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
         for (_, job) in jobs {
             queue.active.fetch_add(1, Ordering::SeqCst);
             let log_path = job.shared.log_path.clone();
-            let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_runtime_probe_refresh_job(job)
-            }));
+            let panic_result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job.execute()));
             queue.active.fetch_sub(1, Ordering::SeqCst);
             if let Err(panic_payload) = panic_result {
                 let panic_message = if let Some(message) = panic_payload.downcast_ref::<&str>() {
@@ -1284,49 +1248,179 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
     }
 }
 
-fn run_runtime_probe_refresh_job(job: RuntimeProbeRefreshJob) {
-    runtime_proxy_log(
-        &job.shared,
-        format!("profile_probe_refresh_start profile={}", job.profile_name),
+struct RuntimeProbeProgressObserver;
+
+impl RuntimeProbeProgressObserver {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl Drop for RuntimeProbeProgressObserver {
+    fn drop(&mut self) {
+        note_runtime_probe_refresh_progress();
+    }
+}
+
+trait RuntimeProbeExecutionStrategy {
+    fn apply(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        auth: AuthSummary,
+        result: std::result::Result<UsageResponse, String>,
+    ) -> Result<()>;
+
+    fn log_completion(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        queued_at: Instant,
+        result: &std::result::Result<UsageResponse, String>,
+        apply_result: Result<()>,
     );
-    let auth = read_auth_summary(&job.codex_home);
-    let result = if auth.quota_compatible {
-        fetch_usage(&job.codex_home, Some(job.upstream_base_url.as_str()))
-            .map_err(|err| err.to_string())
-    } else {
-        Err("auth mode is not quota-compatible".to_string())
-    };
-    let apply_result = apply_runtime_profile_probe_result_with_timeout(
-        &job.shared,
-        &job.profile_name,
-        auth,
-        result.clone(),
-        runtime_probe_refresh_apply_wait_timeout(),
-    );
-    match result {
-        Ok(_) => runtime_proxy_log(
-            &job.shared,
-            if let Err(err) = apply_result {
-                format!(
-                    "profile_probe_refresh_error profile={} lag_ms={} error=state_update:{err:#}",
-                    job.profile_name,
-                    job.queued_at.elapsed().as_millis()
-                )
-            } else {
-                format!(
-                    "profile_probe_refresh_ok profile={} lag_ms={}",
-                    job.profile_name,
-                    job.queued_at.elapsed().as_millis()
-                )
-            },
-        ),
-        Err(err) => runtime_proxy_log(
-            &job.shared,
-            format!(
-                "profile_probe_refresh_error profile={} lag_ms={} error={err}",
-                job.profile_name,
-                job.queued_at.elapsed().as_millis()
+}
+
+struct RuntimeInlineProbeExecutionStrategy<'a> {
+    context: &'a str,
+}
+
+impl RuntimeProbeExecutionStrategy for RuntimeInlineProbeExecutionStrategy<'_> {
+    fn apply(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        auth: AuthSummary,
+        result: std::result::Result<UsageResponse, String>,
+    ) -> Result<()> {
+        apply_runtime_profile_probe_result(shared, profile_name, auth, result)
+    }
+
+    fn log_completion(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        _queued_at: Instant,
+        result: &std::result::Result<UsageResponse, String>,
+        apply_result: Result<()>,
+    ) {
+        match result {
+            Ok(_) => runtime_proxy_log(
+                shared,
+                if let Err(err) = apply_result {
+                    format!(
+                        "{}_error profile={} error=state_update:{err:#}",
+                        self.context, profile_name
+                    )
+                } else {
+                    format!("{}_ok profile={profile_name}", self.context)
+                },
             ),
-        ),
+            Err(err) => runtime_proxy_log(
+                shared,
+                format!(
+                    "{}_error profile={} error={err}",
+                    self.context, profile_name
+                ),
+            ),
+        }
+    }
+}
+
+struct RuntimeQueuedProbeExecutionStrategy {
+    apply_timeout: Duration,
+}
+
+impl RuntimeProbeExecutionStrategy for RuntimeQueuedProbeExecutionStrategy {
+    fn apply(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        auth: AuthSummary,
+        result: std::result::Result<UsageResponse, String>,
+    ) -> Result<()> {
+        apply_runtime_profile_probe_result_with_timeout(
+            shared,
+            profile_name,
+            auth,
+            result,
+            self.apply_timeout,
+        )
+    }
+
+    fn log_completion(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        queued_at: Instant,
+        result: &std::result::Result<UsageResponse, String>,
+        apply_result: Result<()>,
+    ) {
+        let lag_ms = queued_at.elapsed().as_millis();
+        match result {
+            Ok(_) => runtime_proxy_log(
+                shared,
+                if let Err(err) = apply_result {
+                    format!(
+                        "profile_probe_refresh_error profile={} lag_ms={} error=state_update:{err:#}",
+                        profile_name, lag_ms
+                    )
+                } else {
+                    format!(
+                        "profile_probe_refresh_ok profile={} lag_ms={lag_ms}",
+                        profile_name
+                    )
+                },
+            ),
+            Err(err) => runtime_proxy_log(
+                shared,
+                format!(
+                    "profile_probe_refresh_error profile={} lag_ms={} error={err}",
+                    profile_name, lag_ms
+                ),
+            ),
+        }
+    }
+}
+
+struct RuntimeProbeRefreshAttempt {
+    auth: AuthSummary,
+    result: std::result::Result<UsageResponse, String>,
+}
+
+impl RuntimeProbeRefreshAttempt {
+    fn collect(codex_home: &Path, upstream_base_url: &str) -> Self {
+        let auth = read_auth_summary(codex_home);
+        let result = if auth.quota_compatible {
+            fetch_usage(codex_home, Some(upstream_base_url)).map_err(|err| err.to_string())
+        } else {
+            Err("auth mode is not quota-compatible".to_string())
+        };
+        Self { auth, result }
+    }
+
+    fn execute_with_strategy<S: RuntimeProbeExecutionStrategy>(
+        self,
+        strategy: &S,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        queued_at: Instant,
+    ) {
+        let apply_result = strategy.apply(shared, profile_name, self.auth, self.result.clone());
+        strategy.log_completion(shared, profile_name, queued_at, &self.result, apply_result);
+    }
+}
+
+impl RuntimeProbeRefreshJob {
+    fn execute(self) {
+        runtime_proxy_log(
+            &self.shared,
+            format!("profile_probe_refresh_start profile={}", self.profile_name),
+        );
+        let strategy = RuntimeQueuedProbeExecutionStrategy {
+            apply_timeout: runtime_probe_refresh_apply_wait_timeout(),
+        };
+        RuntimeProbeRefreshAttempt::collect(&self.codex_home, self.upstream_base_url.as_str())
+            .execute_with_strategy(&strategy, &self.shared, &self.profile_name, self.queued_at);
     }
 }

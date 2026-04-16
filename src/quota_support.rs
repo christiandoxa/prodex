@@ -33,6 +33,96 @@ pub(crate) struct UsageAuthSyncOutcome {
     pub(crate) auth_changed: bool,
 }
 
+#[derive(Debug)]
+enum AuthSummaryKind {
+    UnreadableAuth,
+    MissingAuth,
+    InvalidAuth,
+    Chatgpt,
+    ApiKey,
+    Other(String),
+}
+
+impl AuthSummaryKind {
+    fn build(self) -> AuthSummary {
+        match self {
+            Self::UnreadableAuth => AuthSummary {
+                label: "unreadable-auth".to_string(),
+                quota_compatible: false,
+            },
+            Self::MissingAuth => AuthSummary {
+                label: "no-auth".to_string(),
+                quota_compatible: false,
+            },
+            Self::InvalidAuth => AuthSummary {
+                label: "invalid-auth".to_string(),
+                quota_compatible: false,
+            },
+            Self::Chatgpt => AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            Self::ApiKey => AuthSummary {
+                label: "api-key".to_string(),
+                quota_compatible: false,
+            },
+            Self::Other(label) => AuthSummary {
+                label,
+                quota_compatible: false,
+            },
+        }
+    }
+}
+
+struct AuthSummaryFactory;
+
+impl AuthSummaryFactory {
+    fn from_auth_text_result(
+        result: std::result::Result<Option<String>, anyhow::Error>,
+    ) -> AuthSummary {
+        match result {
+            Ok(Some(content)) => Self::from_auth_text(&content),
+            Ok(None) => AuthSummaryKind::MissingAuth.build(),
+            Err(_) => AuthSummaryKind::UnreadableAuth.build(),
+        }
+    }
+
+    fn from_auth_text(content: &str) -> AuthSummary {
+        let stored_auth: StoredAuth = match serde_json::from_str(content) {
+            Ok(auth) => auth,
+            Err(_) => return AuthSummaryKind::InvalidAuth.build(),
+        };
+        Self::from_stored_auth(stored_auth)
+    }
+
+    fn from_stored_auth(stored_auth: StoredAuth) -> AuthSummary {
+        let has_chatgpt_token = stored_auth
+            .tokens
+            .as_ref()
+            .and_then(|tokens| tokens.access_token.as_deref())
+            .is_some_and(|token| !token.trim().is_empty());
+        let has_api_key = stored_auth
+            .openai_api_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty());
+
+        if has_chatgpt_token {
+            return AuthSummaryKind::Chatgpt.build();
+        }
+
+        if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+            return AuthSummaryKind::ApiKey.build();
+        }
+
+        AuthSummaryKind::Other(
+            stored_auth
+                .auth_mode
+                .unwrap_or_else(|| "auth-present".to_string()),
+        )
+        .build()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct JwtExpirationClaims {
     #[serde(default)]
@@ -95,6 +185,128 @@ pub(crate) struct ProfileSummaryReport {
 pub(crate) struct DoctorProfileReport {
     pub(crate) summary: ProfileSummaryReport,
     pub(crate) quota: Option<std::result::Result<UsageResponse, String>>,
+}
+
+struct UsageHttpClientFactory;
+
+impl UsageHttpClientFactory {
+    fn build(context_label: &'static str) -> Result<Client> {
+        Client::builder()
+            .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
+            .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
+            .build()
+            .with_context(|| format!("failed to build {context_label} client"))
+    }
+}
+
+struct UsageFetchFlow<'a> {
+    codex_home: &'a Path,
+    usage_url: String,
+    client: Client,
+    auth: UsageAuth,
+}
+
+impl<'a> UsageFetchFlow<'a> {
+    fn new(codex_home: &'a Path, base_url: Option<&str>) -> Result<Self> {
+        let mut auth = read_usage_auth(codex_home)?;
+        if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp()) {
+            if let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth)) {
+                auth = outcome.auth;
+            }
+        }
+
+        Ok(Self {
+            codex_home,
+            usage_url: usage_url(&quota_base_url(base_url)),
+            client: UsageHttpClientFactory::build("quota HTTP")?,
+            auth,
+        })
+    }
+
+    fn execute(mut self) -> Result<serde_json::Value> {
+        let (status, body) = self.send_with_unauthorized_retry()?;
+        self.ensure_success(status, &body)?;
+        serde_json::from_slice(&body).with_context(|| {
+            format!(
+                "invalid JSON returned by quota backend for {}",
+                self.codex_home.display()
+            )
+        })
+    }
+
+    fn send_with_unauthorized_retry(&mut self) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+        let initial = self.send()?;
+        if initial.0.as_u16() != 401 {
+            return Ok(initial);
+        }
+
+        if let Some(retried) = self.retry_after_unauthorized()? {
+            return Ok(retried);
+        }
+
+        Ok(initial)
+    }
+
+    fn send(&self) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+        send_usage_request(&self.client, &self.usage_url, &self.auth)
+    }
+
+    fn retry_after_unauthorized(&mut self) -> Result<Option<(reqwest::StatusCode, Vec<u8>)>> {
+        let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(self.codex_home, Some(&self.auth))
+        else {
+            return Ok(None);
+        };
+
+        self.auth = outcome.auth;
+        self.send().map(Some)
+    }
+
+    fn ensure_success(&self, status: reqwest::StatusCode, body: &[u8]) -> Result<()> {
+        if status.is_success() {
+            return Ok(());
+        }
+
+        let body_text = format_response_body(body);
+        if body_text.is_empty() {
+            bail!(
+                "request failed (HTTP {}) to {}",
+                status.as_u16(),
+                self.usage_url
+            );
+        }
+        bail!(
+            "request failed (HTTP {}) to {}: {}",
+            status.as_u16(),
+            self.usage_url,
+            body_text
+        );
+    }
+}
+
+struct PanelFieldBuilder {
+    title: String,
+    fields: Vec<(String, String)>,
+}
+
+impl PanelFieldBuilder {
+    fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            fields: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, label: impl Into<String>, value: impl Into<String>) {
+        self.fields.push((label.into(), value.into()));
+    }
+
+    fn extend(&mut self, fields: impl IntoIterator<Item = (String, String)>) {
+        self.fields.extend(fields);
+    }
+
+    fn render(self) -> String {
+        render_panel(&self.title, &self.fields)
+    }
 }
 
 pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
@@ -174,50 +386,7 @@ pub(crate) fn fetch_usage_json(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<serde_json::Value> {
-    let mut auth = read_usage_auth(codex_home)?;
-    if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp()) {
-        if let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth)) {
-            auth = outcome.auth;
-        }
-    }
-    let usage_url = usage_url(&quota_base_url(base_url));
-    let client = Client::builder()
-        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
-        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
-        .build()
-        .context("failed to build quota HTTP client")?;
-
-    let (mut status, mut body) = send_usage_request(&client, &usage_url, &auth)?;
-    if status.as_u16() == 401
-        && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth))
-    {
-        auth = outcome.auth;
-        let refreshed = send_usage_request(&client, &usage_url, &auth)?;
-        status = refreshed.0;
-        body = refreshed.1;
-    }
-
-    if !status.is_success() {
-        let body_text = format_response_body(&body);
-        if body_text.is_empty() {
-            bail!("request failed (HTTP {}) to {}", status.as_u16(), usage_url);
-        }
-        bail!(
-            "request failed (HTTP {}) to {}: {}",
-            status.as_u16(),
-            usage_url,
-            body_text
-        );
-    }
-
-    let usage = serde_json::from_slice(&body).with_context(|| {
-        format!(
-            "invalid JSON returned by quota backend for {}",
-            codex_home.display()
-        )
-    })?;
-
-    Ok(usage)
+    UsageFetchFlow::new(codex_home, base_url)?.execute()
 }
 
 pub(crate) fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
@@ -925,29 +1094,19 @@ pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) ->
     } else {
         format!("Blocked ({})", format_blocked_limits(&blocked))
     };
-    let mut fields = vec![
-        ("Profile".to_string(), profile_name.to_string()),
-        (
-            "Account".to_string(),
-            display_optional(usage.email.as_deref()).to_string(),
-        ),
-        (
-            "Plan".to_string(),
-            display_optional(usage.plan_type.as_deref()).to_string(),
-        ),
-        ("Status".to_string(), status),
-        ("Main".to_string(), format_main_windows(usage)),
-    ];
+    let mut panel = PanelFieldBuilder::new(format!("Quota {profile_name}"));
+    panel.push("Profile", profile_name);
+    panel.push("Account", display_optional(usage.email.as_deref()));
+    panel.push("Plan", display_optional(usage.plan_type.as_deref()));
+    panel.push("Status", status);
+    panel.push("Main", format_main_windows(usage));
 
     if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        fields.push(("Code review".to_string(), format_window_pair(code_review)));
+        panel.push("Code review", format_window_pair(code_review));
     }
 
-    for (name, value) in format_additional_limits(usage) {
-        fields.push((name, value));
-    }
-
-    render_panel(&format!("Quota {profile_name}"), &fields)
+    panel.extend(format_additional_limits(usage));
+    panel.render()
 }
 
 fn format_additional_limits(usage: &UsageResponse) -> Vec<(String, String)> {
@@ -1001,10 +1160,11 @@ pub(crate) fn render_profile_quota_watch_output(
 ) -> String {
     match usage_result {
         Ok(usage) => render_profile_quota(profile_name, &usage),
-        Err(err) => render_panel(
-            &format!("Quota {profile_name}"),
-            &[("Error".to_string(), first_line_of_error(&err))],
-        ),
+        Err(err) => {
+            let mut panel = PanelFieldBuilder::new(format!("Quota {profile_name}"));
+            panel.push("Error", first_line_of_error(&err));
+            panel.render()
+        }
     }
 }
 
@@ -1065,17 +1225,19 @@ fn render_all_quota_watch_snapshot(
             );
             window.output
         }
-        AllQuotaWatchSnapshot::Empty { updated: _updated } => render_panel(
-            "Quota",
-            &[("Error".to_string(), "No profiles configured".to_string())],
-        ),
+        AllQuotaWatchSnapshot::Empty { updated: _updated } => {
+            let mut panel = PanelFieldBuilder::new("Quota");
+            panel.push("Error", "No profiles configured");
+            panel.render()
+        }
         AllQuotaWatchSnapshot::Error {
             updated: _updated,
             message,
-        } => render_panel(
-            "Quota",
-            &[("Error".to_string(), first_line_of_error(message))],
-        ),
+        } => {
+            let mut panel = PanelFieldBuilder::new("Quota");
+            panel.push("Error", first_line_of_error(message));
+            panel.render()
+        }
     }
 }
 
@@ -1251,62 +1413,7 @@ pub(crate) fn watch_all_quotas(
 }
 
 pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
-    let content = match read_auth_json_text(codex_home) {
-        Ok(Some(content)) => content,
-        Err(_) => {
-            return AuthSummary {
-                label: "unreadable-auth".to_string(),
-                quota_compatible: false,
-            };
-        }
-        Ok(None) => {
-            return AuthSummary {
-                label: "no-auth".to_string(),
-                quota_compatible: false,
-            };
-        }
-    };
-
-    let stored_auth: StoredAuth = match serde_json::from_str(&content) {
-        Ok(auth) => auth,
-        Err(_) => {
-            return AuthSummary {
-                label: "invalid-auth".to_string(),
-                quota_compatible: false,
-            };
-        }
-    };
-
-    let has_chatgpt_token = stored_auth
-        .tokens
-        .as_ref()
-        .and_then(|tokens| tokens.access_token.as_deref())
-        .is_some_and(|token| !token.trim().is_empty());
-    let has_api_key = stored_auth
-        .openai_api_key
-        .as_deref()
-        .is_some_and(|key| !key.trim().is_empty());
-
-    if has_chatgpt_token {
-        return AuthSummary {
-            label: "chatgpt".to_string(),
-            quota_compatible: true,
-        };
-    }
-
-    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
-        return AuthSummary {
-            label: "api-key".to_string(),
-            quota_compatible: false,
-        };
-    }
-
-    AuthSummary {
-        label: stored_auth
-            .auth_mode
-            .unwrap_or_else(|| "auth-present".to_string()),
-        quota_compatible: false,
-    }
+    AuthSummaryFactory::from_auth_text_result(read_auth_json_text(codex_home))
 }
 
 pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
@@ -1487,11 +1594,7 @@ fn refresh_usage_auth_file(codex_home: &Path, refresh_token: &str) -> Result<()>
         .as_object_mut()
         .context("stored auth tokens must be an object")?;
 
-    let client = Client::builder()
-        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
-        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
-        .build()
-        .context("failed to build auth refresh HTTP client")?;
+    let client = UsageHttpClientFactory::build("auth refresh HTTP")?;
     let response = client
         .post(refresh_usage_auth_endpoint())
         .header("Content-Type", "application/json")

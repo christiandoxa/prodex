@@ -67,236 +67,155 @@ pub fn render_runtime_broker_prometheus_with_options(
     snapshot: &RuntimeBrokerSnapshot,
     options: PrometheusTextOptions,
 ) -> String {
-    let mut out = String::new();
+    RuntimeBrokerPrometheusRenderer::new(snapshot, options).render()
+}
 
-    if options.include_help {
-        push_help(
-            &mut out,
+struct RuntimeBrokerPrometheusRenderer<'a> {
+    snapshot: &'a RuntimeBrokerSnapshot,
+    options: PrometheusTextOptions,
+    out: String,
+}
+
+impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
+    fn new(snapshot: &'a RuntimeBrokerSnapshot, options: PrometheusTextOptions) -> Self {
+        Self {
+            snapshot,
+            options,
+            out: String::new(),
+        }
+    }
+
+    fn render(mut self) -> String {
+        self.render_info();
+        self.render_lane_families();
+        self.render_broker_gauge(
+            "prodex_runtime_broker_active_requests",
+            "Active runtime requests currently being served by the broker.",
+            self.snapshot.active_requests as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_active_request_limit",
+            "Maximum active runtime requests allowed by the broker.",
+            self.snapshot.active_request_limit as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_local_overload_backoff_remaining_seconds",
+            "Remaining backoff time for local overload shedding.",
+            self.snapshot.local_overload_backoff_remaining_seconds as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_retry_backoffs",
+            "Profiles currently in retry backoff.",
+            self.snapshot.retry_backoffs as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_transport_backoffs",
+            "Profiles currently in transport backoff.",
+            self.snapshot.transport_backoffs as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_route_circuits",
+            "Profiles currently protected by an open circuit per route.",
+            self.snapshot.route_circuits as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_degraded_profiles",
+            "Profiles with a non-zero effective health score.",
+            self.snapshot.degraded_profiles as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_degraded_routes",
+            "Route-specific health scores that are still degraded.",
+            self.snapshot.degraded_routes as f64,
+        );
+        render_continuation_family(
+            &mut self.out,
+            "prodex_runtime_broker_continuation_bindings",
+            "Continuation bindings grouped by lifecycle.",
+            &self.snapshot.continuations,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_inflight_family(
+            &mut self.out,
+            "prodex_runtime_broker_profile_inflight",
+            "Current per-profile inflight counts.",
+            &self.snapshot.profile_inflight,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        self.out
+    }
+
+    fn render_info(&mut self) {
+        self.push_help(
             "prodex_runtime_broker_info",
             "Static broker metadata and current health attributes.",
         );
-    }
-    push_type(&mut out, "prodex_runtime_broker_info", "gauge");
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_info",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-            ("current_profile", snapshot.current_profile.as_str()),
-            (
-                "include_code_review",
-                bool_label(snapshot.include_code_review),
-            ),
-            ("persistence_role", snapshot.persistence_role.as_str()),
-        ]),
-        1.0,
-    );
-
-    render_lane_family(
-        &mut out,
-        "prodex_runtime_broker_lane_active_requests",
-        "Current active requests per broker lane.",
-        snapshot.broker_key.as_str(),
-        snapshot.listen_addr.as_str(),
-        &[
-            ("responses", &snapshot.traffic.responses),
-            ("compact", &snapshot.traffic.compact),
-            ("websocket", &snapshot.traffic.websocket),
-            ("standard", &snapshot.traffic.standard),
-        ],
-        |lane| lane.active as f64,
-    );
-    render_lane_family(
-        &mut out,
-        "prodex_runtime_broker_lane_limits",
-        "Configured admission limits per broker lane.",
-        snapshot.broker_key.as_str(),
-        snapshot.listen_addr.as_str(),
-        &[
-            ("responses", &snapshot.traffic.responses),
-            ("compact", &snapshot.traffic.compact),
-            ("websocket", &snapshot.traffic.websocket),
-            ("standard", &snapshot.traffic.standard),
-        ],
-        |lane| lane.limit as f64,
-    );
-
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_active_requests",
-            "Active runtime requests currently being served by the broker.",
+        push_type(&mut self.out, "prodex_runtime_broker_info", "gauge");
+        push_gauge(
+            &mut self.out,
+            "prodex_runtime_broker_info",
+            labels(&[
+                ("broker_key", self.snapshot.broker_key.as_str()),
+                ("listen_addr", self.snapshot.listen_addr.as_str()),
+                ("current_profile", self.snapshot.current_profile.as_str()),
+                (
+                    "include_code_review",
+                    bool_label(self.snapshot.include_code_review),
+                ),
+                ("persistence_role", self.snapshot.persistence_role.as_str()),
+            ]),
+            1.0,
         );
     }
-    push_type(&mut out, "prodex_runtime_broker_active_requests", "gauge");
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_active_requests",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.active_requests as f64,
-    );
 
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_active_request_limit",
-            "Maximum active runtime requests allowed by the broker.",
+    fn render_lane_families(&mut self) {
+        let lanes = [
+            ("responses", &self.snapshot.traffic.responses),
+            ("compact", &self.snapshot.traffic.compact),
+            ("websocket", &self.snapshot.traffic.websocket),
+            ("standard", &self.snapshot.traffic.standard),
+        ];
+        render_lane_family(
+            &mut self.out,
+            "prodex_runtime_broker_lane_active_requests",
+            "Current active requests per broker lane.",
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.active as f64,
+        );
+        render_lane_family(
+            &mut self.out,
+            "prodex_runtime_broker_lane_limits",
+            "Configured admission limits per broker lane.",
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.limit as f64,
         );
     }
-    push_type(
-        &mut out,
-        "prodex_runtime_broker_active_request_limit",
-        "gauge",
-    );
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_active_request_limit",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.active_request_limit as f64,
-    );
 
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_local_overload_backoff_remaining_seconds",
-            "Remaining backoff time for local overload shedding.",
+    fn render_broker_gauge(&mut self, metric_name: &str, help: &str, value: f64) {
+        self.push_help(metric_name, help);
+        push_type(&mut self.out, metric_name, "gauge");
+        push_gauge(
+            &mut self.out,
+            metric_name,
+            labels(&[
+                ("broker_key", self.snapshot.broker_key.as_str()),
+                ("listen_addr", self.snapshot.listen_addr.as_str()),
+            ]),
+            value,
         );
     }
-    push_type(
-        &mut out,
-        "prodex_runtime_broker_local_overload_backoff_remaining_seconds",
-        "gauge",
-    );
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_local_overload_backoff_remaining_seconds",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.local_overload_backoff_remaining_seconds as f64,
-    );
 
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_retry_backoffs",
-            "Profiles currently in retry backoff.",
-        );
+    fn push_help(&mut self, metric_name: &str, help: &str) {
+        if self.options.include_help {
+            push_help(&mut self.out, metric_name, help);
+        }
     }
-    push_type(&mut out, "prodex_runtime_broker_retry_backoffs", "gauge");
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_retry_backoffs",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.retry_backoffs as f64,
-    );
-
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_transport_backoffs",
-            "Profiles currently in transport backoff.",
-        );
-    }
-    push_type(
-        &mut out,
-        "prodex_runtime_broker_transport_backoffs",
-        "gauge",
-    );
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_transport_backoffs",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.transport_backoffs as f64,
-    );
-
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_route_circuits",
-            "Profiles currently protected by an open circuit per route.",
-        );
-    }
-    push_type(&mut out, "prodex_runtime_broker_route_circuits", "gauge");
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_route_circuits",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.route_circuits as f64,
-    );
-
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_degraded_profiles",
-            "Profiles with a non-zero effective health score.",
-        );
-    }
-    push_type(&mut out, "prodex_runtime_broker_degraded_profiles", "gauge");
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_degraded_profiles",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.degraded_profiles as f64,
-    );
-
-    if options.include_help {
-        push_help(
-            &mut out,
-            "prodex_runtime_broker_degraded_routes",
-            "Route-specific health scores that are still degraded.",
-        );
-    }
-    push_type(&mut out, "prodex_runtime_broker_degraded_routes", "gauge");
-    push_gauge(
-        &mut out,
-        "prodex_runtime_broker_degraded_routes",
-        labels(&[
-            ("broker_key", snapshot.broker_key.as_str()),
-            ("listen_addr", snapshot.listen_addr.as_str()),
-        ]),
-        snapshot.degraded_routes as f64,
-    );
-
-    render_continuation_family(
-        &mut out,
-        "prodex_runtime_broker_continuation_bindings",
-        "Continuation bindings grouped by lifecycle.",
-        &snapshot.continuations,
-        snapshot.broker_key.as_str(),
-        snapshot.listen_addr.as_str(),
-    );
-
-    render_inflight_family(
-        &mut out,
-        "prodex_runtime_broker_profile_inflight",
-        "Current per-profile inflight counts.",
-        &snapshot.profile_inflight,
-        snapshot.broker_key.as_str(),
-        snapshot.listen_addr.as_str(),
-    );
-
-    out
 }
 
 #[allow(dead_code)]
