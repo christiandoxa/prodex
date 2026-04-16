@@ -467,6 +467,13 @@ pub(super) enum RuntimeProfileUsageAuthCacheFreshness {
     Unknown,
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeProfileUsageAuthLookup {
+    cached_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
+    cached_previous_auth: Option<UsageAuth>,
+    codex_home: PathBuf,
+}
+
 pub(super) fn runtime_profile_usage_auth_cache_entry_freshness(
     entry: &RuntimeProfileUsageAuthCacheEntry,
 ) -> RuntimeProfileUsageAuthCacheFreshness {
@@ -525,80 +532,157 @@ pub(super) fn runtime_profile_usage_auth(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<UsageAuth> {
-    let (cached_entry, codex_home) = {
-        let runtime = shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        let profile = runtime
-            .state
-            .profiles
-            .get(profile_name)
-            .with_context(|| format!("profile '{}' is missing", profile_name))?;
-        (
-            runtime.profile_usage_auth.get(profile_name).cloned(),
-            profile.codex_home.clone(),
-        )
-    };
-    let cached_previous_auth = cached_entry.as_ref().map(|entry| entry.auth.clone());
-
-    let reload_auth = || -> Result<UsageAuth> {
-        let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
-        Ok(update_runtime_profile_usage_auth_cache_entry(
-            shared,
-            profile_name,
-            cached_previous_auth.as_ref(),
-            entry,
-            "auth_changed",
-        ))
-    };
+    let RuntimeProfileUsageAuthLookup {
+        cached_entry,
+        cached_previous_auth,
+        codex_home,
+    } = load_runtime_profile_usage_auth_lookup(shared, profile_name)?;
 
     if let Some(entry) = cached_entry {
-        match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
-            RuntimeProfileUsageAuthCacheFreshness::Fresh => {
-                let now = Local::now().timestamp();
-                if !usage_auth_needs_proactive_refresh(&entry.auth, now) {
-                    return Ok(entry.auth);
-                }
-                return match sync_usage_auth_from_disk_or_refresh(&codex_home, Some(&entry.auth)) {
-                    Ok(outcome) => {
-                        runtime_proxy_log(
-                            shared,
-                            format!(
-                                "profile_auth_proactive_sync profile={profile_name} source={} changed={}",
-                                usage_auth_sync_source_label(outcome.source),
-                                outcome.auth_changed,
-                            ),
-                        );
-                        let refreshed_entry =
-                            load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
-                        Ok(update_runtime_profile_usage_auth_cache_entry(
-                            shared,
-                            profile_name,
-                            Some(&entry.auth),
-                            refreshed_entry,
-                            &format!("auth_{}", usage_auth_sync_source_label(outcome.source)),
-                        ))
-                    }
-                    Err(err) => {
-                        runtime_proxy_log(
-                            shared,
-                            format!(
-                                "profile_auth_proactive_sync_failed profile={profile_name} error={err}"
-                            ),
-                        );
-                        Ok(entry.auth)
-                    }
-                };
-            }
-            RuntimeProfileUsageAuthCacheFreshness::Stale => {}
-            RuntimeProfileUsageAuthCacheFreshness::Unknown => {
-                return reload_auth().or(Ok(entry.auth));
-            }
-        }
+        return runtime_profile_usage_auth_from_cached_entry(
+            shared,
+            profile_name,
+            &codex_home,
+            cached_previous_auth.as_ref(),
+            entry,
+        );
     }
 
-    reload_auth()
+    reload_runtime_profile_usage_auth(
+        shared,
+        profile_name,
+        &codex_home,
+        cached_previous_auth.as_ref(),
+    )
+}
+
+fn load_runtime_profile_usage_auth_lookup(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<RuntimeProfileUsageAuthLookup> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let profile = runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    let cached_entry = runtime.profile_usage_auth.get(profile_name).cloned();
+    let cached_previous_auth = cached_entry.as_ref().map(|entry| entry.auth.clone());
+
+    Ok(RuntimeProfileUsageAuthLookup {
+        cached_entry,
+        cached_previous_auth,
+        codex_home: profile.codex_home.clone(),
+    })
+}
+
+fn runtime_profile_usage_auth_from_cached_entry(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    codex_home: &Path,
+    previous_auth: Option<&UsageAuth>,
+    entry: RuntimeProfileUsageAuthCacheEntry,
+) -> Result<UsageAuth> {
+    match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
+        RuntimeProfileUsageAuthCacheFreshness::Fresh => {
+            runtime_profile_usage_auth_from_fresh_cache_entry(
+                shared,
+                profile_name,
+                codex_home,
+                entry,
+            )
+        }
+        RuntimeProfileUsageAuthCacheFreshness::Stale => {
+            reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
+        }
+        RuntimeProfileUsageAuthCacheFreshness::Unknown => {
+            reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
+                .or(Ok(entry.auth))
+        }
+    }
+}
+
+fn runtime_profile_usage_auth_from_fresh_cache_entry(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    codex_home: &Path,
+    entry: RuntimeProfileUsageAuthCacheEntry,
+) -> Result<UsageAuth> {
+    let now = Local::now().timestamp();
+    if !usage_auth_needs_proactive_refresh(&entry.auth, now) {
+        return Ok(entry.auth);
+    }
+
+    match sync_usage_auth_from_disk_or_refresh(codex_home, Some(&entry.auth)) {
+        Ok(outcome) => {
+            log_runtime_profile_proactive_sync(shared, profile_name, &outcome);
+            reload_runtime_profile_usage_auth_after_sync(
+                shared,
+                profile_name,
+                codex_home,
+                &entry.auth,
+                outcome.source,
+            )
+        }
+        Err(err) => {
+            runtime_proxy_log(
+                shared,
+                format!("profile_auth_proactive_sync_failed profile={profile_name} error={err}"),
+            );
+            Ok(entry.auth)
+        }
+    }
+}
+
+fn reload_runtime_profile_usage_auth(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    codex_home: &Path,
+    previous_auth: Option<&UsageAuth>,
+) -> Result<UsageAuth> {
+    let entry = load_runtime_profile_usage_auth_cache_entry(codex_home)?;
+    Ok(update_runtime_profile_usage_auth_cache_entry(
+        shared,
+        profile_name,
+        previous_auth,
+        entry,
+        "auth_changed",
+    ))
+}
+
+fn reload_runtime_profile_usage_auth_after_sync(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    codex_home: &Path,
+    previous_auth: &UsageAuth,
+    source: UsageAuthSyncSource,
+) -> Result<UsageAuth> {
+    let refreshed_entry = load_runtime_profile_usage_auth_cache_entry(codex_home)?;
+    Ok(update_runtime_profile_usage_auth_cache_entry(
+        shared,
+        profile_name,
+        Some(previous_auth),
+        refreshed_entry,
+        &format!("auth_{}", usage_auth_sync_source_label(source)),
+    ))
+}
+
+fn log_runtime_profile_proactive_sync(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    outcome: &UsageAuthSyncOutcome,
+) {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "profile_auth_proactive_sync profile={profile_name} source={} changed={}",
+            usage_auth_sync_source_label(outcome.source),
+            outcome.auth_changed,
+        ),
+    );
 }
 
 pub(super) fn runtime_profile_auth_failure_key(profile_name: &str) -> String {
@@ -1155,6 +1239,15 @@ pub(super) fn runtime_profile_transport_backoff_max_until(
         .max()
 }
 
+struct PreparedRuntimeStateSnapshotSave {
+    state: AppState,
+    continuations: RuntimeContinuationStore,
+    json: String,
+    profile_scores: BTreeMap<String, RuntimeProfileHealth>,
+    usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    backoffs: RuntimeProfileBackoffs,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn save_runtime_state_snapshot_if_latest(
     paths: &AppPaths,
@@ -1167,73 +1260,30 @@ pub(super) fn save_runtime_state_snapshot_if_latest(
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
-        if latest_revision.load(Ordering::SeqCst) != revision {
+        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
             return Ok(false);
         }
 
         let _lock = acquire_state_file_lock(paths)?;
 
-        if latest_revision.load(Ordering::SeqCst) != revision {
+        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
             return Ok(false);
         }
 
-        let existing = AppState::load(paths)?;
-        let merged = merge_runtime_state_snapshot(existing, snapshot);
-        let existing_continuations =
-            load_runtime_continuations_with_recovery(paths, &merged.profiles)?;
-        let merged_continuations = merge_runtime_continuation_store(
-            &existing_continuations.value,
+        let prepared = prepare_runtime_state_snapshot_save(
+            paths,
+            snapshot,
             continuations,
-            &merged.profiles,
-        );
-        let mut merged = merged;
-        merged.response_profile_bindings = runtime_external_response_profile_bindings(
-            &merged_continuations.response_profile_bindings,
-        );
-        merged.session_profile_bindings = merged_continuations.session_profile_bindings.clone();
-        let json =
-            serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
-        let existing_scores = load_runtime_profile_scores(paths, &merged.profiles)?;
-        let merged_scores =
-            merge_runtime_profile_scores(&existing_scores, profile_scores, &merged.profiles);
-        let existing_usage_snapshots = load_runtime_usage_snapshots(paths, &merged.profiles)?;
-        let merged_usage_snapshots = merge_runtime_usage_snapshots(
-            &existing_usage_snapshots,
+            profile_scores,
             usage_snapshots,
-            &merged.profiles,
-        );
-        let existing_backoffs = load_runtime_profile_backoffs(paths, &merged.profiles)?;
-        let merged_backoffs = merge_runtime_profile_backoffs(
-            &existing_backoffs,
             backoffs,
-            &merged.profiles,
-            Local::now().timestamp(),
-        );
+        )?;
 
-        if latest_revision.load(Ordering::SeqCst) != revision {
+        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
             return Ok(false);
         }
 
-        let save_result = (|| -> Result<()> {
-            // Continuations are restored as the stronger source of truth on startup,
-            // so persist them before the state snapshot to reduce crash windows where
-            // a newer state file could be overwritten by an older continuation sidecar.
-            save_runtime_continuations_for_profiles(
-                paths,
-                &merged_continuations,
-                &merged.profiles,
-            )?;
-            write_state_json_atomic(paths, &json)?;
-            save_runtime_profile_scores_for_profiles(paths, &merged_scores, &merged.profiles)?;
-            save_runtime_usage_snapshots_for_profiles(
-                paths,
-                &merged_usage_snapshots,
-                &merged.profiles,
-            )?;
-            save_runtime_profile_backoffs_for_profiles(paths, &merged_backoffs, &merged.profiles)?;
-            Ok(())
-        })();
-        match save_result {
+        match persist_runtime_state_snapshot_save(paths, &prepared) {
             Ok(()) => return Ok(true),
             Err(err)
                 if runtime_sidecar_generation_error_is_stale(&err)
@@ -1245,4 +1295,124 @@ pub(super) fn save_runtime_state_snapshot_if_latest(
         }
     }
     Ok(false)
+}
+
+fn runtime_state_snapshot_is_latest_revision(latest_revision: &AtomicU64, revision: u64) -> bool {
+    latest_revision.load(Ordering::SeqCst) == revision
+}
+
+fn prepare_runtime_state_snapshot_save(
+    paths: &AppPaths,
+    snapshot: &AppState,
+    continuations: &RuntimeContinuationStore,
+    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    backoffs: &RuntimeProfileBackoffs,
+) -> Result<PreparedRuntimeStateSnapshotSave> {
+    let (state, continuations) =
+        merge_runtime_state_and_continuations_for_save(paths, snapshot, continuations)?;
+    let json = serialize_runtime_state_snapshot_for_save(&state)?;
+    let profile_scores =
+        merge_runtime_profile_scores_for_save(paths, &state.profiles, profile_scores)?;
+    let usage_snapshots =
+        merge_runtime_usage_snapshots_for_save(paths, &state.profiles, usage_snapshots)?;
+    let backoffs = merge_runtime_backoffs_for_save(paths, &state.profiles, backoffs)?;
+
+    Ok(PreparedRuntimeStateSnapshotSave {
+        state,
+        continuations,
+        json,
+        profile_scores,
+        usage_snapshots,
+        backoffs,
+    })
+}
+
+fn merge_runtime_state_and_continuations_for_save(
+    paths: &AppPaths,
+    snapshot: &AppState,
+    continuations: &RuntimeContinuationStore,
+) -> Result<(AppState, RuntimeContinuationStore)> {
+    let existing = AppState::load(paths)?;
+    let mut state = merge_runtime_state_snapshot(existing, snapshot);
+    let existing_continuations = load_runtime_continuations_with_recovery(paths, &state.profiles)?;
+    let continuations = merge_runtime_continuation_store(
+        &existing_continuations.value,
+        continuations,
+        &state.profiles,
+    );
+    state.response_profile_bindings =
+        runtime_external_response_profile_bindings(&continuations.response_profile_bindings);
+    state.session_profile_bindings = continuations.session_profile_bindings.clone();
+    Ok((state, continuations))
+}
+
+fn serialize_runtime_state_snapshot_for_save(state: &AppState) -> Result<String> {
+    serde_json::to_string_pretty(state).context("failed to serialize prodex state")
+}
+
+fn merge_runtime_profile_scores_for_save(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    desired_scores: &BTreeMap<String, RuntimeProfileHealth>,
+) -> Result<BTreeMap<String, RuntimeProfileHealth>> {
+    let existing_scores = load_runtime_profile_scores(paths, profiles)?;
+    Ok(merge_runtime_profile_scores(
+        &existing_scores,
+        desired_scores,
+        profiles,
+    ))
+}
+
+fn merge_runtime_usage_snapshots_for_save(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    desired_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+) -> Result<BTreeMap<String, RuntimeProfileUsageSnapshot>> {
+    let existing_usage_snapshots = load_runtime_usage_snapshots(paths, profiles)?;
+    Ok(merge_runtime_usage_snapshots(
+        &existing_usage_snapshots,
+        desired_snapshots,
+        profiles,
+    ))
+}
+
+fn merge_runtime_backoffs_for_save(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    desired_backoffs: &RuntimeProfileBackoffs,
+) -> Result<RuntimeProfileBackoffs> {
+    let existing_backoffs = load_runtime_profile_backoffs(paths, profiles)?;
+    Ok(merge_runtime_profile_backoffs(
+        &existing_backoffs,
+        desired_backoffs,
+        profiles,
+        Local::now().timestamp(),
+    ))
+}
+
+fn persist_runtime_state_snapshot_save(
+    paths: &AppPaths,
+    prepared: &PreparedRuntimeStateSnapshotSave,
+) -> Result<()> {
+    // Continuations are restored as the stronger source of truth on startup,
+    // so persist them before the state snapshot to reduce crash windows where
+    // a newer state file could be overwritten by an older continuation sidecar.
+    save_runtime_continuations_for_profiles(
+        paths,
+        &prepared.continuations,
+        &prepared.state.profiles,
+    )?;
+    write_state_json_atomic(paths, &prepared.json)?;
+    save_runtime_profile_scores_for_profiles(
+        paths,
+        &prepared.profile_scores,
+        &prepared.state.profiles,
+    )?;
+    save_runtime_usage_snapshots_for_profiles(
+        paths,
+        &prepared.usage_snapshots,
+        &prepared.state.profiles,
+    )?;
+    save_runtime_profile_backoffs_for_profiles(paths, &prepared.backoffs, &prepared.state.profiles)
 }

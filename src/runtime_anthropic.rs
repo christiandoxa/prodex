@@ -1895,102 +1895,160 @@ pub(super) fn runtime_proxy_translate_anthropic_message_content(
     let blocks = content
         .as_array()
         .context("Anthropic message content must be a string or an array of content blocks")?;
-    let mut input_items = Vec::new();
-    let has_tool_blocks = blocks.iter().any(|block| {
-        block
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(runtime_proxy_anthropic_is_special_input_item_block_type)
-    });
 
-    match role {
-        "user" => {
-            if let Some(message_content) =
-                runtime_proxy_translate_anthropic_user_content_blocks(blocks)
-            {
-                input_items.push(serde_json::json!({
-                    "role": "user",
-                    "content": message_content,
-                }));
-            } else if !has_tool_blocks {
-                input_items.push(serde_json::json!({
-                    "role": "user",
-                    "content": "",
-                }));
-            }
-        }
-        "assistant" => {
-            let text = runtime_proxy_translate_anthropic_text_blocks(blocks);
-            if !text.is_empty() || !has_tool_blocks {
-                input_items.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": text,
-                }));
-            }
-        }
-        other => bail!("Unsupported Anthropic role '{other}'"),
+    RuntimeAnthropicInputContentTranslator {
+        role,
+        blocks,
+        native_shell_enabled,
+        native_computer_enabled,
+        native_client_tool_calls,
+        input_items: Vec::new(),
+    }
+    .translate()
+}
+
+struct RuntimeAnthropicInputContentTranslator<'a> {
+    role: &'a str,
+    blocks: &'a [serde_json::Value],
+    native_shell_enabled: bool,
+    native_computer_enabled: bool,
+    native_client_tool_calls: &'a mut BTreeMap<String, RuntimeAnthropicNativeClientToolCall>,
+    input_items: Vec<serde_json::Value>,
+}
+
+impl RuntimeAnthropicInputContentTranslator<'_> {
+    fn translate(mut self) -> Result<Vec<serde_json::Value>> {
+        self.push_role_content()?;
+        self.push_special_input_items()?;
+        Ok(self.input_items)
     }
 
-    for block in blocks {
+    fn has_tool_blocks(&self) -> bool {
+        self.blocks.iter().any(|block| {
+            block
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(runtime_proxy_anthropic_is_special_input_item_block_type)
+        })
+    }
+
+    fn push_role_content(&mut self) -> Result<()> {
+        let has_tool_blocks = self.has_tool_blocks();
+        match self.role {
+            "user" => {
+                if let Some(message_content) =
+                    runtime_proxy_translate_anthropic_user_content_blocks(self.blocks)
+                {
+                    self.input_items.push(serde_json::json!({
+                        "role": "user",
+                        "content": message_content,
+                    }));
+                } else if !has_tool_blocks {
+                    self.input_items.push(serde_json::json!({
+                        "role": "user",
+                        "content": "",
+                    }));
+                }
+            }
+            "assistant" => {
+                let text = runtime_proxy_translate_anthropic_text_blocks(self.blocks);
+                if !text.is_empty() || !has_tool_blocks {
+                    self.input_items.push(serde_json::json!({
+                        "role": "assistant",
+                        "content": text,
+                    }));
+                }
+            }
+            other => bail!("Unsupported Anthropic role '{other}'"),
+        }
+        Ok(())
+    }
+
+    fn push_special_input_items(&mut self) -> Result<()> {
+        for block in self.blocks {
+            self.push_special_input_item(block)?;
+        }
+        Ok(())
+    }
+
+    fn push_special_input_item(&mut self, block: &serde_json::Value) -> Result<()> {
         match block.get("type").and_then(serde_json::Value::as_str) {
             Some(block_type) if runtime_proxy_anthropic_is_tool_use_block_type(block_type) => {
-                if native_shell_enabled
-                    && let Some((call_id, translated, native_shell_call)) =
-                        runtime_proxy_translate_anthropic_shell_tool_call(block)
-                {
-                    native_client_tool_calls.insert(call_id, native_shell_call);
-                    input_items.push(translated);
-                    continue;
-                }
-                if native_computer_enabled
-                    && let Some((call_id, translated, native_computer_call)) =
-                        runtime_proxy_translate_anthropic_computer_tool_call(block)
-                {
-                    native_client_tool_calls.insert(call_id, native_computer_call);
-                    input_items.push(translated);
-                    continue;
-                }
-                input_items.push(runtime_proxy_translate_anthropic_tool_call(block)?);
+                self.push_tool_use_block(block)?;
             }
             Some(block_type) if runtime_proxy_anthropic_is_tool_result_block_type(block_type) => {
-                let native_client_tool_call = block
-                    .get("tool_use_id")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|call_id| native_client_tool_calls.get(call_id));
-                match native_client_tool_call.map(|call| call.kind) {
-                    Some(RuntimeAnthropicNativeClientToolKind::Shell) if native_shell_enabled => {
-                        input_items.extend(runtime_proxy_translate_anthropic_shell_tool_result(
-                            block,
-                            native_client_tool_call.and_then(|call| call.max_output_length),
-                        )?);
-                    }
-                    Some(RuntimeAnthropicNativeClientToolKind::Computer)
-                        if native_computer_enabled =>
-                    {
-                        if let Some(translated) =
-                            runtime_proxy_translate_anthropic_computer_tool_result(block)?
-                        {
-                            input_items.extend(translated);
-                        } else {
-                            input_items
-                                .extend(runtime_proxy_translate_anthropic_tool_result(block)?);
-                        }
-                    }
-                    _ => {
-                        input_items.extend(runtime_proxy_translate_anthropic_tool_result(block)?);
-                    }
-                }
+                self.push_tool_result_block(block)?;
             }
             Some("mcp_approval_response") => {
-                input_items.push(runtime_proxy_translate_anthropic_mcp_approval_response(
-                    block,
-                )?);
+                self.input_items
+                    .push(runtime_proxy_translate_anthropic_mcp_approval_response(
+                        block,
+                    )?);
             }
             _ => {}
         }
+        Ok(())
     }
 
-    Ok(input_items)
+    fn push_tool_use_block(&mut self, block: &serde_json::Value) -> Result<()> {
+        if self.native_shell_enabled
+            && let Some((call_id, translated, native_shell_call)) =
+                runtime_proxy_translate_anthropic_shell_tool_call(block)
+        {
+            self.native_client_tool_calls
+                .insert(call_id, native_shell_call);
+            self.input_items.push(translated);
+            return Ok(());
+        }
+
+        if self.native_computer_enabled
+            && let Some((call_id, translated, native_computer_call)) =
+                runtime_proxy_translate_anthropic_computer_tool_call(block)
+        {
+            self.native_client_tool_calls
+                .insert(call_id, native_computer_call);
+            self.input_items.push(translated);
+            return Ok(());
+        }
+
+        self.input_items
+            .push(runtime_proxy_translate_anthropic_tool_call(block)?);
+        Ok(())
+    }
+
+    fn push_tool_result_block(&mut self, block: &serde_json::Value) -> Result<()> {
+        let native_client_tool_call = block
+            .get("tool_use_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|call_id| self.native_client_tool_calls.get(call_id))
+            .copied();
+        match native_client_tool_call.map(|call| call.kind) {
+            Some(RuntimeAnthropicNativeClientToolKind::Shell) if self.native_shell_enabled => {
+                self.input_items
+                    .extend(runtime_proxy_translate_anthropic_shell_tool_result(
+                        block,
+                        native_client_tool_call.and_then(|call| call.max_output_length),
+                    )?);
+            }
+            Some(RuntimeAnthropicNativeClientToolKind::Computer)
+                if self.native_computer_enabled =>
+            {
+                if let Some(translated) =
+                    runtime_proxy_translate_anthropic_computer_tool_result(block)?
+                {
+                    self.input_items.extend(translated);
+                } else {
+                    self.input_items
+                        .extend(runtime_proxy_translate_anthropic_tool_result(block)?);
+                }
+            }
+            _ => {
+                self.input_items
+                    .extend(runtime_proxy_translate_anthropic_tool_result(block)?);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn runtime_proxy_translate_anthropic_user_content_blocks(
@@ -3628,122 +3686,170 @@ pub(super) fn runtime_anthropic_mcp_list_tools_block_from_output_item(
     serde_json::Value::Object(block)
 }
 
-pub(super) fn runtime_anthropic_output_blocks_from_json(
-    output: &[serde_json::Value],
+struct RuntimeAnthropicOutputBlockTranslator<'a> {
+    content: Vec<serde_json::Value>,
+    has_tool_calls: bool,
     want_thinking: bool,
-    server_tools: Option<&RuntimeAnthropicServerTools>,
-) -> (Vec<serde_json::Value>, bool) {
-    let mut content = Vec::new();
-    let mut has_tool_calls = false;
-    let annotation_titles_by_url = runtime_anthropic_message_annotation_titles_by_url(output);
+    server_tools: Option<&'a RuntimeAnthropicServerTools>,
+    annotation_titles_by_url: BTreeMap<String, String>,
+}
 
-    for item in output {
+impl<'a> RuntimeAnthropicOutputBlockTranslator<'a> {
+    fn new(
+        output: &[serde_json::Value],
+        want_thinking: bool,
+        server_tools: Option<&'a RuntimeAnthropicServerTools>,
+    ) -> Self {
+        Self {
+            content: Vec::new(),
+            has_tool_calls: false,
+            want_thinking,
+            server_tools,
+            annotation_titles_by_url: runtime_anthropic_message_annotation_titles_by_url(output),
+        }
+    }
+
+    fn translate(mut self, output: &[serde_json::Value]) -> (Vec<serde_json::Value>, bool) {
+        for item in output {
+            self.push_item(item);
+        }
+        if self.content.is_empty() {
+            self.content.push(serde_json::json!({
+                "type": "text",
+                "text": "",
+            }));
+        }
+        (self.content, self.has_tool_calls)
+    }
+
+    fn push_item(&mut self, item: &serde_json::Value) {
         match item.get("type").and_then(serde_json::Value::as_str) {
-            Some("reasoning") if want_thinking => {
-                let thinking = runtime_anthropic_reasoning_summary_text(item);
-                if !thinking.is_empty() {
-                    content.push(serde_json::json!({
-                        "type": "thinking",
-                        "thinking": thinking,
-                    }));
-                }
+            Some("reasoning") if self.want_thinking => {
+                self.push_reasoning(item);
             }
             Some("message") => {
-                if let Some(parts) = item.get("content").and_then(serde_json::Value::as_array) {
-                    let mut text = String::new();
-                    for part in parts {
-                        if part
-                            .get("type")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(|part_type| matches!(part_type, "output_text" | "text"))
-                            && let Some(part_text) =
-                                part.get("text").and_then(serde_json::Value::as_str)
-                        {
-                            text.push_str(part_text);
-                        }
-                    }
-                    if !text.is_empty() {
-                        content.push(serde_json::json!({
-                            "type": "text",
-                            "text": text,
-                        }));
-                    }
-                }
+                self.push_message_text(item);
             }
             Some("web_search_call") => {
-                content.extend(runtime_anthropic_web_search_blocks_from_output_item(
-                    item,
-                    &annotation_titles_by_url,
-                ));
+                self.content
+                    .extend(runtime_anthropic_web_search_blocks_from_output_item(
+                        item,
+                        &self.annotation_titles_by_url,
+                    ));
             }
             Some("mcp_call") => {
-                content.extend(runtime_anthropic_mcp_call_blocks_from_output_item(item));
+                self.content
+                    .extend(runtime_anthropic_mcp_call_blocks_from_output_item(item));
             }
             Some("mcp_approval_request") => {
-                has_tool_calls = true;
-                content.push(runtime_anthropic_mcp_approval_request_block_from_output_item(item));
+                self.has_tool_calls = true;
+                self.content
+                    .push(runtime_anthropic_mcp_approval_request_block_from_output_item(item));
             }
             Some("mcp_list_tools") => {
-                content.push(runtime_anthropic_mcp_list_tools_block_from_output_item(
-                    item,
-                ));
+                self.content
+                    .push(runtime_anthropic_mcp_list_tools_block_from_output_item(
+                        item,
+                    ));
             }
             Some("shell_call") => {
-                has_tool_calls = true;
-                content.push(runtime_anthropic_shell_tool_use_block_from_output_item(
-                    item,
-                ));
+                self.has_tool_calls = true;
+                self.content
+                    .push(runtime_anthropic_shell_tool_use_block_from_output_item(
+                        item,
+                    ));
             }
             Some("computer_call") => {
-                has_tool_calls = true;
-                content.push(runtime_anthropic_computer_tool_use_block_from_output_item(
-                    item,
-                ));
+                self.has_tool_calls = true;
+                self.content
+                    .push(runtime_anthropic_computer_tool_use_block_from_output_item(
+                        item,
+                    ));
             }
             Some("function_call") => {
-                has_tool_calls = true;
-                let call_id = item
-                    .get("call_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("tool_call");
-                let name = item
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("tool");
-                let input = runtime_anthropic_tool_input_from_arguments(
-                    item.get("arguments")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("{}"),
-                );
-                content.push(
-                    runtime_anthropic_server_tool_use_block(
-                        call_id,
-                        name,
-                        input.clone(),
-                        server_tools,
-                    )
-                    .unwrap_or_else(|| {
-                        serde_json::json!({
-                            "type": "tool_use",
-                            "id": call_id,
-                            "name": name,
-                            "input": input,
-                        })
-                    }),
-                );
+                self.push_function_call(item);
             }
             _ => {}
         }
     }
 
-    if content.is_empty() {
-        content.push(serde_json::json!({
-            "type": "text",
-            "text": "",
-        }));
+    fn push_reasoning(&mut self, item: &serde_json::Value) {
+        if !self.want_thinking {
+            return;
+        }
+        let thinking = runtime_anthropic_reasoning_summary_text(item);
+        if !thinking.is_empty() {
+            self.content.push(serde_json::json!({
+                "type": "thinking",
+                "thinking": thinking,
+            }));
+        }
     }
 
-    (content, has_tool_calls)
+    fn push_message_text(&mut self, item: &serde_json::Value) {
+        let Some(parts) = item.get("content").and_then(serde_json::Value::as_array) else {
+            return;
+        };
+        let mut text = String::new();
+        for part in parts {
+            if part
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|part_type| matches!(part_type, "output_text" | "text"))
+                && let Some(part_text) = part.get("text").and_then(serde_json::Value::as_str)
+            {
+                text.push_str(part_text);
+            }
+        }
+        if !text.is_empty() {
+            self.content.push(serde_json::json!({
+                "type": "text",
+                "text": text,
+            }));
+        }
+    }
+
+    fn push_function_call(&mut self, item: &serde_json::Value) {
+        self.has_tool_calls = true;
+        let call_id = item
+            .get("call_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("tool_call");
+        let name = item
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("tool");
+        let input = runtime_anthropic_tool_input_from_arguments(
+            item.get("arguments")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("{}"),
+        );
+        self.content.push(
+            runtime_anthropic_server_tool_use_block(
+                call_id,
+                name,
+                input.clone(),
+                self.server_tools,
+            )
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": name,
+                    "input": input,
+                })
+            }),
+        );
+    }
+}
+
+pub(super) fn runtime_anthropic_output_blocks_from_json(
+    output: &[serde_json::Value],
+    want_thinking: bool,
+    server_tools: Option<&RuntimeAnthropicServerTools>,
+) -> (Vec<serde_json::Value>, bool) {
+    RuntimeAnthropicOutputBlockTranslator::new(output, want_thinking, server_tools)
+        .translate(output)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -3855,6 +3961,40 @@ pub(super) struct RuntimeAnthropicCollectedResponse {
     server_tools: RuntimeAnthropicServerTools,
 }
 
+fn runtime_anthropic_response_event_item(value: &serde_json::Value) -> Option<&serde_json::Value> {
+    value.get("item")
+}
+
+fn runtime_anthropic_output_item_type(item: &serde_json::Value) -> Option<&str> {
+    item.get("type").and_then(serde_json::Value::as_str)
+}
+
+fn runtime_anthropic_output_item_call_id<'a>(
+    item: &'a serde_json::Value,
+    default: &'static str,
+) -> &'a str {
+    item.get("call_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(default)
+}
+
+fn runtime_anthropic_output_item_name<'a>(
+    item: &'a serde_json::Value,
+    default: &'static str,
+) -> &'a str {
+    item.get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(default)
+}
+
+fn runtime_anthropic_response_event_error_message(value: &serde_json::Value) -> &str {
+    value
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Codex returned an error.")
+}
+
 impl RuntimeAnthropicCollectedResponse {
     fn flush_text(&mut self) {
         if self.pending_text.is_empty() {
@@ -3913,221 +4053,232 @@ impl RuntimeAnthropicCollectedResponse {
     fn observe_event(&mut self, value: &serde_json::Value) -> Result<()> {
         match value.get("type").and_then(serde_json::Value::as_str) {
             Some("response.reasoning_summary_text.delta") if self.want_thinking => {
-                self.flush_text();
-                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
-                    self.pending_thinking.push_str(delta);
-                }
+                self.observe_reasoning_delta(value);
             }
             Some("response.output_text.delta") => {
-                self.flush_thinking();
-                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
-                    self.pending_text.push_str(delta);
-                }
+                self.observe_text_delta(value);
             }
             Some("response.output_item.added") => {
-                if value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(serde_json::Value::as_str)
-                    == Some("function_call")
-                {
-                    self.flush_pending_textual_content();
-                    self.active_tool_use = Some(RuntimeAnthropicCollectedToolUse {
-                        call_id: value
-                            .get("item")
-                            .and_then(|item| item.get("call_id"))
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("tool_call")
-                            .to_string(),
-                        name: value
-                            .get("item")
-                            .and_then(|item| item.get("name"))
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("tool")
-                            .to_string(),
-                        server_tool_name: value
-                            .get("item")
-                            .and_then(|item| item.get("name"))
-                            .and_then(serde_json::Value::as_str)
-                            .and_then(|name| {
-                                runtime_anthropic_server_tool_registration_for_call(
-                                    name,
-                                    Some(&self.server_tools),
-                                )
-                            })
-                            .map(|(server_tool_name, _)| server_tool_name),
-                        server_tool_block_type: value
-                            .get("item")
-                            .and_then(|item| item.get("name"))
-                            .and_then(serde_json::Value::as_str)
-                            .and_then(|name| {
-                                runtime_anthropic_server_tool_registration_for_call(
-                                    name,
-                                    Some(&self.server_tools),
-                                )
-                            })
-                            .map(|(_, block_type)| block_type),
-                        ..RuntimeAnthropicCollectedToolUse::default()
-                    });
-                }
+                self.observe_output_item_added(value);
             }
             Some("response.function_call_arguments.delta") => {
-                if let Some(active_tool_use) = self.active_tool_use.as_mut()
-                    && let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str)
-                {
-                    active_tool_use.saw_delta = true;
-                    active_tool_use.arguments.push_str(delta);
-                }
+                self.observe_function_call_arguments_delta(value);
             }
             Some("response.function_call_arguments.done") => {
-                if let Some(active_tool_use) = self.active_tool_use.as_mut()
-                    && let Some(arguments) =
-                        value.get("arguments").and_then(serde_json::Value::as_str)
-                    && !active_tool_use.saw_delta
-                {
-                    active_tool_use.arguments = arguments.to_string();
-                }
+                self.observe_function_call_arguments_done(value);
             }
             Some("response.output_item.done") => {
-                match value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    Some("function_call") => {
-                        if let Some(item) = value.get("item") {
-                            let usage = runtime_anthropic_output_item_server_tool_usage(
-                                item,
-                                Some(&self.server_tools),
-                            );
-                            self.web_search_requests += usage.web_search_requests;
-                            self.web_fetch_requests += usage.web_fetch_requests;
-                            self.code_execution_requests += usage.code_execution_requests;
-                            self.tool_search_requests += usage.tool_search_requests;
-                        }
-                        if let Some(active_tool_use) = self.active_tool_use.as_mut() {
-                            if let Some(arguments) = value
-                                .get("item")
-                                .and_then(|item| item.get("arguments"))
-                                .and_then(serde_json::Value::as_str)
-                                && !active_tool_use.saw_delta
-                            {
-                                active_tool_use.arguments = arguments.to_string();
-                            }
-                            if let Some(name) = value
-                                .get("item")
-                                .and_then(|item| item.get("name"))
-                                .and_then(serde_json::Value::as_str)
-                            {
-                                active_tool_use.name = name.to_string();
-                                if let Some((server_tool_name, block_type)) =
-                                    runtime_anthropic_server_tool_registration_for_call(
-                                        name,
-                                        Some(&self.server_tools),
-                                    )
-                                {
-                                    active_tool_use.server_tool_name = Some(server_tool_name);
-                                    active_tool_use.server_tool_block_type = Some(block_type);
-                                } else {
-                                    active_tool_use.server_tool_name = None;
-                                    active_tool_use.server_tool_block_type = None;
-                                }
-                            }
-                        }
-                        self.close_active_tool_use();
-                    }
-                    Some("web_search_call") => {
-                        if let Some(item) = value.get("item") {
-                            self.flush_pending_textual_content();
-                            self.web_search_requests +=
-                                runtime_anthropic_web_search_request_count_from_output_item(item);
-                            self.content.extend(
-                                runtime_anthropic_web_search_blocks_from_output_item(
-                                    item,
-                                    &BTreeMap::new(),
-                                ),
-                            );
-                        }
-                    }
-                    Some("shell_call") => {
-                        if let Some(item) = value.get("item") {
-                            self.flush_pending_textual_content();
-                            self.has_tool_calls = true;
-                            self.content.push(
-                                runtime_anthropic_shell_tool_use_block_from_output_item(item),
-                            );
-                        }
-                    }
-                    Some("computer_call") => {
-                        if let Some(item) = value.get("item") {
-                            self.flush_pending_textual_content();
-                            self.has_tool_calls = true;
-                            self.content.push(
-                                runtime_anthropic_computer_tool_use_block_from_output_item(item),
-                            );
-                        }
-                    }
-                    _ => {}
-                }
+                self.observe_output_item_done(value);
             }
             Some("response.completed") => {
-                let (input_tokens, output_tokens, cached_tokens) =
-                    runtime_anthropic_usage_from_value(value);
-                self.input_tokens = input_tokens;
-                self.output_tokens = output_tokens;
-                self.cached_tokens = cached_tokens;
-                self.web_search_requests = self.web_search_requests.max(
-                    runtime_anthropic_tool_usage_web_search_requests_from_value(value),
-                );
-                self.code_execution_requests = self
-                    .code_execution_requests
-                    .max(runtime_anthropic_tool_usage_code_execution_requests_from_value(value));
-                self.tool_search_requests = self
-                    .tool_search_requests
-                    .max(runtime_anthropic_tool_usage_tool_search_requests_from_value(value));
-                self.final_output = value
-                    .get("response")
-                    .and_then(|response| response.get("output"))
-                    .and_then(serde_json::Value::as_array)
-                    .cloned();
-                if let Some(output) = self.final_output.as_ref() {
-                    self.web_search_requests = self.web_search_requests.max(
-                        runtime_anthropic_web_search_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                    self.web_fetch_requests = self.web_fetch_requests.max(
-                        runtime_anthropic_web_fetch_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                    self.code_execution_requests = self.code_execution_requests.max(
-                        runtime_anthropic_code_execution_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                    self.tool_search_requests = self.tool_search_requests.max(
-                        runtime_anthropic_tool_search_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                }
+                self.observe_completed(value);
             }
             Some("error" | "response.failed") => {
-                let message = value
-                    .get("error")
-                    .and_then(|error| error.get("message"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("Codex returned an error.");
-                bail!(message.to_string());
+                bail!(runtime_anthropic_response_event_error_message(value).to_string());
             }
             _ => {}
         }
         Ok(())
+    }
+
+    fn observe_reasoning_delta(&mut self, value: &serde_json::Value) {
+        self.flush_text();
+        if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+            self.pending_thinking.push_str(delta);
+        }
+    }
+
+    fn observe_text_delta(&mut self, value: &serde_json::Value) {
+        self.flush_thinking();
+        if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+            self.pending_text.push_str(delta);
+        }
+    }
+
+    fn observe_output_item_added(&mut self, value: &serde_json::Value) {
+        let Some(item) = runtime_anthropic_response_event_item(value) else {
+            return;
+        };
+        if runtime_anthropic_output_item_type(item) != Some("function_call") {
+            return;
+        }
+        self.flush_pending_textual_content();
+        self.active_tool_use = Some(self.collected_tool_use_from_item(item));
+    }
+
+    fn collected_tool_use_from_item(
+        &self,
+        item: &serde_json::Value,
+    ) -> RuntimeAnthropicCollectedToolUse {
+        let name = runtime_anthropic_output_item_name(item, "tool");
+        let server_tool_registration =
+            runtime_anthropic_server_tool_registration_for_call(name, Some(&self.server_tools));
+        RuntimeAnthropicCollectedToolUse {
+            call_id: runtime_anthropic_output_item_call_id(item, "tool_call").to_string(),
+            name: name.to_string(),
+            server_tool_name: server_tool_registration
+                .as_ref()
+                .map(|(server_tool_name, _)| server_tool_name.clone()),
+            server_tool_block_type: server_tool_registration.map(|(_, block_type)| block_type),
+            ..RuntimeAnthropicCollectedToolUse::default()
+        }
+    }
+
+    fn observe_function_call_arguments_delta(&mut self, value: &serde_json::Value) {
+        if let Some(active_tool_use) = self.active_tool_use.as_mut()
+            && let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str)
+        {
+            active_tool_use.saw_delta = true;
+            active_tool_use.arguments.push_str(delta);
+        }
+    }
+
+    fn observe_function_call_arguments_done(&mut self, value: &serde_json::Value) {
+        if let Some(active_tool_use) = self.active_tool_use.as_mut()
+            && let Some(arguments) = value.get("arguments").and_then(serde_json::Value::as_str)
+            && !active_tool_use.saw_delta
+        {
+            active_tool_use.arguments = arguments.to_string();
+        }
+    }
+
+    fn observe_output_item_done(&mut self, value: &serde_json::Value) {
+        let Some(item) = runtime_anthropic_response_event_item(value) else {
+            return;
+        };
+        match runtime_anthropic_output_item_type(item) {
+            Some("function_call") => self.observe_function_call_item_done(item),
+            Some("web_search_call") => self.observe_web_search_item_done(item),
+            Some("shell_call") => self.observe_shell_call_item_done(item),
+            Some("computer_call") => self.observe_computer_call_item_done(item),
+            _ => {}
+        }
+    }
+
+    fn observe_function_call_item_done(&mut self, item: &serde_json::Value) {
+        self.add_output_item_server_tool_usage(item);
+        if let Some(active_tool_use) = self.active_tool_use.as_mut() {
+            if let Some(arguments) = item.get("arguments").and_then(serde_json::Value::as_str)
+                && !active_tool_use.saw_delta
+            {
+                active_tool_use.arguments = arguments.to_string();
+            }
+            if let Some(name) = item.get("name").and_then(serde_json::Value::as_str) {
+                active_tool_use.name = name.to_string();
+                Self::set_collected_tool_server_registration(
+                    active_tool_use,
+                    name,
+                    &self.server_tools,
+                );
+            }
+        }
+        self.close_active_tool_use();
+    }
+
+    fn set_collected_tool_server_registration(
+        active_tool_use: &mut RuntimeAnthropicCollectedToolUse,
+        name: &str,
+        server_tools: &RuntimeAnthropicServerTools,
+    ) {
+        if let Some((server_tool_name, block_type)) =
+            runtime_anthropic_server_tool_registration_for_call(name, Some(server_tools))
+        {
+            active_tool_use.server_tool_name = Some(server_tool_name);
+            active_tool_use.server_tool_block_type = Some(block_type);
+        } else {
+            active_tool_use.server_tool_name = None;
+            active_tool_use.server_tool_block_type = None;
+        }
+    }
+
+    fn observe_web_search_item_done(&mut self, item: &serde_json::Value) {
+        self.flush_pending_textual_content();
+        self.web_search_requests +=
+            runtime_anthropic_web_search_request_count_from_output_item(item);
+        self.content
+            .extend(runtime_anthropic_web_search_blocks_from_output_item(
+                item,
+                &BTreeMap::new(),
+            ));
+    }
+
+    fn observe_shell_call_item_done(&mut self, item: &serde_json::Value) {
+        self.flush_pending_textual_content();
+        self.has_tool_calls = true;
+        self.content
+            .push(runtime_anthropic_shell_tool_use_block_from_output_item(
+                item,
+            ));
+    }
+
+    fn observe_computer_call_item_done(&mut self, item: &serde_json::Value) {
+        self.flush_pending_textual_content();
+        self.has_tool_calls = true;
+        self.content
+            .push(runtime_anthropic_computer_tool_use_block_from_output_item(
+                item,
+            ));
+    }
+
+    fn observe_completed(&mut self, value: &serde_json::Value) {
+        let (input_tokens, output_tokens, cached_tokens) =
+            runtime_anthropic_usage_from_value(value);
+        self.input_tokens = input_tokens;
+        self.output_tokens = output_tokens;
+        self.cached_tokens = cached_tokens;
+        self.web_search_requests = self.web_search_requests.max(
+            runtime_anthropic_tool_usage_web_search_requests_from_value(value),
+        );
+        self.code_execution_requests = self
+            .code_execution_requests
+            .max(runtime_anthropic_tool_usage_code_execution_requests_from_value(value));
+        self.tool_search_requests = self
+            .tool_search_requests
+            .max(runtime_anthropic_tool_usage_tool_search_requests_from_value(value));
+        let final_output = value
+            .get("response")
+            .and_then(|response| response.get("output"))
+            .and_then(serde_json::Value::as_array)
+            .cloned();
+        if let Some(output) = final_output.as_ref() {
+            self.merge_output_usage(output);
+        }
+        self.final_output = final_output;
+    }
+
+    fn add_output_item_server_tool_usage(&mut self, item: &serde_json::Value) {
+        let usage = runtime_anthropic_output_item_server_tool_usage(item, Some(&self.server_tools));
+        self.web_search_requests += usage.web_search_requests;
+        self.web_fetch_requests += usage.web_fetch_requests;
+        self.code_execution_requests += usage.code_execution_requests;
+        self.tool_search_requests += usage.tool_search_requests;
+    }
+
+    fn merge_output_usage(&mut self, output: &[serde_json::Value]) {
+        self.web_search_requests =
+            self.web_search_requests
+                .max(runtime_anthropic_web_search_request_count_from_output(
+                    output,
+                    Some(&self.server_tools),
+                ));
+        self.web_fetch_requests =
+            self.web_fetch_requests
+                .max(runtime_anthropic_web_fetch_request_count_from_output(
+                    output,
+                    Some(&self.server_tools),
+                ));
+        self.code_execution_requests = self.code_execution_requests.max(
+            runtime_anthropic_code_execution_request_count_from_output(
+                output,
+                Some(&self.server_tools),
+            ),
+        );
+        self.tool_search_requests =
+            self.tool_search_requests
+                .max(runtime_anthropic_tool_search_request_count_from_output(
+                    output,
+                    Some(&self.server_tools),
+                ));
     }
 
     fn into_response(mut self, requested_model: &str) -> serde_json::Value {
@@ -5247,293 +5398,261 @@ impl RuntimeAnthropicSseReader {
     fn observe_upstream_event(&mut self, value: &serde_json::Value) {
         match value.get("type").and_then(serde_json::Value::as_str) {
             Some("response.reasoning_summary_text.delta") if self.want_thinking => {
-                self.close_text_block();
-                self.ensure_thinking_block();
-                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
-                    self.push_event(
-                        "content_block_delta",
-                        serde_json::json!({
-                            "type": "content_block_delta",
-                            "index": self.content_index,
-                            "delta": {
-                                "type": "thinking_delta",
-                                "thinking": delta,
-                            }
-                        }),
-                    );
-                    self.has_content = true;
-                }
+                self.observe_stream_reasoning_delta(value);
             }
             Some("response.output_text.delta") => {
-                self.close_thinking_block();
-                self.ensure_text_block();
-                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
-                    self.push_event(
-                        "content_block_delta",
-                        serde_json::json!({
-                            "type": "content_block_delta",
-                            "index": self.content_index,
-                            "delta": {
-                                "type": "text_delta",
-                                "text": delta,
-                            }
-                        }),
-                    );
-                    self.has_content = true;
-                }
+                self.observe_stream_text_delta(value);
             }
             Some("response.output_item.added") => {
-                if value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(serde_json::Value::as_str)
-                    == Some("function_call")
-                {
-                    let call_id = value
-                        .get("item")
-                        .and_then(|item| item.get("call_id"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("tool_call");
-                    let name = value
-                        .get("item")
-                        .and_then(|item| item.get("name"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("tool");
-                    self.start_tool_use_block(call_id, name);
-                } else if value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(serde_json::Value::as_str)
-                    == Some("shell_call")
-                {
-                    let call_id = value
-                        .get("item")
-                        .and_then(|item| item.get("call_id"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("shell_call");
-                    self.start_tool_use_block(call_id, "bash");
-                } else if value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(serde_json::Value::as_str)
-                    == Some("computer_call")
-                {
-                    let call_id = value
-                        .get("item")
-                        .and_then(|item| item.get("call_id"))
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("computer_call");
-                    self.start_tool_use_block(call_id, "computer");
-                }
+                self.observe_stream_output_item_added(value);
             }
             Some("response.function_call_arguments.delta") => {
-                if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
-                    if let Some(active_tool_use) = self.active_tool_use.as_mut() {
-                        active_tool_use.saw_delta = true;
-                        active_tool_use.arguments.push_str(delta);
-                    }
-                    self.push_event(
-                        "content_block_delta",
-                        serde_json::json!({
-                            "type": "content_block_delta",
-                            "index": self.content_index,
-                            "delta": {
-                                "type": "input_json_delta",
-                                "partial_json": delta,
-                            }
-                        }),
-                    );
-                }
+                self.observe_stream_function_call_arguments_delta(value);
             }
             Some("response.function_call_arguments.done") => {
-                if let Some(active_tool_use) = self.active_tool_use.as_mut()
-                    && let Some(arguments) =
-                        value.get("arguments").and_then(serde_json::Value::as_str)
-                    && !active_tool_use.saw_delta
-                {
-                    active_tool_use.arguments = arguments.to_string();
-                }
+                self.observe_stream_function_call_arguments_done(value);
             }
             Some("response.output_item.done") => {
-                match value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    Some("function_call") => {
-                        if let Some(item) = value.get("item") {
-                            let usage = runtime_anthropic_output_item_server_tool_usage(
-                                item,
-                                Some(&self.server_tools),
-                            );
-                            self.web_search_requests += usage.web_search_requests;
-                            self.web_fetch_requests += usage.web_fetch_requests;
-                            self.code_execution_requests += usage.code_execution_requests;
-                            self.tool_search_requests += usage.tool_search_requests;
-                        }
-                        if self.active_tool_use.is_none() {
-                            let call_id = value
-                                .get("item")
-                                .and_then(|item| item.get("call_id"))
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or("tool_call");
-                            let name = value
-                                .get("item")
-                                .and_then(|item| item.get("name"))
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or("tool");
-                            self.start_tool_use_block(call_id, name);
-                        }
-                        let arguments = value
-                            .get("item")
-                            .and_then(|item| item.get("arguments"))
-                            .and_then(serde_json::Value::as_str);
-                        let name = value
-                            .get("item")
-                            .and_then(|item| item.get("name"))
-                            .and_then(serde_json::Value::as_str);
-                        let call_id = value
-                            .get("item")
-                            .and_then(|item| item.get("call_id"))
-                            .and_then(serde_json::Value::as_str);
-                        self.finish_active_tool_use(arguments, name, call_id);
-                    }
-                    Some("web_search_call") => {
-                        if let Some(item) = value.get("item") {
-                            self.web_search_requests +=
-                                runtime_anthropic_web_search_request_count_from_output_item(item);
-                        }
-                    }
-                    Some("mcp_call") => {
-                        if let Some(item) = value.get("item") {
-                            self.emit_mcp_call_blocks(item);
-                        }
-                    }
-                    Some("shell_call") => {
-                        if self.active_tool_use.is_none() {
-                            let call_id = value
-                                .get("item")
-                                .and_then(|item| item.get("call_id"))
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or("shell_call");
-                            self.start_tool_use_block(call_id, "bash");
-                        }
-                        let call_id = value
-                            .get("item")
-                            .and_then(|item| item.get("call_id"))
-                            .and_then(serde_json::Value::as_str);
-                        let arguments = value
-                            .get("item")
-                            .map(runtime_anthropic_shell_tool_input_from_output_item)
-                            .and_then(|input| serde_json::to_string(&input).ok());
-                        self.finish_active_tool_use(arguments.as_deref(), Some("bash"), call_id);
-                    }
-                    Some("computer_call") => {
-                        if self.active_tool_use.is_none() {
-                            let call_id = value
-                                .get("item")
-                                .and_then(|item| item.get("call_id"))
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or("computer_call");
-                            self.start_tool_use_block(call_id, "computer");
-                        }
-                        let call_id = value
-                            .get("item")
-                            .and_then(|item| item.get("call_id"))
-                            .and_then(serde_json::Value::as_str);
-                        let arguments = value
-                            .get("item")
-                            .map(runtime_anthropic_computer_tool_input_from_output_item)
-                            .map(|input| {
-                                input.unwrap_or_else(|| {
-                                    runtime_anthropic_raw_computer_tool_input_from_output_item(
-                                        value.get("item").unwrap_or(&serde_json::Value::Null),
-                                    )
-                                })
-                            })
-                            .and_then(|input| serde_json::to_string(&input).ok());
-                        self.finish_active_tool_use(
-                            arguments.as_deref(),
-                            Some("computer"),
-                            call_id,
-                        );
-                    }
-                    Some("mcp_approval_request") => {
-                        if let Some(item) = value.get("item") {
-                            self.emit_completed_content_block(
-                                runtime_anthropic_mcp_approval_request_block_from_output_item(item),
-                                true,
-                            );
-                        }
-                    }
-                    Some("mcp_list_tools") => {
-                        if let Some(item) = value.get("item") {
-                            self.emit_completed_content_block(
-                                runtime_anthropic_mcp_list_tools_block_from_output_item(item),
-                                false,
-                            );
-                        }
-                    }
-                    _ => {}
-                }
+                self.observe_stream_output_item_done(value);
             }
             Some("response.completed") => {
-                let (input_tokens, output_tokens, cached_tokens) =
-                    runtime_anthropic_usage_from_value(value);
-                self.input_tokens = input_tokens;
-                self.output_tokens = output_tokens;
-                self.cached_tokens = cached_tokens;
-                self.web_search_requests = self.web_search_requests.max(
-                    runtime_anthropic_tool_usage_web_search_requests_from_value(value),
-                );
-                self.code_execution_requests = self
-                    .code_execution_requests
-                    .max(runtime_anthropic_tool_usage_code_execution_requests_from_value(value));
-                self.tool_search_requests = self
-                    .tool_search_requests
-                    .max(runtime_anthropic_tool_usage_tool_search_requests_from_value(value));
-                if let Some(output) = value
-                    .get("response")
-                    .and_then(|response| response.get("output"))
-                    .and_then(serde_json::Value::as_array)
-                {
-                    self.web_search_requests = self.web_search_requests.max(
-                        runtime_anthropic_web_search_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                    self.web_fetch_requests = self.web_fetch_requests.max(
-                        runtime_anthropic_web_fetch_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                    self.code_execution_requests = self.code_execution_requests.max(
-                        runtime_anthropic_code_execution_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                    self.tool_search_requests = self.tool_search_requests.max(
-                        runtime_anthropic_tool_search_request_count_from_output(
-                            output,
-                            Some(&self.server_tools),
-                        ),
-                    );
-                }
-                self.finish_success();
+                self.observe_stream_completed(value);
             }
             Some("error" | "response.failed") => {
-                let message = value
-                    .get("error")
-                    .and_then(|error| error.get("message"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("Codex returned an error.");
-                self.finish_error(message);
+                self.finish_error(runtime_anthropic_response_event_error_message(value));
             }
             _ => {}
         }
+    }
+
+    fn observe_stream_reasoning_delta(&mut self, value: &serde_json::Value) {
+        self.close_text_block();
+        self.ensure_thinking_block();
+        if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+            self.push_event(
+                "content_block_delta",
+                serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": self.content_index,
+                    "delta": {
+                        "type": "thinking_delta",
+                        "thinking": delta,
+                    }
+                }),
+            );
+            self.has_content = true;
+        }
+    }
+
+    fn observe_stream_text_delta(&mut self, value: &serde_json::Value) {
+        self.close_thinking_block();
+        self.ensure_text_block();
+        if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+            self.push_event(
+                "content_block_delta",
+                serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": self.content_index,
+                    "delta": {
+                        "type": "text_delta",
+                        "text": delta,
+                    }
+                }),
+            );
+            self.has_content = true;
+        }
+    }
+
+    fn observe_stream_output_item_added(&mut self, value: &serde_json::Value) {
+        let Some(item) = runtime_anthropic_response_event_item(value) else {
+            return;
+        };
+        match runtime_anthropic_output_item_type(item) {
+            Some("function_call") => {
+                self.start_tool_use_block(
+                    runtime_anthropic_output_item_call_id(item, "tool_call"),
+                    runtime_anthropic_output_item_name(item, "tool"),
+                );
+            }
+            Some("shell_call") => {
+                self.start_tool_use_block(
+                    runtime_anthropic_output_item_call_id(item, "shell_call"),
+                    "bash",
+                );
+            }
+            Some("computer_call") => {
+                self.start_tool_use_block(
+                    runtime_anthropic_output_item_call_id(item, "computer_call"),
+                    "computer",
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn observe_stream_function_call_arguments_delta(&mut self, value: &serde_json::Value) {
+        let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        if let Some(active_tool_use) = self.active_tool_use.as_mut() {
+            active_tool_use.saw_delta = true;
+            active_tool_use.arguments.push_str(delta);
+        }
+        self.push_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta",
+                "index": self.content_index,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": delta,
+                }
+            }),
+        );
+    }
+
+    fn observe_stream_function_call_arguments_done(&mut self, value: &serde_json::Value) {
+        if let Some(active_tool_use) = self.active_tool_use.as_mut()
+            && let Some(arguments) = value.get("arguments").and_then(serde_json::Value::as_str)
+            && !active_tool_use.saw_delta
+        {
+            active_tool_use.arguments = arguments.to_string();
+        }
+    }
+
+    fn observe_stream_output_item_done(&mut self, value: &serde_json::Value) {
+        let Some(item) = runtime_anthropic_response_event_item(value) else {
+            return;
+        };
+        match runtime_anthropic_output_item_type(item) {
+            Some("function_call") => self.observe_stream_function_call_item_done(item),
+            Some("web_search_call") => self.observe_stream_web_search_item_done(item),
+            Some("mcp_call") => self.emit_mcp_call_blocks(item),
+            Some("shell_call") => self.observe_stream_shell_call_item_done(item),
+            Some("computer_call") => self.observe_stream_computer_call_item_done(item),
+            Some("mcp_approval_request") => self.emit_completed_content_block(
+                runtime_anthropic_mcp_approval_request_block_from_output_item(item),
+                true,
+            ),
+            Some("mcp_list_tools") => self.emit_completed_content_block(
+                runtime_anthropic_mcp_list_tools_block_from_output_item(item),
+                false,
+            ),
+            _ => {}
+        }
+    }
+
+    fn observe_stream_function_call_item_done(&mut self, item: &serde_json::Value) {
+        self.add_stream_output_item_server_tool_usage(item);
+        if self.active_tool_use.is_none() {
+            self.start_tool_use_block(
+                runtime_anthropic_output_item_call_id(item, "tool_call"),
+                runtime_anthropic_output_item_name(item, "tool"),
+            );
+        }
+        self.finish_active_tool_use(
+            item.get("arguments").and_then(serde_json::Value::as_str),
+            item.get("name").and_then(serde_json::Value::as_str),
+            item.get("call_id").and_then(serde_json::Value::as_str),
+        );
+    }
+
+    fn observe_stream_web_search_item_done(&mut self, item: &serde_json::Value) {
+        self.web_search_requests +=
+            runtime_anthropic_web_search_request_count_from_output_item(item);
+    }
+
+    fn observe_stream_shell_call_item_done(&mut self, item: &serde_json::Value) {
+        if self.active_tool_use.is_none() {
+            self.start_tool_use_block(
+                runtime_anthropic_output_item_call_id(item, "shell_call"),
+                "bash",
+            );
+        }
+        let arguments =
+            serde_json::to_string(&runtime_anthropic_shell_tool_input_from_output_item(item)).ok();
+        self.finish_active_tool_use(
+            arguments.as_deref(),
+            Some("bash"),
+            item.get("call_id").and_then(serde_json::Value::as_str),
+        );
+    }
+
+    fn observe_stream_computer_call_item_done(&mut self, item: &serde_json::Value) {
+        if self.active_tool_use.is_none() {
+            self.start_tool_use_block(
+                runtime_anthropic_output_item_call_id(item, "computer_call"),
+                "computer",
+            );
+        }
+        let input = runtime_anthropic_computer_tool_input_from_output_item(item)
+            .unwrap_or_else(|| runtime_anthropic_raw_computer_tool_input_from_output_item(item));
+        let arguments = serde_json::to_string(&input).ok();
+        self.finish_active_tool_use(
+            arguments.as_deref(),
+            Some("computer"),
+            item.get("call_id").and_then(serde_json::Value::as_str),
+        );
+    }
+
+    fn observe_stream_completed(&mut self, value: &serde_json::Value) {
+        let (input_tokens, output_tokens, cached_tokens) =
+            runtime_anthropic_usage_from_value(value);
+        self.input_tokens = input_tokens;
+        self.output_tokens = output_tokens;
+        self.cached_tokens = cached_tokens;
+        self.web_search_requests = self.web_search_requests.max(
+            runtime_anthropic_tool_usage_web_search_requests_from_value(value),
+        );
+        self.code_execution_requests = self
+            .code_execution_requests
+            .max(runtime_anthropic_tool_usage_code_execution_requests_from_value(value));
+        self.tool_search_requests = self
+            .tool_search_requests
+            .max(runtime_anthropic_tool_usage_tool_search_requests_from_value(value));
+        if let Some(output) = value
+            .get("response")
+            .and_then(|response| response.get("output"))
+            .and_then(serde_json::Value::as_array)
+        {
+            self.merge_stream_output_usage(output);
+        }
+        self.finish_success();
+    }
+
+    fn add_stream_output_item_server_tool_usage(&mut self, item: &serde_json::Value) {
+        let usage = runtime_anthropic_output_item_server_tool_usage(item, Some(&self.server_tools));
+        self.web_search_requests += usage.web_search_requests;
+        self.web_fetch_requests += usage.web_fetch_requests;
+        self.code_execution_requests += usage.code_execution_requests;
+        self.tool_search_requests += usage.tool_search_requests;
+    }
+
+    fn merge_stream_output_usage(&mut self, output: &[serde_json::Value]) {
+        self.web_search_requests =
+            self.web_search_requests
+                .max(runtime_anthropic_web_search_request_count_from_output(
+                    output,
+                    Some(&self.server_tools),
+                ));
+        self.web_fetch_requests =
+            self.web_fetch_requests
+                .max(runtime_anthropic_web_fetch_request_count_from_output(
+                    output,
+                    Some(&self.server_tools),
+                ));
+        self.code_execution_requests = self.code_execution_requests.max(
+            runtime_anthropic_code_execution_request_count_from_output(
+                output,
+                Some(&self.server_tools),
+            ),
+        );
+        self.tool_search_requests =
+            self.tool_search_requests
+                .max(runtime_anthropic_tool_search_request_count_from_output(
+                    output,
+                    Some(&self.server_tools),
+                ));
     }
 
     fn process_upstream_event(&mut self) -> io::Result<()> {

@@ -61,6 +61,31 @@ pub(super) fn runtime_broker_metadata_for_log_path(
         .cloned()
 }
 
+pub(super) struct RuntimeStateSaveRequest {
+    state: AppState,
+    continuations: RuntimeContinuationStore,
+    profile_scores: BTreeMap<String, RuntimeProfileHealth>,
+    usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    backoffs: RuntimeProfileBackoffs,
+    paths: AppPaths,
+    reason: String,
+}
+
+impl RuntimeStateSaveRequest {
+    fn from_snapshot(snapshot: RuntimeStateSaveSnapshot, reason: &str) -> Self {
+        Self {
+            state: snapshot.state,
+            continuations: snapshot.continuations,
+            profile_scores: snapshot.profile_scores,
+            usage_snapshots: snapshot.usage_snapshots,
+            backoffs: snapshot.backoffs,
+            paths: snapshot.paths,
+            reason: reason.to_string(),
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn schedule_runtime_state_save(
     shared: &RuntimeRotationProxyShared,
@@ -72,12 +97,32 @@ pub(super) fn schedule_runtime_state_save(
     paths: AppPaths,
     reason: &str,
 ) {
+    schedule_runtime_state_save_request(
+        shared,
+        RuntimeStateSaveRequest {
+            state,
+            continuations,
+            profile_scores,
+            usage_snapshots,
+            backoffs,
+            paths,
+            reason: reason.to_string(),
+        },
+    );
+}
+
+pub(super) fn schedule_runtime_state_save_request(
+    shared: &RuntimeRotationProxyShared,
+    request: RuntimeStateSaveRequest,
+) {
+    let reason = request.reason.clone();
+    let reason = reason.as_str();
     if !runtime_proxy_persistence_enabled(shared) {
         runtime_proxy_log(
             shared,
             format!(
                 "state_save_suppressed role=follower reason={reason} path={}",
-                paths.state_file.display()
+                request.paths.state_file.display()
             ),
         );
         return;
@@ -85,9 +130,9 @@ pub(super) fn schedule_runtime_state_save(
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
     let queued_at = Instant::now();
     let ready_at = queued_at + runtime_state_save_debounce(reason);
-    let state_profiles = state.profiles.clone();
+    let state_profiles = request.state.profiles.clone();
     let journal_continuations = runtime_state_save_reason_requires_continuation_journal(reason)
-        .then(|| continuations.clone());
+        .then(|| request.continuations.clone());
     if cfg!(test) {
         runtime_proxy_log(
             shared,
@@ -99,12 +144,12 @@ pub(super) fn schedule_runtime_state_save(
             ),
         );
         match save_runtime_state_snapshot_if_latest(
-            &paths,
-            &state,
-            &continuations,
-            &profile_scores,
-            &usage_snapshots,
-            &backoffs,
+            &request.paths,
+            &request.state,
+            &request.continuations,
+            &request.profile_scores,
+            &request.usage_snapshots,
+            &request.backoffs,
             revision,
             &shared.state_save_revision,
         ) {
@@ -134,8 +179,8 @@ pub(super) fn schedule_runtime_state_save(
             schedule_runtime_continuation_journal_save(
                 shared,
                 continuations,
-                state.profiles.clone(),
-                paths,
+                request.state.profiles.clone(),
+                request.paths,
                 reason,
             );
         }
@@ -147,20 +192,20 @@ pub(super) fn schedule_runtime_state_save(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     pending.insert(
-        paths.state_file.clone(),
+        request.paths.state_file.clone(),
         RuntimeStateSaveJob {
             payload: RuntimeStateSavePayload::Snapshot(RuntimeStateSaveSnapshot {
-                paths: paths.clone(),
-                state,
-                continuations,
-                profile_scores,
-                usage_snapshots,
-                backoffs,
+                paths: request.paths.clone(),
+                state: request.state,
+                continuations: request.continuations,
+                profile_scores: request.profile_scores,
+                usage_snapshots: request.usage_snapshots,
+                backoffs: request.backoffs,
             }),
             revision,
             latest_revision: Arc::clone(&shared.state_save_revision),
             log_path: shared.log_path.clone(),
-            reason: reason.to_string(),
+            reason: request.reason.clone(),
             queued_at,
             ready_at,
         },
@@ -192,7 +237,7 @@ pub(super) fn schedule_runtime_state_save(
             shared,
             continuations,
             state_profiles,
-            paths,
+            request.paths,
             reason,
         );
     }
@@ -230,15 +275,12 @@ pub(super) fn schedule_runtime_state_save_from_runtime(
         return;
     }
     if cfg!(test) {
-        schedule_runtime_state_save(
+        schedule_runtime_state_save_request(
             shared,
-            runtime.state.clone(),
-            runtime_continuation_store_snapshot(runtime),
-            runtime.profile_health.clone(),
-            runtime.profile_usage_snapshots.clone(),
-            runtime_profile_backoffs_snapshot(runtime),
-            runtime.paths.clone(),
-            reason,
+            RuntimeStateSaveRequest::from_snapshot(
+                runtime_state_save_snapshot_from_runtime(runtime),
+                reason,
+            ),
         );
         return;
     }
@@ -1014,7 +1056,7 @@ fn apply_runtime_profile_probe_result_to_runtime(
     auth: AuthSummary,
     result: std::result::Result<UsageResponse, String>,
     now: i64,
-) -> (Vec<String>, Option<RuntimeStateSaveArgs>) {
+) -> (Vec<String>, Option<RuntimeStateSaveRequest>) {
     let mut log_messages = Vec::new();
     let mut state_save_args = None;
     runtime.profile_probe_cache.insert(
@@ -1092,14 +1134,9 @@ fn apply_runtime_profile_probe_result_to_runtime(
             ));
         }
         if snapshot_should_persist || retry_backoff_changed {
-            state_save_args = Some((
-                runtime.state.clone(),
-                runtime_continuation_store_snapshot(runtime),
-                runtime.profile_health.clone(),
-                runtime.profile_usage_snapshots.clone(),
-                runtime_profile_backoffs_snapshot(runtime),
-                runtime.paths.clone(),
-                format!("usage_snapshot:{profile_name}"),
+            state_save_args = Some(RuntimeStateSaveRequest::from_snapshot(
+                runtime_state_save_snapshot_from_runtime(runtime),
+                &format!("usage_snapshot:{profile_name}"),
             ));
         }
     }
@@ -1107,37 +1144,16 @@ fn apply_runtime_profile_probe_result_to_runtime(
     (log_messages, state_save_args)
 }
 
-type RuntimeStateSaveArgs = (
-    AppState,
-    RuntimeContinuationStore,
-    BTreeMap<String, RuntimeProfileHealth>,
-    BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    RuntimeProfileBackoffs,
-    AppPaths,
-    String,
-);
-
 fn emit_runtime_profile_probe_result(
     shared: &RuntimeRotationProxyShared,
     log_messages: Vec<String>,
-    state_save_args: Option<RuntimeStateSaveArgs>,
+    state_save_args: Option<RuntimeStateSaveRequest>,
 ) {
     for message in log_messages {
         runtime_proxy_log(shared, message);
     }
-    if let Some((state, continuations, profile_scores, usage_snapshots, backoffs, paths, reason)) =
-        state_save_args
-    {
-        schedule_runtime_state_save(
-            shared,
-            state,
-            continuations,
-            profile_scores,
-            usage_snapshots,
-            backoffs,
-            paths,
-            &reason,
-        );
+    if let Some(request) = state_save_args {
+        schedule_runtime_state_save_request(shared, request);
     }
 }
 

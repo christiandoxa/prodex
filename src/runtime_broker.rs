@@ -249,100 +249,103 @@ pub(super) fn runtime_broker_metrics_snapshot(
     })
 }
 
-pub(super) fn handle_runtime_proxy_admin_request(
-    request: &mut tiny_http::Request,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeBrokerAdminRoute {
+    Health,
+    Metrics,
+    MetricsPrometheus,
+    Activate,
+}
+
+impl RuntimeBrokerAdminRoute {
+    fn from_path(path: &str) -> Option<Self> {
+        match path {
+            "/__prodex/runtime/health" => Some(Self::Health),
+            "/__prodex/runtime/metrics" => Some(Self::Metrics),
+            "/__prodex/runtime/metrics/prometheus" => Some(Self::MetricsPrometheus),
+            "/__prodex/runtime/activate" => Some(Self::Activate),
+            _ => None,
+        }
+    }
+}
+
+fn runtime_broker_metrics_json_response(
     shared: &RuntimeRotationProxyShared,
+    metadata: &RuntimeBrokerMetadata,
 ) -> Option<tiny_http::ResponseBox> {
-    let path = path_without_query(request.url());
-    if path != "/__prodex/runtime/health"
-        && path != "/__prodex/runtime/metrics"
-        && path != "/__prodex/runtime/metrics/prometheus"
-        && path != "/__prodex/runtime/activate"
-    {
-        return None;
-    }
-
-    let Some(metadata) = runtime_broker_metadata_for_log_path(&shared.log_path) else {
-        return Some(build_runtime_proxy_json_error_response(
-            404,
-            "not_found",
-            "runtime broker admin endpoint is not enabled for this proxy",
-        ));
+    let metrics = match runtime_broker_metrics_snapshot(shared, metadata) {
+        Ok(metrics) => metrics,
+        Err(err) => {
+            return Some(build_runtime_proxy_json_error_response(
+                500,
+                "internal_error",
+                &err.to_string(),
+            ));
+        }
     };
-    if runtime_proxy_admin_token(request).as_deref() != Some(metadata.admin_token.as_str()) {
-        return Some(build_runtime_proxy_json_error_response(
-            403,
-            "forbidden",
-            "missing or invalid runtime broker admin token",
-        ));
-    }
+    let body = serde_json::to_string(&metrics).ok()?;
+    Some(build_runtime_proxy_json_response(200, body))
+}
 
-    if path == "/__prodex/runtime/health" {
-        let health = RuntimeBrokerHealth {
-            pid: std::process::id(),
-            started_at: metadata.started_at,
-            current_profile: metadata.current_profile,
-            include_code_review: metadata.include_code_review,
-            active_requests: shared.active_request_count.load(Ordering::SeqCst),
-            instance_token: metadata.instance_token,
-            persistence_role: if runtime_proxy_persistence_enabled(shared) {
-                "owner".to_string()
-            } else {
-                "follower".to_string()
-            },
-        };
-        let body = serde_json::to_string(&health).ok()?;
-        return Some(build_runtime_proxy_json_response(200, body));
-    }
+fn runtime_broker_metrics_prometheus_response(
+    shared: &RuntimeRotationProxyShared,
+    metadata: &RuntimeBrokerMetadata,
+) -> Option<tiny_http::ResponseBox> {
+    let metrics = match runtime_broker_metrics_snapshot(shared, metadata) {
+        Ok(metrics) => metrics,
+        Err(err) => {
+            return Some(build_runtime_proxy_json_error_response(
+                500,
+                "internal_error",
+                &err.to_string(),
+            ));
+        }
+    };
+    let snapshot = runtime_broker_prometheus_snapshot(metadata, &metrics);
+    let body = runtime_metrics::render_runtime_broker_prometheus(&snapshot);
+    Some(build_runtime_proxy_prometheus_response(200, body))
+}
 
-    if path == "/__prodex/runtime/metrics" {
-        let metrics = match runtime_broker_metrics_snapshot(shared, &metadata) {
-            Ok(metrics) => metrics,
-            Err(err) => {
-                return Some(build_runtime_proxy_json_error_response(
-                    500,
-                    "internal_error",
-                    &err.to_string(),
-                ));
-            }
-        };
-        let body = serde_json::to_string(&metrics).ok()?;
-        return Some(build_runtime_proxy_json_response(200, body));
-    }
+fn runtime_broker_health_response(
+    shared: &RuntimeRotationProxyShared,
+    metadata: RuntimeBrokerMetadata,
+) -> Option<tiny_http::ResponseBox> {
+    let health = RuntimeBrokerHealth {
+        pid: std::process::id(),
+        started_at: metadata.started_at,
+        current_profile: metadata.current_profile,
+        include_code_review: metadata.include_code_review,
+        active_requests: shared.active_request_count.load(Ordering::SeqCst),
+        instance_token: metadata.instance_token,
+        persistence_role: if runtime_proxy_persistence_enabled(shared) {
+            "owner".to_string()
+        } else {
+            "follower".to_string()
+        },
+    };
+    let body = serde_json::to_string(&health).ok()?;
+    Some(build_runtime_proxy_json_response(200, body))
+}
 
-    if path == "/__prodex/runtime/metrics/prometheus" {
-        let metrics = match runtime_broker_metrics_snapshot(shared, &metadata) {
-            Ok(metrics) => metrics,
-            Err(err) => {
-                return Some(build_runtime_proxy_json_error_response(
-                    500,
-                    "internal_error",
-                    &err.to_string(),
-                ));
-            }
-        };
-        let snapshot = runtime_broker_prometheus_snapshot(&metadata, &metrics);
-        let body = runtime_metrics::render_runtime_broker_prometheus(&snapshot);
-        return Some(build_runtime_proxy_prometheus_response(200, body));
-    }
-
+fn runtime_broker_activation_profile(
+    request: &mut tiny_http::Request,
+) -> std::result::Result<String, tiny_http::ResponseBox> {
     if request.method().as_str() != "POST" {
-        return Some(build_runtime_proxy_json_error_response(
+        return Err(build_runtime_proxy_json_error_response(
             405,
             "method_not_allowed",
             "runtime broker activation requires POST",
         ));
     }
-
     let mut body = Vec::new();
     if let Err(err) = request.as_reader().read_to_end(&mut body) {
-        return Some(build_runtime_proxy_json_error_response(
+        return Err(build_runtime_proxy_json_error_response(
             400,
             "invalid_request",
             &format!("failed to read runtime broker activation body: {err}"),
         ));
     }
-    let current_profile = match serde_json::from_slice::<serde_json::Value>(&body)
+    serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
         .and_then(|value| {
             value
@@ -352,27 +355,38 @@ pub(super) fn handle_runtime_proxy_admin_request(
                 .map(str::to_string)
         })
         .filter(|value| !value.is_empty())
-    {
-        Some(current_profile) => current_profile,
-        None => {
-            return Some(build_runtime_proxy_json_error_response(
+        .ok_or_else(|| {
+            build_runtime_proxy_json_error_response(
                 400,
                 "invalid_request",
                 "runtime broker activation requires a non-empty current_profile",
-            ));
-        }
-    };
+            )
+        })
+}
 
-    let update_result = (|| -> Result<()> {
-        let mut runtime = shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        runtime.current_profile = current_profile.clone();
-        runtime.state.active_profile = Some(current_profile.clone());
-        Ok(())
-    })();
-    if let Err(err) = update_result {
+fn apply_runtime_broker_activation(
+    shared: &RuntimeRotationProxyShared,
+    current_profile: &str,
+) -> Result<()> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    runtime.current_profile = current_profile.to_string();
+    runtime.state.active_profile = Some(current_profile.to_string());
+    Ok(())
+}
+
+fn runtime_broker_activation_response(
+    request: &mut tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    metadata: RuntimeBrokerMetadata,
+) -> Option<tiny_http::ResponseBox> {
+    let current_profile = match runtime_broker_activation_profile(request) {
+        Ok(current_profile) => current_profile,
+        Err(response) => return Some(response),
+    };
+    if let Err(err) = apply_runtime_broker_activation(shared, &current_profile) {
         return Some(build_runtime_proxy_json_error_response(
             500,
             "internal_error",
@@ -402,6 +416,40 @@ pub(super) fn handle_runtime_proxy_admin_request(
         })
         .to_string(),
     ))
+}
+
+pub(super) fn handle_runtime_proxy_admin_request(
+    request: &mut tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Option<tiny_http::ResponseBox> {
+    let path = path_without_query(request.url());
+    let route = RuntimeBrokerAdminRoute::from_path(path)?;
+
+    let Some(metadata) = runtime_broker_metadata_for_log_path(&shared.log_path) else {
+        return Some(build_runtime_proxy_json_error_response(
+            404,
+            "not_found",
+            "runtime broker admin endpoint is not enabled for this proxy",
+        ));
+    };
+    if runtime_proxy_admin_token(request).as_deref() != Some(metadata.admin_token.as_str()) {
+        return Some(build_runtime_proxy_json_error_response(
+            403,
+            "forbidden",
+            "missing or invalid runtime broker admin token",
+        ));
+    }
+
+    match route {
+        RuntimeBrokerAdminRoute::Health => runtime_broker_health_response(shared, metadata),
+        RuntimeBrokerAdminRoute::Metrics => runtime_broker_metrics_json_response(shared, &metadata),
+        RuntimeBrokerAdminRoute::MetricsPrometheus => {
+            runtime_broker_metrics_prometheus_response(shared, &metadata)
+        }
+        RuntimeBrokerAdminRoute::Activate => {
+            runtime_broker_activation_response(request, shared, metadata)
+        }
+    }
 }
 
 pub(super) fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
@@ -906,27 +954,30 @@ pub(super) fn wait_for_runtime_broker_ready(
     bail!("timed out waiting for runtime broker readiness");
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct RuntimeBrokerSpawnConfig<'a> {
+    current_profile: &'a str,
+    upstream_base_url: &'a str,
+    include_code_review: bool,
+    broker_key: &'a str,
+    instance_token: &'a str,
+    admin_token: &'a str,
+    listen_addr: Option<&'a str>,
+}
+
 pub(super) fn spawn_runtime_broker_process(
     paths: &AppPaths,
-    current_profile: &str,
-    upstream_base_url: &str,
-    include_code_review: bool,
-    broker_key: &str,
-    instance_token: &str,
-    admin_token: &str,
-    listen_addr: Option<&str>,
+    config: RuntimeBrokerSpawnConfig<'_>,
 ) -> Result<()> {
     let current_exe = env::current_exe().context("failed to locate current prodex binary")?;
     Command::new(current_exe)
         .args(runtime_broker_process_args(
-            current_profile,
-            upstream_base_url,
-            include_code_review,
-            broker_key,
-            instance_token,
-            admin_token,
-            listen_addr,
+            config.current_profile,
+            config.upstream_base_url,
+            config.include_code_review,
+            config.broker_key,
+            config.instance_token,
+            config.admin_token,
+            config.listen_addr,
         ))
         .env("PRODEX_HOME", &paths.root)
         .stdin(Stdio::null())
@@ -1003,13 +1054,15 @@ pub(super) fn ensure_runtime_rotation_proxy_endpoint(
     let admin_token = runtime_random_token("admin");
     spawn_runtime_broker_process(
         paths,
-        current_profile,
-        upstream_base_url,
-        include_code_review,
-        &broker_key,
-        &instance_token,
-        &admin_token,
-        preferred_listen_addr.as_deref(),
+        RuntimeBrokerSpawnConfig {
+            current_profile,
+            upstream_base_url,
+            include_code_review,
+            broker_key: &broker_key,
+            instance_token: &instance_token,
+            admin_token: &admin_token,
+            listen_addr: preferred_listen_addr.as_deref(),
+        },
     )?;
     let registry =
         wait_for_runtime_broker_ready(&broker_client, paths, &broker_key, &instance_token)?;

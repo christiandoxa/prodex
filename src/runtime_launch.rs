@@ -76,18 +76,41 @@ pub(super) trait RuntimeLaunchStrategy {
     ) -> Result<RuntimeLaunchPlan>;
 }
 
+#[derive(Debug)]
+struct RuntimeLaunchExecution {
+    plan: RuntimeLaunchPlan,
+    runtime_proxy: Option<RuntimeProxyEndpoint>,
+}
+
 pub(super) fn execute_runtime_launch<S>(strategy: S) -> Result<()>
 where
     S: RuntimeLaunchStrategy,
 {
+    let execution = build_runtime_launch_execution(&strategy)?;
+    exit_with_status(run_runtime_launch_execution(execution)?)
+}
+
+fn build_runtime_launch_execution<S>(strategy: &S) -> Result<RuntimeLaunchExecution>
+where
+    S: RuntimeLaunchStrategy,
+{
     let prepared = prepare_runtime_launch(strategy.runtime_request())?;
-    let runtime_proxy_ref = prepared.runtime_proxy.as_ref();
-    let plan = strategy.build_plan(&prepared, runtime_proxy_ref)?;
-    let runtime_proxy = prepared.runtime_proxy;
+    let plan = strategy.build_plan(&prepared, prepared.runtime_proxy.as_ref())?;
+    Ok(RuntimeLaunchExecution {
+        plan,
+        runtime_proxy: prepared.runtime_proxy,
+    })
+}
+
+fn run_runtime_launch_execution(execution: RuntimeLaunchExecution) -> Result<ExitStatus> {
+    let RuntimeLaunchExecution {
+        plan,
+        runtime_proxy,
+    } = execution;
     let status = run_child_plan(&plan.child, runtime_proxy.as_ref());
     drop(runtime_proxy);
     cleanup_runtime_launch_plan(&plan);
-    exit_with_status(status?)
+    status
 }
 
 pub(super) fn runtime_proxy_codex_passthrough_args(

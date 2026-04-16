@@ -104,6 +104,61 @@ struct ImportedProfilesCommit {
 }
 
 #[derive(Debug)]
+struct ImportedProfilesTransaction {
+    imported_names: Vec<String>,
+    updated_existing_names: Vec<String>,
+    committed_homes: Vec<PathBuf>,
+    auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
+    previous_active_profile: Option<String>,
+}
+
+impl ImportedProfilesTransaction {
+    fn new(
+        previous_active_profile: Option<String>,
+        staged_profile_count: usize,
+        auth_update_count: usize,
+    ) -> Self {
+        Self {
+            imported_names: Vec::with_capacity(staged_profile_count),
+            updated_existing_names: Vec::with_capacity(auth_update_count),
+            committed_homes: Vec::with_capacity(staged_profile_count),
+            auth_updates: Vec::with_capacity(auth_update_count),
+            previous_active_profile,
+        }
+    }
+
+    fn record_existing_auth_update(&mut self, update: ImportedExistingProfileAuthUpdate) {
+        self.updated_existing_names
+            .push(update.profile_name.clone());
+        self.auth_updates.push(update);
+    }
+
+    fn record_imported_profile(&mut self, name: String, final_home: PathBuf) {
+        self.committed_homes.push(final_home);
+        self.imported_names.push(name);
+    }
+
+    fn rollback_partial(&self, state: &mut AppState) {
+        for name in &self.imported_names {
+            state.profiles.remove(name);
+        }
+        rollback_imported_auth_updates(state, &self.auth_updates);
+        state.active_profile = self.previous_active_profile.clone();
+        remove_committed_import_homes(&self.committed_homes);
+    }
+
+    fn into_commit(self) -> ImportedProfilesCommit {
+        ImportedProfilesCommit {
+            imported_names: self.imported_names,
+            updated_existing_names: self.updated_existing_names,
+            committed_homes: self.committed_homes,
+            auth_updates: self.auth_updates,
+            previous_active_profile: self.previous_active_profile,
+        }
+    }
+}
+
+#[derive(Debug)]
 enum ImportEmailTarget {
     Existing(String),
     PendingNew(usize),
@@ -600,68 +655,118 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
 
-    let target_names = if args.all {
-        state.profiles.keys().cloned().collect::<Vec<_>>()
-    } else {
-        let Some(name) = args.name.as_deref() else {
-            bail!("provide a profile name or pass --all");
-        };
-        if !state.profiles.contains_key(name) {
-            bail!("profile '{}' does not exist", name);
-        }
-        vec![name.to_string()]
-    };
+    let target_names = resolve_remove_profile_targets(&state, &args)?;
+    validate_bulk_profile_home_deletion(&state, &target_names, &args)?;
+    let removed_profiles = remove_profiles_from_state(&mut state, &target_names, args.delete_home)?;
+    prune_removed_profile_metadata(&mut state, &target_names);
+    state.save(&paths)?;
+    persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
 
-    if args.all && args.delete_home {
-        let external_profiles = target_names
-            .iter()
-            .filter(|name| {
-                state
-                    .profiles
-                    .get(*name)
-                    .is_some_and(|profile| !profile.managed)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        if !external_profiles.is_empty() {
-            bail!(
-                "--delete-home with --all refuses to delete external profiles: {}",
-                external_profiles.join(", ")
-            );
-        }
+    if args.all {
+        print_bulk_profile_removal_result(&state, &removed_profiles);
+        return Ok(());
     }
 
-    let removed_names = target_names.iter().cloned().collect::<BTreeSet<_>>();
+    let removed_profile = removed_profiles
+        .into_iter()
+        .next()
+        .expect("single-profile removal should record the removed profile");
+    print_single_profile_removal_result(&state, removed_profile);
+
+    Ok(())
+}
+
+fn resolve_remove_profile_targets(
+    state: &AppState,
+    args: &RemoveProfileArgs,
+) -> Result<Vec<String>> {
+    if args.all {
+        return Ok(state.profiles.keys().cloned().collect::<Vec<_>>());
+    }
+
+    let Some(name) = args.name.as_deref() else {
+        bail!("provide a profile name or pass --all");
+    };
+    if !state.profiles.contains_key(name) {
+        bail!("profile '{}' does not exist", name);
+    }
+    Ok(vec![name.to_string()])
+}
+
+fn validate_bulk_profile_home_deletion(
+    state: &AppState,
+    target_names: &[String],
+    args: &RemoveProfileArgs,
+) -> Result<()> {
+    if !args.all || !args.delete_home {
+        return Ok(());
+    }
+
+    let external_profiles = target_names
+        .iter()
+        .filter(|name| {
+            state
+                .profiles
+                .get(*name)
+                .is_some_and(|profile| !profile.managed)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !external_profiles.is_empty() {
+        bail!(
+            "--delete-home with --all refuses to delete external profiles: {}",
+            external_profiles.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+fn remove_profiles_from_state(
+    state: &mut AppState,
+    target_names: &[String],
+    delete_home: bool,
+) -> Result<Vec<RemovedProfileRecord>> {
     let mut removed_profiles = Vec::with_capacity(target_names.len());
-    for name in &target_names {
+    for name in target_names {
         let profile = state
             .profiles
             .remove(name)
             .with_context(|| format!("profile '{}' disappeared from state", name))?;
-
-        let should_delete_home = profile.managed || args.delete_home;
-        if should_delete_home {
-            if !profile.managed && args.delete_home {
-                bail!(
-                    "refusing to delete external path {}",
-                    profile.codex_home.display()
-                );
-            }
-            if profile.codex_home.exists() {
-                fs::remove_dir_all(&profile.codex_home).with_context(|| {
-                    format!("failed to delete {}", profile.codex_home.display())
-                })?;
-            }
-        }
-
+        let deleted_home = remove_profile_home_if_requested(&profile, delete_home)?;
         removed_profiles.push(RemovedProfileRecord {
             name: name.clone(),
             managed: profile.managed,
-            deleted_home: should_delete_home,
+            deleted_home,
             codex_home: profile.codex_home,
         });
     }
 
+    Ok(removed_profiles)
+}
+
+fn remove_profile_home_if_requested(profile: &ProfileEntry, delete_home: bool) -> Result<bool> {
+    let should_delete_home = profile.managed || delete_home;
+    if !should_delete_home {
+        return Ok(false);
+    }
+
+    if !profile.managed && delete_home {
+        bail!(
+            "refusing to delete external path {}",
+            profile.codex_home.display()
+        );
+    }
+    if profile.codex_home.exists() {
+        fs::remove_dir_all(&profile.codex_home)
+            .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
+    }
+
+    Ok(true)
+}
+
+fn prune_removed_profile_metadata(state: &mut AppState, target_names: &[String]) {
+    let removed_names = target_names.iter().cloned().collect::<BTreeSet<_>>();
     state
         .last_run_selected_at
         .retain(|profile_name, _| !removed_names.contains(profile_name));
@@ -679,63 +784,57 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     {
         state.active_profile = state.profiles.keys().next().cloned();
     }
+}
 
-    state.save(&paths)?;
-    persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
+fn print_bulk_profile_removal_result(state: &AppState, removed_profiles: &[RemovedProfileRecord]) {
+    audit_log_event_best_effort(
+        "profile",
+        "remove",
+        "success",
+        serde_json::json!({
+            "all": true,
+            "removed_count": removed_profiles.len(),
+            "profile_names": removed_profiles.iter().map(|profile| profile.name.clone()).collect::<Vec<_>>(),
+            "deleted_home_count": removed_profiles.iter().filter(|profile| profile.deleted_home).count(),
+            "active_profile": state.active_profile.clone(),
+        }),
+    );
 
-    if args.all {
-        audit_log_event_best_effort(
-            "profile",
-            "remove",
-            "success",
-            serde_json::json!({
-                "all": true,
-                "removed_count": removed_profiles.len(),
-                "profile_names": removed_profiles.iter().map(|profile| profile.name.clone()).collect::<Vec<_>>(),
-                "deleted_home_count": removed_profiles.iter().filter(|profile| profile.deleted_home).count(),
-                "active_profile": state.active_profile.clone(),
-            }),
-        );
-
-        let mut fields = vec![
-            (
-                "Result".to_string(),
-                format!("Removed {} profile(s).", removed_profiles.len()),
-            ),
-            (
-                "Deleted homes".to_string(),
-                removed_profiles
-                    .iter()
-                    .filter(|profile| profile.deleted_home)
-                    .count()
-                    .to_string(),
-            ),
-            (
-                "Active".to_string(),
-                state
-                    .active_profile
-                    .clone()
-                    .unwrap_or_else(|| "cleared".to_string()),
-            ),
-        ];
-        if !removed_profiles.is_empty() {
-            fields.push((
-                "Profiles".to_string(),
-                removed_profiles
-                    .iter()
-                    .map(|profile| profile.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ));
-        }
-        print_panel("Profiles Removed", &fields);
-        return Ok(());
+    let mut fields = vec![
+        (
+            "Result".to_string(),
+            format!("Removed {} profile(s).", removed_profiles.len()),
+        ),
+        (
+            "Deleted homes".to_string(),
+            removed_profiles
+                .iter()
+                .filter(|profile| profile.deleted_home)
+                .count()
+                .to_string(),
+        ),
+        (
+            "Active".to_string(),
+            state
+                .active_profile
+                .clone()
+                .unwrap_or_else(|| "cleared".to_string()),
+        ),
+    ];
+    if !removed_profiles.is_empty() {
+        fields.push((
+            "Profiles".to_string(),
+            removed_profiles
+                .iter()
+                .map(|profile| profile.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ));
     }
+    print_panel("Profiles Removed", &fields);
+}
 
-    let removed_profile = removed_profiles
-        .into_iter()
-        .next()
-        .expect("single-profile removal should record the removed profile");
+fn print_single_profile_removal_result(state: &AppState, removed_profile: RemovedProfileRecord) {
     audit_log_event_best_effort(
         "profile",
         "remove",
@@ -771,8 +870,6 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         ),
     ];
     print_panel("Profile Removed", &fields);
-
-    Ok(())
 }
 
 pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()> {
@@ -876,48 +973,72 @@ fn login_into_profile(
     codex_args: &[OsString],
 ) -> Result<ExitStatus> {
     let profile_name = resolve_profile_name(state, Some(profile_name))?;
-    let profile = state
-        .profiles
-        .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let codex_home = profile.codex_home.clone();
-    let managed = profile.managed;
-
-    if managed {
-        prepare_managed_codex_home(paths, &codex_home)?;
-    } else {
-        create_codex_home_if_missing(&codex_home)?;
-    }
-
+    let codex_home = prepare_profile_login_home(paths, state, &profile_name)?;
     let status = run_codex_login(&codex_home, codex_args)?;
     if !status.success() {
         return Ok(status);
     }
 
-    if let Ok(email) = fetch_profile_email(&codex_home)
-        && let Some(profile) = state.profiles.get_mut(&profile_name)
-    {
-        profile.email = Some(email);
-    }
+    finish_named_profile_login(paths, state, &profile_name, &codex_home)?;
+    Ok(status)
+}
 
-    let account_email = state
+fn prepare_profile_login_home(
+    paths: &AppPaths,
+    state: &AppState,
+    profile_name: &str,
+) -> Result<PathBuf> {
+    let profile = state
         .profiles
-        .get(&profile_name)
-        .and_then(|profile| profile.email.clone())
-        .unwrap_or_else(|| "-".to_string());
-    state.active_profile = Some(profile_name.clone());
+        .get(profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    let codex_home = profile.codex_home.clone();
+    if profile.managed {
+        prepare_managed_codex_home(paths, &codex_home)?;
+    } else {
+        create_codex_home_if_missing(&codex_home)?;
+    }
+    Ok(codex_home)
+}
+
+fn finish_named_profile_login(
+    paths: &AppPaths,
+    state: &mut AppState,
+    profile_name: &str,
+    codex_home: &Path,
+) -> Result<()> {
+    refresh_profile_email_from_home(state, profile_name, codex_home);
+    let account_email = profile_email_label(state, profile_name);
+    state.active_profile = Some(profile_name.to_string());
     state.save(paths)?;
+
     let fields = vec![
         (
             "Result".to_string(),
             format!("Logged in successfully for profile '{profile_name}'."),
         ),
         ("Account".to_string(), account_email),
-        ("Profile".to_string(), profile_name),
+        ("Profile".to_string(), profile_name.to_string()),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
     print_panel("Login", &fields);
-    Ok(status)
+    Ok(())
+}
+
+fn refresh_profile_email_from_home(state: &mut AppState, profile_name: &str, codex_home: &Path) {
+    if let Ok(email) = fetch_profile_email(codex_home)
+        && let Some(profile) = state.profiles.get_mut(profile_name)
+    {
+        profile.email = Some(email);
+    }
+}
+
+fn profile_email_label(state: &AppState, profile_name: &str) -> String {
+    state
+        .profiles
+        .get(profile_name)
+        .and_then(|profile| profile.email.clone())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn login_with_auto_profile(
@@ -941,39 +1062,62 @@ fn login_with_auto_profile(
     let auth_json = required_auth_json_text(&login_home)?;
 
     if let Some(profile_name) = find_profile_by_email(state, &email)? {
-        let updated = update_existing_profile_auth(
+        finish_auto_login_for_existing_profile(
             paths,
             state,
+            &login_home,
             &profile_name,
-            Some(&email),
+            &email,
             &auth_json,
-            true,
         )?;
-        remove_dir_if_exists(&login_home)?;
-        state.save(paths)?;
-
-        let fields = vec![
-            (
-                "Result".to_string(),
-                format!(
-                    "Logged in as {email}. Updated auth token for existing profile '{}'.",
-                    updated.profile_name
-                ),
-            ),
-            ("Account".to_string(), email),
-            ("Profile".to_string(), updated.profile_name),
-            (
-                "CODEX_HOME".to_string(),
-                updated.codex_home.display().to_string(),
-            ),
-        ];
-        print_panel("Login", &fields);
         return Ok(status);
     }
 
-    let profile_name = unique_profile_name_for_email(paths, state, &email);
+    finish_auto_login_for_new_profile(paths, state, &login_home, &email)?;
+    Ok(status)
+}
+
+fn finish_auto_login_for_existing_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    login_home: &Path,
+    profile_name: &str,
+    email: &str,
+    auth_json: &str,
+) -> Result<()> {
+    let updated =
+        update_existing_profile_auth(paths, state, profile_name, Some(email), auth_json, true)?;
+    remove_dir_if_exists(login_home)?;
+    state.save(paths)?;
+
+    let fields = vec![
+        (
+            "Result".to_string(),
+            format!(
+                "Logged in as {email}. Updated auth token for existing profile '{}'.",
+                updated.profile_name
+            ),
+        ),
+        ("Account".to_string(), email.to_string()),
+        ("Profile".to_string(), updated.profile_name),
+        (
+            "CODEX_HOME".to_string(),
+            updated.codex_home.display().to_string(),
+        ),
+    ];
+    print_panel("Login", &fields);
+    Ok(())
+}
+
+fn finish_auto_login_for_new_profile(
+    paths: &AppPaths,
+    state: &mut AppState,
+    login_home: &Path,
+    email: &str,
+) -> Result<()> {
+    let profile_name = unique_profile_name_for_email(paths, state, email);
     let codex_home = absolutize(paths.managed_profiles_root.join(&profile_name))?;
-    persist_login_home(&login_home, &codex_home)?;
+    persist_login_home(login_home, &codex_home)?;
     prepare_managed_codex_home(paths, &codex_home)?;
 
     state.profiles.insert(
@@ -981,7 +1125,7 @@ fn login_with_auto_profile(
         ProfileEntry {
             codex_home: codex_home.clone(),
             managed: true,
-            email: Some(email.clone()),
+            email: Some(email.to_string()),
         },
     );
     state.active_profile = Some(profile_name.clone());
@@ -992,12 +1136,12 @@ fn login_with_auto_profile(
             "Result".to_string(),
             format!("Logged in as {email}. Created profile '{profile_name}'."),
         ),
-        ("Account".to_string(), email),
+        ("Account".to_string(), email.to_string()),
         ("Profile".to_string(), profile_name),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
     print_panel("Login", &fields);
-    Ok(status)
+    Ok(())
 }
 
 fn run_codex_login(codex_home: &Path, codex_args: &[OsString]) -> Result<ExitStatus> {
@@ -1359,102 +1503,107 @@ fn import_profile_export_payload(
     payload: &ProfileExportPayload,
 ) -> Result<ImportedProfilesCommit> {
     let prepared = stage_imported_profiles(paths, state, payload)?;
-    let previous_active_profile = state.active_profile.clone();
-    let mut committed_homes = Vec::with_capacity(prepared.staged_profiles.len());
-    let mut imported_names = Vec::with_capacity(prepared.staged_profiles.len());
-    let mut updated_existing_names = Vec::with_capacity(prepared.auth_updates.len());
-    let mut auth_updates = Vec::with_capacity(prepared.auth_updates.len());
+    let mut transaction = ImportedProfilesTransaction::new(
+        state.active_profile.clone(),
+        prepared.staged_profiles.len(),
+        prepared.auth_updates.len(),
+    );
 
-    let result = (|| -> Result<()> {
-        for update in &prepared.auth_updates {
-            let previous = state
-                .profiles
-                .get(&update.target_profile_name)
-                .with_context(|| format!("profile '{}' is missing", update.target_profile_name))?
-                .clone();
-            let previous_auth_json =
-                read_auth_json_text(&previous.codex_home).with_context(|| {
-                    format!(
-                        "failed to read {}",
-                        secret_store::auth_json_path(&previous.codex_home).display()
-                    )
-                })?;
-            let updated = update_existing_profile_auth(
-                paths,
-                state,
-                &update.target_profile_name,
-                update.email.as_deref(),
-                &update.auth_json,
-                false,
-            )?;
-            updated_existing_names.push(updated.profile_name.clone());
-            auth_updates.push(ImportedExistingProfileAuthUpdate {
-                profile_name: updated.profile_name,
-                codex_home: updated.codex_home,
-                previous_auth_json,
-                previous_email: previous.email,
-            });
-        }
-
-        for staged in &prepared.staged_profiles {
-            fs::rename(&staged.staging_home, &staged.final_home).with_context(|| {
-                format!(
-                    "failed to finalize imported profile home {}",
-                    staged.final_home.display()
-                )
-            })?;
-            committed_homes.push(staged.final_home.clone());
-            imported_names.push(staged.name.clone());
-            state.profiles.insert(
-                staged.name.clone(),
-                ProfileEntry {
-                    codex_home: staged.final_home.clone(),
-                    managed: true,
-                    email: staged.email.clone(),
-                },
-            );
-        }
-
-        if state.active_profile.is_none()
-            && let Some(active_profile) = payload.active_profile.as_ref()
-            && let Some(resolved_profile_name) = prepared.resolved_profile_names.get(active_profile)
-        {
-            state.active_profile = Some(resolved_profile_name.clone());
-        }
-        Ok(())
-    })();
-
-    if let Err(err) = result {
-        for name in &imported_names {
-            state.profiles.remove(name);
-        }
-        for update in auth_updates.iter().rev() {
-            if let Some(profile) = state.profiles.get_mut(&update.profile_name) {
-                profile.email = update.previous_email.clone();
-            }
-            if let Some(previous_auth_json) = update.previous_auth_json.as_deref() {
-                let _ = write_secret_text_file(
-                    &secret_store::auth_json_path(&update.codex_home),
-                    previous_auth_json,
-                );
-            } else {
-                let _ = fs::remove_file(secret_store::auth_json_path(&update.codex_home));
-            }
-        }
-        state.active_profile = previous_active_profile.clone();
-        for home in committed_homes.iter().rev() {
-            let _ = fs::remove_dir_all(home);
-        }
+    if let Err(err) = apply_imported_profiles(paths, state, payload, &prepared, &mut transaction) {
+        transaction.rollback_partial(state);
         return Err(err);
     }
 
-    Ok(ImportedProfilesCommit {
-        imported_names,
-        updated_existing_names,
-        committed_homes,
-        auth_updates,
-        previous_active_profile,
-    })
+    Ok(transaction.into_commit())
+}
+
+fn apply_imported_profiles(
+    paths: &AppPaths,
+    state: &mut AppState,
+    payload: &ProfileExportPayload,
+    prepared: &PreparedImportedProfiles,
+    transaction: &mut ImportedProfilesTransaction,
+) -> Result<()> {
+    apply_imported_existing_auth_updates(paths, state, &prepared.auth_updates, transaction)?;
+    finalize_staged_imported_profiles(state, &prepared.staged_profiles, transaction)?;
+    activate_imported_profile_from_payload(state, payload, prepared);
+    Ok(())
+}
+
+fn apply_imported_existing_auth_updates(
+    paths: &AppPaths,
+    state: &mut AppState,
+    prepared_updates: &[PreparedImportedProfileAuthUpdate],
+    transaction: &mut ImportedProfilesTransaction,
+) -> Result<()> {
+    for update in prepared_updates {
+        let previous = state
+            .profiles
+            .get(&update.target_profile_name)
+            .with_context(|| format!("profile '{}' is missing", update.target_profile_name))?
+            .clone();
+        let previous_auth_json = read_auth_json_text(&previous.codex_home).with_context(|| {
+            format!(
+                "failed to read {}",
+                secret_store::auth_json_path(&previous.codex_home).display()
+            )
+        })?;
+        let updated = update_existing_profile_auth(
+            paths,
+            state,
+            &update.target_profile_name,
+            update.email.as_deref(),
+            &update.auth_json,
+            false,
+        )?;
+        transaction.record_existing_auth_update(ImportedExistingProfileAuthUpdate {
+            profile_name: updated.profile_name,
+            codex_home: updated.codex_home,
+            previous_auth_json,
+            previous_email: previous.email,
+        });
+    }
+
+    Ok(())
+}
+
+fn finalize_staged_imported_profiles(
+    state: &mut AppState,
+    staged_profiles: &[StagedImportedProfile],
+    transaction: &mut ImportedProfilesTransaction,
+) -> Result<()> {
+    for staged in staged_profiles {
+        fs::rename(&staged.staging_home, &staged.final_home).with_context(|| {
+            format!(
+                "failed to finalize imported profile home {}",
+                staged.final_home.display()
+            )
+        })?;
+        transaction.record_imported_profile(staged.name.clone(), staged.final_home.clone());
+        state.profiles.insert(
+            staged.name.clone(),
+            ProfileEntry {
+                codex_home: staged.final_home.clone(),
+                managed: true,
+                email: staged.email.clone(),
+            },
+        );
+    }
+
+    Ok(())
+}
+
+fn activate_imported_profile_from_payload(
+    state: &mut AppState,
+    payload: &ProfileExportPayload,
+    prepared: &PreparedImportedProfiles,
+) {
+    if state.active_profile.is_none()
+        && let Some(active_profile) = payload.active_profile.as_ref()
+        && let Some(resolved_profile_name) = prepared.resolved_profile_names.get(active_profile)
+    {
+        state.active_profile = Some(resolved_profile_name.clone());
+    }
 }
 
 fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCommit) {
@@ -1468,7 +1617,16 @@ fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCom
             .session_profile_bindings
             .retain(|_, binding| binding.profile_name != *name);
     }
-    for update in commit.auth_updates.iter().rev() {
+    rollback_imported_auth_updates(state, &commit.auth_updates);
+    state.active_profile = commit.previous_active_profile.clone();
+    remove_committed_import_homes(&commit.committed_homes);
+}
+
+fn rollback_imported_auth_updates(
+    state: &mut AppState,
+    auth_updates: &[ImportedExistingProfileAuthUpdate],
+) {
+    for update in auth_updates.iter().rev() {
         if let Some(profile) = state.profiles.get_mut(&update.profile_name) {
             profile.email = update.previous_email.clone();
         }
@@ -1481,8 +1639,10 @@ fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCom
             let _ = fs::remove_file(secret_store::auth_json_path(&update.codex_home));
         }
     }
-    state.active_profile = commit.previous_active_profile.clone();
-    for home in commit.committed_homes.iter().rev() {
+}
+
+fn remove_committed_import_homes(committed_homes: &[PathBuf]) {
+    for home in committed_homes.iter().rev() {
         let _ = fs::remove_dir_all(home);
     }
 }

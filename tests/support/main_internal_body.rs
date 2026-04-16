@@ -23332,39 +23332,45 @@ fn runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous
 fn runtime_quota_blocked_tool_output_continuations_never_release_affinity() {
     assert!(
         !runtime_quota_blocked_affinity_is_releasable(
-            RuntimeRouteKind::Responses,
-            "main",
-            None,
-            Some("main"),
-            None,
-            None,
-            true,
+            RuntimeCandidateAffinity::new(
+                RuntimeRouteKind::Responses,
+                "main",
+                None,
+                Some("main"),
+                None,
+                None,
+                true,
+            ),
             true,
         ),
         "tool-output continuations with previous_response affinity must stay pinned"
     );
     assert!(
         !runtime_quota_blocked_affinity_is_releasable(
-            RuntimeRouteKind::Websocket,
-            "main",
-            None,
-            None,
-            None,
-            Some("main"),
-            false,
+            RuntimeCandidateAffinity::new(
+                RuntimeRouteKind::Websocket,
+                "main",
+                None,
+                None,
+                None,
+                Some("main"),
+                false,
+            ),
             true,
         ),
         "tool-output continuations with only session affinity must stay pinned"
     );
     assert!(
         runtime_quota_blocked_affinity_is_releasable(
-            RuntimeRouteKind::Websocket,
-            "main",
-            None,
-            None,
-            None,
-            Some("main"),
-            false,
+            RuntimeCandidateAffinity::new(
+                RuntimeRouteKind::Websocket,
+                "main",
+                None,
+                None,
+                None,
+                Some("main"),
+                false,
+            ),
             false,
         ),
         "ordinary session-bound continuations should remain releasable on quota-blocked pre-commit failures"
@@ -39064,16 +39070,19 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
         .to_string()
         .into_bytes(),
     };
+    let excluded_profiles = BTreeSet::new();
     assert!(
         !runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-            45,
-            &request,
-            &shared,
-            &BTreeSet::new(),
-            RuntimeRouteKind::Responses,
-            Instant::now(),
-            true,
-            Some("main"),
+            RuntimeInflightReliefWait::new(
+                45,
+                &request,
+                &shared,
+                &excluded_profiles,
+                RuntimeRouteKind::Responses,
+                Instant::now(),
+                true,
+                Some("main"),
+            ),
         )
         .expect("owner-scoped wait should complete"),
         "non-owner release should not count as useful relief"

@@ -309,6 +309,15 @@ impl PanelFieldBuilder {
     }
 }
 
+#[derive(Debug)]
+struct QuotaReportViewData {
+    email: String,
+    plan: String,
+    main: String,
+    status: String,
+    resets: Option<String>,
+}
+
 pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
     let jobs = state
         .profiles
@@ -510,79 +519,65 @@ pub(crate) fn render_quota_reports_window_with_layout(
     let column_widths = quota_report_column_widths(total_width);
     let pool_summary =
         render_quota_pool_summary_lines(&collect_quota_pool_aggregate(reports), total_width);
-
-    let mut sections = Vec::new();
-
-    for report in sort_quota_reports_for_display(reports) {
-        let active = if report.active { "*" } else { "" }.to_string();
-        let auth = report.auth.label.clone();
-
-        let (email, plan, main, status, resets) = match &report.result {
-            Ok(usage) => {
-                let blocked = collect_blocked_limits(usage, false);
-                let status = if blocked.is_empty() {
-                    "Ready".to_string()
-                } else {
-                    format!("Blocked: {}", format_blocked_limits(&blocked))
-                };
-                (
-                    display_optional(usage.email.as_deref()).to_string(),
-                    display_optional(usage.plan_type.as_deref()).to_string(),
-                    format_main_windows_compact(usage),
-                    status,
-                    Some(format!("resets: {}", format_main_reset_summary(usage))),
-                )
-            }
-            Err(err) => (
-                "-".to_string(),
-                "-".to_string(),
-                "-".to_string(),
-                format!("Error: {}", first_line_of_error(err)),
-                Some("resets: unavailable".to_string()),
-            ),
-        };
-
-        let mut section = Vec::new();
-        section.push(format!(
-            "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
-            fit_cell(&report.name, column_widths.profile),
-            CLI_TABLE_GAP,
-            fit_cell(&active, column_widths.current),
-            CLI_TABLE_GAP,
-            fit_cell(&auth, column_widths.auth),
-            CLI_TABLE_GAP,
-            fit_cell(&email, column_widths.account),
-            CLI_TABLE_GAP,
-            fit_cell(&plan, column_widths.plan),
-            CLI_TABLE_GAP,
-            fit_cell(&main, column_widths.remaining),
-            name_w = column_widths.profile,
-            act_w = column_widths.current,
-            auth_w = column_widths.auth,
-            email_w = column_widths.account,
-            plan_w = column_widths.plan,
-            main_w = column_widths.remaining,
-        ));
-        section.extend(
-            wrap_text(
-                &format!("status: {status}"),
-                total_width.saturating_sub(2).max(1),
-            )
-            .into_iter()
-            .map(|line| format!("  {line}")),
-        );
-        if detail && let Some(resets) = resets.as_deref() {
-            section.extend(
-                wrap_text(resets, total_width.saturating_sub(2).max(1))
-                    .into_iter()
-                    .map(|line| format!("  {line}")),
-            );
-        }
-        section.push(String::new());
-        sections.push(section);
+    let sections = build_quota_report_sections(reports, column_widths, detail, total_width);
+    let header = render_quota_report_header(column_widths);
+    let has_pool_summary = !pool_summary.is_empty();
+    let mut output =
+        render_quota_report_window_header(total_width, &pool_summary, &header, has_pool_summary);
+    let total_profiles = sections.len();
+    let start_profile = if total_profiles == 0 {
+        0
+    } else {
+        start_profile.min(total_profiles.saturating_sub(1))
+    };
+    let shown_profiles = append_quota_report_sections(
+        &mut output,
+        &sections,
+        max_lines,
+        start_profile,
+        interactive_scroll_hint,
+    );
+    let hidden_before = start_profile;
+    let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
+    RenderedQuotaReportWindow {
+        output: output.join("\n"),
+        shown_profiles,
+        total_profiles,
+        start_profile,
+        hidden_before,
+        hidden_after,
     }
+}
 
-    let header = format!(
+fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
+    match &report.result {
+        Ok(usage) => {
+            let blocked = collect_blocked_limits(usage, false);
+            let status = if blocked.is_empty() {
+                "Ready".to_string()
+            } else {
+                format!("Blocked: {}", format_blocked_limits(&blocked))
+            };
+            QuotaReportViewData {
+                email: display_optional(usage.email.as_deref()).to_string(),
+                plan: display_optional(usage.plan_type.as_deref()).to_string(),
+                main: format_main_windows_compact(usage),
+                status,
+                resets: Some(format!("resets: {}", format_main_reset_summary(usage))),
+            }
+        }
+        Err(err) => QuotaReportViewData {
+            email: "-".to_string(),
+            plan: "-".to_string(),
+            main: "-".to_string(),
+            status: format!("Error: {}", first_line_of_error(err)),
+            resets: Some("resets: unavailable".to_string()),
+        },
+    }
+}
+
+fn render_quota_report_header(column_widths: QuotaReportColumnWidths) -> String {
+    format!(
         "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}",
         "PROFILE",
         "CUR",
@@ -596,71 +591,173 @@ pub(crate) fn render_quota_reports_window_with_layout(
         email_w = column_widths.account,
         plan_w = column_widths.plan,
         main_w = column_widths.remaining,
-    );
-    let has_pool_summary = !pool_summary.is_empty();
+    )
+}
+
+fn render_quota_report_window_header(
+    total_width: usize,
+    pool_summary: &[String],
+    header: &str,
+    has_pool_summary: bool,
+) -> Vec<String> {
     let mut output = vec![section_header_with_width("Quota Overview", total_width)];
-    output.extend(pool_summary);
+    output.extend(pool_summary.iter().cloned());
     if has_pool_summary {
         output.push(String::new());
     }
-    output.push(header.clone());
-    output.push("-".repeat(text_width(&header)));
-    let total_profiles = sections.len();
-    let start_profile = if total_profiles == 0 {
-        0
-    } else {
-        start_profile.min(total_profiles.saturating_sub(1))
-    };
-    let mut shown_profiles = 0_usize;
-    if let Some(max_lines) = max_lines {
-        let mut remaining = max_lines.saturating_sub(output.len());
+    output.push(header.to_string());
+    output.push("-".repeat(text_width(header)));
+    output
+}
 
-        for section in sections.iter().skip(start_profile) {
-            if section.len() > remaining {
-                break;
-            }
-            remaining = remaining.saturating_sub(section.len());
-            output.extend(section.iter().cloned());
-            shown_profiles += 1;
-        }
+fn build_quota_report_sections(
+    reports: &[QuotaReport],
+    column_widths: QuotaReportColumnWidths,
+    detail: bool,
+    total_width: usize,
+) -> Vec<Vec<String>> {
+    sort_quota_reports_for_display(reports)
+        .into_iter()
+        .map(|report| render_quota_report_section(report, column_widths, detail, total_width))
+        .collect()
+}
 
-        let hidden_before = start_profile;
-        let hidden_profiles = total_profiles.saturating_sub(shown_profiles);
-        let hidden_after = hidden_profiles.saturating_sub(hidden_before);
-        if hidden_before > 0 || hidden_after > 0 {
-            let notice = if interactive_scroll_hint {
-                let first_visible = start_profile.saturating_add(1);
-                let last_visible = start_profile.saturating_add(shown_profiles);
-                format!(
-                    "press Up/Down to scroll profiles ({first_visible}-{last_visible} of {total_profiles}; {hidden_before} above, {hidden_after} below)"
-                )
-            } else {
-                format!(
-                    "showing top {shown_profiles} of {total_profiles} profiles due to terminal height"
-                )
-            };
-            if remaining == 0 && !output.is_empty() {
-                output.pop();
-            }
-            output.push(String::new());
-            output.push(notice);
-        }
-    } else {
-        for section in sections {
-            output.extend(section);
-            shown_profiles += 1;
+fn render_quota_report_section(
+    report: &QuotaReport,
+    column_widths: QuotaReportColumnWidths,
+    detail: bool,
+    total_width: usize,
+) -> Vec<String> {
+    let view = quota_report_view_data(report);
+    let mut section = vec![render_quota_report_row(report, column_widths, &view)];
+    push_wrapped_quota_report_line(
+        &mut section,
+        &format!("status: {}", view.status),
+        total_width,
+    );
+    if detail && let Some(resets) = view.resets.as_deref() {
+        push_wrapped_quota_report_line(&mut section, resets, total_width);
+    }
+    section.push(String::new());
+    section
+}
+
+fn render_quota_report_row(
+    report: &QuotaReport,
+    column_widths: QuotaReportColumnWidths,
+    view: &QuotaReportViewData,
+) -> String {
+    let active = if report.active { "*" } else { "" };
+    format!(
+        "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
+        fit_cell(&report.name, column_widths.profile),
+        CLI_TABLE_GAP,
+        fit_cell(active, column_widths.current),
+        CLI_TABLE_GAP,
+        fit_cell(&report.auth.label, column_widths.auth),
+        CLI_TABLE_GAP,
+        fit_cell(&view.email, column_widths.account),
+        CLI_TABLE_GAP,
+        fit_cell(&view.plan, column_widths.plan),
+        CLI_TABLE_GAP,
+        fit_cell(&view.main, column_widths.remaining),
+        name_w = column_widths.profile,
+        act_w = column_widths.current,
+        auth_w = column_widths.auth,
+        email_w = column_widths.account,
+        plan_w = column_widths.plan,
+        main_w = column_widths.remaining,
+    )
+}
+
+fn push_wrapped_quota_report_line(section: &mut Vec<String>, line: &str, total_width: usize) {
+    section.extend(
+        wrap_text(line, total_width.saturating_sub(2).max(1))
+            .into_iter()
+            .map(|line| format!("  {line}")),
+    );
+}
+
+fn append_quota_report_sections(
+    output: &mut Vec<String>,
+    sections: &[Vec<String>],
+    max_lines: Option<usize>,
+    start_profile: usize,
+    interactive_scroll_hint: bool,
+) -> usize {
+    match max_lines {
+        Some(max_lines) => append_limited_quota_report_sections(
+            output,
+            sections,
+            max_lines,
+            start_profile,
+            interactive_scroll_hint,
+        ),
+        None => {
+            output.extend(sections.iter().flatten().cloned());
+            sections.len()
         }
     }
-    let hidden_before = start_profile;
-    let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
-    RenderedQuotaReportWindow {
-        output: output.join("\n"),
+}
+
+fn append_limited_quota_report_sections(
+    output: &mut Vec<String>,
+    sections: &[Vec<String>],
+    max_lines: usize,
+    start_profile: usize,
+    interactive_scroll_hint: bool,
+) -> usize {
+    let total_profiles = sections.len();
+    let mut shown_profiles = 0_usize;
+    let mut remaining = max_lines.saturating_sub(output.len());
+
+    for section in sections.iter().skip(start_profile) {
+        if section.len() > remaining {
+            break;
+        }
+        remaining = remaining.saturating_sub(section.len());
+        output.extend(section.iter().cloned());
+        shown_profiles += 1;
+    }
+
+    if let Some(notice) = quota_report_window_notice(
+        start_profile,
         shown_profiles,
         total_profiles,
-        start_profile,
-        hidden_before,
-        hidden_after,
+        interactive_scroll_hint,
+    ) {
+        if remaining == 0 && !output.is_empty() {
+            output.pop();
+        }
+        output.push(String::new());
+        output.push(notice);
     }
+
+    shown_profiles
+}
+
+fn quota_report_window_notice(
+    start_profile: usize,
+    shown_profiles: usize,
+    total_profiles: usize,
+    interactive_scroll_hint: bool,
+) -> Option<String> {
+    let hidden_before = start_profile;
+    let hidden_profiles = total_profiles.saturating_sub(shown_profiles);
+    let hidden_after = hidden_profiles.saturating_sub(hidden_before);
+    if hidden_before == 0 && hidden_after == 0 {
+        return None;
+    }
+
+    Some(if interactive_scroll_hint {
+        let first_visible = start_profile.saturating_add(1);
+        let last_visible = start_profile.saturating_add(shown_profiles);
+        format!(
+            "press Up/Down to scroll profiles ({first_visible}-{last_visible} of {total_profiles}; {hidden_before} above, {hidden_after} below)"
+        )
+    } else {
+        format!("showing top {shown_profiles} of {total_profiles} profiles due to terminal height")
+    })
 }
 
 fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
@@ -1160,11 +1257,7 @@ pub(crate) fn render_profile_quota_watch_output(
 ) -> String {
     match usage_result {
         Ok(usage) => render_profile_quota(profile_name, &usage),
-        Err(err) => {
-            let mut panel = PanelFieldBuilder::new(format!("Quota {profile_name}"));
-            panel.push("Error", first_line_of_error(&err));
-            panel.render()
-        }
+        Err(err) => render_quota_watch_error_panel(&format!("Quota {profile_name}"), &err),
     }
 }
 
@@ -1213,32 +1306,37 @@ fn render_all_quota_watch_snapshot(
             updated: _updated,
             profile_count: _profile_count,
             reports,
-        } => {
-            let available_report_lines = quota_watch_available_report_lines("");
-            let window = render_quota_reports_window_with_layout(
-                reports,
-                detail,
-                available_report_lines,
-                current_cli_width(),
-                scroll_offset,
-                true,
-            );
-            window.output
-        }
+        } => render_all_quota_watch_report_output(reports, detail, scroll_offset),
         AllQuotaWatchSnapshot::Empty { updated: _updated } => {
-            let mut panel = PanelFieldBuilder::new("Quota");
-            panel.push("Error", "No profiles configured");
-            panel.render()
+            render_quota_watch_error_panel("Quota", "No profiles configured")
         }
         AllQuotaWatchSnapshot::Error {
             updated: _updated,
             message,
-        } => {
-            let mut panel = PanelFieldBuilder::new("Quota");
-            panel.push("Error", first_line_of_error(message));
-            panel.render()
-        }
+        } => render_quota_watch_error_panel("Quota", message),
     }
+}
+
+fn render_all_quota_watch_report_output(
+    reports: &[QuotaReport],
+    detail: bool,
+    scroll_offset: usize,
+) -> String {
+    render_quota_reports_window_with_layout(
+        reports,
+        detail,
+        quota_watch_available_report_lines(""),
+        current_cli_width(),
+        scroll_offset,
+        true,
+    )
+    .output
+}
+
+fn render_quota_watch_error_panel(title: &str, message: &str) -> String {
+    let mut panel = PanelFieldBuilder::new(title);
+    panel.push("Error", first_line_of_error(message));
+    panel.render()
 }
 
 fn redraw_quota_watch(output: &str) -> Result<()> {
@@ -1260,6 +1358,11 @@ const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
 enum QuotaWatchCommand {
     Up,
     Down,
+    Quit,
+}
+
+enum QuotaWatchCommandOutcome {
+    Continue(usize),
     Quit,
 }
 
@@ -1335,10 +1438,9 @@ pub(crate) fn watch_quota(
     base_url: Option<&str>,
 ) -> Result<()> {
     loop {
-        let updated = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
         let output = render_profile_quota_watch_output(
             profile_name,
-            &updated,
+            &quota_watch_updated_at(),
             fetch_usage(codex_home, base_url).map_err(|err| err.to_string()),
         );
         redraw_quota_watch(&output)?;
@@ -1353,62 +1455,84 @@ pub(crate) fn watch_all_quotas(
 ) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
-    let mut snapshot = collect_all_quota_watch_snapshot(
-        &Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string(),
-        AppState::load(paths).map_err(|err| err.to_string()),
-        base_url,
-    );
+    let mut snapshot = load_all_quota_watch_snapshot(paths, base_url);
     let mut redraw_needed = true;
-    let mut next_refresh_at = Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS);
+    let mut next_refresh_at = quota_watch_next_refresh_at();
 
     loop {
         if redraw_needed {
-            let max_scroll_offset = match &snapshot {
-                AllQuotaWatchSnapshot::Reports { reports, .. } => reports.len().saturating_sub(1),
-                _ => 0,
-            };
-            scroll_offset = scroll_offset.min(max_scroll_offset);
+            scroll_offset = scroll_offset.min(quota_watch_max_scroll_offset(&snapshot));
             let output = render_all_quota_watch_snapshot(&snapshot, detail, scroll_offset);
             redraw_quota_watch(&output)?;
             redraw_needed = false;
         }
 
         if Instant::now() >= next_refresh_at {
-            snapshot = collect_all_quota_watch_snapshot(
-                &Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string(),
-                AppState::load(paths).map_err(|err| err.to_string()),
-                base_url,
-            );
+            snapshot = load_all_quota_watch_snapshot(paths, base_url);
             redraw_needed = true;
-            next_refresh_at = Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS);
+            next_refresh_at = quota_watch_next_refresh_at();
             continue;
         }
 
         if let Some(command) = input.as_mut().and_then(QuotaWatchInput::read_command) {
-            let max_scroll_offset = match &snapshot {
-                AllQuotaWatchSnapshot::Reports { reports, .. } => reports.len().saturating_sub(1),
-                _ => 0,
-            };
-            match command {
-                QuotaWatchCommand::Up => {
-                    let next_offset = scroll_offset.saturating_sub(1);
+            match apply_quota_watch_command(
+                command,
+                scroll_offset,
+                quota_watch_max_scroll_offset(&snapshot),
+            ) {
+                QuotaWatchCommandOutcome::Continue(next_offset) => {
                     if next_offset != scroll_offset {
                         scroll_offset = next_offset;
                         redraw_needed = true;
                     }
                 }
-                QuotaWatchCommand::Down => {
-                    let next_offset = scroll_offset.saturating_add(1).min(max_scroll_offset);
-                    if next_offset != scroll_offset {
-                        scroll_offset = next_offset;
-                        redraw_needed = true;
-                    }
-                }
-                QuotaWatchCommand::Quit => return Ok(()),
+                QuotaWatchCommandOutcome::Quit => return Ok(()),
             }
         }
 
         thread::sleep(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS));
+    }
+}
+
+fn quota_watch_updated_at() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string()
+}
+
+fn load_all_quota_watch_snapshot(
+    paths: &AppPaths,
+    base_url: Option<&str>,
+) -> AllQuotaWatchSnapshot {
+    collect_all_quota_watch_snapshot(
+        &quota_watch_updated_at(),
+        AppState::load(paths).map_err(|err| err.to_string()),
+        base_url,
+    )
+}
+
+fn quota_watch_next_refresh_at() -> Instant {
+    Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
+}
+
+fn quota_watch_max_scroll_offset(snapshot: &AllQuotaWatchSnapshot) -> usize {
+    match snapshot {
+        AllQuotaWatchSnapshot::Reports { reports, .. } => reports.len().saturating_sub(1),
+        _ => 0,
+    }
+}
+
+fn apply_quota_watch_command(
+    command: QuotaWatchCommand,
+    scroll_offset: usize,
+    max_scroll_offset: usize,
+) -> QuotaWatchCommandOutcome {
+    match command {
+        QuotaWatchCommand::Up => {
+            QuotaWatchCommandOutcome::Continue(scroll_offset.saturating_sub(1))
+        }
+        QuotaWatchCommand::Down => QuotaWatchCommandOutcome::Continue(
+            scroll_offset.saturating_add(1).min(max_scroll_offset),
+        ),
+        QuotaWatchCommand::Quit => QuotaWatchCommandOutcome::Quit,
     }
 }
 
@@ -1498,13 +1622,12 @@ pub(crate) fn sync_usage_auth_from_disk_or_refresh(
     expected_current: Option<&UsageAuth>,
 ) -> Result<UsageAuthSyncOutcome> {
     let latest = read_usage_auth(codex_home)?;
-    let auth_changed = expected_current.is_some_and(|current| current != &latest);
-    if auth_changed {
-        return Ok(UsageAuthSyncOutcome {
-            auth: latest,
-            source: UsageAuthSyncSource::Reloaded,
-            auth_changed: true,
-        });
+    if usage_auth_changed(expected_current, &latest) {
+        return Ok(usage_auth_sync_outcome(
+            latest,
+            UsageAuthSyncSource::Reloaded,
+            expected_current,
+        ));
     }
 
     let refresh_token = latest
@@ -1514,12 +1637,11 @@ pub(crate) fn sync_usage_auth_from_disk_or_refresh(
     refresh_usage_auth_file(codex_home, refresh_token)?;
 
     let refreshed = read_usage_auth(codex_home)?;
-    let auth_changed = expected_current.is_some_and(|current| current != &refreshed);
-    Ok(UsageAuthSyncOutcome {
-        auth: refreshed,
-        source: UsageAuthSyncSource::Refreshed,
-        auth_changed,
-    })
+    Ok(usage_auth_sync_outcome(
+        refreshed,
+        UsageAuthSyncSource::Refreshed,
+        expected_current,
+    ))
 }
 
 fn send_usage_request(
@@ -1573,6 +1695,29 @@ fn refresh_usage_auth_endpoint() -> String {
 }
 
 fn refresh_usage_auth_file(codex_home: &Path, refresh_token: &str) -> Result<()> {
+    let mut auth_json = read_auth_json_value(codex_home)?;
+    let refreshed = request_chatgpt_auth_refresh(refresh_token)?;
+    apply_chatgpt_refresh(&mut auth_json, refreshed)?;
+    write_auth_json_value(codex_home, &auth_json)
+}
+
+fn usage_auth_changed(expected_current: Option<&UsageAuth>, candidate: &UsageAuth) -> bool {
+    expected_current.is_some_and(|current| current != candidate)
+}
+
+fn usage_auth_sync_outcome(
+    auth: UsageAuth,
+    source: UsageAuthSyncSource,
+    expected_current: Option<&UsageAuth>,
+) -> UsageAuthSyncOutcome {
+    UsageAuthSyncOutcome {
+        auth_changed: usage_auth_changed(expected_current, &auth),
+        auth,
+        source,
+    }
+}
+
+fn read_auth_json_value(codex_home: &Path) -> Result<serde_json::Value> {
     let auth_location = secret_store::auth_json_path(codex_home);
     let Some(content) = read_auth_json_text(codex_home)
         .with_context(|| format!("failed to read {}", auth_location.display()))?
@@ -1582,18 +1727,11 @@ fn refresh_usage_auth_file(codex_home: &Path, refresh_token: &str) -> Result<()>
             auth_location.display()
         );
     };
-    let mut auth_json: serde_json::Value = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", auth_location.display()))?;
-    let auth_object = auth_json
-        .as_object_mut()
-        .context("stored auth JSON must be an object")?;
-    let tokens_value = auth_object
-        .entry("tokens".to_string())
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    let tokens_object = tokens_value
-        .as_object_mut()
-        .context("stored auth tokens must be an object")?;
+    serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", auth_location.display()))
+}
 
+fn request_chatgpt_auth_refresh(refresh_token: &str) -> Result<ChatgptRefreshResponse> {
     let client = UsageHttpClientFactory::build("auth refresh HTTP")?;
     let response = client
         .post(refresh_usage_auth_endpoint())
@@ -1618,32 +1756,64 @@ fn refresh_usage_auth_file(codex_home: &Path, refresh_token: &str) -> Result<()>
         );
     }
 
-    let refreshed: ChatgptRefreshResponse =
-        serde_json::from_str(&body).context("failed to parse auth refresh JSON")?;
-    if let Some(id_token) = refreshed.id_token {
-        tokens_object.insert("id_token".to_string(), serde_json::Value::String(id_token));
+    serde_json::from_str(&body).context("failed to parse auth refresh JSON")
+}
+
+fn apply_chatgpt_refresh(
+    auth_json: &mut serde_json::Value,
+    refreshed: ChatgptRefreshResponse,
+) -> Result<()> {
+    {
+        let tokens_object = auth_tokens_object_mut(auth_json)?;
+        if let Some(id_token) = refreshed.id_token {
+            tokens_object.insert("id_token".to_string(), serde_json::Value::String(id_token));
+        }
+        if let Some(access_token) = refreshed.access_token {
+            tokens_object.insert(
+                "access_token".to_string(),
+                serde_json::Value::String(access_token),
+            );
+        }
+        if let Some(refresh_token) = refreshed.refresh_token {
+            tokens_object.insert(
+                "refresh_token".to_string(),
+                serde_json::Value::String(refresh_token),
+            );
+        }
     }
-    if let Some(access_token) = refreshed.access_token {
-        tokens_object.insert(
-            "access_token".to_string(),
-            serde_json::Value::String(access_token),
-        );
-    }
-    if let Some(refresh_token) = refreshed.refresh_token {
-        tokens_object.insert(
-            "refresh_token".to_string(),
-            serde_json::Value::String(refresh_token),
-        );
-    }
-    auth_object.insert(
+
+    auth_object_mut(auth_json)?.insert(
         "last_refresh".to_string(),
         serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
     );
+    Ok(())
+}
 
+fn auth_object_mut(
+    auth_json: &mut serde_json::Value,
+) -> Result<&mut serde_json::Map<String, serde_json::Value>> {
+    auth_json
+        .as_object_mut()
+        .context("stored auth JSON must be an object")
+}
+
+fn auth_tokens_object_mut(
+    auth_json: &mut serde_json::Value,
+) -> Result<&mut serde_json::Map<String, serde_json::Value>> {
+    let auth_object = auth_object_mut(auth_json)?;
+    let tokens_value = auth_object
+        .entry("tokens".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    tokens_value
+        .as_object_mut()
+        .context("stored auth tokens must be an object")
+}
+
+fn write_auth_json_value(codex_home: &Path, auth_json: &serde_json::Value) -> Result<()> {
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .write_text(
             &secret_store::auth_json_location(codex_home),
-            serde_json::to_string_pretty(&auth_json).context("failed to serialize auth JSON")?,
+            serde_json::to_string_pretty(auth_json).context("failed to serialize auth JSON")?,
         )
         .map_err(anyhow::Error::new)
 }

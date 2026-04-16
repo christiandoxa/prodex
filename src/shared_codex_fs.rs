@@ -12,6 +12,22 @@ struct SharedCodexEntry {
     kind: SharedCodexEntryKind,
 }
 
+impl SharedCodexEntry {
+    fn directory(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: SharedCodexEntryKind::Directory,
+        }
+    }
+
+    fn file(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            kind: SharedCodexEntryKind::File,
+        }
+    }
+}
+
 pub(crate) fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
     if !source.is_dir() {
         bail!("copy source {} is not a directory", source.display());
@@ -43,35 +59,54 @@ pub(crate) fn copy_directory_contents(source: &Path, destination: &Path) -> Resu
         let file_type = entry
             .file_type()
             .with_context(|| format!("failed to read metadata for {}", source_path.display()))?;
-
-        if file_type.is_dir() {
-            create_codex_home_if_missing(&destination_path)?;
-            copy_directory_contents(&source_path, &destination_path)?;
-        } else if file_type.is_file() {
-            fs::copy(&source_path, &destination_path).with_context(|| {
-                format!(
-                    "failed to copy {} to {}",
-                    source_path.display(),
-                    destination_path.display()
-                )
-            })?;
-        } else if file_type.is_symlink() {
-            #[cfg(unix)]
-            {
-                let target = fs::read_link(&source_path)
-                    .with_context(|| format!("failed to read symlink {}", source_path.display()))?;
-                std::os::unix::fs::symlink(target, &destination_path).with_context(|| {
-                    format!("failed to recreate symlink {}", destination_path.display())
-                })?;
-            }
-            #[cfg(not(unix))]
-            {
-                bail!("symlinks are not supported on this platform");
-            }
-        }
+        copy_directory_entry(&source_path, &destination_path, file_type)?;
     }
 
     Ok(())
+}
+
+fn copy_directory_entry(
+    source_path: &Path,
+    destination_path: &Path,
+    file_type: fs::FileType,
+) -> Result<()> {
+    if file_type.is_dir() {
+        create_codex_home_if_missing(destination_path)?;
+        return copy_directory_contents(source_path, destination_path);
+    }
+
+    if file_type.is_file() {
+        fs::copy(source_path, destination_path).with_context(|| {
+            format!(
+                "failed to copy {} to {}",
+                source_path.display(),
+                destination_path.display()
+            )
+        })?;
+        return Ok(());
+    }
+
+    if file_type.is_symlink() {
+        return recreate_symlink(source_path, destination_path);
+    }
+
+    Ok(())
+}
+
+fn recreate_symlink(source_path: &Path, destination_path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let target = fs::read_link(source_path)
+            .with_context(|| format!("failed to read symlink {}", source_path.display()))?;
+        std::os::unix::fs::symlink(target, destination_path)
+            .with_context(|| format!("failed to recreate symlink {}", destination_path.display()))
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (source_path, destination_path);
+        bail!("symlinks are not supported on this platform");
+    }
 }
 
 pub(crate) fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
@@ -101,28 +136,7 @@ fn seed_legacy_default_codex_home(paths: &AppPaths) -> Result<()> {
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
 
-    let mut entries = SHARED_CODEX_DIR_NAMES
-        .iter()
-        .map(|name| SharedCodexEntry {
-            name: (*name).to_string(),
-            kind: SharedCodexEntryKind::Directory,
-        })
-        .chain(SHARED_CODEX_FILE_NAMES.iter().map(|name| SharedCodexEntry {
-            name: (*name).to_string(),
-            kind: SharedCodexEntryKind::File,
-        }))
-        .collect::<Vec<_>>();
-
-    let mut sqlite_entries = BTreeSet::new();
-    collect_shared_codex_sqlite_entries(&legacy_root, &mut sqlite_entries)?;
-    for name in sqlite_entries {
-        entries.push(SharedCodexEntry {
-            name,
-            kind: SharedCodexEntryKind::File,
-        });
-    }
-
-    for entry in entries {
+    for entry in shared_codex_entries_for_roots([legacy_root.as_path()])? {
         let legacy_path = legacy_root.join(&entry.name);
         let shared_path = paths.shared_codex_root.join(&entry.name);
         seed_shared_codex_entry(&legacy_path, &shared_path, entry.kind)?;
@@ -141,28 +155,7 @@ fn migrate_legacy_shared_codex_root(paths: &AppPaths) -> Result<()> {
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
 
-    let mut entries = SHARED_CODEX_DIR_NAMES
-        .iter()
-        .map(|name| SharedCodexEntry {
-            name: (*name).to_string(),
-            kind: SharedCodexEntryKind::Directory,
-        })
-        .chain(SHARED_CODEX_FILE_NAMES.iter().map(|name| SharedCodexEntry {
-            name: (*name).to_string(),
-            kind: SharedCodexEntryKind::File,
-        }))
-        .collect::<Vec<_>>();
-
-    let mut sqlite_entries = BTreeSet::new();
-    collect_shared_codex_sqlite_entries(&paths.legacy_shared_codex_root, &mut sqlite_entries)?;
-    for name in sqlite_entries {
-        entries.push(SharedCodexEntry {
-            name,
-            kind: SharedCodexEntryKind::File,
-        });
-    }
-
-    for entry in entries {
+    for entry in shared_codex_entries_for_roots([paths.legacy_shared_codex_root.as_path()])? {
         let legacy_path = paths.legacy_shared_codex_root.join(&entry.name);
         let shared_path = paths.shared_codex_root.join(&entry.name);
         migrate_shared_codex_entry(&legacy_path, &shared_path, entry.kind)?;
@@ -172,35 +165,36 @@ fn migrate_legacy_shared_codex_root(paths: &AppPaths) -> Result<()> {
 }
 
 fn shared_codex_entries(paths: &AppPaths, codex_home: &Path) -> Result<Vec<SharedCodexEntry>> {
-    let mut entries = SHARED_CODEX_DIR_NAMES
-        .iter()
-        .map(|name| SharedCodexEntry {
-            name: (*name).to_string(),
-            kind: SharedCodexEntryKind::Directory,
-        })
-        .chain(SHARED_CODEX_FILE_NAMES.iter().map(|name| SharedCodexEntry {
-            name: (*name).to_string(),
-            kind: SharedCodexEntryKind::File,
-        }))
-        .collect::<Vec<_>>();
-
-    let mut sqlite_entries = BTreeSet::new();
     let mut scan_roots = vec![paths.shared_codex_root.clone(), codex_home.to_path_buf()];
     scan_roots.sort();
     scan_roots.dedup();
+    shared_codex_entries_for_roots(scan_roots.iter().map(PathBuf::as_path))
+}
+
+fn shared_codex_entries_for_roots<'a>(
+    scan_roots: impl IntoIterator<Item = &'a Path>,
+) -> Result<Vec<SharedCodexEntry>> {
+    let mut entries = shared_codex_manifest_entries();
+    let mut sqlite_entries = BTreeSet::new();
 
     for root in scan_roots {
-        collect_shared_codex_sqlite_entries(&root, &mut sqlite_entries)?;
+        collect_shared_codex_sqlite_entries(root, &mut sqlite_entries)?;
     }
 
-    for name in sqlite_entries {
-        entries.push(SharedCodexEntry {
-            name,
-            kind: SharedCodexEntryKind::File,
-        });
-    }
-
+    entries.extend(sqlite_entries.into_iter().map(SharedCodexEntry::file));
     Ok(entries)
+}
+
+fn shared_codex_manifest_entries() -> Vec<SharedCodexEntry> {
+    SHARED_CODEX_DIR_NAMES
+        .iter()
+        .map(|name| SharedCodexEntry::directory(name))
+        .chain(
+            SHARED_CODEX_FILE_NAMES
+                .iter()
+                .map(|name| SharedCodexEntry::file(*name)),
+        )
+        .collect()
 }
 
 fn collect_shared_codex_sqlite_entries(root: &Path, names: &mut BTreeSet<String>) -> Result<()> {
@@ -236,10 +230,7 @@ fn ensure_shared_codex_entry(
 ) -> Result<()> {
     let local_path = codex_home.join(&entry.name);
     let shared_path = paths.shared_codex_root.join(&entry.name);
-    if let Some(parent) = shared_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
+    ensure_shared_codex_parent_dir(&shared_path)?;
 
     migrate_shared_codex_entry(&local_path, &shared_path, entry.kind)?;
 
@@ -250,17 +241,29 @@ fn ensure_shared_codex_entry(
     ensure_symlink_to_shared(&local_path, &shared_path, entry.kind)
 }
 
+fn ensure_shared_codex_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    Ok(())
+}
+
+fn load_shared_codex_entry_metadata(path: &Path) -> Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
 fn migrate_shared_codex_entry(
     local_path: &Path,
     shared_path: &Path,
     kind: SharedCodexEntryKind,
 ) -> Result<()> {
-    let metadata = match fs::symlink_metadata(local_path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to inspect {}", local_path.display()));
-        }
+    let Some(metadata) = load_shared_codex_entry_metadata(local_path)? else {
+        return Ok(());
     };
 
     if metadata.file_type().is_symlink() {
@@ -271,57 +274,48 @@ fn migrate_shared_codex_entry(
 
     match kind {
         SharedCodexEntryKind::Directory => {
-            if !metadata.is_dir() {
-                bail!(
-                    "expected {} to be a directory for shared Codex state",
-                    local_path.display()
-                );
-            }
-
-            if !shared_path.exists() {
-                move_directory(local_path, shared_path)?;
-                return Ok(());
-            }
-            if !shared_path.is_dir() {
-                bail!(
-                    "expected {} to be a directory for shared Codex state",
-                    shared_path.display()
-                );
-            }
-
-            copy_directory_contents(local_path, shared_path)?;
-            fs::remove_dir_all(local_path)
-                .with_context(|| format!("failed to remove {}", local_path.display()))?;
+            migrate_shared_codex_directory_entry(local_path, shared_path, &metadata)
         }
         SharedCodexEntryKind::File => {
-            if !metadata.is_file() {
-                bail!(
-                    "expected {} to be a file for shared Codex state",
-                    local_path.display()
-                );
-            }
-
-            if !shared_path.exists() {
-                move_file(local_path, shared_path)?;
-                return Ok(());
-            }
-            if !shared_path.is_file() {
-                bail!(
-                    "expected {} to be a file for shared Codex state",
-                    shared_path.display()
-                );
-            }
-
-            if is_history_jsonl(local_path) {
-                merge_history_files(local_path, shared_path)?;
-            }
-
-            fs::remove_file(local_path)
-                .with_context(|| format!("failed to remove {}", local_path.display()))?;
+            migrate_shared_codex_file_entry(local_path, shared_path, &metadata)
         }
     }
+}
 
-    Ok(())
+fn migrate_shared_codex_directory_entry(
+    local_path: &Path,
+    shared_path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<()> {
+    ensure_shared_codex_directory(local_path, metadata)?;
+    if !shared_path.exists() {
+        move_directory(local_path, shared_path)?;
+        return Ok(());
+    }
+
+    ensure_shared_codex_path_is_directory(shared_path)?;
+    copy_directory_contents(local_path, shared_path)?;
+    fs::remove_dir_all(local_path)
+        .with_context(|| format!("failed to remove {}", local_path.display()))
+}
+
+fn migrate_shared_codex_file_entry(
+    local_path: &Path,
+    shared_path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<()> {
+    ensure_shared_codex_file(local_path, metadata)?;
+    if !shared_path.exists() {
+        move_file(local_path, shared_path)?;
+        return Ok(());
+    }
+
+    ensure_shared_codex_path_is_file(shared_path)?;
+    if is_history_jsonl(local_path) {
+        merge_history_files(local_path, shared_path)?;
+    }
+    fs::remove_file(local_path)
+        .with_context(|| format!("failed to remove {}", local_path.display()))
 }
 
 fn migrate_shared_codex_symlink_target(
@@ -329,73 +323,65 @@ fn migrate_shared_codex_symlink_target(
     shared_path: &Path,
     kind: SharedCodexEntryKind,
 ) -> Result<()> {
+    let target_path = shared_codex_symlink_target_path(local_path)?;
+
+    if same_path(&target_path, shared_path) || !target_path.exists() {
+        return Ok(());
+    }
+
+    ensure_shared_codex_parent_dir(shared_path)?;
+
+    match kind {
+        SharedCodexEntryKind::Directory => {
+            migrate_shared_codex_symlink_directory_entry(&target_path, shared_path)
+        }
+        SharedCodexEntryKind::File => {
+            migrate_shared_codex_symlink_file_entry(local_path, &target_path, shared_path)
+        }
+    }
+}
+
+fn shared_codex_symlink_target_path(local_path: &Path) -> Result<PathBuf> {
     let target = fs::read_link(local_path)
         .with_context(|| format!("failed to read symlink {}", local_path.display()))?;
-    let target_path = if target.is_absolute() {
+    Ok(if target.is_absolute() {
         target
     } else {
         local_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(target)
-    };
+    })
+}
 
-    if same_path(&target_path, shared_path) || !target_path.exists() {
+fn migrate_shared_codex_symlink_directory_entry(
+    target_path: &Path,
+    shared_path: &Path,
+) -> Result<()> {
+    ensure_shared_codex_target_is_directory(target_path)?;
+    if !shared_path.exists() {
+        create_codex_home_if_missing(shared_path)?;
+    } else {
+        ensure_shared_codex_path_is_directory(shared_path)?;
+    }
+    copy_directory_contents(target_path, shared_path)
+}
+
+fn migrate_shared_codex_symlink_file_entry(
+    local_path: &Path,
+    target_path: &Path,
+    shared_path: &Path,
+) -> Result<()> {
+    ensure_shared_codex_target_is_file(target_path)?;
+    if !shared_path.exists() {
+        copy_shared_codex_file(target_path, shared_path)?;
         return Ok(());
     }
 
-    if let Some(parent) = shared_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+    ensure_shared_codex_path_is_file(shared_path)?;
+    if is_history_jsonl(local_path) {
+        merge_history_files(target_path, shared_path)?;
     }
-
-    match kind {
-        SharedCodexEntryKind::Directory => {
-            if !target_path.is_dir() {
-                bail!(
-                    "expected {} to be a directory for shared Codex state",
-                    target_path.display()
-                );
-            }
-
-            if !shared_path.exists() {
-                create_codex_home_if_missing(shared_path)?;
-            } else if !shared_path.is_dir() {
-                bail!(
-                    "expected {} to be a directory for shared Codex state",
-                    shared_path.display()
-                );
-            }
-
-            copy_directory_contents(&target_path, shared_path)?;
-        }
-        SharedCodexEntryKind::File => {
-            if !target_path.is_file() {
-                bail!(
-                    "expected {} to be a file for shared Codex state",
-                    target_path.display()
-                );
-            }
-
-            if !shared_path.exists() {
-                fs::copy(&target_path, shared_path).with_context(|| {
-                    format!(
-                        "failed to copy {} to {}",
-                        target_path.display(),
-                        shared_path.display()
-                    )
-                })?;
-            } else if !shared_path.is_file() {
-                bail!(
-                    "expected {} to be a file for shared Codex state",
-                    shared_path.display()
-                );
-            } else if is_history_jsonl(local_path) {
-                merge_history_files(&target_path, shared_path)?;
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -404,83 +390,147 @@ fn seed_shared_codex_entry(
     shared_path: &Path,
     kind: SharedCodexEntryKind,
 ) -> Result<()> {
-    let metadata = match fs::symlink_metadata(legacy_path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => {
-            return Err(err)
-                .with_context(|| format!("failed to inspect {}", legacy_path.display()));
-        }
+    let Some(metadata) = load_shared_codex_entry_metadata(legacy_path)? else {
+        return Ok(());
     };
 
     if metadata.file_type().is_symlink() {
         return Ok(());
     }
 
-    if let Some(parent) = shared_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
+    ensure_shared_codex_parent_dir(shared_path)?;
 
     match kind {
         SharedCodexEntryKind::Directory => {
-            if !metadata.is_dir() {
-                bail!(
-                    "expected {} to be a directory for shared Codex state",
-                    legacy_path.display()
-                );
-            }
-
-            if shared_path.exists() {
-                if !shared_path.is_dir() {
-                    bail!(
-                        "expected {} to be a directory for shared Codex state",
-                        shared_path.display()
-                    );
-                }
-
-                // Legacy seeding is a one-time bootstrap. Recopying populated
-                // session trees from ~/.codex on every `prodex run` adds large
-                // disk I/O directly to the startup hot path.
-                if !dir_is_empty(shared_path)? {
-                    return Ok(());
-                }
-            } else {
-                create_codex_home_if_missing(shared_path)?;
-            }
-
-            copy_directory_contents(legacy_path, shared_path)?;
+            seed_shared_codex_directory_entry(legacy_path, shared_path, &metadata)
         }
         SharedCodexEntryKind::File => {
-            if !metadata.is_file() {
-                bail!(
-                    "expected {} to be a file for shared Codex state",
-                    legacy_path.display()
-                );
-            }
-
-            if !shared_path.exists() {
-                fs::copy(legacy_path, shared_path).with_context(|| {
-                    format!(
-                        "failed to copy legacy shared Codex file {} to {}",
-                        legacy_path.display(),
-                        shared_path.display()
-                    )
-                })?;
-            } else if !shared_path.is_file() {
-                bail!(
-                    "expected {} to be a file for shared Codex state",
-                    shared_path.display()
-                );
-            } else if is_history_jsonl(legacy_path) {
-                // Legacy default CODEX_HOME seeding should stay one-shot so
-                // startup does not reread and rewrite large history files on
-                // every `prodex run`.
-                return Ok(());
-            }
+            seed_shared_codex_file_entry(legacy_path, shared_path, &metadata)
         }
     }
+}
 
+fn seed_shared_codex_directory_entry(
+    legacy_path: &Path,
+    shared_path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<()> {
+    ensure_shared_codex_directory(legacy_path, metadata)?;
+    if shared_path.exists() {
+        ensure_shared_codex_path_is_directory(shared_path)?;
+
+        // Legacy seeding is a one-time bootstrap. Recopying populated
+        // session trees from ~/.codex on every `prodex run` adds large
+        // disk I/O directly to the startup hot path.
+        if !dir_is_empty(shared_path)? {
+            return Ok(());
+        }
+    } else {
+        create_codex_home_if_missing(shared_path)?;
+    }
+
+    copy_directory_contents(legacy_path, shared_path)
+}
+
+fn seed_shared_codex_file_entry(
+    legacy_path: &Path,
+    shared_path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<()> {
+    ensure_shared_codex_file(legacy_path, metadata)?;
+    if !shared_path.exists() {
+        return copy_legacy_shared_codex_file(legacy_path, shared_path);
+    }
+
+    ensure_shared_codex_path_is_file(shared_path)?;
+    if is_history_jsonl(legacy_path) {
+        // Legacy default CODEX_HOME seeding should stay one-shot so
+        // startup does not reread and rewrite large history files on
+        // every `prodex run`.
+        return Ok(());
+    }
+    Ok(())
+}
+
+fn ensure_shared_codex_directory(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    if metadata.is_dir() {
+        return Ok(());
+    }
+    bail!(
+        "expected {} to be a directory for shared Codex state",
+        path.display()
+    );
+}
+
+fn ensure_shared_codex_file(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    if metadata.is_file() {
+        return Ok(());
+    }
+    bail!(
+        "expected {} to be a file for shared Codex state",
+        path.display()
+    );
+}
+
+fn ensure_shared_codex_path_is_directory(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    bail!(
+        "expected {} to be a directory for shared Codex state",
+        path.display()
+    );
+}
+
+fn ensure_shared_codex_path_is_file(path: &Path) -> Result<()> {
+    if path.is_file() {
+        return Ok(());
+    }
+    bail!(
+        "expected {} to be a file for shared Codex state",
+        path.display()
+    );
+}
+
+fn ensure_shared_codex_target_is_directory(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    bail!(
+        "expected {} to be a directory for shared Codex state",
+        path.display()
+    );
+}
+
+fn ensure_shared_codex_target_is_file(path: &Path) -> Result<()> {
+    if path.is_file() {
+        return Ok(());
+    }
+    bail!(
+        "expected {} to be a file for shared Codex state",
+        path.display()
+    );
+}
+
+fn copy_shared_codex_file(source: &Path, destination: &Path) -> Result<()> {
+    fs::copy(source, destination).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn copy_legacy_shared_codex_file(source: &Path, destination: &Path) -> Result<()> {
+    fs::copy(source, destination).with_context(|| {
+        format!(
+            "failed to copy legacy shared Codex file {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
     Ok(())
 }
 

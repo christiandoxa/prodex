@@ -1174,135 +1174,78 @@ pub(super) fn runtime_request_text_without_previous_response_id(
     serde_json::to_string(&value).ok()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn reset_runtime_previous_response_fresh_fallback_state(
-    previous_response_id: &mut Option<String>,
-    request_turn_state: &mut Option<String>,
-    previous_response_fresh_fallback_used: &mut bool,
-    saw_previous_response_not_found: &mut bool,
-    previous_response_retry_candidate: &mut Option<String>,
-    previous_response_retry_index: &mut usize,
-    candidate_turn_state_retry_profile: &mut Option<String>,
-    candidate_turn_state_retry_value: &mut Option<String>,
-    trusted_previous_response_affinity: &mut bool,
-    bound_profile: &mut Option<String>,
-    pinned_profile: &mut Option<String>,
-    turn_state_profile: &mut Option<String>,
-    session_profile: &mut Option<String>,
-    excluded_profiles: &mut BTreeSet<String>,
-    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
-    selection_started_at: &mut Instant,
-    selection_attempts: &mut usize,
-) {
-    *previous_response_id = None;
-    *request_turn_state = None;
-    *previous_response_fresh_fallback_used = true;
-    *saw_previous_response_not_found = false;
-    *previous_response_retry_candidate = None;
-    *previous_response_retry_index = 0;
-    *candidate_turn_state_retry_profile = None;
-    *candidate_turn_state_retry_value = None;
-    *trusted_previous_response_affinity = false;
-    *bound_profile = None;
-    *pinned_profile = None;
-    *turn_state_profile = None;
-    *session_profile = None;
-    excluded_profiles.clear();
-    *last_failure = None;
-    *selection_started_at = Instant::now();
-    *selection_attempts = 0;
+pub(super) struct RuntimePreviousResponseFreshFallbackState<'a> {
+    previous_response_id: &'a mut Option<String>,
+    request_turn_state: &'a mut Option<String>,
+    previous_response_fresh_fallback_used: &'a mut bool,
+    saw_previous_response_not_found: &'a mut bool,
+    previous_response_retry_candidate: &'a mut Option<String>,
+    previous_response_retry_index: &'a mut usize,
+    candidate_turn_state_retry_profile: &'a mut Option<String>,
+    candidate_turn_state_retry_value: &'a mut Option<String>,
+    trusted_previous_response_affinity: &'a mut bool,
+    bound_profile: &'a mut Option<String>,
+    pinned_profile: &'a mut Option<String>,
+    turn_state_profile: &'a mut Option<String>,
+    session_profile: &'a mut Option<String>,
+    excluded_profiles: &'a mut BTreeSet<String>,
+    last_failure: &'a mut Option<(RuntimeUpstreamFailureResponse, bool)>,
+    selection_started_at: &'a mut Instant,
+    selection_attempts: &'a mut usize,
 }
 
-#[allow(clippy::too_many_arguments)]
+impl RuntimePreviousResponseFreshFallbackState<'_> {
+    fn reset(&mut self) {
+        *self.previous_response_id = None;
+        *self.request_turn_state = None;
+        *self.previous_response_fresh_fallback_used = true;
+        *self.saw_previous_response_not_found = false;
+        *self.previous_response_retry_candidate = None;
+        *self.previous_response_retry_index = 0;
+        *self.candidate_turn_state_retry_profile = None;
+        *self.candidate_turn_state_retry_value = None;
+        *self.trusted_previous_response_affinity = false;
+        *self.bound_profile = None;
+        *self.pinned_profile = None;
+        *self.turn_state_profile = None;
+        *self.session_profile = None;
+        self.excluded_profiles.clear();
+        *self.last_failure = None;
+        *self.selection_started_at = Instant::now();
+        *self.selection_attempts = 0;
+    }
+}
+
+pub(super) fn reset_runtime_previous_response_fresh_fallback_state(
+    mut state: RuntimePreviousResponseFreshFallbackState<'_>,
+) {
+    state.reset();
+}
+
 pub(super) fn apply_runtime_responses_previous_response_fresh_fallback(
     request: &mut RuntimeProxyRequest,
     fresh_request: RuntimeProxyRequest,
-    previous_response_id: &mut Option<String>,
-    request_turn_state: &mut Option<String>,
-    previous_response_fresh_fallback_used: &mut bool,
-    saw_previous_response_not_found: &mut bool,
-    previous_response_retry_candidate: &mut Option<String>,
-    previous_response_retry_index: &mut usize,
-    candidate_turn_state_retry_profile: &mut Option<String>,
-    candidate_turn_state_retry_value: &mut Option<String>,
-    trusted_previous_response_affinity: &mut bool,
-    bound_profile: &mut Option<String>,
-    pinned_profile: &mut Option<String>,
-    turn_state_profile: &mut Option<String>,
-    session_profile: &mut Option<String>,
-    excluded_profiles: &mut BTreeSet<String>,
-    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
-    selection_started_at: &mut Instant,
-    selection_attempts: &mut usize,
+    fallback_state: RuntimePreviousResponseFreshFallbackState<'_>,
 ) {
     *request = fresh_request;
-    reset_runtime_previous_response_fresh_fallback_state(
-        previous_response_id,
-        request_turn_state,
-        previous_response_fresh_fallback_used,
-        saw_previous_response_not_found,
-        previous_response_retry_candidate,
-        previous_response_retry_index,
-        candidate_turn_state_retry_profile,
-        candidate_turn_state_retry_value,
-        trusted_previous_response_affinity,
-        bound_profile,
-        pinned_profile,
-        turn_state_profile,
-        session_profile,
-        excluded_profiles,
-        last_failure,
-        selection_started_at,
-        selection_attempts,
-    );
+    reset_runtime_previous_response_fresh_fallback_state(fallback_state);
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct RuntimeWebsocketFreshFallbackTarget<'a> {
+    request_text: &'a mut String,
+    handshake_request: &'a mut RuntimeProxyRequest,
+    websocket_reuse_fresh_retry_profiles: &'a mut BTreeSet<String>,
+}
+
 pub(super) fn apply_runtime_websocket_previous_response_fresh_fallback(
-    request_text: &mut String,
     fresh_request_text: String,
-    handshake_request: &mut RuntimeProxyRequest,
-    websocket_reuse_fresh_retry_profiles: &mut BTreeSet<String>,
-    previous_response_id: &mut Option<String>,
-    request_turn_state: &mut Option<String>,
-    previous_response_fresh_fallback_used: &mut bool,
-    saw_previous_response_not_found: &mut bool,
-    previous_response_retry_candidate: &mut Option<String>,
-    previous_response_retry_index: &mut usize,
-    candidate_turn_state_retry_profile: &mut Option<String>,
-    candidate_turn_state_retry_value: &mut Option<String>,
-    trusted_previous_response_affinity: &mut bool,
-    bound_profile: &mut Option<String>,
-    pinned_profile: &mut Option<String>,
-    turn_state_profile: &mut Option<String>,
-    session_profile: &mut Option<String>,
-    excluded_profiles: &mut BTreeSet<String>,
-    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
-    selection_started_at: &mut Instant,
-    selection_attempts: &mut usize,
+    target: RuntimeWebsocketFreshFallbackTarget<'_>,
+    fallback_state: RuntimePreviousResponseFreshFallbackState<'_>,
 ) {
-    *request_text = fresh_request_text;
-    *handshake_request = runtime_request_without_turn_state_header(handshake_request);
-    websocket_reuse_fresh_retry_profiles.clear();
-    reset_runtime_previous_response_fresh_fallback_state(
-        previous_response_id,
-        request_turn_state,
-        previous_response_fresh_fallback_used,
-        saw_previous_response_not_found,
-        previous_response_retry_candidate,
-        previous_response_retry_index,
-        candidate_turn_state_retry_profile,
-        candidate_turn_state_retry_value,
-        trusted_previous_response_affinity,
-        bound_profile,
-        pinned_profile,
-        turn_state_profile,
-        session_profile,
-        excluded_profiles,
-        last_failure,
-        selection_started_at,
-        selection_attempts,
-    );
+    *target.request_text = fresh_request_text;
+    *target.handshake_request = runtime_request_without_turn_state_header(target.handshake_request);
+    target.websocket_reuse_fresh_retry_profiles.clear();
+    reset_runtime_previous_response_fresh_fallback_state(fallback_state);
 }
 
 pub(super) fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
@@ -4419,32 +4362,59 @@ pub(super) fn runtime_previous_response_affinity_is_bound(
         .is_some_and(|binding| binding.profile_name == bound_profile))
 }
 
-pub(super) fn runtime_candidate_has_hard_affinity(
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RuntimeCandidateAffinity<'a> {
     route_kind: RuntimeRouteKind,
-    candidate_name: &str,
-    strict_affinity_profile: Option<&str>,
-    pinned_profile: Option<&str>,
-    turn_state_profile: Option<&str>,
-    session_profile: Option<&str>,
+    candidate_name: &'a str,
+    strict_affinity_profile: Option<&'a str>,
+    pinned_profile: Option<&'a str>,
+    turn_state_profile: Option<&'a str>,
+    session_profile: Option<&'a str>,
     trusted_previous_response_affinity: bool,
-) -> bool {
-    strict_affinity_profile.is_some_and(|profile_name| profile_name == candidate_name)
-        || turn_state_profile.is_some_and(|profile_name| profile_name == candidate_name)
-        || (trusted_previous_response_affinity
-            && pinned_profile.is_some_and(|profile_name| profile_name == candidate_name))
-        || (route_kind == RuntimeRouteKind::Compact
-            && session_profile.is_some_and(|profile_name| profile_name == candidate_name))
 }
 
-#[allow(clippy::too_many_arguments)]
+impl<'a> RuntimeCandidateAffinity<'a> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn new(
+        route_kind: RuntimeRouteKind,
+        candidate_name: &'a str,
+        strict_affinity_profile: Option<&'a str>,
+        pinned_profile: Option<&'a str>,
+        turn_state_profile: Option<&'a str>,
+        session_profile: Option<&'a str>,
+        trusted_previous_response_affinity: bool,
+    ) -> Self {
+        Self {
+            route_kind,
+            candidate_name,
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            trusted_previous_response_affinity,
+        }
+    }
+}
+
+pub(super) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffinity<'_>) -> bool {
+    affinity
+        .strict_affinity_profile
+        .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+        || affinity
+            .turn_state_profile
+            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+        || (affinity.trusted_previous_response_affinity
+            && affinity
+                .pinned_profile
+                .is_some_and(|profile_name| profile_name == affinity.candidate_name))
+        || (affinity.route_kind == RuntimeRouteKind::Compact
+            && affinity
+                .session_profile
+                .is_some_and(|profile_name| profile_name == affinity.candidate_name))
+}
+
 pub(super) fn runtime_quota_blocked_affinity_is_releasable(
-    route_kind: RuntimeRouteKind,
-    candidate_name: &str,
-    strict_affinity_profile: Option<&str>,
-    pinned_profile: Option<&str>,
-    turn_state_profile: Option<&str>,
-    session_profile: Option<&str>,
-    trusted_previous_response_affinity: bool,
+    affinity: RuntimeCandidateAffinity<'_>,
     request_requires_previous_response_affinity: bool,
 ) -> bool {
     if request_requires_previous_response_affinity {
@@ -4454,16 +4424,24 @@ pub(super) fn runtime_quota_blocked_affinity_is_releasable(
         return false;
     }
 
-    if strict_affinity_profile.is_some_and(|profile_name| profile_name == candidate_name)
-        || turn_state_profile.is_some_and(|profile_name| profile_name == candidate_name)
-        || (route_kind == RuntimeRouteKind::Compact
-            && session_profile.is_some_and(|profile_name| profile_name == candidate_name))
+    if affinity
+        .strict_affinity_profile
+        .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+        || affinity
+            .turn_state_profile
+            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+        || (affinity.route_kind == RuntimeRouteKind::Compact
+            && affinity
+                .session_profile
+                .is_some_and(|profile_name| profile_name == affinity.candidate_name))
     {
         return false;
     }
 
-    if trusted_previous_response_affinity
-        && pinned_profile.is_some_and(|profile_name| profile_name == candidate_name)
+    if affinity.trusted_previous_response_affinity
+        && affinity
+            .pinned_profile
+            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
     {
         // Pre-commit quota or overload means the owning response chain is temporarily unavailable,
         // so a fresh fallback may safely drop previous_response affinity even for *_call_output.
@@ -4523,6 +4501,19 @@ pub(super) fn runtime_quota_precommit_guard_reason(
     None
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RuntimeResponseCandidateSelection<'a> {
+    excluded_profiles: &'a BTreeSet<String>,
+    strict_affinity_profile: Option<&'a str>,
+    pinned_profile: Option<&'a str>,
+    turn_state_profile: Option<&'a str>,
+    session_profile: Option<&'a str>,
+    discover_previous_response_owner: bool,
+    previous_response_id: Option<&'a str>,
+    route_kind: RuntimeRouteKind,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn select_runtime_response_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
@@ -4535,19 +4526,49 @@ pub(super) fn select_runtime_response_candidate_for_route(
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
-    if let Some(profile_name) = strict_affinity_profile {
-        if excluded_profiles.contains(profile_name) {
-            return Ok(None);
-        }
-        if runtime_candidate_has_hard_affinity(
-            route_kind,
-            profile_name,
+    select_runtime_response_candidate_for_route_with_selection(
+        shared,
+        RuntimeResponseCandidateSelection {
+            excluded_profiles,
             strict_affinity_profile,
             pinned_profile,
             turn_state_profile,
             session_profile,
-            false,
-        ) {
+            discover_previous_response_owner,
+            previous_response_id,
+            route_kind,
+        },
+    )
+}
+
+pub(super) fn select_runtime_response_candidate_for_route_with_selection(
+    shared: &RuntimeRotationProxyShared,
+    selection: RuntimeResponseCandidateSelection<'_>,
+) -> Result<Option<String>> {
+    let RuntimeResponseCandidateSelection {
+        excluded_profiles,
+        strict_affinity_profile,
+        pinned_profile,
+        turn_state_profile,
+        session_profile,
+        discover_previous_response_owner,
+        previous_response_id,
+        route_kind,
+    } = selection;
+
+    if let Some(profile_name) = strict_affinity_profile {
+        if excluded_profiles.contains(profile_name) {
+            return Ok(None);
+        }
+        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+            route_kind,
+            candidate_name: profile_name,
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            trusted_previous_response_affinity: false,
+        }) {
             return Ok(Some(profile_name.to_string()));
         }
         let (quota_summary, quota_source) =
@@ -4589,19 +4610,19 @@ pub(super) fn select_runtime_response_candidate_for_route(
         )? {
             return Ok(Some(profile_name.to_string()));
         }
-        if runtime_candidate_has_hard_affinity(
+        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
             route_kind,
-            profile_name,
+            candidate_name: profile_name,
             strict_affinity_profile,
             pinned_profile,
             turn_state_profile,
             session_profile,
-            runtime_previous_response_affinity_is_trusted(
+            trusted_previous_response_affinity: runtime_previous_response_affinity_is_trusted(
                 shared,
                 previous_response_id,
                 pinned_profile,
             )?,
-        ) {
+        }) {
             return Ok(Some(profile_name.to_string()));
         }
         let (quota_summary, quota_source) =
@@ -4628,15 +4649,15 @@ pub(super) fn select_runtime_response_candidate_for_route(
 
     if let Some(profile_name) = turn_state_profile.filter(|name| !excluded_profiles.contains(*name))
     {
-        if runtime_candidate_has_hard_affinity(
+        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
             route_kind,
-            profile_name,
+            candidate_name: profile_name,
             strict_affinity_profile,
             pinned_profile,
             turn_state_profile,
             session_profile,
-            false,
-        ) {
+            trusted_previous_response_affinity: false,
+        }) {
             return Ok(Some(profile_name.to_string()));
         }
         let (quota_summary, quota_source) =
@@ -4671,15 +4692,15 @@ pub(super) fn select_runtime_response_candidate_for_route(
     }
 
     if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
-        if runtime_candidate_has_hard_affinity(
+        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
             route_kind,
-            profile_name,
+            candidate_name: profile_name,
             strict_affinity_profile,
             pinned_profile,
             turn_state_profile,
             session_profile,
-            false,
-        ) {
+            trusted_previous_response_affinity: false,
+        }) {
             return Ok(Some(profile_name.to_string()));
         }
         let (quota_summary, quota_source) =
@@ -5427,6 +5448,51 @@ pub(super) fn proxy_runtime_websocket_text_message(
     let mut previous_response_fresh_fallback_used = false;
     let mut saw_previous_response_not_found = false;
     let mut websocket_reuse_fresh_retry_profiles = BTreeSet::new();
+    macro_rules! runtime_candidate_affinity {
+        ($route_kind:expr, $candidate_name:expr, $strict_affinity_profile:expr $(,)?) => {
+            RuntimeCandidateAffinity {
+                route_kind: $route_kind,
+                candidate_name: $candidate_name,
+                strict_affinity_profile: $strict_affinity_profile,
+                pinned_profile: pinned_profile.as_deref(),
+                turn_state_profile: turn_state_profile.as_deref(),
+                session_profile: session_profile.as_deref(),
+                trusted_previous_response_affinity,
+            }
+        };
+    }
+    macro_rules! runtime_websocket_fresh_fallback_target {
+        () => {
+            RuntimeWebsocketFreshFallbackTarget {
+                request_text: &mut request_text,
+                handshake_request: &mut handshake_request,
+                websocket_reuse_fresh_retry_profiles: &mut websocket_reuse_fresh_retry_profiles,
+            }
+        };
+    }
+    macro_rules! runtime_previous_response_fresh_fallback_state {
+        () => {
+            RuntimePreviousResponseFreshFallbackState {
+                previous_response_id: &mut previous_response_id,
+                request_turn_state: &mut request_turn_state,
+                previous_response_fresh_fallback_used: &mut previous_response_fresh_fallback_used,
+                saw_previous_response_not_found: &mut saw_previous_response_not_found,
+                previous_response_retry_candidate: &mut previous_response_retry_candidate,
+                previous_response_retry_index: &mut previous_response_retry_index,
+                candidate_turn_state_retry_profile: &mut candidate_turn_state_retry_profile,
+                candidate_turn_state_retry_value: &mut candidate_turn_state_retry_value,
+                trusted_previous_response_affinity: &mut trusted_previous_response_affinity,
+                bound_profile: &mut bound_profile,
+                pinned_profile: &mut pinned_profile,
+                turn_state_profile: &mut turn_state_profile,
+                session_profile: &mut session_profile,
+                excluded_profiles: &mut excluded_profiles,
+                last_failure: &mut last_failure,
+                selection_started_at: &mut selection_started_at,
+                selection_attempts: &mut selection_attempts,
+            }
+        };
+    }
 
     loop {
         let pressure_mode =
@@ -5472,27 +5538,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     ),
                 );
                 apply_runtime_websocket_previous_response_fresh_fallback(
-                    &mut request_text,
                     fresh_request_text,
-                    &mut handshake_request,
-                    &mut websocket_reuse_fresh_retry_profiles,
-                    &mut previous_response_id,
-                    &mut request_turn_state,
-                    &mut previous_response_fresh_fallback_used,
-                    &mut saw_previous_response_not_found,
-                    &mut previous_response_retry_candidate,
-                    &mut previous_response_retry_index,
-                    &mut candidate_turn_state_retry_profile,
-                    &mut candidate_turn_state_retry_value,
-                    &mut trusted_previous_response_affinity,
-                    &mut bound_profile,
-                    &mut pinned_profile,
-                    &mut turn_state_profile,
-                    &mut session_profile,
-                    &mut excluded_profiles,
-                    &mut last_failure,
-                    &mut selection_started_at,
-                    &mut selection_attempts,
+                    runtime_websocket_fresh_fallback_target!(),
+                    runtime_previous_response_fresh_fallback_state!(),
                 );
                 recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
@@ -5533,25 +5581,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} direct_current_profile_fallback profile={current_profile} reason=precommit_budget_exhausted"
                     ),
                 );
-                match attempt_runtime_websocket_request(
+                match attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
                     request_id,
                     local_socket,
-                    &handshake_request,
-                    &request_text,
-                    previous_response_id.as_deref(),
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
+                    handshake_request: &handshake_request,
+                    request_text: &request_text,
+                    request_previous_response_id: previous_response_id.as_deref(),
+                    request_session_id: request_session_id.as_deref(),
+                    request_turn_state: request_turn_state.as_deref(),
                     shared,
                     websocket_session,
-                    &current_profile,
-                    request_turn_state.as_deref(),
-                    previous_response_id.is_none()
+                    profile_name: &current_profile,
+                    turn_state_override: request_turn_state.as_deref(),
+                    promote_committed_profile: previous_response_id.is_none()
                         && bound_profile.is_none()
                         && request_turn_state.is_none()
                         && turn_state_profile.is_none()
                         && compact_followup_profile.is_none()
                         && !(request_session_id_header_present || bound_session_profile.is_some()),
-                )? {
+                })? {
                     RuntimeWebsocketAttempt::Delivered => return Ok(()),
                     RuntimeWebsocketAttempt::QuotaBlocked {
                         profile_name,
@@ -5559,15 +5607,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Websocket,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             request_requires_previous_response_affinity,
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
@@ -5614,27 +5660,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                             apply_runtime_websocket_previous_response_fresh_fallback(
-                                &mut request_text,
                                 fresh_request_text,
-                                &mut handshake_request,
-                                &mut websocket_reuse_fresh_retry_profiles,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_websocket_fresh_fallback_target!(),
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -5682,15 +5710,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "websocket_overload",
                         );
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Websocket,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             runtime_websocket_request_requires_locked_previous_response_affinity(
                                 request_requires_previous_response_affinity,
                                 trusted_previous_response_affinity,
@@ -5721,27 +5747,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                             apply_runtime_websocket_previous_response_fresh_fallback(
-                                &mut request_text,
                                 fresh_request_text,
-                                &mut handshake_request,
-                                &mut websocket_reuse_fresh_retry_profiles,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_websocket_fresh_fallback_target!(),
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -5850,15 +5858,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Websocket,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             runtime_websocket_request_requires_locked_previous_response_affinity(
                                 request_requires_previous_response_affinity,
                                 trusted_previous_response_affinity,
@@ -5915,27 +5921,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                             apply_runtime_websocket_previous_response_fresh_fallback(
-                                &mut request_text,
                                 fresh_request_text,
-                                &mut handshake_request,
-                                &mut websocket_reuse_fresh_retry_profiles,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_websocket_fresh_fallback_target!(),
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -5953,18 +5941,20 @@ pub(super) fn proxy_runtime_websocket_text_message(
             return Ok(());
         }
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
             shared,
-            &excluded_profiles,
-            compact_followup_profile
-                .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
-            pinned_profile.as_deref(),
-            turn_state_profile.as_deref(),
-            session_profile.as_deref(),
-            previous_response_id.is_some(),
-            previous_response_id.as_deref(),
-            RuntimeRouteKind::Websocket,
+            RuntimeResponseCandidateSelection {
+                excluded_profiles: &excluded_profiles,
+                strict_affinity_profile: compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                pinned_profile: pinned_profile.as_deref(),
+                turn_state_profile: turn_state_profile.as_deref(),
+                session_profile: session_profile.as_deref(),
+                discover_previous_response_owner: previous_response_id.is_some(),
+                previous_response_id: previous_response_id.as_deref(),
+                route_kind: RuntimeRouteKind::Websocket,
+            },
         )?
         else {
             runtime_proxy_log(
@@ -5997,27 +5987,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     ),
                 );
                 apply_runtime_websocket_previous_response_fresh_fallback(
-                    &mut request_text,
                     fresh_request_text,
-                    &mut handshake_request,
-                    &mut websocket_reuse_fresh_retry_profiles,
-                    &mut previous_response_id,
-                    &mut request_turn_state,
-                    &mut previous_response_fresh_fallback_used,
-                    &mut saw_previous_response_not_found,
-                    &mut previous_response_retry_candidate,
-                    &mut previous_response_retry_index,
-                    &mut candidate_turn_state_retry_profile,
-                    &mut candidate_turn_state_retry_value,
-                    &mut trusted_previous_response_affinity,
-                    &mut bound_profile,
-                    &mut pinned_profile,
-                    &mut turn_state_profile,
-                    &mut session_profile,
-                    &mut excluded_profiles,
-                    &mut last_failure,
-                    &mut selection_started_at,
-                    &mut selection_attempts,
+                    runtime_websocket_fresh_fallback_target!(),
+                    runtime_previous_response_fresh_fallback_state!(),
                 );
                 recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
@@ -6074,25 +6046,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} direct_current_profile_fallback profile={current_profile} reason=candidate_exhausted"
                     ),
                 );
-                match attempt_runtime_websocket_request(
+                match attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
                     request_id,
                     local_socket,
-                    &handshake_request,
-                    &request_text,
-                    previous_response_id.as_deref(),
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
+                    handshake_request: &handshake_request,
+                    request_text: &request_text,
+                    request_previous_response_id: previous_response_id.as_deref(),
+                    request_session_id: request_session_id.as_deref(),
+                    request_turn_state: request_turn_state.as_deref(),
                     shared,
                     websocket_session,
-                    &current_profile,
-                    request_turn_state.as_deref(),
-                    previous_response_id.is_none()
+                    profile_name: &current_profile,
+                    turn_state_override: request_turn_state.as_deref(),
+                    promote_committed_profile: previous_response_id.is_none()
                         && bound_profile.is_none()
                         && request_turn_state.is_none()
                         && turn_state_profile.is_none()
                         && compact_followup_profile.is_none()
                         && !(request_session_id_header_present || bound_session_profile.is_some()),
-                )? {
+                })? {
                     RuntimeWebsocketAttempt::Delivered => return Ok(()),
                     RuntimeWebsocketAttempt::QuotaBlocked {
                         profile_name,
@@ -6100,15 +6072,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Websocket,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             request_requires_previous_response_affinity,
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
@@ -6155,27 +6125,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                             apply_runtime_websocket_previous_response_fresh_fallback(
-                                &mut request_text,
                                 fresh_request_text,
-                                &mut handshake_request,
-                                &mut websocket_reuse_fresh_retry_profiles,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_websocket_fresh_fallback_target!(),
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -6223,15 +6175,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "websocket_overload",
                         );
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Websocket,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             runtime_websocket_request_requires_locked_previous_response_affinity(
                                 request_requires_previous_response_affinity,
                                 trusted_previous_response_affinity,
@@ -6352,15 +6302,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Websocket,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Websocket,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             runtime_websocket_request_requires_locked_previous_response_affinity(
                                 request_requires_previous_response_affinity,
                                 trusted_previous_response_affinity,
@@ -6417,27 +6365,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                             apply_runtime_websocket_previous_response_fresh_fallback(
-                                &mut request_text,
                                 fresh_request_text,
-                                &mut handshake_request,
-                                &mut websocket_reuse_fresh_retry_profiles,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_websocket_fresh_fallback_target!(),
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -6496,25 +6426,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
             continue;
         }
 
-        match attempt_runtime_websocket_request(
+        match attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
             request_id,
             local_socket,
-            &handshake_request,
-            &request_text,
-            previous_response_id.as_deref(),
-            request_session_id.as_deref(),
-            request_turn_state.as_deref(),
+            handshake_request: &handshake_request,
+            request_text: &request_text,
+            request_previous_response_id: previous_response_id.as_deref(),
+            request_session_id: request_session_id.as_deref(),
+            request_turn_state: request_turn_state.as_deref(),
             shared,
             websocket_session,
-            &candidate_name,
+            profile_name: &candidate_name,
             turn_state_override,
-            previous_response_id.is_none()
+            promote_committed_profile: previous_response_id.is_none()
                 && bound_profile.is_none()
                 && request_turn_state.is_none()
                 && turn_state_profile.is_none()
                 && compact_followup_profile.is_none()
                 && !(request_session_id_header_present || bound_session_profile.is_some()),
-        )? {
+        })? {
             RuntimeWebsocketAttempt::Delivered => return Ok(()),
             RuntimeWebsocketAttempt::QuotaBlocked {
                 profile_name,
@@ -6535,15 +6465,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     quota_message.as_deref(),
                 )?;
                 if !runtime_quota_blocked_affinity_is_releasable(
-                    RuntimeRouteKind::Websocket,
-                    &profile_name,
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
-                    trusted_previous_response_affinity,
+                    runtime_candidate_affinity!(
+                        RuntimeRouteKind::Websocket,
+                        &profile_name,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                    ),
                     request_requires_previous_response_affinity,
                 ) {
                     runtime_proxy_log(
@@ -6596,27 +6524,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                     apply_runtime_websocket_previous_response_fresh_fallback(
-                        &mut request_text,
                         fresh_request_text,
-                        &mut handshake_request,
-                        &mut websocket_reuse_fresh_retry_profiles,
-                        &mut previous_response_id,
-                        &mut request_turn_state,
-                        &mut previous_response_fresh_fallback_used,
-                        &mut saw_previous_response_not_found,
-                        &mut previous_response_retry_candidate,
-                        &mut previous_response_retry_index,
-                        &mut candidate_turn_state_retry_profile,
-                        &mut candidate_turn_state_retry_value,
-                        &mut trusted_previous_response_affinity,
-                        &mut bound_profile,
-                        &mut pinned_profile,
-                        &mut turn_state_profile,
-                        &mut session_profile,
-                        &mut excluded_profiles,
-                        &mut last_failure,
-                        &mut selection_started_at,
-                        &mut selection_attempts,
+                        runtime_websocket_fresh_fallback_target!(),
+                        runtime_previous_response_fresh_fallback_state!(),
                     );
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
@@ -6662,15 +6572,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     "websocket_overload",
                 );
                 if !runtime_quota_blocked_affinity_is_releasable(
-                    RuntimeRouteKind::Websocket,
-                    &profile_name,
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
-                    trusted_previous_response_affinity,
+                    runtime_candidate_affinity!(
+                        RuntimeRouteKind::Websocket,
+                        &profile_name,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                    ),
                     runtime_websocket_request_requires_locked_previous_response_affinity(
                         request_requires_previous_response_affinity,
                         trusted_previous_response_affinity,
@@ -6701,27 +6609,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                     apply_runtime_websocket_previous_response_fresh_fallback(
-                        &mut request_text,
                         fresh_request_text,
-                        &mut handshake_request,
-                        &mut websocket_reuse_fresh_retry_profiles,
-                        &mut previous_response_id,
-                        &mut request_turn_state,
-                        &mut previous_response_fresh_fallback_used,
-                        &mut saw_previous_response_not_found,
-                        &mut previous_response_retry_candidate,
-                        &mut previous_response_retry_index,
-                        &mut candidate_turn_state_retry_profile,
-                        &mut candidate_turn_state_retry_value,
-                        &mut trusted_previous_response_affinity,
-                        &mut bound_profile,
-                        &mut pinned_profile,
-                        &mut turn_state_profile,
-                        &mut session_profile,
-                        &mut excluded_profiles,
-                        &mut last_failure,
-                        &mut selection_started_at,
-                        &mut selection_attempts,
+                        runtime_websocket_fresh_fallback_target!(),
+                        runtime_previous_response_fresh_fallback_state!(),
                     );
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
@@ -6741,15 +6631,13 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if !runtime_quota_blocked_affinity_is_releasable(
-                    RuntimeRouteKind::Websocket,
-                    &profile_name,
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
-                    trusted_previous_response_affinity,
+                    runtime_candidate_affinity!(
+                        RuntimeRouteKind::Websocket,
+                        &profile_name,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                    ),
                     runtime_websocket_request_requires_locked_previous_response_affinity(
                         request_requires_previous_response_affinity,
                         trusted_previous_response_affinity,
@@ -6806,27 +6694,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                     apply_runtime_websocket_previous_response_fresh_fallback(
-                        &mut request_text,
                         fresh_request_text,
-                        &mut handshake_request,
-                        &mut websocket_reuse_fresh_retry_profiles,
-                        &mut previous_response_id,
-                        &mut request_turn_state,
-                        &mut previous_response_fresh_fallback_used,
-                        &mut saw_previous_response_not_found,
-                        &mut previous_response_retry_candidate,
-                        &mut previous_response_retry_index,
-                        &mut candidate_turn_state_retry_profile,
-                        &mut candidate_turn_state_retry_value,
-                        &mut trusted_previous_response_affinity,
-                        &mut bound_profile,
-                        &mut pinned_profile,
-                        &mut turn_state_profile,
-                        &mut session_profile,
-                        &mut excluded_profiles,
-                        &mut last_failure,
-                        &mut selection_started_at,
-                        &mut selection_attempts,
+                        runtime_websocket_fresh_fallback_target!(),
+                        runtime_previous_response_fresh_fallback_state!(),
                     );
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
@@ -6922,27 +6792,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                     apply_runtime_websocket_previous_response_fresh_fallback(
-                        &mut request_text,
                         fresh_request_text,
-                        &mut handshake_request,
-                        &mut websocket_reuse_fresh_retry_profiles,
-                        &mut previous_response_id,
-                        &mut request_turn_state,
-                        &mut previous_response_fresh_fallback_used,
-                        &mut saw_previous_response_not_found,
-                        &mut previous_response_retry_candidate,
-                        &mut previous_response_retry_index,
-                        &mut candidate_turn_state_retry_profile,
-                        &mut candidate_turn_state_retry_value,
-                        &mut trusted_previous_response_affinity,
-                        &mut bound_profile,
-                        &mut pinned_profile,
-                        &mut turn_state_profile,
-                        &mut session_profile,
-                        &mut excluded_profiles,
-                        &mut last_failure,
-                        &mut selection_started_at,
-                        &mut selection_attempts,
+                        runtime_websocket_fresh_fallback_target!(),
+                        runtime_previous_response_fresh_fallback_state!(),
                     );
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
@@ -7051,21 +6903,39 @@ pub(super) fn proxy_runtime_websocket_text_message(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn attempt_runtime_websocket_request(
+pub(super) struct RuntimeWebsocketAttemptRequest<'a> {
     request_id: u64,
-    local_socket: &mut RuntimeLocalWebSocket,
-    handshake_request: &RuntimeProxyRequest,
-    request_text: &str,
-    request_previous_response_id: Option<&str>,
-    request_session_id: Option<&str>,
-    request_turn_state: Option<&str>,
-    shared: &RuntimeRotationProxyShared,
-    websocket_session: &mut RuntimeWebsocketSessionState,
-    profile_name: &str,
-    turn_state_override: Option<&str>,
+    local_socket: &'a mut RuntimeLocalWebSocket,
+    handshake_request: &'a RuntimeProxyRequest,
+    request_text: &'a str,
+    request_previous_response_id: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    shared: &'a RuntimeRotationProxyShared,
+    websocket_session: &'a mut RuntimeWebsocketSessionState,
+    profile_name: &'a str,
+    turn_state_override: Option<&'a str>,
     promote_committed_profile: bool,
+}
+
+pub(super) fn attempt_runtime_websocket_request(
+    attempt: RuntimeWebsocketAttemptRequest<'_>,
 ) -> Result<RuntimeWebsocketAttempt> {
+    let RuntimeWebsocketAttemptRequest {
+        request_id,
+        local_socket,
+        handshake_request,
+        request_text,
+        request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        shared,
+        websocket_session,
+        profile_name,
+        turn_state_override,
+        promote_committed_profile,
+    } = attempt;
+
     let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
     let (initial_quota_summary, initial_quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
@@ -7399,23 +7269,27 @@ pub(super) fn attempt_runtime_websocket_request(
                     forward_runtime_proxy_buffered_websocket_text_frames(
                         local_socket,
                         &mut buffered_precommit_text_frames,
-                        shared,
-                        profile_name,
-                        request_previous_response_id,
-                        request_session_id,
-                        request_turn_state,
-                        upstream_turn_state.as_deref(),
+                        RuntimeWebsocketResponseBindingContext {
+                            shared,
+                            profile_name,
+                            request_previous_response_id,
+                            request_session_id,
+                            request_turn_state,
+                            response_turn_state: upstream_turn_state.as_deref(),
+                        },
                         &mut previous_response_owner_recorded,
                     )?;
                 }
 
                 remember_runtime_websocket_response_ids(
-                    shared,
-                    profile_name,
-                    request_previous_response_id,
-                    request_session_id,
-                    request_turn_state,
-                    upstream_turn_state.as_deref(),
+                    RuntimeWebsocketResponseBindingContext {
+                        shared,
+                        profile_name,
+                        request_previous_response_id,
+                        request_session_id,
+                        request_turn_state,
+                        response_turn_state: upstream_turn_state.as_deref(),
+                    },
                     &inspected.response_ids,
                     &mut previous_response_owner_recorded,
                 )?;
@@ -7489,12 +7363,14 @@ pub(super) fn attempt_runtime_websocket_request(
                     forward_runtime_proxy_buffered_websocket_text_frames(
                         local_socket,
                         &mut buffered_precommit_text_frames,
-                        shared,
-                        profile_name,
-                        request_previous_response_id,
-                        request_session_id,
-                        request_turn_state,
-                        upstream_turn_state.as_deref(),
+                        RuntimeWebsocketResponseBindingContext {
+                            shared,
+                            profile_name,
+                            request_previous_response_id,
+                            request_session_id,
+                            request_turn_state,
+                            response_turn_state: upstream_turn_state.as_deref(),
+                        },
                         &mut previous_response_owner_recorded,
                     )?;
                 }
@@ -8241,17 +8117,30 @@ pub(super) fn forward_runtime_proxy_websocket_error(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+pub(super) struct RuntimeWebsocketResponseBindingContext<'a> {
+    shared: &'a RuntimeRotationProxyShared,
+    profile_name: &'a str,
+    request_previous_response_id: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    response_turn_state: Option<&'a str>,
+}
+
 pub(super) fn remember_runtime_websocket_response_ids(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    request_previous_response_id: Option<&str>,
-    request_session_id: Option<&str>,
-    request_turn_state: Option<&str>,
-    response_turn_state: Option<&str>,
+    context: RuntimeWebsocketResponseBindingContext<'_>,
     response_ids: &[String],
     previous_response_owner_recorded: &mut bool,
 ) -> Result<()> {
+    let RuntimeWebsocketResponseBindingContext {
+        shared,
+        profile_name,
+        request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        response_turn_state,
+    } = context;
+
     if !*previous_response_owner_recorded {
         remember_runtime_successful_previous_response_owner(
             shared,
@@ -8280,26 +8169,15 @@ pub(super) fn remember_runtime_websocket_response_ids(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
     local_socket: &mut RuntimeLocalWebSocket,
     buffered_frames: &mut Vec<RuntimeBufferedWebsocketTextFrame>,
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    request_previous_response_id: Option<&str>,
-    request_session_id: Option<&str>,
-    request_turn_state: Option<&str>,
-    response_turn_state: Option<&str>,
+    context: RuntimeWebsocketResponseBindingContext<'_>,
     previous_response_owner_recorded: &mut bool,
 ) -> Result<()> {
     for frame in buffered_frames.drain(..) {
         remember_runtime_websocket_response_ids(
-            shared,
-            profile_name,
-            request_previous_response_id,
-            request_session_id,
-            request_turn_state,
-            response_turn_state,
+            context,
             &frame.response_ids,
             previous_response_owner_recorded,
         )?;
@@ -8544,17 +8422,21 @@ pub(super) fn proxy_runtime_standard_request(
 
             let candidate_name = if excluded_profiles.is_empty() {
                 preferred_profile.clone()
-            } else if let Some(candidate_name) = select_runtime_response_candidate_for_route(
-                shared,
-                &excluded_profiles,
-                None,
-                None,
-                None,
-                None,
-                false,
-                None,
-                RuntimeRouteKind::Standard,
-            )? {
+            } else if let Some(candidate_name) =
+                select_runtime_response_candidate_for_route_with_selection(
+                    shared,
+                    RuntimeResponseCandidateSelection {
+                        excluded_profiles: &excluded_profiles,
+                        strict_affinity_profile: None,
+                        pinned_profile: None,
+                        turn_state_profile: None,
+                        session_profile: None,
+                        discover_previous_response_owner: false,
+                        previous_response_id: None,
+                        route_kind: RuntimeRouteKind::Standard,
+                    },
+                )?
+            {
                 candidate_name
             } else {
                 let remaining_cold_start_profiles =
@@ -8752,17 +8634,17 @@ pub(super) fn proxy_runtime_standard_request(
                 request,
                 shared,
                 &compact_owner_profile,
-                runtime_candidate_has_hard_affinity(
-                    RuntimeRouteKind::Compact,
-                    &compact_owner_profile,
-                    compact_followup_profile
+                runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+                    route_kind: RuntimeRouteKind::Compact,
+                    candidate_name: &compact_owner_profile,
+                    strict_affinity_profile: compact_followup_profile
                         .as_ref()
                         .map(|(profile_name, _)| profile_name.as_str()),
-                    None,
-                    None,
-                    session_profile.as_deref(),
-                    false,
-                ),
+                    pinned_profile: None,
+                    turn_state_profile: None,
+                    session_profile: session_profile.as_deref(),
+                    trusted_previous_response_affinity: false,
+                }),
             )? {
                 RuntimeStandardAttempt::Success {
                     profile_name,
@@ -8787,18 +8669,20 @@ pub(super) fn proxy_runtime_standard_request(
         }
         selection_attempts = selection_attempts.saturating_add(1);
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
             shared,
-            &excluded_profiles,
-            compact_followup_profile
-                .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
-            None,
-            None,
-            session_profile.as_deref(),
-            false,
-            None,
-            RuntimeRouteKind::Compact,
+            RuntimeResponseCandidateSelection {
+                excluded_profiles: &excluded_profiles,
+                strict_affinity_profile: compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                pinned_profile: None,
+                turn_state_profile: None,
+                session_profile: session_profile.as_deref(),
+                discover_previous_response_owner: false,
+                previous_response_id: None,
+                route_kind: RuntimeRouteKind::Compact,
+            },
         )?
         else {
             runtime_proxy_log(
@@ -8850,17 +8734,17 @@ pub(super) fn proxy_runtime_standard_request(
                 request,
                 shared,
                 &compact_owner_profile,
-                runtime_candidate_has_hard_affinity(
-                    RuntimeRouteKind::Compact,
-                    &compact_owner_profile,
-                    compact_followup_profile
+                runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+                    route_kind: RuntimeRouteKind::Compact,
+                    candidate_name: &compact_owner_profile,
+                    strict_affinity_profile: compact_followup_profile
                         .as_ref()
                         .map(|(profile_name, _)| profile_name.as_str()),
-                    None,
-                    None,
-                    session_profile.as_deref(),
-                    false,
-                ),
+                    pinned_profile: None,
+                    turn_state_profile: None,
+                    session_profile: session_profile.as_deref(),
+                    trusted_previous_response_affinity: false,
+                }),
             )? {
                 RuntimeStandardAttempt::Success {
                     profile_name,
@@ -8923,17 +8807,17 @@ pub(super) fn proxy_runtime_standard_request(
             request,
             shared,
             &candidate_name,
-            runtime_candidate_has_hard_affinity(
-                RuntimeRouteKind::Compact,
-                &candidate_name,
-                compact_followup_profile
+            runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+                route_kind: RuntimeRouteKind::Compact,
+                candidate_name: &candidate_name,
+                strict_affinity_profile: compact_followup_profile
                     .as_ref()
                     .map(|(profile_name, _)| profile_name.as_str()),
-                None,
-                None,
-                session_profile.as_deref(),
-                false,
-            ),
+                pinned_profile: None,
+                turn_state_profile: None,
+                session_profile: session_profile.as_deref(),
+                trusted_previous_response_affinity: false,
+            }),
         )? {
             RuntimeStandardAttempt::Success {
                 profile_name,
@@ -9010,17 +8894,17 @@ pub(super) fn proxy_runtime_standard_request(
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if !overload
-                    && runtime_candidate_has_hard_affinity(
-                        RuntimeRouteKind::Compact,
-                        &profile_name,
-                        compact_followup_profile
+                    && runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+                        route_kind: RuntimeRouteKind::Compact,
+                        candidate_name: &profile_name,
+                        strict_affinity_profile: compact_followup_profile
                             .as_ref()
                             .map(|(profile_name, _)| profile_name.as_str()),
-                        None,
-                        None,
-                        session_profile.as_deref(),
-                        false,
-                    )
+                        pinned_profile: None,
+                        turn_state_profile: None,
+                        session_profile: session_profile.as_deref(),
+                        trusted_previous_response_affinity: false,
+                    })
                 {
                     return Ok(response);
                 }
@@ -9602,6 +9486,42 @@ pub(super) fn proxy_runtime_responses_request(
     let mut selection_attempts = 0usize;
     let mut previous_response_fresh_fallback_used = false;
     let mut saw_previous_response_not_found = false;
+    macro_rules! runtime_candidate_affinity {
+        ($route_kind:expr, $candidate_name:expr, $strict_affinity_profile:expr $(,)?) => {
+            RuntimeCandidateAffinity {
+                route_kind: $route_kind,
+                candidate_name: $candidate_name,
+                strict_affinity_profile: $strict_affinity_profile,
+                pinned_profile: pinned_profile.as_deref(),
+                turn_state_profile: turn_state_profile.as_deref(),
+                session_profile: session_profile.as_deref(),
+                trusted_previous_response_affinity,
+            }
+        };
+    }
+    macro_rules! runtime_previous_response_fresh_fallback_state {
+        () => {
+            RuntimePreviousResponseFreshFallbackState {
+                previous_response_id: &mut previous_response_id,
+                request_turn_state: &mut request_turn_state,
+                previous_response_fresh_fallback_used: &mut previous_response_fresh_fallback_used,
+                saw_previous_response_not_found: &mut saw_previous_response_not_found,
+                previous_response_retry_candidate: &mut previous_response_retry_candidate,
+                previous_response_retry_index: &mut previous_response_retry_index,
+                candidate_turn_state_retry_profile: &mut candidate_turn_state_retry_profile,
+                candidate_turn_state_retry_value: &mut candidate_turn_state_retry_value,
+                trusted_previous_response_affinity: &mut trusted_previous_response_affinity,
+                bound_profile: &mut bound_profile,
+                pinned_profile: &mut pinned_profile,
+                turn_state_profile: &mut turn_state_profile,
+                session_profile: &mut session_profile,
+                excluded_profiles: &mut excluded_profiles,
+                last_failure: &mut last_failure,
+                selection_started_at: &mut selection_started_at,
+                selection_attempts: &mut selection_attempts,
+            }
+        };
+    }
 
     loop {
         let pressure_mode =
@@ -9644,23 +9564,7 @@ pub(super) fn proxy_runtime_responses_request(
                 apply_runtime_responses_previous_response_fresh_fallback(
                     &mut request,
                     fresh_request,
-                    &mut previous_response_id,
-                    &mut request_turn_state,
-                    &mut previous_response_fresh_fallback_used,
-                    &mut saw_previous_response_not_found,
-                    &mut previous_response_retry_candidate,
-                    &mut previous_response_retry_index,
-                    &mut candidate_turn_state_retry_profile,
-                    &mut candidate_turn_state_retry_value,
-                    &mut trusted_previous_response_affinity,
-                    &mut bound_profile,
-                    &mut pinned_profile,
-                    &mut turn_state_profile,
-                    &mut session_profile,
-                    &mut excluded_profiles,
-                    &mut last_failure,
-                    &mut selection_started_at,
-                    &mut selection_attempts,
+                    runtime_previous_response_fresh_fallback_state!(),
                 );
                 recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
@@ -9744,15 +9648,13 @@ pub(super) fn proxy_runtime_responses_request(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Responses,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Responses,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             request_requires_previous_response_affinity,
                         ) {
                             return Ok(response);
@@ -9800,23 +9702,7 @@ pub(super) fn proxy_runtime_responses_request(
                             apply_runtime_responses_previous_response_fresh_fallback(
                                 &mut request,
                                 fresh_request,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -9921,15 +9807,13 @@ pub(super) fn proxy_runtime_responses_request(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Responses,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Responses,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             request_requires_previous_response_affinity,
                         ) {
                             return Ok(RuntimeResponsesReply::Buffered(
@@ -9983,23 +9867,7 @@ pub(super) fn proxy_runtime_responses_request(
                             apply_runtime_responses_previous_response_fresh_fallback(
                                 &mut request,
                                 fresh_request,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -10015,18 +9883,20 @@ pub(super) fn proxy_runtime_responses_request(
             ));
         }
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
             shared,
-            &excluded_profiles,
-            compact_followup_profile
-                .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
-            pinned_profile.as_deref(),
-            turn_state_profile.as_deref(),
-            session_profile.as_deref(),
-            previous_response_id.is_some(),
-            previous_response_id.as_deref(),
-            RuntimeRouteKind::Responses,
+            RuntimeResponseCandidateSelection {
+                excluded_profiles: &excluded_profiles,
+                strict_affinity_profile: compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                pinned_profile: pinned_profile.as_deref(),
+                turn_state_profile: turn_state_profile.as_deref(),
+                session_profile: session_profile.as_deref(),
+                discover_previous_response_owner: previous_response_id.is_some(),
+                previous_response_id: previous_response_id.as_deref(),
+                route_kind: RuntimeRouteKind::Responses,
+            },
         )?
         else {
             runtime_proxy_log(
@@ -10041,34 +9911,36 @@ pub(super) fn proxy_runtime_responses_request(
                 ),
             );
             if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                request_id,
-                &request,
-                shared,
-                &excluded_profiles,
-                RuntimeRouteKind::Responses,
-                selection_started_at,
-                runtime_proxy_has_continuation_priority(
-                    previous_response_id.as_deref(),
-                    pinned_profile.as_deref(),
-                    request_turn_state.as_deref(),
-                    turn_state_profile.as_deref(),
-                    runtime_noncompact_session_priority_profile(
-                        session_profile.as_deref(),
-                        compact_session_profile.as_deref(),
+                RuntimeInflightReliefWait {
+                    request_id,
+                    request: &request,
+                    shared,
+                    excluded_profiles: &excluded_profiles,
+                    route_kind: RuntimeRouteKind::Responses,
+                    selection_started_at,
+                    continuation: runtime_proxy_has_continuation_priority(
+                        previous_response_id.as_deref(),
+                        pinned_profile.as_deref(),
+                        request_turn_state.as_deref(),
+                        turn_state_profile.as_deref(),
+                        runtime_noncompact_session_priority_profile(
+                            session_profile.as_deref(),
+                            compact_session_profile.as_deref(),
+                        ),
                     ),
-                ),
-                runtime_wait_affinity_owner(
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    runtime_noncompact_session_priority_profile(
-                        session_profile.as_deref(),
-                        compact_session_profile.as_deref(),
+                    wait_affinity_owner: runtime_wait_affinity_owner(
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                        pinned_profile.as_deref(),
+                        turn_state_profile.as_deref(),
+                        runtime_noncompact_session_priority_profile(
+                            session_profile.as_deref(),
+                            compact_session_profile.as_deref(),
+                        ),
+                        trusted_previous_response_affinity,
                     ),
-                    trusted_previous_response_affinity,
-                ),
+                },
             )? {
                 continue;
             }
@@ -10088,23 +9960,7 @@ pub(super) fn proxy_runtime_responses_request(
                 apply_runtime_responses_previous_response_fresh_fallback(
                     &mut request,
                     fresh_request,
-                    &mut previous_response_id,
-                    &mut request_turn_state,
-                    &mut previous_response_fresh_fallback_used,
-                    &mut saw_previous_response_not_found,
-                    &mut previous_response_retry_candidate,
-                    &mut previous_response_retry_index,
-                    &mut candidate_turn_state_retry_profile,
-                    &mut candidate_turn_state_retry_value,
-                    &mut trusted_previous_response_affinity,
-                    &mut bound_profile,
-                    &mut pinned_profile,
-                    &mut turn_state_profile,
-                    &mut session_profile,
-                    &mut excluded_profiles,
-                    &mut last_failure,
-                    &mut selection_started_at,
-                    &mut selection_attempts,
+                    runtime_previous_response_fresh_fallback_state!(),
                 );
                 recompute_route_affinity!("previous_response_fresh_fallback")?;
                 continue;
@@ -10204,15 +10060,13 @@ pub(super) fn proxy_runtime_responses_request(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Responses,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Responses,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             request_requires_previous_response_affinity,
                         ) {
                             return Ok(response);
@@ -10260,23 +10114,7 @@ pub(super) fn proxy_runtime_responses_request(
                             apply_runtime_responses_previous_response_fresh_fallback(
                                 &mut request,
                                 fresh_request,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -10381,15 +10219,13 @@ pub(super) fn proxy_runtime_responses_request(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         if !runtime_quota_blocked_affinity_is_releasable(
-                            RuntimeRouteKind::Responses,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                            pinned_profile.as_deref(),
-                            turn_state_profile.as_deref(),
-                            session_profile.as_deref(),
-                            trusted_previous_response_affinity,
+                            runtime_candidate_affinity!(
+                                RuntimeRouteKind::Responses,
+                                &profile_name,
+                                compact_followup_profile
+                                    .as_ref()
+                                    .map(|(profile_name, _)| profile_name.as_str()),
+                            ),
                             request_requires_previous_response_affinity,
                         ) {
                             return Ok(RuntimeResponsesReply::Buffered(
@@ -10443,23 +10279,7 @@ pub(super) fn proxy_runtime_responses_request(
                             apply_runtime_responses_previous_response_fresh_fallback(
                                 &mut request,
                                 fresh_request,
-                                &mut previous_response_id,
-                                &mut request_turn_state,
-                                &mut previous_response_fresh_fallback_used,
-                                &mut saw_previous_response_not_found,
-                                &mut previous_response_retry_candidate,
-                                &mut previous_response_retry_index,
-                                &mut candidate_turn_state_retry_profile,
-                                &mut candidate_turn_state_retry_value,
-                                &mut trusted_previous_response_affinity,
-                                &mut bound_profile,
-                                &mut pinned_profile,
-                                &mut turn_state_profile,
-                                &mut session_profile,
-                                &mut excluded_profiles,
-                                &mut last_failure,
-                                &mut selection_started_at,
-                                &mut selection_attempts,
+                                runtime_previous_response_fresh_fallback_state!(),
                             );
                             recompute_route_affinity!("previous_response_fresh_fallback")?;
                             continue;
@@ -10510,34 +10330,36 @@ pub(super) fn proxy_runtime_responses_request(
             );
             saw_inflight_saturation = true;
             if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                request_id,
-                &request,
-                shared,
-                &excluded_profiles,
-                RuntimeRouteKind::Responses,
-                selection_started_at,
-                runtime_proxy_has_continuation_priority(
-                    previous_response_id.as_deref(),
-                    pinned_profile.as_deref(),
-                    request_turn_state.as_deref(),
-                    turn_state_profile.as_deref(),
-                    runtime_noncompact_session_priority_profile(
-                        session_profile.as_deref(),
-                        compact_session_profile.as_deref(),
+                RuntimeInflightReliefWait {
+                    request_id,
+                    request: &request,
+                    shared,
+                    excluded_profiles: &excluded_profiles,
+                    route_kind: RuntimeRouteKind::Responses,
+                    selection_started_at,
+                    continuation: runtime_proxy_has_continuation_priority(
+                        previous_response_id.as_deref(),
+                        pinned_profile.as_deref(),
+                        request_turn_state.as_deref(),
+                        turn_state_profile.as_deref(),
+                        runtime_noncompact_session_priority_profile(
+                            session_profile.as_deref(),
+                            compact_session_profile.as_deref(),
+                        ),
                     ),
-                ),
-                runtime_wait_affinity_owner(
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    runtime_noncompact_session_priority_profile(
-                        session_profile.as_deref(),
-                        compact_session_profile.as_deref(),
+                    wait_affinity_owner: runtime_wait_affinity_owner(
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                        pinned_profile.as_deref(),
+                        turn_state_profile.as_deref(),
+                        runtime_noncompact_session_priority_profile(
+                            session_profile.as_deref(),
+                            compact_session_profile.as_deref(),
+                        ),
+                        trusted_previous_response_affinity,
                     ),
-                    trusted_previous_response_affinity,
-                ),
+                },
             )? {
                 continue;
             }
@@ -10601,15 +10423,13 @@ pub(super) fn proxy_runtime_responses_request(
                     quota_message.as_deref(),
                 )?;
                 if !runtime_quota_blocked_affinity_is_releasable(
-                    RuntimeRouteKind::Responses,
-                    &profile_name,
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
-                    trusted_previous_response_affinity,
+                    runtime_candidate_affinity!(
+                        RuntimeRouteKind::Responses,
+                        &profile_name,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                    ),
                     request_requires_previous_response_affinity,
                 ) {
                     runtime_proxy_log(
@@ -10663,23 +10483,7 @@ pub(super) fn proxy_runtime_responses_request(
                     apply_runtime_responses_previous_response_fresh_fallback(
                         &mut request,
                         fresh_request,
-                        &mut previous_response_id,
-                        &mut request_turn_state,
-                        &mut previous_response_fresh_fallback_used,
-                        &mut saw_previous_response_not_found,
-                        &mut previous_response_retry_candidate,
-                        &mut previous_response_retry_index,
-                        &mut candidate_turn_state_retry_profile,
-                        &mut candidate_turn_state_retry_value,
-                        &mut trusted_previous_response_affinity,
-                        &mut bound_profile,
-                        &mut pinned_profile,
-                        &mut turn_state_profile,
-                        &mut session_profile,
-                        &mut excluded_profiles,
-                        &mut last_failure,
-                        &mut selection_started_at,
-                        &mut selection_attempts,
+                        runtime_previous_response_fresh_fallback_state!(),
                     );
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
@@ -10707,15 +10511,13 @@ pub(super) fn proxy_runtime_responses_request(
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 if !runtime_quota_blocked_affinity_is_releasable(
-                    RuntimeRouteKind::Responses,
-                    &profile_name,
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    pinned_profile.as_deref(),
-                    turn_state_profile.as_deref(),
-                    session_profile.as_deref(),
-                    trusted_previous_response_affinity,
+                    runtime_candidate_affinity!(
+                        RuntimeRouteKind::Responses,
+                        &profile_name,
+                        compact_followup_profile
+                            .as_ref()
+                            .map(|(profile_name, _)| profile_name.as_str()),
+                    ),
                     request_requires_previous_response_affinity,
                 ) {
                     return Ok(RuntimeResponsesReply::Buffered(
@@ -10769,23 +10571,7 @@ pub(super) fn proxy_runtime_responses_request(
                     apply_runtime_responses_previous_response_fresh_fallback(
                         &mut request,
                         fresh_request,
-                        &mut previous_response_id,
-                        &mut request_turn_state,
-                        &mut previous_response_fresh_fallback_used,
-                        &mut saw_previous_response_not_found,
-                        &mut previous_response_retry_candidate,
-                        &mut previous_response_retry_index,
-                        &mut candidate_turn_state_retry_profile,
-                        &mut candidate_turn_state_retry_value,
-                        &mut trusted_previous_response_affinity,
-                        &mut bound_profile,
-                        &mut pinned_profile,
-                        &mut turn_state_profile,
-                        &mut session_profile,
-                        &mut excluded_profiles,
-                        &mut last_failure,
-                        &mut selection_started_at,
-                        &mut selection_attempts,
+                        runtime_previous_response_fresh_fallback_state!(),
                     );
                     recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
@@ -11046,17 +10832,20 @@ pub(super) fn attempt_runtime_responses_request(
             });
         }
         return prepare_runtime_proxy_responses_success(
-            request_id,
-            runtime_request_previous_response_id(request).as_deref(),
-            request_session_id.as_deref(),
-            runtime_request_turn_state(request).as_deref(),
-            turn_state_override,
+            RuntimeResponsesSuccessContext {
+                request_id,
+                request_previous_response_id: runtime_request_previous_response_id(request)
+                    .as_deref(),
+                request_session_id: request_session_id.as_deref(),
+                request_turn_state: runtime_request_turn_state(request).as_deref(),
+                turn_state_override,
+                shared,
+                profile_name,
+                inflight_guard: inflight_guard
+                    .take()
+                    .expect("responses inflight guard should be present"),
+            },
             response,
-            shared,
-            profile_name,
-            inflight_guard
-                .take()
-                .expect("responses inflight guard should be present"),
         )
         .inspect_err(|err| {
             note_runtime_profile_transport_failure(
@@ -11900,17 +11689,56 @@ pub(super) fn runtime_any_waited_candidate_relieved(
     Ok(false)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+pub(super) struct RuntimeInflightReliefWait<'a> {
     request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeRotationProxyShared,
-    excluded_profiles: &BTreeSet<String>,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    excluded_profiles: &'a BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     selection_started_at: Instant,
     continuation: bool,
-    wait_affinity_owner: Option<&str>,
+    wait_affinity_owner: Option<&'a str>,
+}
+
+impl<'a> RuntimeInflightReliefWait<'a> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn new(
+        request_id: u64,
+        request: &'a RuntimeProxyRequest,
+        shared: &'a RuntimeRotationProxyShared,
+        excluded_profiles: &'a BTreeSet<String>,
+        route_kind: RuntimeRouteKind,
+        selection_started_at: Instant,
+        continuation: bool,
+        wait_affinity_owner: Option<&'a str>,
+    ) -> Self {
+        Self {
+            request_id,
+            request,
+            shared,
+            excluded_profiles,
+            route_kind,
+            selection_started_at,
+            continuation,
+            wait_affinity_owner,
+        }
+    }
+}
+
+pub(super) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+    wait: RuntimeInflightReliefWait<'_>,
 ) -> Result<bool> {
+    let RuntimeInflightReliefWait {
+        request_id,
+        request,
+        shared,
+        excluded_profiles,
+        route_kind,
+        selection_started_at,
+        continuation,
+        wait_affinity_owner,
+    } = wait;
+
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let wait_budget = runtime_proxy_request_inflight_wait_budget(request, pressure_mode);
     if wait_budget.is_zero() {
@@ -14388,18 +14216,32 @@ pub(super) fn forward_runtime_proxy_response_with_limit(
     Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn prepare_runtime_proxy_responses_success(
+pub(super) struct RuntimeResponsesSuccessContext<'a> {
     request_id: u64,
-    request_previous_response_id: Option<&str>,
-    request_session_id: Option<&str>,
-    request_turn_state: Option<&str>,
-    turn_state_override: Option<&str>,
-    response: reqwest::Response,
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
+    request_previous_response_id: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    turn_state_override: Option<&'a str>,
+    shared: &'a RuntimeRotationProxyShared,
+    profile_name: &'a str,
     inflight_guard: RuntimeProfileInFlightGuard,
+}
+
+pub(super) fn prepare_runtime_proxy_responses_success(
+    context: RuntimeResponsesSuccessContext<'_>,
+    response: reqwest::Response,
 ) -> Result<RuntimeResponsesAttempt> {
+    let RuntimeResponsesSuccessContext {
+        request_id,
+        request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        turn_state_override,
+        shared,
+        profile_name,
+        inflight_guard,
+    } = context;
+
     let response_header_turn_state =
         runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
     remember_runtime_successful_previous_response_owner(
