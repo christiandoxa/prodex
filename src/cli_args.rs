@@ -1,0 +1,342 @@
+use super::*;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "prodex",
+    version,
+    about = "Manage multiple Codex profiles backed by isolated CODEX_HOME directories.",
+    after_help = CLI_TOP_LEVEL_AFTER_HELP
+)]
+pub(crate) struct Cli {
+    #[command(subcommand)]
+    pub(crate) command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum Commands {
+    #[command(
+        subcommand,
+        about = "Add, inspect, remove, and activate managed profiles.",
+        after_help = CLI_PROFILE_AFTER_HELP
+    )]
+    Profile(ProfileCommands),
+    #[command(
+        name = "use",
+        about = "Set the active profile used by commands that omit --profile."
+    )]
+    UseProfile(ProfileSelector),
+    #[command(about = "Show the active profile and its CODEX_HOME details.")]
+    Current,
+    #[command(
+        name = "info",
+        about = "Summarize version status, running processes, quota pool, and runway."
+    )]
+    Info(InfoArgs),
+    #[command(
+        about = "Inspect local state, Codex resolution, quota readiness, and runtime logs.",
+        after_help = CLI_DOCTOR_AFTER_HELP
+    )]
+    Doctor(DoctorArgs),
+    #[command(
+        about = "Inspect structured enterprise audit events written to /tmp.",
+        after_help = CLI_AUDIT_AFTER_HELP
+    )]
+    Audit(AuditArgs),
+    #[command(
+        about = "Remove stale local runtime logs, temp homes, dead broker artifacts, and orphaned managed homes.",
+        after_help = CLI_CLEANUP_AFTER_HELP
+    )]
+    Cleanup,
+    #[command(
+        trailing_var_arg = true,
+        about = "Run codex login inside a selected or auto-created profile.",
+        after_help = CLI_LOGIN_AFTER_HELP
+    )]
+    Login(CodexPassthroughArgs),
+    #[command(about = "Run codex logout for the selected or active profile.")]
+    Logout(LogoutArgs),
+    #[command(
+        about = "Inspect live quota for one profile or the whole profile pool.",
+        after_help = CLI_QUOTA_AFTER_HELP
+    )]
+    Quota(QuotaArgs),
+    #[command(
+        trailing_var_arg = true,
+        about = "Run codex through prodex with quota preflight and safe auto-rotate.",
+        after_help = CLI_RUN_AFTER_HELP
+    )]
+    Run(RunArgs),
+    #[command(
+        trailing_var_arg = true,
+        about = "Run codex through prodex with the Caveman plugin active in a temporary overlay home.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Caveman(CavemanArgs),
+    #[command(
+        trailing_var_arg = true,
+        about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
+        after_help = CLI_CLAUDE_AFTER_HELP
+    )]
+    Claude(ClaudeArgs),
+    #[command(name = "__runtime-broker", hide = true)]
+    RuntimeBroker(RuntimeBrokerArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum ProfileCommands {
+    /// Add a profile entry and optionally seed it from another CODEX_HOME.
+    Add(AddProfileArgs),
+    /// Export one or more profiles, including their auth.json access tokens.
+    Export(ExportProfileArgs),
+    /// Import profiles from a bundle created by `prodex profile export`.
+    Import(ImportProfileArgs),
+    /// Copy the current shared Prodex CODEX_HOME into a new managed profile and activate it.
+    ImportCurrent(ImportCurrentArgs),
+    /// List configured profiles and show which one is active.
+    List,
+    /// Remove one profile entry or every profile entry and optionally delete managed homes.
+    Remove(RemoveProfileArgs),
+    /// Set the active profile used by commands that omit --profile.
+    Use(ProfileSelector),
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct AddProfileArgs {
+    /// Name of the profile to create.
+    pub(crate) name: String,
+    /// Register an existing CODEX_HOME path instead of creating a managed profile home.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) codex_home: Option<PathBuf>,
+    /// Copy initial state from another CODEX_HOME path into the new managed profile.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) copy_from: Option<PathBuf>,
+    /// Seed the new managed profile from the default shared Prodex CODEX_HOME.
+    #[arg(long)]
+    pub(crate) copy_current: bool,
+    /// Make the new profile active after creation.
+    #[arg(long)]
+    pub(crate) activate: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ExportProfileArgs {
+    /// Export only the named profile. Repeat to export multiple profiles. Defaults to all profiles.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Vec<String>,
+    /// Write the export bundle to this path. Defaults to a timestamped JSON file in the current directory.
+    #[arg(value_name = "PATH")]
+    pub(crate) output: Option<PathBuf>,
+    /// Protect the export bundle with a password.
+    #[arg(long, conflicts_with = "no_password")]
+    pub(crate) password_protect: bool,
+    /// Export without password protection and skip the interactive prompt.
+    #[arg(long)]
+    pub(crate) no_password: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ImportProfileArgs {
+    /// Path to a profile export bundle created by `prodex profile export`.
+    #[arg(value_name = "PATH")]
+    pub(crate) path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ImportCurrentArgs {
+    /// Name of the managed profile to create from the current shared Prodex CODEX_HOME.
+    #[arg(default_value = "default")]
+    pub(crate) name: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct RemoveProfileArgs {
+    /// Name of the profile to remove.
+    #[arg(
+        value_name = "NAME",
+        required_unless_present = "all",
+        conflicts_with = "all"
+    )]
+    pub(crate) name: Option<String>,
+    /// Remove every configured profile.
+    #[arg(long, conflicts_with = "name")]
+    pub(crate) all: bool,
+    /// Also delete the managed CODEX_HOME directory from disk.
+    #[arg(long)]
+    pub(crate) delete_home: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct ProfileSelector {
+    /// Profile name. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(crate) struct LogoutArgs {
+    /// Profile name. If omitted, prodex uses the active profile.
+    #[arg(value_name = "NAME", conflicts_with = "profile")]
+    pub(crate) profile_name: Option<String>,
+    /// Profile name. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+}
+
+impl LogoutArgs {
+    pub(crate) fn selected_profile(&self) -> Option<&str> {
+        self.profile.as_deref().or(self.profile_name.as_deref())
+    }
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CodexPassthroughArgs {
+    /// Existing profile to log into. If omitted, prodex creates or reuses a profile by account email.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    /// Extra arguments passed through to `codex login` unchanged.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub(crate) codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct QuotaArgs {
+    /// Inspect a single profile. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    /// Show every configured profile in one aggregated view.
+    #[arg(long)]
+    pub(crate) all: bool,
+    /// Include exact reset timestamps and expanded window details.
+    #[arg(long)]
+    pub(crate) detail: bool,
+    /// Print raw usage JSON for a single profile and disable the live refresh view.
+    #[arg(long)]
+    pub(crate) raw: bool,
+    #[arg(long, hide = true)]
+    pub(crate) watch: bool,
+    /// Render one human-readable snapshot instead of refreshing every 5 seconds.
+    #[arg(long, conflicts_with = "watch")]
+    pub(crate) once: bool,
+    /// Override the ChatGPT backend base URL used for quota requests.
+    #[arg(long, value_name = "URL")]
+    pub(crate) base_url: Option<String>,
+}
+
+#[derive(Args, Debug, Default)]
+pub(crate) struct InfoArgs {}
+
+#[derive(Args, Debug)]
+pub(crate) struct DoctorArgs {
+    /// Also probe each profile's quota endpoint.
+    #[arg(long)]
+    pub(crate) quota: bool,
+    /// Also summarize runtime proxy state and recent logs from /tmp.
+    #[arg(long)]
+    pub(crate) runtime: bool,
+    /// Emit machine-readable JSON output. Supported together with --runtime.
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct AuditArgs {
+    /// Show only the most recent matching events.
+    #[arg(long, default_value_t = 50, value_name = "COUNT")]
+    pub(crate) tail: usize,
+    /// Emit machine-readable JSON output.
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Filter by component, for example `profile` or `runtime`.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) component: Option<String>,
+    /// Filter by action, for example `use` or `broker_start`.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) action: Option<String>,
+    /// Filter by outcome, for example `success` or `failure`.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) outcome: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct RunArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub(crate) auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub(crate) no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    pub(crate) skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub(crate) base_url: Option<String>,
+    /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub(crate) codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ClaudeArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub(crate) auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub(crate) no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching Claude Code.
+    #[arg(long)]
+    pub(crate) skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub(crate) base_url: Option<String>,
+    /// Arguments passed through to `claude` unchanged.
+    #[arg(value_name = "CLAUDE_ARG", allow_hyphen_values = true)]
+    pub(crate) claude_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CavemanArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub(crate) auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub(crate) no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    pub(crate) skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub(crate) base_url: Option<String>,
+    /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub(crate) codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct RuntimeBrokerArgs {
+    #[arg(long)]
+    pub(crate) current_profile: String,
+    #[arg(long)]
+    pub(crate) upstream_base_url: String,
+    #[arg(long, default_value_t = false)]
+    pub(crate) include_code_review: bool,
+    #[arg(long)]
+    pub(crate) broker_key: String,
+    #[arg(long)]
+    pub(crate) instance_token: String,
+    #[arg(long)]
+    pub(crate) admin_token: String,
+    #[arg(long)]
+    pub(crate) listen_addr: Option<String>,
+}
