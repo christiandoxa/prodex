@@ -10,7 +10,7 @@ Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex cla
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
 
-If you install `@christiandoxa/prodex` from npm, the Codex runtime dependency is installed for you. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+If you install `@christiandoxa/prodex` from npm, the pinned Codex runtime dependency `@openai/codex@0.121.0` is installed for you. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
 ## Install
 
@@ -43,7 +43,7 @@ cargo install prodex --force --version 0.18.0
 
 Dependency status in this repo:
 
-- The npm runtime dependency follows the `latest` dist-tag declared in the workspace package manifest for `@openai/codex`
+- The npm runtime dependency is pinned to `@openai/codex@0.121.0` in the workspace package manifest
 - Run `cargo update` whenever dependency metadata changes so the published lockfile stays in sync
 - Versioned install snippets in this guide and `README.md` are synced from `Cargo.toml`
 

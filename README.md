@@ -21,7 +21,7 @@ Run Codex, Claude Code, and their Caveman-mode variants on top of one OpenAI pro
 - Codex CLI for `prodex` and `prodex caveman`
 - Claude Code (`claude`) for `prodex claude` and `prodex claude caveman`
 
-Installing `@christiandoxa/prodex` from npm also installs the Codex runtime dependency for you. Claude Code is still a separate CLI.
+Installing `@christiandoxa/prodex` from npm also installs the pinned Codex runtime dependency `@openai/codex@0.121.0` for you. Claude Code is still a separate CLI.
 
 ## Install
 

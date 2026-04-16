@@ -595,6 +595,9 @@ fn ensure_symlink_to_shared(
     shared_path: &Path,
     kind: SharedCodexEntryKind,
 ) -> Result<()> {
+    if let Some(parent) = local_path.parent() {
+        create_codex_home_if_missing(parent)?;
+    }
     if local_path.exists() || fs::symlink_metadata(local_path).is_ok() {
         remove_path(local_path)?;
     }

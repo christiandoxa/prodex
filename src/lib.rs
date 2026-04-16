@@ -339,8 +339,11 @@ const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "archived_sessions",
     "shell_snapshots",
     "memories",
+    "memories_extensions",
     "rules",
     "skills",
+    "plugins",
+    ".tmp/marketplaces",
 ];
 const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl", "config.toml"];
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
