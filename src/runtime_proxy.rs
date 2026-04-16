@@ -1103,6 +1103,10 @@ pub(super) fn runtime_request_without_previous_response_affinity(
 pub(super) fn runtime_request_value_requires_previous_response_affinity(
     value: &serde_json::Value,
 ) -> bool {
+    if runtime_request_previous_response_id_from_value(value).is_none() {
+        return false;
+    }
+
     value
         .get("input")
         .and_then(serde_json::Value::as_array)

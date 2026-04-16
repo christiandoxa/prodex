@@ -4003,6 +4003,21 @@ fn runtime_request_strips_previous_response_id_from_function_call_output_payload
 }
 
 #[test]
+fn runtime_request_allows_fresh_function_call_output_replay_without_previous_response_id() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":[{"type":"function_call","call_id":"call_123","name":"shell","arguments":"{\"cmd\":\"pwd\"}"},{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
+    };
+
+    assert!(
+        !runtime_request_requires_previous_response_affinity(&request),
+        "fresh replayable transcripts should not be pinned just because they include call outputs"
+    );
+}
+
+#[test]
 fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     let metadata = parse_runtime_websocket_request_metadata(
         r#"{"previous_response_id":"resp_123","client_metadata":{"session_id":"sess_123"},"input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
@@ -16965,6 +16980,80 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
         .expect("runtime proxy request should succeed");
     let body = response.text().expect("response body should be readable");
 
+    assert!(body.contains("\"response.created\""));
+    assert!(!body.contains("You've hit your usage limit"));
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
+}
+
+#[test]
+fn runtime_proxy_retries_fresh_function_call_output_transcript_on_another_profile() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body(
+            r#"{"input":[{"type":"function_call","call_id":"call_123","name":"shell","arguments":"{\"cmd\":\"pwd\"}"},{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
+        )
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::OK, "unexpected status: {status} {body}");
     assert!(body.contains("\"response.created\""));
     assert!(!body.contains("You've hit your usage limit"));
     assert_eq!(
@@ -37435,6 +37524,123 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
             .and_then(serde_json::Value::as_str),
         Some("hello from Claude")
     );
+}
+
+#[test]
+fn runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_profile() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/v1/messages?beta=true",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .header("x-api-key", "dummy")
+        .header("anthropic-version", "2023-06-01")
+        .body(
+            serde_json::json!({
+                "model": "claude-sonnet-4-6",
+                "stream": true,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Run pwd"
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "shell",
+                                "input": {
+                                    "cmd": "pwd"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": "ok"
+                            }
+                        ]
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("anthropic proxy request should succeed");
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::OK,
+        "unexpected anthropic status: {}",
+        response.status()
+    );
+    let body = response.text().expect("anthropic stream body should decode");
+    assert!(body.contains("event: message_start"), "unexpected body: {body}");
+    assert!(body.contains("event: message_stop"), "unexpected body: {body}");
+    assert!(
+        !body.contains("You've hit your usage limit"),
+        "fresh anthropic tool-result transcript should rotate instead of surfacing quota: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("second"));
 }
 
 #[test]
