@@ -5,7 +5,6 @@ mod runtime_launch;
 mod shared;
 
 pub(crate) use self::info::*;
-use self::runtime_launch::*;
 pub(crate) use self::shared::*;
 
 pub(super) fn handle_info(_args: InfoArgs) -> Result<()> {
@@ -436,165 +435,22 @@ pub(super) fn handle_quota(args: QuotaArgs) -> Result<()> {
     Ok(())
 }
 
-struct RunCommandStrategy {
-    args: RunArgs,
-    codex_args: Vec<OsString>,
-    include_code_review: bool,
-    mem_mode: bool,
-}
-
-impl RunCommandStrategy {
-    fn new(args: RunArgs) -> Self {
-        let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
-        let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
-        Self {
-            args,
-            codex_args,
-            include_code_review,
-            mem_mode,
-        }
-    }
-}
-
-impl RuntimeLaunchStrategy for RunCommandStrategy {
-    fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
-        RuntimeLaunchRequest {
-            profile: self.args.profile.as_deref(),
-            allow_auto_rotate: !self.args.no_auto_rotate,
-            skip_quota_check: self.args.skip_quota_check,
-            base_url: self.args.base_url.as_deref(),
-            include_code_review: self.include_code_review,
-            force_runtime_proxy: false,
-        }
-    }
-
-    fn build_plan(
-        &self,
-        prepared: &PreparedRuntimeLaunch,
-        runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    ) -> Result<RuntimeLaunchPlan> {
-        if self.mem_mode {
-            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
-            ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
-        }
-        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
-        Ok(RuntimeLaunchPlan::new(
-            ChildProcessPlan::new(codex_bin(), prepared.codex_home.clone()).with_args(runtime_args),
-        ))
-    }
-}
-
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
-    execute_runtime_launch(RunCommandStrategy::new(args))
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeLaunchSelection {
-    initial_profile_name: String,
-    selected_profile_name: String,
-    codex_home: PathBuf,
-    explicit_profile_requested: bool,
-}
-
-impl RuntimeLaunchSelection {
-    fn resolve(state: &AppState, requested: Option<&str>) -> Result<Self> {
-        let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
-        let codex_home = runtime_launch_profile_home(state, &profile_name)?;
-
-        Ok(Self {
-            initial_profile_name: profile_name.clone(),
-            selected_profile_name: profile_name,
-            codex_home,
-            explicit_profile_requested: requested.is_some(),
-        })
-    }
-
-    fn select_profile(&mut self, state: &AppState, profile_name: &str) -> Result<()> {
-        self.codex_home = runtime_launch_profile_home(state, profile_name)?;
-        self.selected_profile_name = profile_name.to_string();
-        Ok(())
-    }
-}
-
-pub(super) fn resolve_runtime_launch_profile_name(
-    state: &AppState,
-    requested: Option<&str>,
-) -> Result<String> {
-    let profile_name = resolve_profile_name(state, requested)?;
-    if requested.is_some() {
-        return Ok(profile_name);
-    }
-
-    if state
-        .profiles
-        .get(&profile_name)
-        .is_some_and(|profile| profile.provider.supports_codex_runtime())
-    {
-        return Ok(profile_name);
-    }
-
-    active_profile_selection_order(state, &profile_name)
-        .into_iter()
-        .find(|candidate_name| {
-            state.profiles.get(candidate_name).is_some_and(|profile| {
-                profile.codex_home.exists() && profile.provider.supports_codex_runtime()
-            })
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "profile '{}' uses {}. `prodex run` currently supports OpenAI/Codex profiles only.",
-                profile_name,
-                state
-                    .profiles
-                    .get(&profile_name)
-                    .map(|profile| profile.provider.display_name())
-                    .unwrap_or("an unsupported provider"),
-            )
-        })
+    runtime_launch::handle_run(args)
 }
 
 pub(super) fn prepare_runtime_launch(
     request: RuntimeLaunchRequest<'_>,
 ) -> Result<PreparedRuntimeLaunch> {
-    let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
-    let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
+    runtime_launch::prepare_runtime_launch(request)
+}
 
-    record_run_selection(&mut state, &selection.selected_profile_name);
-    state.save(&paths)?;
-
-    let managed = state
-        .profiles
-        .get(&selection.selected_profile_name)
-        .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
-        .managed;
-    if managed {
-        prepare_managed_codex_home(&paths, &selection.codex_home)?;
-    }
-
-    let runtime_upstream_base_url = quota_base_url(request.base_url);
-    let runtime_proxy = if request.force_runtime_proxy
-        || should_enable_runtime_rotation_proxy(
-            &state,
-            &selection.selected_profile_name,
-            request.allow_auto_rotate,
-        ) {
-        Some(ensure_runtime_rotation_proxy_endpoint(
-            &paths,
-            &selection.selected_profile_name,
-            runtime_upstream_base_url.as_str(),
-            request.include_code_review,
-        )?)
-    } else {
-        None
-    };
-
-    Ok(PreparedRuntimeLaunch {
-        paths,
-        codex_home: selection.codex_home,
-        managed,
-        runtime_proxy,
-    })
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn resolve_runtime_launch_profile_name(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String> {
+    runtime_launch::resolve_runtime_launch_profile_name(state, requested)
 }
 
 pub(super) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {

@@ -3,7 +3,7 @@ use super::*;
 impl Commands {
     pub(super) fn execute(self) -> Result<()> {
         match self {
-            Commands::Profile(command) => handle_profile_command(command),
+            Commands::Profile(command) => command.execute(),
             Commands::UseProfile(selector) => handle_set_active_profile(selector),
             Commands::Current => handle_current_profile(),
             Commands::Info(args) => handle_info(args),
@@ -22,5 +22,19 @@ impl Commands {
 
     pub(super) fn should_show_update_notice(&self) -> bool {
         !matches!(self, Commands::RuntimeBroker(_))
+    }
+}
+
+impl ProfileCommands {
+    fn execute(self) -> Result<()> {
+        match self {
+            ProfileCommands::Add(args) => handle_add_profile(args),
+            ProfileCommands::Export(args) => handle_export_profiles(args),
+            ProfileCommands::Import(args) => handle_import_profiles(args),
+            ProfileCommands::ImportCurrent(args) => handle_import_current_profile(args),
+            ProfileCommands::List => handle_list_profiles(),
+            ProfileCommands::Remove(args) => handle_remove_profile(args),
+            ProfileCommands::Use(selector) => handle_set_active_profile(selector),
+        }
     }
 }

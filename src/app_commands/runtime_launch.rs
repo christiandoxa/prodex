@@ -1,6 +1,167 @@
 use super::*;
 
-pub(super) fn select_runtime_launch_profile(
+struct RunCommandStrategy {
+    args: RunArgs,
+    codex_args: Vec<OsString>,
+    include_code_review: bool,
+    mem_mode: bool,
+}
+
+impl RunCommandStrategy {
+    fn new(args: RunArgs) -> Self {
+        let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+        let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
+        Self {
+            args,
+            codex_args,
+            include_code_review,
+            mem_mode,
+        }
+    }
+}
+
+impl RuntimeLaunchStrategy for RunCommandStrategy {
+    fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
+        RuntimeLaunchRequest {
+            profile: self.args.profile.as_deref(),
+            allow_auto_rotate: !self.args.no_auto_rotate,
+            skip_quota_check: self.args.skip_quota_check,
+            base_url: self.args.base_url.as_deref(),
+            include_code_review: self.include_code_review,
+            force_runtime_proxy: false,
+        }
+    }
+
+    fn build_plan(
+        &self,
+        prepared: &PreparedRuntimeLaunch,
+        runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    ) -> Result<RuntimeLaunchPlan> {
+        if self.mem_mode {
+            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
+            ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
+        }
+        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
+        Ok(RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(codex_bin(), prepared.codex_home.clone()).with_args(runtime_args),
+        ))
+    }
+}
+
+pub(super) fn handle_run(args: RunArgs) -> Result<()> {
+    execute_runtime_launch(RunCommandStrategy::new(args))
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeLaunchSelection {
+    initial_profile_name: String,
+    selected_profile_name: String,
+    codex_home: PathBuf,
+    explicit_profile_requested: bool,
+}
+
+impl RuntimeLaunchSelection {
+    fn resolve(state: &AppState, requested: Option<&str>) -> Result<Self> {
+        let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
+        let codex_home = runtime_launch_profile_home(state, &profile_name)?;
+
+        Ok(Self {
+            initial_profile_name: profile_name.clone(),
+            selected_profile_name: profile_name,
+            codex_home,
+            explicit_profile_requested: requested.is_some(),
+        })
+    }
+
+    fn select_profile(&mut self, state: &AppState, profile_name: &str) -> Result<()> {
+        self.codex_home = runtime_launch_profile_home(state, profile_name)?;
+        self.selected_profile_name = profile_name.to_string();
+        Ok(())
+    }
+}
+
+pub(crate) fn resolve_runtime_launch_profile_name(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String> {
+    let profile_name = resolve_profile_name(state, requested)?;
+    if requested.is_some() {
+        return Ok(profile_name);
+    }
+
+    if state
+        .profiles
+        .get(&profile_name)
+        .is_some_and(|profile| profile.provider.supports_codex_runtime())
+    {
+        return Ok(profile_name);
+    }
+
+    active_profile_selection_order(state, &profile_name)
+        .into_iter()
+        .find(|candidate_name| {
+            state.profiles.get(candidate_name).is_some_and(|profile| {
+                profile.codex_home.exists() && profile.provider.supports_codex_runtime()
+            })
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "profile '{}' uses {}. `prodex run` currently supports OpenAI/Codex profiles only.",
+                profile_name,
+                state
+                    .profiles
+                    .get(&profile_name)
+                    .map(|profile| profile.provider.display_name())
+                    .unwrap_or("an unsupported provider"),
+            )
+        })
+}
+
+pub(super) fn prepare_runtime_launch(
+    request: RuntimeLaunchRequest<'_>,
+) -> Result<PreparedRuntimeLaunch> {
+    let paths = AppPaths::discover()?;
+    let mut state = AppState::load(&paths)?;
+    let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
+
+    record_run_selection(&mut state, &selection.selected_profile_name);
+    state.save(&paths)?;
+
+    let managed = state
+        .profiles
+        .get(&selection.selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
+        .managed;
+    if managed {
+        prepare_managed_codex_home(&paths, &selection.codex_home)?;
+    }
+
+    let runtime_upstream_base_url = quota_base_url(request.base_url);
+    let runtime_proxy = if request.force_runtime_proxy
+        || should_enable_runtime_rotation_proxy(
+            &state,
+            &selection.selected_profile_name,
+            request.allow_auto_rotate,
+        ) {
+        Some(ensure_runtime_rotation_proxy_endpoint(
+            &paths,
+            &selection.selected_profile_name,
+            runtime_upstream_base_url.as_str(),
+            request.include_code_review,
+        )?)
+    } else {
+        None
+    };
+
+    Ok(PreparedRuntimeLaunch {
+        paths,
+        codex_home: selection.codex_home,
+        managed,
+        runtime_proxy,
+    })
+}
+
+fn select_runtime_launch_profile(
     paths: &AppPaths,
     state: &mut AppState,
     request: &RuntimeLaunchRequest<'_>,
@@ -22,7 +183,7 @@ pub(super) fn select_runtime_launch_profile(
     Ok(selection)
 }
 
-pub(super) fn run_auto_runtime_launch_preflight(
+fn run_auto_runtime_launch_preflight(
     paths: &AppPaths,
     state: &mut AppState,
     request: &RuntimeLaunchRequest<'_>,
@@ -73,7 +234,7 @@ pub(super) fn run_auto_runtime_launch_preflight(
     Ok(())
 }
 
-pub(super) fn rotate_to_scored_runtime_candidate(
+fn rotate_to_scored_runtime_candidate(
     paths: &AppPaths,
     state: &mut AppState,
     selection: &mut RuntimeLaunchSelection,
@@ -94,7 +255,7 @@ pub(super) fn rotate_to_scored_runtime_candidate(
     Ok(())
 }
 
-pub(super) fn scored_runtime_candidate_message(
+fn scored_runtime_candidate_message(
     initial_profile_name: &str,
     best_candidate: &ReadyProfileCandidate,
     selected_report: Option<&RunProfileProbeReport>,
@@ -147,7 +308,7 @@ pub(super) fn scored_runtime_candidate_message(
     selection_message
 }
 
-pub(super) fn handle_no_ready_runtime_profiles(
+fn handle_no_ready_runtime_profiles(
     report: &RunProfileProbeReport,
     profile_name: &str,
     request: &RuntimeLaunchRequest<'_>,
@@ -176,7 +337,7 @@ pub(super) fn handle_no_ready_runtime_profiles(
     }
 }
 
-pub(super) fn run_selected_runtime_launch_preflight(
+fn run_selected_runtime_launch_preflight(
     paths: &AppPaths,
     state: &mut AppState,
     request: &RuntimeLaunchRequest<'_>,
@@ -204,7 +365,7 @@ pub(super) fn run_selected_runtime_launch_preflight(
     Ok(())
 }
 
-pub(super) fn handle_blocked_selected_runtime_profile(
+fn handle_blocked_selected_runtime_profile(
     paths: &AppPaths,
     state: &mut AppState,
     request: &RuntimeLaunchRequest<'_>,
@@ -250,7 +411,7 @@ pub(super) fn handle_blocked_selected_runtime_profile(
     Ok(())
 }
 
-pub(super) fn activate_runtime_launch_profile(
+fn activate_runtime_launch_profile(
     paths: &AppPaths,
     state: &mut AppState,
     selection: &mut RuntimeLaunchSelection,
@@ -262,14 +423,14 @@ pub(super) fn activate_runtime_launch_profile(
     Ok(())
 }
 
-pub(super) fn print_quota_preflight_inspect_hint(profile_name: &str) {
+fn print_quota_preflight_inspect_hint(profile_name: &str) {
     print_wrapped_stderr(&format!(
         "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
         profile_name
     ));
 }
 
-pub(super) fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<PathBuf> {
+fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<PathBuf> {
     let profile = state
         .profiles
         .get(profile_name)
