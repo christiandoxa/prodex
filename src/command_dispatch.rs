@@ -1,40 +1,82 @@
 use super::*;
 
+mod routed_command;
+
+use routed_command::{CommandAction, RoutedCommand};
+
+macro_rules! impl_command_action {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl CommandAction for $ty {
+                fn run(self: Box<Self>) -> Result<()> {
+                    <$ty>::execute(*self)
+                }
+            }
+        )+
+    };
+}
+
+impl_command_action!(
+    AddProfileArgs,
+    AuditArgs,
+    CavemanArgs,
+    ClaudeArgs,
+    CleanupCommand,
+    CodexPassthroughArgs,
+    CurrentCommand,
+    DoctorArgs,
+    ExportProfileArgs,
+    ImportCurrentArgs,
+    ImportProfileArgs,
+    InfoArgs,
+    ListProfilesCommand,
+    LogoutArgs,
+    ProfileSelector,
+    QuotaArgs,
+    RemoveProfileArgs,
+    RunArgs,
+    RuntimeBrokerArgs,
+);
+
 impl Commands {
     pub(super) fn execute(self) -> Result<()> {
-        match self {
-            Commands::Profile(command) => command.execute(),
-            Commands::UseProfile(command) => command.execute(),
-            Commands::Current => CurrentCommand.execute(),
-            Commands::Info(command) => command.execute(),
-            Commands::Doctor(command) => command.execute(),
-            Commands::Audit(command) => command.execute(),
-            Commands::Cleanup => CleanupCommand.execute(),
-            Commands::Login(command) => command.execute(),
-            Commands::Logout(command) => command.execute(),
-            Commands::Quota(command) => command.execute(),
-            Commands::Run(command) => command.execute(),
-            Commands::Caveman(command) => command.execute(),
-            Commands::Claude(command) => command.execute(),
-            Commands::RuntimeBroker(command) => command.execute(),
-        }
+        self.into_routed_command().execute()
     }
 
     pub(super) fn should_show_update_notice(&self) -> bool {
         !matches!(self, Commands::RuntimeBroker(_))
     }
+
+    fn into_routed_command(self) -> RoutedCommand {
+        match self {
+            Commands::Profile(command) => command.into_routed_command(),
+            Commands::UseProfile(command) => RoutedCommand::new(command),
+            Commands::Current => RoutedCommand::new(CurrentCommand),
+            Commands::Info(command) => RoutedCommand::new(command),
+            Commands::Doctor(command) => RoutedCommand::new(command),
+            Commands::Audit(command) => RoutedCommand::new(command),
+            Commands::Cleanup => RoutedCommand::new(CleanupCommand),
+            Commands::Login(command) => RoutedCommand::new(command),
+            Commands::Logout(command) => RoutedCommand::new(command),
+            Commands::Quota(command) => RoutedCommand::new(command),
+            Commands::Run(command) => RoutedCommand::new(command),
+            Commands::Caveman(command) => RoutedCommand::new(command),
+            Commands::Claude(command) => RoutedCommand::new(command),
+            Commands::RuntimeBroker(command) => RoutedCommand::new(command),
+        }
+    }
 }
 
 impl ProfileCommands {
-    fn execute(self) -> Result<()> {
+    fn into_routed_command(self) -> RoutedCommand {
         match self {
-            ProfileCommands::Add(command) => command.execute(),
-            ProfileCommands::Export(command) => command.execute(),
-            ProfileCommands::Import(command) => command.execute(),
-            ProfileCommands::ImportCurrent(command) => command.execute(),
-            ProfileCommands::List => ListProfilesCommand.execute(),
-            ProfileCommands::Remove(command) => command.execute(),
-            ProfileCommands::Use(command) => command.execute(),
+            ProfileCommands::Add(command) => RoutedCommand::new(command),
+            ProfileCommands::Export(command) => RoutedCommand::new(command),
+            ProfileCommands::Import(command) => RoutedCommand::new(command),
+            ProfileCommands::ImportCurrent(command) => RoutedCommand::new(command),
+            ProfileCommands::List => RoutedCommand::new(ListProfilesCommand),
+            ProfileCommands::Remove(command) => RoutedCommand::new(command),
+            ProfileCommands::Use(command) => RoutedCommand::new(command),
         }
     }
 }

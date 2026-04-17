@@ -117,48 +117,107 @@ pub(crate) fn resolve_runtime_launch_profile_name(
         })
 }
 
+struct RuntimeLaunchPreparationBuilder<'a> {
+    request: RuntimeLaunchRequest<'a>,
+    paths: AppPaths,
+    state: AppState,
+    selection: RuntimeLaunchSelection,
+}
+
+impl<'a> RuntimeLaunchPreparationBuilder<'a> {
+    fn from_request(request: RuntimeLaunchRequest<'a>) -> Result<Self> {
+        let paths = AppPaths::discover()?;
+        let mut state = AppState::load(&paths)?;
+        let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
+
+        Ok(Self {
+            request,
+            paths,
+            state,
+            selection,
+        })
+    }
+
+    fn build(mut self) -> Result<PreparedRuntimeLaunch> {
+        self.record_selection()?;
+
+        let managed = self.selected_profile_is_managed()?;
+        if managed {
+            prepare_managed_codex_home(&self.paths, &self.selection.codex_home)?;
+        }
+
+        let runtime_proxy = RuntimeProxyStartupFactory::build(
+            &self.paths,
+            &self.state,
+            &self.selection,
+            &self.request,
+        )?;
+
+        let RuntimeLaunchPreparationBuilder {
+            paths, selection, ..
+        } = self;
+        Ok(PreparedRuntimeLaunch {
+            paths,
+            codex_home: selection.codex_home,
+            managed,
+            runtime_proxy,
+        })
+    }
+
+    fn record_selection(&mut self) -> Result<()> {
+        record_run_selection(&mut self.state, &self.selection.selected_profile_name);
+        self.state.save(&self.paths)?;
+        Ok(())
+    }
+
+    fn selected_profile_is_managed(&self) -> Result<bool> {
+        Ok(self
+            .state
+            .profiles
+            .get(&self.selection.selected_profile_name)
+            .with_context(|| {
+                format!(
+                    "profile '{}' is missing",
+                    self.selection.selected_profile_name
+                )
+            })?
+            .managed)
+    }
+}
+
+struct RuntimeProxyStartupFactory;
+
+impl RuntimeProxyStartupFactory {
+    fn build(
+        paths: &AppPaths,
+        state: &AppState,
+        selection: &RuntimeLaunchSelection,
+        request: &RuntimeLaunchRequest<'_>,
+    ) -> Result<Option<RuntimeProxyEndpoint>> {
+        let runtime_upstream_base_url = quota_base_url(request.base_url);
+        if request.force_runtime_proxy
+            || should_enable_runtime_rotation_proxy(
+                state,
+                &selection.selected_profile_name,
+                request.allow_auto_rotate,
+            )
+        {
+            return Ok(Some(ensure_runtime_rotation_proxy_endpoint(
+                paths,
+                &selection.selected_profile_name,
+                runtime_upstream_base_url.as_str(),
+                request.include_code_review,
+            )?));
+        }
+
+        Ok(None)
+    }
+}
+
 pub(super) fn prepare_runtime_launch(
     request: RuntimeLaunchRequest<'_>,
 ) -> Result<PreparedRuntimeLaunch> {
-    let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
-    let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
-
-    record_run_selection(&mut state, &selection.selected_profile_name);
-    state.save(&paths)?;
-
-    let managed = state
-        .profiles
-        .get(&selection.selected_profile_name)
-        .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
-        .managed;
-    if managed {
-        prepare_managed_codex_home(&paths, &selection.codex_home)?;
-    }
-
-    let runtime_upstream_base_url = quota_base_url(request.base_url);
-    let runtime_proxy = if request.force_runtime_proxy
-        || should_enable_runtime_rotation_proxy(
-            &state,
-            &selection.selected_profile_name,
-            request.allow_auto_rotate,
-        ) {
-        Some(ensure_runtime_rotation_proxy_endpoint(
-            &paths,
-            &selection.selected_profile_name,
-            runtime_upstream_base_url.as_str(),
-            request.include_code_review,
-        )?)
-    } else {
-        None
-    };
-
-    Ok(PreparedRuntimeLaunch {
-        paths,
-        codex_home: selection.codex_home,
-        managed,
-        runtime_proxy,
-    })
+    RuntimeLaunchPreparationBuilder::from_request(request)?.build()
 }
 
 fn select_runtime_launch_profile(
