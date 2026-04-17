@@ -96,6 +96,33 @@ struct JwtExpirationClaims {
     exp: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct JwtAccessTokenClaims {
+    #[serde(rename = "https://api.openai.com/auth", default)]
+    auth: Option<JwtAccessTokenAuthClaims>,
+    #[serde(rename = "https://api.openai.com/auth.chatgpt_account_id", default)]
+    auth_chatgpt_account_id: Option<String>,
+    #[serde(default)]
+    chatgpt_account_id: Option<String>,
+}
+
+impl JwtAccessTokenClaims {
+    fn into_chatgpt_account_id(self) -> Option<String> {
+        self.auth
+            .and_then(|auth| auth.chatgpt_account_id)
+            .or(self.auth_chatgpt_account_id)
+            .or(self.chatgpt_account_id)
+            .map(|account_id| account_id.trim().to_string())
+            .filter(|account_id| !account_id.is_empty())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct JwtAccessTokenAuthClaims {
+    #[serde(default)]
+    chatgpt_account_id: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct ChatgptRefreshRequest<'a> {
     client_id: &'static str,
@@ -245,12 +272,16 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
         .filter(|token| !token.is_empty())
         .context("access token not found in the stored auth secret")?
         .to_string();
-    let account_id = tokens
+    let stored_account_id = tokens
         .account_id
         .as_deref()
         .map(str::trim)
         .filter(|account_id| !account_id.is_empty())
         .map(ToOwned::to_owned);
+    let account_id = parse_jwt_chatgpt_account_id(&access_token)
+        .ok()
+        .flatten()
+        .or(stored_account_id);
     let refresh_token = tokens
         .refresh_token
         .as_deref()
@@ -275,7 +306,7 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
 
 pub(crate) fn usage_auth_needs_proactive_refresh(auth: &UsageAuth, now: i64) -> bool {
     if let Some(expires_at) = auth.expires_at {
-        return expires_at <= now;
+        return expires_at <= now.saturating_add(CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS);
     }
 
     auth.last_refresh.is_some_and(|last_refresh| {
@@ -343,6 +374,19 @@ fn send_usage_request(
 }
 
 fn parse_jwt_expiration(raw_jwt: &str) -> Result<Option<i64>> {
+    let claims: JwtExpirationClaims = parse_jwt_payload(raw_jwt)?;
+    Ok(claims.exp)
+}
+
+fn parse_jwt_chatgpt_account_id(raw_jwt: &str) -> Result<Option<String>> {
+    let claims: JwtAccessTokenClaims = parse_jwt_payload(raw_jwt)?;
+    Ok(claims.into_chatgpt_account_id())
+}
+
+fn parse_jwt_payload<T>(raw_jwt: &str) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
     let mut parts = raw_jwt.split('.');
     let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
         (Some(header), Some(payload), Some(signature))
@@ -357,9 +401,7 @@ fn parse_jwt_expiration(raw_jwt: &str) -> Result<Option<i64>> {
         .decode(payload_b64)
         .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
         .context("failed to decode JWT payload")?;
-    let claims: JwtExpirationClaims =
-        serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")?;
-    Ok(claims.exp)
+    serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")
 }
 
 fn refresh_usage_auth_endpoint() -> String {
@@ -436,18 +478,32 @@ fn apply_chatgpt_refresh(
     auth_json: &mut serde_json::Value,
     refreshed: ChatgptRefreshResponse,
 ) -> Result<()> {
+    let ChatgptRefreshResponse {
+        id_token,
+        access_token,
+        refresh_token,
+    } = refreshed;
+    let refreshed_account_id = access_token
+        .as_deref()
+        .and_then(|token| parse_jwt_chatgpt_account_id(token).ok().flatten());
     {
         let tokens_object = auth_tokens_object_mut(auth_json)?;
-        if let Some(id_token) = refreshed.id_token {
+        if let Some(id_token) = id_token {
             tokens_object.insert("id_token".to_string(), serde_json::Value::String(id_token));
         }
-        if let Some(access_token) = refreshed.access_token {
+        if let Some(access_token) = access_token {
             tokens_object.insert(
                 "access_token".to_string(),
                 serde_json::Value::String(access_token),
             );
         }
-        if let Some(refresh_token) = refreshed.refresh_token {
+        if let Some(account_id) = refreshed_account_id {
+            tokens_object.insert(
+                "account_id".to_string(),
+                serde_json::Value::String(account_id),
+            );
+        }
+        if let Some(refresh_token) = refresh_token {
             tokens_object.insert(
                 "refresh_token".to_string(),
                 serde_json::Value::String(refresh_token),

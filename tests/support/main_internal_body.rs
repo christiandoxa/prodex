@@ -2936,10 +2936,22 @@ fn write_auth_json_with_tokens(
 }
 
 fn fake_jwt_with_exp(exp: i64) -> String {
+    fake_jwt_with_exp_and_account_id(exp, "")
+}
+
+fn fake_jwt_with_exp_and_account_id(exp: i64, account_id: &str) -> String {
     let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(br#"{"alg":"none","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(format!(r#"{{"exp":{exp}}}"#));
+        .encode(
+            serde_json::json!({
+                "exp": exp,
+                "https://api.openai.com/auth": {
+                    "chatgpt_account_id": account_id,
+                },
+            })
+            .to_string(),
+        );
     format!("{header}.{payload}.signature")
 }
 
@@ -4972,6 +4984,22 @@ fn fetch_usage_json_refreshes_access_token_after_401() {
     assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
     assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
     assert!(auth_json.get("last_refresh").is_some());
+}
+
+#[test]
+fn read_usage_auth_prefers_account_id_from_access_token_claims() {
+    let temp_dir = TestDir::new();
+    let codex_home = temp_dir.path.join("homes/main");
+    write_auth_json_with_tokens(
+        &codex_home.join("auth.json"),
+        &fake_jwt_with_exp_and_account_id(Local::now().timestamp() + 600, "jwt-account"),
+        "stale-account",
+        Some("stale-refresh-token"),
+        None,
+    );
+
+    let auth = read_usage_auth(&codex_home).expect("usage auth should load");
+    assert_eq!(auth.account_id.as_deref(), Some("jwt-account"));
 }
 
 #[test]
@@ -16588,10 +16616,91 @@ fn runtime_profile_usage_auth_proactively_refreshes_expired_access_token() {
 }
 
 #[test]
-fn runtime_proxy_standard_request_refreshes_access_token_after_401() {
+fn runtime_profile_usage_auth_proactively_refreshes_near_expiry_access_token() {
     let temp_dir = TestDir::new();
-    let backend = TokenAwareServer::start_runtime_status("fresh-token", "main-account");
     let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
+    let _refresh_guard =
+        TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json_with_tokens(
+        &profile_home.join("auth.json"),
+        &fake_jwt_with_exp(
+            Local::now().timestamp() + CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS - 5,
+        ),
+        "main-account",
+        Some("stale-refresh-token"),
+        None,
+    );
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: load_runtime_profile_usage_auth_cache(&AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            }),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    let auth = runtime_profile_usage_auth(&shared, "main")
+        .expect("runtime usage auth should proactively refresh near expiry");
+    assert_eq!(auth.access_token, "fresh-token");
+    assert_eq!(auth.refresh_token.as_deref(), Some("fresh-refresh-token"));
+    assert_eq!(refresh_server.request_bodies().len(), 1);
+}
+
+#[test]
+fn runtime_proxy_standard_request_refreshes_access_token_and_account_id_after_401() {
+    let temp_dir = TestDir::new();
+    let fresh_token =
+        fake_jwt_with_exp_and_account_id(Local::now().timestamp() + 600, "fresh-account");
+    let backend = TokenAwareServer::start_runtime_status(&fresh_token, "fresh-account");
+    let refresh_server = AuthRefreshServer::start(&fresh_token, "fresh-refresh-token");
     let _refresh_guard =
         TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
     let paths = AppPaths {
@@ -16647,7 +16756,10 @@ fn runtime_proxy_standard_request_refreshes_access_token_after_401() {
     );
     assert_eq!(
         auth_headers[auth_headers.len() - 2..],
-        ["Bearer stale-token".to_string(), "Bearer fresh-token".to_string()]
+        [
+            "Bearer stale-token".to_string(),
+            format!("Bearer {fresh_token}")
+        ]
     );
     assert_eq!(refresh_server.request_bodies().len(), 1);
 
@@ -16655,7 +16767,8 @@ fn runtime_proxy_standard_request_refreshes_access_token_after_401() {
         .expect("updated auth.json should be readable");
     let auth_json: serde_json::Value =
         serde_json::from_str(&auth_json).expect("updated auth.json should parse");
-    assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
+    assert_eq!(auth_json["tokens"]["access_token"], fresh_token);
+    assert_eq!(auth_json["tokens"]["account_id"], "fresh-account");
     assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
 }
 

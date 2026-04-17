@@ -98,6 +98,7 @@ pub(super) struct RuntimePolicyProxySettings {
     pub(super) pressure_admission_wait_budget_ms: Option<u64>,
     pub(super) long_lived_queue_wait_budget_ms: Option<u64>,
     pub(super) pressure_long_lived_queue_wait_budget_ms: Option<u64>,
+    pub(super) sync_probe_pressure_pause_ms: Option<u64>,
     pub(super) responses_critical_floor_percent: Option<i64>,
     pub(super) startup_sync_probe_warm_limit: Option<usize>,
 }
@@ -473,6 +474,11 @@ fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> Resu
             .pressure_long_lived_queue_wait_budget_ms,
         path,
         "runtime_proxy.pressure_long_lived_queue_wait_budget_ms",
+    )?;
+    validate_optional_u64(
+        policy.runtime_proxy.sync_probe_pressure_pause_ms,
+        path,
+        "runtime_proxy.sync_probe_pressure_pause_ms",
     )?;
     validate_optional_i64_percent(
         policy.runtime_proxy.responses_critical_floor_percent,
