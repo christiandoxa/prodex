@@ -5023,6 +5023,29 @@ fn fetch_usage_json_refreshes_access_token_after_401() {
 }
 
 #[test]
+fn read_auth_summary_classifies_api_key_auth() {
+    let temp_dir = TestDir::new();
+    let codex_home = temp_dir.path.join("homes/main");
+    write_api_key_auth_json(&codex_home.join("auth.json"));
+
+    let summary = read_auth_summary(&codex_home);
+    assert_eq!(summary.label, "api-key");
+    assert!(!summary.quota_compatible);
+}
+
+#[test]
+fn read_auth_summary_classifies_invalid_auth_json() {
+    let temp_dir = TestDir::new();
+    let codex_home = temp_dir.path.join("homes/main");
+    fs::create_dir_all(&codex_home).expect("failed to create codex home");
+    fs::write(codex_home.join("auth.json"), "{").expect("failed to write invalid auth.json");
+
+    let summary = read_auth_summary(&codex_home);
+    assert_eq!(summary.label, "invalid-auth");
+    assert!(!summary.quota_compatible);
+}
+
+#[test]
 fn read_usage_auth_prefers_account_id_from_access_token_claims() {
     let temp_dir = TestDir::new();
     let codex_home = temp_dir.path.join("homes/main");
@@ -9471,6 +9494,85 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(
         value["profiles"][0]["routes"][0]["transport_backoff_until"],
         200
+    );
+}
+
+#[test]
+fn runtime_doctor_degraded_routes_sort_and_cap_output() {
+    let now = Local::now().timestamp();
+    let routes = runtime_doctor_degraded_routes(
+        &RuntimeProfileBackoffs {
+            retry_backoff_until: BTreeMap::from([
+                ("alpha".to_string(), now + 10),
+                ("zeta".to_string(), now + 11),
+            ]),
+            transport_backoff_until: BTreeMap::from([
+                (
+                    runtime_profile_transport_backoff_key("beta", RuntimeRouteKind::Responses),
+                    now + 20,
+                ),
+                ("gamma".to_string(), now + 21),
+            ]),
+            route_circuit_open_until: BTreeMap::from([
+                ("__route_circuit__:responses:delta".to_string(), now - 1),
+                ("__route_circuit__:websocket:eta".to_string(), now + 30),
+                ("__route_circuit__:compact:theta".to_string(), now + 31),
+            ]),
+        },
+        &BTreeMap::from([
+            (
+                "__route_bad_pairing__:standard:aardvark".to_string(),
+                RuntimeProfileHealth {
+                    score: 5,
+                    updated_at: now,
+                },
+            ),
+            (
+                "__route_health__:compact:lambda".to_string(),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: now,
+                },
+            ),
+            (
+                "__route_bad_pairing__:responses:main".to_string(),
+                RuntimeProfileHealth {
+                    score: 2,
+                    updated_at: now,
+                },
+            ),
+            (
+                "__route_health__:websocket:omega".to_string(),
+                RuntimeProfileHealth {
+                    score: 4,
+                    updated_at: now,
+                },
+            ),
+        ]),
+        now,
+    );
+
+    assert_eq!(routes.len(), 8);
+    assert_eq!(routes[0], "aardvark/standard bad_pairing=5");
+    assert_eq!(routes[1], format!("alpha/retry retry_backoff until={}", now + 10));
+    assert_eq!(
+        routes[3],
+        format!("delta/responses circuit=half-open until={}", now - 1)
+    );
+    assert_eq!(
+        routes[4],
+        format!("eta/websocket circuit=open until={}", now + 30)
+    );
+    assert_eq!(
+        routes[7],
+        "main/responses bad_pairing=2",
+        "helper should keep the first eight sorted entries"
+    );
+    assert!(
+        !routes
+            .iter()
+            .any(|route| route.starts_with("omega/") || route.starts_with("theta/") || route.starts_with("zeta/")),
+        "later sorted entries should be truncated: {routes:?}"
     );
 }
 
@@ -39053,6 +39155,107 @@ fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
     assert!(
         runtime.profile_usage_snapshots.contains_key("main"),
         "probe apply should update usage snapshots after waiting for the runtime lock"
+    );
+}
+
+#[test]
+fn runtime_probe_inline_execution_logs_context_without_queue_lag() {
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    execute_runtime_probe_attempt_inline_for_test(
+        &shared,
+        "main",
+        "startup_probe_warmup",
+        Err("timeout".to_string()),
+    );
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("startup_probe_warmup_error profile=main error=timeout"),
+        "inline probe execution should keep the context-specific marker: {log}"
+    );
+    assert!(
+        !log.contains("startup_probe_warmup_error profile=main lag_ms="),
+        "inline probe execution should not report queue lag: {log}"
+    );
+}
+
+#[test]
+fn runtime_probe_queued_execution_logs_refresh_marker_with_queue_lag() {
+    let temp_dir = TestDir::new();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    execute_runtime_probe_attempt_queued_for_test(
+        &shared,
+        "main",
+        Err("timeout".to_string()),
+        Duration::from_millis(50),
+        Instant::now(),
+    );
+
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("profile_probe_refresh_error profile=main lag_ms="),
+        "queued probe execution should keep the queue-aware marker: {log}"
+    );
+    assert!(
+        log.contains("error=timeout"),
+        "queued probe execution should preserve the fetch error: {log}"
     );
 }
 

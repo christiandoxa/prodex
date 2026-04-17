@@ -170,115 +170,102 @@ const RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS: &[&str] = &["state_save_skipped
 const RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS: &[&str] =
     &["profile_probe_refresh_start", "profile_probe_refresh_ok"];
 
-struct RuntimeDoctorJsonBuilder {
-    value: serde_json::Map<String, serde_json::Value>,
+fn runtime_doctor_json_entry<T: serde::Serialize>(
+    key: &str,
+    value: T,
+) -> (String, serde_json::Value) {
+    (
+        key.to_string(),
+        serde_json::to_value(value).expect("runtime doctor serialization should always succeed"),
+    )
 }
 
-impl RuntimeDoctorJsonBuilder {
-    fn new() -> Self {
-        Self {
-            value: serde_json::Map::new(),
+fn runtime_doctor_push_route_circuits(
+    routes: &mut Vec<String>,
+    backoffs: &RuntimeProfileBackoffs,
+    now: i64,
+) {
+    for (key, until) in &backoffs.route_circuit_open_until {
+        if let Some((route, profile_name)) =
+            runtime_profile_route_key_parts(key, "__route_circuit__:")
+        {
+            let state = if *until > now { "open" } else { "half-open" };
+            routes.push(format!(
+                "{profile_name}/{route} circuit={state} until={until}"
+            ));
         }
-    }
-
-    fn insert<T: serde::Serialize>(&mut self, key: &str, value: T) -> &mut Self {
-        let value = serde_json::to_value(value)
-            .expect("runtime doctor serialization should always succeed");
-        self.value.insert(key.to_string(), value);
-        self
-    }
-
-    fn build(self) -> serde_json::Value {
-        serde_json::Value::Object(self.value)
     }
 }
 
-struct RuntimeDoctorDegradedRouteBuilder {
-    routes: Vec<String>,
+fn runtime_doctor_push_transport_backoffs(
+    routes: &mut Vec<String>,
+    backoffs: &RuntimeProfileBackoffs,
+) {
+    for (profile_name, until) in &backoffs.transport_backoff_until {
+        if let Some((route, profile_name)) =
+            runtime_profile_transport_backoff_key_parts(profile_name)
+        {
+            routes.push(format!(
+                "{profile_name}/{route} transport_backoff until={until}"
+            ));
+        } else {
+            routes.push(format!(
+                "{profile_name}/transport transport_backoff until={until}"
+            ));
+        }
+    }
 }
 
-impl RuntimeDoctorDegradedRouteBuilder {
-    fn new() -> Self {
-        Self { routes: Vec::new() }
+fn runtime_doctor_push_retry_backoffs(routes: &mut Vec<String>, backoffs: &RuntimeProfileBackoffs) {
+    for (profile_name, until) in &backoffs.retry_backoff_until {
+        routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
     }
+}
 
-    fn push_route_circuits(&mut self, backoffs: &RuntimeProfileBackoffs, now: i64) -> &mut Self {
-        for (key, until) in &backoffs.route_circuit_open_until {
-            if let Some((route, profile_name)) =
-                runtime_profile_route_key_parts(key, "__route_circuit__:")
-            {
-                let state = if *until > now { "open" } else { "half-open" };
-                self.routes.push(format!(
-                    "{profile_name}/{route} circuit={state} until={until}"
-                ));
+fn runtime_doctor_push_score_degradations(
+    routes: &mut Vec<String>,
+    scores: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+) {
+    for (key, health) in scores {
+        if let Some((route, profile_name)) =
+            runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
+        {
+            let score = runtime_profile_effective_score(
+                health,
+                now,
+                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+            );
+            if score > 0 {
+                routes.push(format!("{profile_name}/{route} bad_pairing={score}"));
+            }
+            continue;
+        }
+        if let Some((route, profile_name)) =
+            runtime_profile_route_key_parts(key, "__route_health__:")
+        {
+            let score = runtime_profile_effective_health_score(health, now);
+            if score > 0 {
+                routes.push(format!("{profile_name}/{route} health={score}"));
             }
         }
-        self
     }
+}
 
-    fn push_transport_backoffs(&mut self, backoffs: &RuntimeProfileBackoffs) -> &mut Self {
-        for (profile_name, until) in &backoffs.transport_backoff_until {
-            if let Some((route, profile_name)) =
-                runtime_profile_transport_backoff_key_parts(profile_name)
-            {
-                self.routes.push(format!(
-                    "{profile_name}/{route} transport_backoff until={until}"
-                ));
-            } else {
-                self.routes.push(format!(
-                    "{profile_name}/transport transport_backoff until={until}"
-                ));
-            }
-        }
-        self
-    }
-
-    fn push_retry_backoffs(&mut self, backoffs: &RuntimeProfileBackoffs) -> &mut Self {
-        for (profile_name, until) in &backoffs.retry_backoff_until {
-            self.routes
-                .push(format!("{profile_name}/retry retry_backoff until={until}"));
-        }
-        self
-    }
-
-    fn push_scores(
-        &mut self,
-        scores: &BTreeMap<String, RuntimeProfileHealth>,
-        now: i64,
-    ) -> &mut Self {
-        for (key, health) in scores {
-            if let Some((route, profile_name)) =
-                runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
-            {
-                let score = runtime_profile_effective_score(
-                    health,
-                    now,
-                    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-                );
-                if score > 0 {
-                    self.routes
-                        .push(format!("{profile_name}/{route} bad_pairing={score}"));
-                }
-                continue;
-            }
-            if let Some((route, profile_name)) =
-                runtime_profile_route_key_parts(key, "__route_health__:")
-            {
-                let score = runtime_profile_effective_health_score(health, now);
-                if score > 0 {
-                    self.routes
-                        .push(format!("{profile_name}/{route} health={score}"));
-                }
-            }
-        }
-        self
-    }
-
-    fn build(mut self) -> Vec<String> {
-        self.routes.sort();
-        self.routes.dedup();
-        self.routes.into_iter().take(8).collect()
-    }
+pub(crate) fn runtime_doctor_degraded_routes(
+    backoffs: &RuntimeProfileBackoffs,
+    scores: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+) -> Vec<String> {
+    let mut routes = Vec::new();
+    runtime_doctor_push_route_circuits(&mut routes, backoffs, now);
+    runtime_doctor_push_transport_backoffs(&mut routes, backoffs);
+    runtime_doctor_push_retry_backoffs(&mut routes, backoffs);
+    runtime_doctor_push_score_degradations(&mut routes, scores, now);
+    routes.sort();
+    routes.dedup();
+    routes.truncate(8);
+    routes
 }
 
 struct RuntimeDoctorCollector {
@@ -407,194 +394,197 @@ fn runtime_doctor_profile_json(profile: &RuntimeDoctorProfileSummary) -> serde_j
 }
 
 pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Value {
-    let mut builder = RuntimeDoctorJsonBuilder::new();
-    builder
-        .insert(
-            "log_path",
-            summary
-                .log_path
-                .as_ref()
-                .map(|path| path.display().to_string()),
-        )
-        .insert("pointer_exists", summary.pointer_exists)
-        .insert("log_exists", summary.log_exists)
-        .insert("line_count", summary.line_count)
-        .insert("first_timestamp", summary.first_timestamp.clone())
-        .insert("last_timestamp", summary.last_timestamp.clone())
-        .insert("compat_warning_count", summary.compat_warning_count)
-        .insert("top_client_family", summary.top_client_family.clone())
-        .insert("top_client", summary.top_client.clone())
-        .insert("top_tool_surface", summary.top_tool_surface.clone())
-        .insert("top_compat_warning", summary.top_compat_warning.clone())
-        .insert(
-            "marker_counts",
-            runtime_doctor_json_map(
+    serde_json::Value::Object(
+        [
+            runtime_doctor_json_entry(
+                "log_path",
                 summary
-                    .marker_counts
-                    .iter()
-                    .map(|(marker, count)| ((*marker).to_string(), *count)),
+                    .log_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
             ),
-        )
-        .insert(
-            "marker_last_fields",
-            runtime_doctor_json_map(summary.marker_last_fields.iter().map(|(marker, fields)| {
-                (
-                    (*marker).to_string(),
-                    runtime_doctor_json_map(fields.clone()),
-                )
-            })),
-        )
-        .insert(
-            "facet_counts",
-            runtime_doctor_json_map(
-                summary.facet_counts.iter().map(|(facet, counts)| {
+            runtime_doctor_json_entry("pointer_exists", summary.pointer_exists),
+            runtime_doctor_json_entry("log_exists", summary.log_exists),
+            runtime_doctor_json_entry("line_count", summary.line_count),
+            runtime_doctor_json_entry("first_timestamp", summary.first_timestamp.clone()),
+            runtime_doctor_json_entry("last_timestamp", summary.last_timestamp.clone()),
+            runtime_doctor_json_entry("compat_warning_count", summary.compat_warning_count),
+            runtime_doctor_json_entry("top_client_family", summary.top_client_family.clone()),
+            runtime_doctor_json_entry("top_client", summary.top_client.clone()),
+            runtime_doctor_json_entry("top_tool_surface", summary.top_tool_surface.clone()),
+            runtime_doctor_json_entry("top_compat_warning", summary.top_compat_warning.clone()),
+            runtime_doctor_json_entry(
+                "marker_counts",
+                runtime_doctor_json_map(
+                    summary
+                        .marker_counts
+                        .iter()
+                        .map(|(marker, count)| ((*marker).to_string(), *count)),
+                ),
+            ),
+            runtime_doctor_json_entry(
+                "marker_last_fields",
+                runtime_doctor_json_map(summary.marker_last_fields.iter().map(
+                    |(marker, fields)| {
+                        (
+                            (*marker).to_string(),
+                            runtime_doctor_json_map(fields.clone()),
+                        )
+                    },
+                )),
+            ),
+            runtime_doctor_json_entry(
+                "facet_counts",
+                runtime_doctor_json_map(summary.facet_counts.iter().map(|(facet, counts)| {
                     (facet.clone(), runtime_doctor_json_map(counts.clone()))
-                }),
+                })),
             ),
-        )
-        .insert(
-            "previous_response_not_found_by_route",
-            runtime_doctor_json_map(summary.previous_response_not_found_by_route.clone()),
-        )
-        .insert(
-            "previous_response_not_found_by_transport",
-            runtime_doctor_json_map(summary.previous_response_not_found_by_transport.clone()),
-        )
-        .insert("last_marker_line", summary.last_marker_line.clone())
-        .insert("selection_pressure", summary.selection_pressure.clone())
-        .insert("transport_pressure", summary.transport_pressure.clone())
-        .insert("persistence_pressure", summary.persistence_pressure.clone())
-        .insert(
-            "quota_freshness_pressure",
-            summary.quota_freshness_pressure.clone(),
-        )
-        .insert(
-            "startup_audit_pressure",
-            summary.startup_audit_pressure.clone(),
-        )
-        .insert("persisted_retry_backoffs", summary.persisted_retry_backoffs)
-        .insert(
-            "persisted_transport_backoffs",
-            summary.persisted_transport_backoffs,
-        )
-        .insert("persisted_route_circuits", summary.persisted_route_circuits)
-        .insert(
-            "persisted_usage_snapshots",
-            summary.persisted_usage_snapshots,
-        )
-        .insert(
-            "persisted_response_bindings",
-            summary.persisted_response_bindings,
-        )
-        .insert(
-            "persisted_session_bindings",
-            summary.persisted_session_bindings,
-        )
-        .insert(
-            "persisted_turn_state_bindings",
-            summary.persisted_turn_state_bindings,
-        )
-        .insert(
-            "persisted_session_id_bindings",
-            summary.persisted_session_id_bindings,
-        )
-        .insert(
-            "persisted_verified_continuations",
-            summary.persisted_verified_continuations,
-        )
-        .insert(
-            "persisted_warm_continuations",
-            summary.persisted_warm_continuations,
-        )
-        .insert(
-            "persisted_suspect_continuations",
-            summary.persisted_suspect_continuations,
-        )
-        .insert(
-            "persisted_dead_continuations",
-            summary.persisted_dead_continuations,
-        )
-        .insert(
-            "persisted_continuation_journal_response_bindings",
-            summary.persisted_continuation_journal_response_bindings,
-        )
-        .insert(
-            "persisted_continuation_journal_session_bindings",
-            summary.persisted_continuation_journal_session_bindings,
-        )
-        .insert(
-            "persisted_continuation_journal_turn_state_bindings",
-            summary.persisted_continuation_journal_turn_state_bindings,
-        )
-        .insert(
-            "persisted_continuation_journal_session_id_bindings",
-            summary.persisted_continuation_journal_session_id_bindings,
-        )
-        .insert("state_save_queue_backlog", summary.state_save_queue_backlog)
-        .insert("state_save_lag_ms", summary.state_save_lag_ms)
-        .insert(
-            "continuation_journal_save_backlog",
-            summary.continuation_journal_save_backlog,
-        )
-        .insert(
-            "continuation_journal_save_lag_ms",
-            summary.continuation_journal_save_lag_ms,
-        )
-        .insert(
-            "profile_probe_refresh_backlog",
-            summary.profile_probe_refresh_backlog,
-        )
-        .insert(
-            "profile_probe_refresh_lag_ms",
-            summary.profile_probe_refresh_lag_ms,
-        )
-        .insert(
-            "continuation_journal_saved_at",
-            summary.continuation_journal_saved_at,
-        )
-        .insert(
-            "suspect_continuation_bindings",
-            summary.suspect_continuation_bindings.clone(),
-        )
-        .insert(
-            "stale_persisted_usage_snapshots",
-            summary.stale_persisted_usage_snapshots,
-        )
-        .insert("recovered_state_file", summary.recovered_state_file)
-        .insert(
-            "recovered_continuations_file",
-            summary.recovered_continuations_file,
-        )
-        .insert(
-            "recovered_continuation_journal_file",
-            summary.recovered_continuation_journal_file,
-        )
-        .insert("recovered_scores_file", summary.recovered_scores_file)
-        .insert(
-            "recovered_usage_snapshots_file",
-            summary.recovered_usage_snapshots_file,
-        )
-        .insert("recovered_backoffs_file", summary.recovered_backoffs_file)
-        .insert(
-            "last_good_backups_present",
-            summary.last_good_backups_present,
-        )
-        .insert("degraded_routes", summary.degraded_routes.clone())
-        .insert("orphan_managed_dirs", summary.orphan_managed_dirs.clone())
-        .insert(
-            "failure_class_counts",
-            runtime_doctor_json_map(summary.failure_class_counts.clone()),
-        )
-        .insert(
-            "profiles",
-            summary
-                .profiles
-                .iter()
-                .map(runtime_doctor_profile_json)
-                .collect::<Vec<_>>(),
-        )
-        .insert("diagnosis", summary.diagnosis.clone());
-    builder.build()
+            runtime_doctor_json_entry(
+                "previous_response_not_found_by_route",
+                runtime_doctor_json_map(summary.previous_response_not_found_by_route.clone()),
+            ),
+            runtime_doctor_json_entry(
+                "previous_response_not_found_by_transport",
+                runtime_doctor_json_map(summary.previous_response_not_found_by_transport.clone()),
+            ),
+            runtime_doctor_json_entry("last_marker_line", summary.last_marker_line.clone()),
+            runtime_doctor_json_entry("selection_pressure", summary.selection_pressure.clone()),
+            runtime_doctor_json_entry("transport_pressure", summary.transport_pressure.clone()),
+            runtime_doctor_json_entry("persistence_pressure", summary.persistence_pressure.clone()),
+            runtime_doctor_json_entry(
+                "quota_freshness_pressure",
+                summary.quota_freshness_pressure.clone(),
+            ),
+            runtime_doctor_json_entry(
+                "startup_audit_pressure",
+                summary.startup_audit_pressure.clone(),
+            ),
+            runtime_doctor_json_entry("persisted_retry_backoffs", summary.persisted_retry_backoffs),
+            runtime_doctor_json_entry(
+                "persisted_transport_backoffs",
+                summary.persisted_transport_backoffs,
+            ),
+            runtime_doctor_json_entry("persisted_route_circuits", summary.persisted_route_circuits),
+            runtime_doctor_json_entry(
+                "persisted_usage_snapshots",
+                summary.persisted_usage_snapshots,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_response_bindings",
+                summary.persisted_response_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_session_bindings",
+                summary.persisted_session_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_turn_state_bindings",
+                summary.persisted_turn_state_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_session_id_bindings",
+                summary.persisted_session_id_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_verified_continuations",
+                summary.persisted_verified_continuations,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_warm_continuations",
+                summary.persisted_warm_continuations,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_suspect_continuations",
+                summary.persisted_suspect_continuations,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_dead_continuations",
+                summary.persisted_dead_continuations,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_continuation_journal_response_bindings",
+                summary.persisted_continuation_journal_response_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_continuation_journal_session_bindings",
+                summary.persisted_continuation_journal_session_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_continuation_journal_turn_state_bindings",
+                summary.persisted_continuation_journal_turn_state_bindings,
+            ),
+            runtime_doctor_json_entry(
+                "persisted_continuation_journal_session_id_bindings",
+                summary.persisted_continuation_journal_session_id_bindings,
+            ),
+            runtime_doctor_json_entry("state_save_queue_backlog", summary.state_save_queue_backlog),
+            runtime_doctor_json_entry("state_save_lag_ms", summary.state_save_lag_ms),
+            runtime_doctor_json_entry(
+                "continuation_journal_save_backlog",
+                summary.continuation_journal_save_backlog,
+            ),
+            runtime_doctor_json_entry(
+                "continuation_journal_save_lag_ms",
+                summary.continuation_journal_save_lag_ms,
+            ),
+            runtime_doctor_json_entry(
+                "profile_probe_refresh_backlog",
+                summary.profile_probe_refresh_backlog,
+            ),
+            runtime_doctor_json_entry(
+                "profile_probe_refresh_lag_ms",
+                summary.profile_probe_refresh_lag_ms,
+            ),
+            runtime_doctor_json_entry(
+                "continuation_journal_saved_at",
+                summary.continuation_journal_saved_at,
+            ),
+            runtime_doctor_json_entry(
+                "suspect_continuation_bindings",
+                summary.suspect_continuation_bindings.clone(),
+            ),
+            runtime_doctor_json_entry(
+                "stale_persisted_usage_snapshots",
+                summary.stale_persisted_usage_snapshots,
+            ),
+            runtime_doctor_json_entry("recovered_state_file", summary.recovered_state_file),
+            runtime_doctor_json_entry(
+                "recovered_continuations_file",
+                summary.recovered_continuations_file,
+            ),
+            runtime_doctor_json_entry(
+                "recovered_continuation_journal_file",
+                summary.recovered_continuation_journal_file,
+            ),
+            runtime_doctor_json_entry("recovered_scores_file", summary.recovered_scores_file),
+            runtime_doctor_json_entry(
+                "recovered_usage_snapshots_file",
+                summary.recovered_usage_snapshots_file,
+            ),
+            runtime_doctor_json_entry("recovered_backoffs_file", summary.recovered_backoffs_file),
+            runtime_doctor_json_entry(
+                "last_good_backups_present",
+                summary.last_good_backups_present,
+            ),
+            runtime_doctor_json_entry("degraded_routes", summary.degraded_routes.clone()),
+            runtime_doctor_json_entry("orphan_managed_dirs", summary.orphan_managed_dirs.clone()),
+            runtime_doctor_json_entry(
+                "failure_class_counts",
+                runtime_doctor_json_map(summary.failure_class_counts.clone()),
+            ),
+            runtime_doctor_json_entry(
+                "profiles",
+                summary
+                    .profiles
+                    .iter()
+                    .map(runtime_doctor_profile_json)
+                    .collect::<Vec<_>>(),
+            ),
+            runtime_doctor_json_entry("diagnosis", summary.diagnosis.clone()),
+        ]
+        .into_iter()
+        .collect(),
+    )
 }
 
 pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
@@ -1324,13 +1314,7 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
         &backoffs.value,
         now,
     );
-    let mut degraded_routes = RuntimeDoctorDegradedRouteBuilder::new();
-    degraded_routes
-        .push_route_circuits(&backoffs.value, now)
-        .push_transport_backoffs(&backoffs.value)
-        .push_retry_backoffs(&backoffs.value)
-        .push_scores(&scores.value, now);
-    summary.degraded_routes = degraded_routes.build();
+    summary.degraded_routes = runtime_doctor_degraded_routes(&backoffs.value, &scores.value, now);
 }
 
 pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {

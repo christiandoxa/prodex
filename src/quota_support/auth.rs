@@ -11,7 +11,7 @@ enum AuthSummaryKind {
 }
 
 impl AuthSummaryKind {
-    fn build(self) -> AuthSummary {
+    fn into_summary(self) -> AuthSummary {
         match self {
             Self::UnreadableAuth => AuthSummary {
                 label: "unreadable-auth".to_string(),
@@ -41,53 +41,49 @@ impl AuthSummaryKind {
     }
 }
 
-struct AuthSummaryFactory;
+fn auth_summary_from_auth_text_result(
+    result: std::result::Result<Option<String>, anyhow::Error>,
+) -> AuthSummary {
+    match result {
+        Ok(Some(content)) => auth_summary_from_auth_text(&content),
+        Ok(None) => AuthSummaryKind::MissingAuth.into_summary(),
+        Err(_) => AuthSummaryKind::UnreadableAuth.into_summary(),
+    }
+}
 
-impl AuthSummaryFactory {
-    fn from_auth_text_result(
-        result: std::result::Result<Option<String>, anyhow::Error>,
-    ) -> AuthSummary {
-        match result {
-            Ok(Some(content)) => Self::from_auth_text(&content),
-            Ok(None) => AuthSummaryKind::MissingAuth.build(),
-            Err(_) => AuthSummaryKind::UnreadableAuth.build(),
-        }
+fn auth_summary_from_auth_text(content: &str) -> AuthSummary {
+    let stored_auth: StoredAuth = match serde_json::from_str(content) {
+        Ok(auth) => auth,
+        Err(_) => return AuthSummaryKind::InvalidAuth.into_summary(),
+    };
+    auth_summary_from_stored_auth(stored_auth)
+}
+
+fn auth_summary_from_stored_auth(stored_auth: StoredAuth) -> AuthSummary {
+    let has_chatgpt_token = stored_auth
+        .tokens
+        .as_ref()
+        .and_then(|tokens| tokens.access_token.as_deref())
+        .is_some_and(|token| !token.trim().is_empty());
+    let has_api_key = stored_auth
+        .openai_api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty());
+
+    if has_chatgpt_token {
+        return AuthSummaryKind::Chatgpt.into_summary();
     }
 
-    fn from_auth_text(content: &str) -> AuthSummary {
-        let stored_auth: StoredAuth = match serde_json::from_str(content) {
-            Ok(auth) => auth,
-            Err(_) => return AuthSummaryKind::InvalidAuth.build(),
-        };
-        Self::from_stored_auth(stored_auth)
+    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+        return AuthSummaryKind::ApiKey.into_summary();
     }
 
-    fn from_stored_auth(stored_auth: StoredAuth) -> AuthSummary {
-        let has_chatgpt_token = stored_auth
-            .tokens
-            .as_ref()
-            .and_then(|tokens| tokens.access_token.as_deref())
-            .is_some_and(|token| !token.trim().is_empty());
-        let has_api_key = stored_auth
-            .openai_api_key
-            .as_deref()
-            .is_some_and(|key| !key.trim().is_empty());
-
-        if has_chatgpt_token {
-            return AuthSummaryKind::Chatgpt.build();
-        }
-
-        if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
-            return AuthSummaryKind::ApiKey.build();
-        }
-
-        AuthSummaryKind::Other(
-            stored_auth
-                .auth_mode
-                .unwrap_or_else(|| "auth-present".to_string()),
-        )
-        .build()
-    }
+    AuthSummaryKind::Other(
+        stored_auth
+            .auth_mode
+            .unwrap_or_else(|| "auth-present".to_string()),
+    )
+    .into_summary()
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,16 +136,12 @@ struct ChatgptRefreshResponse {
     refresh_token: Option<String>,
 }
 
-struct UsageHttpClientFactory;
-
-impl UsageHttpClientFactory {
-    fn build(context_label: &'static str) -> Result<Client> {
-        Client::builder()
-            .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
-            .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
-            .build()
-            .with_context(|| format!("failed to build {context_label} client"))
-    }
+fn build_usage_http_client(context_label: &'static str) -> Result<Client> {
+    Client::builder()
+        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
+        .build()
+        .with_context(|| format!("failed to build {context_label} client"))
 }
 
 pub(super) struct UsageFetchFlow<'a> {
@@ -171,7 +163,7 @@ impl<'a> UsageFetchFlow<'a> {
         Ok(Self {
             codex_home,
             usage_url: usage_url(&quota_base_url(base_url)),
-            client: UsageHttpClientFactory::build("quota HTTP")?,
+            client: build_usage_http_client("quota HTTP")?,
             auth,
         })
     }
@@ -237,7 +229,7 @@ impl<'a> UsageFetchFlow<'a> {
 }
 
 pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
-    AuthSummaryFactory::from_auth_text_result(read_auth_json_text(codex_home))
+    auth_summary_from_auth_text_result(read_auth_json_text(codex_home))
 }
 
 pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
@@ -447,7 +439,7 @@ fn read_auth_json_value(codex_home: &Path) -> Result<serde_json::Value> {
 }
 
 fn request_chatgpt_auth_refresh(refresh_token: &str) -> Result<ChatgptRefreshResponse> {
-    let client = UsageHttpClientFactory::build("auth refresh HTTP")?;
+    let client = build_usage_http_client("auth refresh HTTP")?;
     let response = client
         .post(refresh_usage_auth_endpoint())
         .header("Content-Type", "application/json")
