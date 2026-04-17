@@ -346,3 +346,126 @@ pub(crate) struct RuntimeBrokerArgs {
     #[arg(long)]
     pub(crate) listen_addr: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CurrentCommand;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CleanupCommand;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ListProfilesCommand;
+
+impl ProfileSelector {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_set_active_profile(self)
+    }
+}
+
+impl AddProfileArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_add_profile(self)
+    }
+}
+
+impl ExportProfileArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_export_profiles(self)
+    }
+}
+
+impl ImportProfileArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_import_profiles(self)
+    }
+}
+
+impl ImportCurrentArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_import_current_profile(self)
+    }
+}
+
+impl RemoveProfileArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_remove_profile(self)
+    }
+}
+
+impl CodexPassthroughArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_codex_login(self)
+    }
+}
+
+impl LogoutArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_codex_logout(self)
+    }
+}
+
+impl CurrentCommand {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_current_profile()
+    }
+}
+
+impl ListProfilesCommand {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_list_profiles()
+    }
+}
+
+impl InfoArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_info(self)
+    }
+}
+
+impl DoctorArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_doctor(self)
+    }
+}
+
+impl AuditArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_audit(self)
+    }
+}
+
+impl CleanupCommand {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_cleanup()
+    }
+}
+
+impl QuotaArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_quota(self)
+    }
+}
+
+impl RunArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_run(self)
+    }
+}
+
+impl CavemanArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_caveman(self)
+    }
+}
+
+impl ClaudeArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_claude(self)
+    }
+}
+
+impl RuntimeBrokerArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_runtime_broker(self)
+    }
+}
