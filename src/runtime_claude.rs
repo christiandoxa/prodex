@@ -82,17 +82,23 @@ pub(super) struct RuntimeProxyResponsesModelDescriptor {
 struct ClaudeLaunchStrategy {
     args: ClaudeArgs,
     claude_args: Vec<OsString>,
-    caveman_mode: bool,
+    launch_modes: RuntimeProxyClaudeLaunchModes,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct RuntimeProxyClaudeLaunchModes {
+    pub(super) caveman_mode: bool,
+    pub(super) mem_mode: bool,
 }
 
 impl ClaudeLaunchStrategy {
     fn new(args: ClaudeArgs) -> Self {
-        let (caveman_mode, claude_args) =
-            runtime_proxy_claude_extract_caveman_mode(&args.claude_args);
+        let (launch_modes, claude_args) =
+            runtime_proxy_claude_extract_launch_modes(&args.claude_args);
         Self {
             args,
             claude_args,
-            caveman_mode,
+            launch_modes,
         }
     }
 }
@@ -130,16 +136,29 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             &current_dir,
             claude_version.as_deref(),
         )?;
+        let mem_plugin_dir = self
+            .launch_modes
+            .mem_mode
+            .then(runtime_mem_claude_plugin_dir)
+            .transpose()?;
         let caveman_plugin_dir = self
+            .launch_modes
             .caveman_mode
             .then(|| prepare_runtime_proxy_claude_caveman_plugin_dir(&prepared.paths))
             .transpose()?;
-        let launch_args =
-            runtime_proxy_claude_launch_args(&self.claude_args, caveman_plugin_dir.as_deref());
+        let mut plugin_dirs = Vec::new();
+        if let Some(plugin_dir) = mem_plugin_dir.as_ref() {
+            plugin_dirs.push(plugin_dir.clone());
+        }
+        if let Some(plugin_dir) = caveman_plugin_dir.as_ref() {
+            plugin_dirs.push(plugin_dir.clone());
+        }
+        let launch_args = runtime_proxy_claude_launch_args(&self.claude_args, &plugin_dirs);
         let extra_env = runtime_proxy_claude_launch_env(
             runtime_proxy.listen_addr,
             &claude_config_dir,
             &prepared.codex_home,
+            mem_plugin_dir.as_deref(),
         );
         Ok(RuntimeLaunchPlan::new(
             ChildProcessPlan::new(claude_bin, prepared.codex_home.clone())
@@ -154,24 +173,28 @@ pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
     execute_runtime_launch(ClaudeLaunchStrategy::new(args))
 }
 
-pub(super) fn runtime_proxy_claude_extract_caveman_mode(
+pub(super) fn runtime_proxy_claude_extract_launch_modes(
     claude_args: &[OsString],
-) -> (bool, Vec<OsString>) {
-    let Some(first) = claude_args.first().and_then(|arg| arg.to_str()) else {
-        return (false, claude_args.to_vec());
-    };
-    if first != "caveman" {
-        return (false, claude_args.to_vec());
+) -> (RuntimeProxyClaudeLaunchModes, Vec<OsString>) {
+    let mut launch_modes = RuntimeProxyClaudeLaunchModes::default();
+    let mut prefix_len = 0;
+    while let Some(arg) = claude_args.get(prefix_len).and_then(|value| value.to_str()) {
+        match arg {
+            "caveman" => launch_modes.caveman_mode = true,
+            "mem" => launch_modes.mem_mode = true,
+            _ => break,
+        }
+        prefix_len += 1;
     }
-    (true, claude_args[1..].to_vec())
+    (launch_modes, claude_args[prefix_len..].to_vec())
 }
 
 pub(super) fn runtime_proxy_claude_launch_args(
     claude_args: &[OsString],
-    plugin_dir: Option<&Path>,
+    plugin_dirs: &[PathBuf],
 ) -> Vec<OsString> {
-    let mut args = Vec::with_capacity(claude_args.len() + usize::from(plugin_dir.is_some()) * 2);
-    if let Some(plugin_dir) = plugin_dir {
+    let mut args = Vec::with_capacity(claude_args.len() + plugin_dirs.len() * 2);
+    for plugin_dir in plugin_dirs {
         args.push(OsString::from("--plugin-dir"));
         args.push(plugin_dir.as_os_str().to_os_string());
     }
@@ -200,6 +223,7 @@ pub(super) fn runtime_proxy_claude_launch_env(
     listen_addr: std::net::SocketAddr,
     config_dir: &Path,
     codex_home: &Path,
+    mem_plugin_root: Option<&Path>,
 ) -> Vec<(&'static str, OsString)> {
     let target_model = runtime_proxy_claude_launch_model(codex_home);
     let base_url = format!("http://{listen_addr}");
@@ -215,6 +239,12 @@ pub(super) fn runtime_proxy_claude_launch_env(
             OsString::from(runtime_proxy_claude_picker_model(&target_model)),
         ),
     ];
+    if let Some(plugin_root) = mem_plugin_root {
+        env.push((
+            "CLAUDE_PLUGIN_ROOT",
+            OsString::from(plugin_root.as_os_str()),
+        ));
+    }
     if runtime_proxy_claude_use_foundry_compat() {
         env.push(("CLAUDE_CODE_USE_FOUNDRY", OsString::from("1")));
         env.push(("ANTHROPIC_FOUNDRY_BASE_URL", OsString::from(base_url)));

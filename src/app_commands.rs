@@ -430,15 +430,18 @@ struct RunCommandStrategy {
     args: RunArgs,
     codex_args: Vec<OsString>,
     include_code_review: bool,
+    mem_mode: bool,
 }
 
 impl RunCommandStrategy {
     fn new(args: RunArgs) -> Self {
-        let (codex_args, include_code_review) = prepare_codex_launch_args(&args.codex_args);
+        let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+        let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
         Self {
             args,
             codex_args,
             include_code_review,
+            mem_mode,
         }
     }
 }
@@ -460,6 +463,9 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        if self.mem_mode {
+            ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
+        }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
         Ok(RuntimeLaunchPlan::new(
             ChildProcessPlan::new(codex_bin(), prepared.codex_home.clone()).with_args(runtime_args),

@@ -31649,20 +31649,22 @@ fn claude_command_accepts_passthrough_args() {
 
 #[test]
 fn claude_caveman_mode_extracts_prefix_and_preserves_passthrough_args() {
-    let (caveman_mode, claude_args) = runtime_proxy_claude_extract_caveman_mode(&[
+    let (launch_modes, claude_args) = runtime_proxy_claude_extract_launch_modes(&[
         OsString::from("caveman"),
         OsString::from("-p"),
         OsString::from("hello"),
     ]);
-    assert!(caveman_mode);
+    assert!(launch_modes.caveman_mode);
+    assert!(!launch_modes.mem_mode);
     assert_eq!(
         claude_args,
         vec![OsString::from("-p"), OsString::from("hello")]
     );
 
-    let (caveman_mode, claude_args) =
-        runtime_proxy_claude_extract_caveman_mode(&[OsString::from("-p"), OsString::from("hi")]);
-    assert!(!caveman_mode);
+    let (launch_modes, claude_args) =
+        runtime_proxy_claude_extract_launch_modes(&[OsString::from("-p"), OsString::from("hi")]);
+    assert!(!launch_modes.caveman_mode);
+    assert!(!launch_modes.mem_mode);
     assert_eq!(
         claude_args,
         vec![OsString::from("-p"), OsString::from("hi")]
@@ -31670,14 +31672,70 @@ fn claude_caveman_mode_extracts_prefix_and_preserves_passthrough_args() {
 }
 
 #[test]
-fn runtime_proxy_claude_launch_args_prepend_plugin_dir_when_present() {
+fn runtime_proxy_claude_launch_modes_extract_mem_and_caveman_prefixes() {
+    let (launch_modes, claude_args) = runtime_proxy_claude_extract_launch_modes(&[
+        OsString::from("caveman"),
+        OsString::from("mem"),
+        OsString::from("-p"),
+        OsString::from("hello"),
+    ]);
+    assert_eq!(
+        launch_modes,
+        RuntimeProxyClaudeLaunchModes {
+            caveman_mode: true,
+            mem_mode: true,
+        }
+    );
+    assert_eq!(
+        claude_args,
+        vec![OsString::from("-p"), OsString::from("hello")]
+    );
+
+    let (launch_modes, claude_args) = runtime_proxy_claude_extract_launch_modes(&[
+        OsString::from("mem"),
+        OsString::from("caveman"),
+        OsString::from("--print"),
+    ]);
+    assert_eq!(
+        launch_modes,
+        RuntimeProxyClaudeLaunchModes {
+            caveman_mode: true,
+            mem_mode: true,
+        }
+    );
+    assert_eq!(claude_args, vec![OsString::from("--print")]);
+}
+
+#[test]
+fn runtime_mem_extract_mode_strips_only_leading_mem_prefix() {
+    let (mem_mode, codex_args) =
+        runtime_mem_extract_mode(&[OsString::from("mem"), OsString::from("exec")]);
+    assert!(mem_mode);
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) =
+        runtime_mem_extract_mode(&[OsString::from("exec"), OsString::from("mem")]);
+    assert!(!mem_mode);
+    assert_eq!(
+        codex_args,
+        vec![OsString::from("exec"), OsString::from("mem")]
+    );
+}
+
+#[test]
+fn runtime_proxy_claude_launch_args_prepend_plugin_dirs_when_present() {
     let launch_args = runtime_proxy_claude_launch_args(
         &[OsString::from("-p"), OsString::from("hello")],
-        Some(Path::new("/tmp/prodex-caveman-plugin")),
+        &[
+            PathBuf::from("/tmp/claude-mem-plugin"),
+            PathBuf::from("/tmp/prodex-caveman-plugin"),
+        ],
     );
     assert_eq!(
         launch_args,
         vec![
+            OsString::from("--plugin-dir"),
+            OsString::from("/tmp/claude-mem-plugin"),
             OsString::from("--plugin-dir"),
             OsString::from("/tmp/prodex-caveman-plugin"),
             OsString::from("-p"),
@@ -31687,7 +31745,7 @@ fn runtime_proxy_claude_launch_args_prepend_plugin_dir_when_present() {
 
     let launch_args = runtime_proxy_claude_launch_args(
         &[OsString::from("-p"), OsString::from("hello")],
-        None,
+        &[],
     );
     assert_eq!(
         launch_args,
@@ -31730,6 +31788,108 @@ fn prepare_runtime_proxy_claude_caveman_plugin_dir_installs_local_plugin_bundle(
     let statusline = fs::read_to_string(plugin_dir.join("hooks/caveman-statusline.sh"))
         .expect("statusline script should read");
     assert!(statusline.contains("CLAUDE_CONFIG_DIR"));
+}
+
+#[test]
+fn runtime_mem_claude_plugin_dir_from_home_uses_marketplace_install_path() {
+    let temp_dir = TestDir::new();
+    let home = temp_dir.path.join("home");
+    assert_eq!(
+        runtime_mem_claude_plugin_dir_from_home(&home),
+        home.join(".claude")
+            .join("plugins")
+            .join("marketplaces")
+            .join("thedotmack")
+            .join("plugin")
+    );
+}
+
+#[test]
+fn runtime_mem_transcript_watch_config_path_from_home_prefers_settings_override() {
+    let temp_dir = TestDir::new();
+    let home = temp_dir.path.join("home");
+    let data_dir = runtime_mem_data_dir_from_home(&home);
+    fs::create_dir_all(&data_dir).expect("claude-mem data dir should exist");
+    fs::write(
+        data_dir.join("settings.json"),
+        serde_json::json!({
+            "CLAUDE_MEM_TRANSCRIPTS_CONFIG_PATH": data_dir.join("custom-watch.json").display().to_string()
+        })
+        .to_string(),
+    )
+    .expect("settings should write");
+
+    assert_eq!(
+        runtime_mem_transcript_watch_config_path_from_home(&home),
+        data_dir.join("custom-watch.json")
+    );
+}
+
+#[test]
+fn ensure_runtime_mem_codex_watch_for_home_adds_prodex_watch_without_clobbering_default_watch() {
+    let temp_dir = TestDir::new();
+    let config_path = temp_dir.path.join("claude-mem/transcript-watch.json");
+    fs::create_dir_all(config_path.parent().expect("config parent")).expect("config parent should exist");
+    fs::write(
+        &config_path,
+        serde_json::json!({
+            "version": 1,
+            "schemas": {
+                "codex": runtime_mem_default_codex_schema(),
+            },
+            "watches": [{
+                "name": "codex",
+                "path": "~/.codex/sessions/**/*.jsonl",
+                "schema": "codex",
+                "startAtEnd": true,
+                "context": {
+                    "mode": "agents",
+                    "updateOn": ["session_start", "session_end"],
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .expect("transcript watch config should write");
+
+    let sessions_root = temp_dir.path.join("prodex-shared/sessions");
+    fs::create_dir_all(&sessions_root).expect("sessions root should exist");
+    let codex_home = temp_dir.path.join("codex-home");
+    fs::create_dir_all(&codex_home).expect("codex home should exist");
+    runtime_proxy_create_symlink(&sessions_root, &codex_home.join("sessions"), true)
+        .expect("sessions symlink should create");
+
+    ensure_runtime_mem_codex_watch_for_home_at_path(&config_path, &codex_home)
+        .expect("prodex codex watch should be added");
+    ensure_runtime_mem_codex_watch_for_home_at_path(&config_path, &codex_home)
+        .expect("prodex codex watch should stay deduplicated");
+
+    let rendered: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&config_path).expect("transcript watch config should read"),
+    )
+    .expect("transcript watch config should parse");
+    let watches = rendered["watches"]
+        .as_array()
+        .expect("watches should be an array");
+    assert_eq!(watches.len(), 2);
+    assert_eq!(watches[0]["name"], serde_json::json!("codex"));
+    let prodex_watch = watches
+        .iter()
+        .find(|watch| {
+            watch["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("prodex-codex-"))
+        })
+        .expect("prodex watch should exist");
+    assert_eq!(
+        prodex_watch["path"],
+        serde_json::json!(format!(
+            "{}{}**{}*.jsonl",
+            sessions_root.display(),
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        ))
+    );
 }
 
 #[test]
@@ -31851,6 +32011,7 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             .expect("listen address should parse"),
         &config_dir,
         &codex_home,
+        None,
     );
     assert_eq!(
         env.iter()
@@ -31976,6 +32137,7 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &temp_dir.path.join("codex-home"),
+        None,
     );
     assert_eq!(
         env.iter()
@@ -31999,6 +32161,7 @@ fn runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_overrid
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &temp_dir.path.join("codex-home"),
+        None,
     );
     assert_eq!(
         env.iter()
@@ -32028,6 +32191,7 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &codex_home,
+        None,
     );
     assert_eq!(
         env.iter()
@@ -32051,12 +32215,33 @@ fn runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &temp_dir.path.join("codex-home"),
+        None,
     );
     assert_eq!(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("opus".to_string())
+    );
+}
+
+#[test]
+fn runtime_proxy_claude_launch_env_sets_plugin_root_when_mem_enabled() {
+    let temp_dir = TestDir::new();
+    let plugin_root = temp_dir.path.join("claude-mem/plugin");
+    let env = runtime_proxy_claude_launch_env(
+        "127.0.0.1:43124"
+            .parse()
+            .expect("listen address should parse"),
+        &temp_dir.path.join("claude-config"),
+        &temp_dir.path.join("codex-home"),
+        Some(&plugin_root),
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "CLAUDE_PLUGIN_ROOT")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some(plugin_root.to_string_lossy().into_owned())
     );
 }
 

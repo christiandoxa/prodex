@@ -79,15 +79,18 @@ struct CavemanLaunchStrategy {
     args: CavemanArgs,
     codex_args: Vec<OsString>,
     include_code_review: bool,
+    mem_mode: bool,
 }
 
 impl CavemanLaunchStrategy {
     fn new(args: CavemanArgs) -> Self {
-        let (codex_args, include_code_review) = prepare_codex_launch_args(&args.codex_args);
+        let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+        let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
         Self {
             args,
             codex_args,
             include_code_review,
+            mem_mode,
         }
     }
 }
@@ -111,6 +114,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
     ) -> Result<RuntimeLaunchPlan> {
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
+        if self.mem_mode {
+            ensure_runtime_mem_codex_watch_for_home(&caveman_home)?;
+        }
         Ok(RuntimeLaunchPlan::new(
             ChildProcessPlan::new(codex_bin(), caveman_home.clone()).with_args(runtime_args),
         )

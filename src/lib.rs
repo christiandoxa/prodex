@@ -59,6 +59,7 @@ mod runtime_core_shared;
 mod runtime_doctor;
 mod runtime_launch;
 mod runtime_launch_shared;
+mod runtime_mem;
 mod runtime_metrics;
 mod runtime_persistence;
 mod runtime_policy;
@@ -90,6 +91,7 @@ use runtime_core_shared::*;
 use runtime_doctor::*;
 use runtime_launch::*;
 use runtime_launch_shared::*;
+use runtime_mem::*;
 use runtime_persistence::*;
 use runtime_policy::*;
 use runtime_proxy::*;
@@ -303,6 +305,7 @@ const CLI_RUN_AFTER_HELP: &str = "\
 Examples:
   prodex
   prodex run
+  prodex run mem
   prodex exec \"review this repo\"
   prodex run --profile main
   prodex run exec \"review this repo\"
@@ -315,14 +318,16 @@ Notes:
 const CLI_CLAUDE_AFTER_HELP: &str = "\
 Examples:
   prodex claude --print \"summarize this repo\"
+  prodex claude mem
   prodex claude caveman
+  prodex claude caveman mem
   prodex claude caveman -- -p \"summarize this repo briefly\"
   prodex claude --profile main --print \"review the latest changes\"
   prodex claude --skip-quota-check -- --help
 
 Notes:
   Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
-  Prefix Claude args with `caveman` to load the Caveman plugin for that session only.
+  Prefix Claude args with `caveman` and/or `mem` to load the Caveman or Claude-Mem plugin for that session only.
   Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
   Claude defaults to the current Codex model from `config.toml` when available.
   Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.
@@ -331,6 +336,7 @@ Notes:
 const CLI_CAVEMAN_AFTER_HELP: &str = "\
 Examples:
   prodex caveman
+  prodex caveman mem
   prodex caveman --profile main
   prodex caveman exec \"review latest diff in caveman mode\"
   prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -338,6 +344,7 @@ Examples:
 Notes:
   Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
+  Prefix Codex args with `mem` to point Claude-Mem transcript watching at the selected Prodex session path.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
