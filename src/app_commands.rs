@@ -464,6 +464,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
         if self.mem_mode {
+            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
         }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);

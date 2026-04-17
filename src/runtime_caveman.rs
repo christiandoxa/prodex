@@ -115,6 +115,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
         if self.mem_mode {
+            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home(&caveman_home)?;
         }
         Ok(RuntimeLaunchPlan::new(

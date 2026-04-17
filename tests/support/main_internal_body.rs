@@ -31826,6 +31826,70 @@ fn runtime_mem_transcript_watch_config_path_from_home_prefers_settings_override(
 }
 
 #[test]
+fn ensure_runtime_mem_prodex_observer_writes_wrapper_and_settings() {
+    let temp_dir = TestDir::new();
+    let home = temp_dir.path.join("home");
+    let settings_path = runtime_mem_settings_path_from_home(&home);
+    fs::create_dir_all(settings_path.parent().expect("settings parent"))
+        .expect("settings parent should exist");
+    fs::write(
+        &settings_path,
+        serde_json::json!({
+            "CLAUDE_MEM_PROVIDER": "claude",
+            "CLAUDE_CODE_PATH": "/usr/bin/claude"
+        })
+        .to_string(),
+    )
+    .expect("settings should write");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex-home"),
+        state_file: temp_dir.path.join("prodex-home/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex-home/profiles"),
+        shared_codex_root: temp_dir.path.join("prodex-home/.codex"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex-home/shared"),
+    };
+    let prodex_exe = temp_dir.path.join("bin/prodex");
+    fs::create_dir_all(prodex_exe.parent().expect("prodex bin parent"))
+        .expect("prodex bin parent should exist");
+    fs::write(&prodex_exe, "").expect("prodex exe should write");
+
+    let wrapper_path = ensure_runtime_mem_prodex_observer_for_home(&home, &paths, &prodex_exe)
+        .expect("prodex observer should configure");
+
+    assert_eq!(
+        wrapper_path,
+        runtime_mem_prodex_claude_wrapper_path(&paths)
+    );
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&settings_path).expect("settings should read"),
+    )
+    .expect("settings should parse");
+    assert_eq!(settings["CLAUDE_MEM_PROVIDER"], serde_json::json!("claude"));
+    assert_eq!(
+        settings["CLAUDE_CODE_PATH"],
+        serde_json::json!(wrapper_path.display().to_string())
+    );
+
+    let wrapper = fs::read_to_string(&wrapper_path).expect("wrapper should read");
+    assert!(wrapper.contains(" claude --skip-quota-check -- "));
+    assert!(wrapper.contains(&prodex_exe.display().to_string()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&wrapper_path)
+                .expect("wrapper metadata should read")
+                .permissions()
+                .mode()
+                & 0o111,
+            0o111,
+            "wrapper should be executable"
+        );
+    }
+}
+
+#[test]
 fn ensure_runtime_mem_codex_watch_for_home_adds_prodex_watch_without_clobbering_default_watch() {
     let temp_dir = TestDir::new();
     let config_path = temp_dir.path.join("claude-mem/transcript-watch.json");

@@ -141,6 +141,9 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             .mem_mode
             .then(runtime_mem_claude_plugin_dir)
             .transpose()?;
+        if self.launch_modes.mem_mode {
+            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
+        }
         let caveman_plugin_dir = self
             .launch_modes
             .caveman_mode

@@ -7,6 +7,9 @@ const CLAUDE_MEM_TRANSCRIPT_WATCH_STATE_FILE_NAME: &str = "transcript-watch-stat
 const CLAUDE_MEM_PLUGIN_MARKETPLACE_OWNER: &str = "thedotmack";
 const CLAUDE_MEM_CODEX_SCHEMA_NAME: &str = "codex";
 const CLAUDE_MEM_PRODEX_WATCH_NAME_PREFIX: &str = "prodex-codex-";
+const CLAUDE_MEM_CLAUDE_CODE_PATH_SETTING: &str = "CLAUDE_CODE_PATH";
+const PRODEX_CLAUDE_MEM_DIR_NAME: &str = "claude-mem";
+const PRODEX_CLAUDE_MEM_WRAPPER_NAME: &str = "prodex-claude";
 
 pub(super) fn runtime_mem_extract_mode(args: &[OsString]) -> (bool, Vec<OsString>) {
     let Some(first) = args.first().and_then(|arg| arg.to_str()) else {
@@ -36,6 +39,24 @@ pub(super) fn ensure_runtime_mem_codex_watch_for_home(codex_home: &Path) -> Resu
     ensure_runtime_mem_codex_watch_for_home_at_path(&config_path, codex_home)
 }
 
+pub(super) fn ensure_runtime_mem_prodex_observer(paths: &AppPaths) -> Result<PathBuf> {
+    let home = home_dir().context("failed to determine home directory for claude-mem")?;
+    let prodex_exe = env::current_exe().context("failed to determine current prodex executable")?;
+    ensure_runtime_mem_prodex_observer_for_home(&home, paths, &prodex_exe)
+}
+
+pub(super) fn ensure_runtime_mem_prodex_observer_for_home(
+    home: &Path,
+    paths: &AppPaths,
+    prodex_exe: &Path,
+) -> Result<PathBuf> {
+    let wrapper_path = runtime_mem_prodex_claude_wrapper_path(paths);
+    write_runtime_mem_prodex_claude_wrapper(&wrapper_path, prodex_exe)?;
+    let settings_path = runtime_mem_settings_path_from_home(home);
+    update_runtime_mem_claude_code_path_setting(&settings_path, &wrapper_path)?;
+    Ok(wrapper_path)
+}
+
 pub(super) fn runtime_mem_claude_plugin_dir_from_home(home: &Path) -> PathBuf {
     home.join(DEFAULT_CLAUDE_CONFIG_DIR_NAME)
         .join("plugins")
@@ -52,8 +73,12 @@ pub(super) fn runtime_mem_data_dir_from_home(home: &Path) -> PathBuf {
     home.join(CLAUDE_MEM_DATA_DIR_NAME)
 }
 
+pub(super) fn runtime_mem_settings_path_from_home(home: &Path) -> PathBuf {
+    runtime_mem_data_dir_from_home(home).join(CLAUDE_MEM_SETTINGS_FILE_NAME)
+}
+
 pub(super) fn runtime_mem_transcript_watch_config_path_from_home(home: &Path) -> PathBuf {
-    let settings_path = runtime_mem_data_dir_from_home(home).join(CLAUDE_MEM_SETTINGS_FILE_NAME);
+    let settings_path = runtime_mem_settings_path_from_home(home);
     let default_path =
         runtime_mem_data_dir_from_home(home).join(CLAUDE_MEM_TRANSCRIPT_WATCH_FILE_NAME);
     let Some(raw) = fs::read_to_string(&settings_path).ok() else {
@@ -169,6 +194,84 @@ pub(super) fn ensure_runtime_mem_codex_watch_for_sessions_root(
     fs::write(config_path, format!("{rendered}\n"))
         .with_context(|| format!("failed to write {}", config_path.display()))?;
     Ok(())
+}
+
+pub(super) fn runtime_mem_prodex_claude_wrapper_path(paths: &AppPaths) -> PathBuf {
+    let file_name = if cfg!(windows) {
+        format!("{PRODEX_CLAUDE_MEM_WRAPPER_NAME}.cmd")
+    } else {
+        PRODEX_CLAUDE_MEM_WRAPPER_NAME.to_string()
+    };
+    paths.root.join(PRODEX_CLAUDE_MEM_DIR_NAME).join(file_name)
+}
+
+fn write_runtime_mem_prodex_claude_wrapper(wrapper_path: &Path, prodex_exe: &Path) -> Result<()> {
+    if let Some(parent) = wrapper_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let contents = if cfg!(windows) {
+        format!(
+            "@echo off\r\n\"{}\" claude --skip-quota-check -- %*\r\n",
+            prodex_exe.display()
+        )
+    } else {
+        format!(
+            "#!/bin/sh\nexec {} claude --skip-quota-check -- \"$@\"\n",
+            shell_single_quote_path(prodex_exe)
+        )
+    };
+    fs::write(wrapper_path, contents)
+        .with_context(|| format!("failed to write {}", wrapper_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(wrapper_path)
+            .with_context(|| format!("failed to inspect {}", wrapper_path.display()))?
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(wrapper_path, permissions)
+            .with_context(|| format!("failed to chmod {}", wrapper_path.display()))?;
+    }
+    Ok(())
+}
+
+fn update_runtime_mem_claude_code_path_setting(
+    settings_path: &Path,
+    wrapper_path: &Path,
+) -> Result<()> {
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let raw = fs::read_to_string(settings_path).ok();
+    let mut settings = raw
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !settings.is_object() {
+        settings = serde_json::json!({});
+    }
+    settings
+        .as_object_mut()
+        .expect("claude-mem settings should be normalized to an object")
+        .insert(
+            CLAUDE_MEM_CLAUDE_CODE_PATH_SETTING.to_string(),
+            serde_json::json!(wrapper_path.display().to_string()),
+        );
+
+    let rendered =
+        serde_json::to_string_pretty(&settings).context("failed to render claude-mem settings")?;
+    fs::write(settings_path, format!("{rendered}\n"))
+        .with_context(|| format!("failed to write {}", settings_path.display()))?;
+    Ok(())
+}
+
+fn shell_single_quote_path(path: &Path) -> String {
+    let raw = path.display().to_string();
+    format!("'{}'", raw.replace('\'', "'\"'\"'"))
 }
 
 fn runtime_mem_codex_sessions_root(codex_home: &Path) -> PathBuf {
