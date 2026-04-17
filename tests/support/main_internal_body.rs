@@ -22963,6 +22963,170 @@ fn runtime_proxy_websocket_x_session_id_affinity_rotates_without_promoting_activ
 }
 
 #[test]
+fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_quota_before_commit() {
+    let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("client request should build");
+    request.headers_mut().insert(
+        "session_id",
+        "sess-ws-quota".parse().expect("session header"),
+    );
+    let (mut socket, _response) =
+        tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-main\""))
+    );
+
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("second runtime proxy websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "unexpected websocket payloads: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("You've hit your usage limit")),
+        "quota error should not be surfaced after session-bound pre-commit rotate: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        "failed pre-commit frames should not leak across rotated session retry: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    assert_eq!(
+        backend.websocket_requests().len(),
+        3,
+        "expected initial request, delayed quota retry on reused session, and rotated retry"
+    );
+
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("main")
+            && state
+                .session_profile_bindings
+                .get("sess-ws-quota")
+                .is_some_and(|binding| binding.profile_name == "second")
+    });
+    assert_eq!(persisted.active_profile.as_deref(), Some("main"));
+    assert_eq!(
+        persisted
+            .session_profile_bindings
+            .get("sess-ws-quota")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert!(
+        persisted.last_run_selected_at.is_empty(),
+        "session-bound websocket continuation should not promote the global active profile"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_x_session_id_affinity_rotates_like_session_id_on_overload() {
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
     let temp_dir = TestDir::new();
