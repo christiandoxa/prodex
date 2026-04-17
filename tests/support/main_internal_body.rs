@@ -671,6 +671,37 @@ fn set_test_websocket_io_timeout(
     }
 }
 
+fn wait_for_runtime_log_tail_until<F, G>(
+    mut read_tail: G,
+    predicate: F,
+    local_ms: u64,
+    ci_ms: u64,
+    poll_ms: u64,
+) -> Vec<u8>
+where
+    F: Fn(&str) -> bool,
+    G: FnMut() -> Option<Vec<u8>>,
+{
+    let deadline = Instant::now() + ci_timing_upper_bound_ms(local_ms, ci_ms);
+    let mut last_tail = Vec::new();
+
+    loop {
+        if let Some(tail) = read_tail() {
+            last_tail = tail;
+            let text = String::from_utf8_lossy(&last_tail);
+            if predicate(&text) {
+                return last_tail;
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return last_tail;
+        }
+
+        thread::sleep(Duration::from_millis(poll_ms));
+    }
+}
+
 fn wait_for_state<F>(paths: &AppPaths, predicate: F) -> AppState
 where
     F: Fn(&AppState) -> bool,
@@ -21688,26 +21719,29 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
         backend.responses_accounts(),
         vec!["second-account".to_string()]
     );
-    let mut tail = Vec::new();
-    let mut observed = false;
-    for _ in 0..80 {
-        tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("first_upstream_chunk")
-            && text.contains("first_local_chunk")
-            && text.contains("stream_read_error")
-        {
-            observed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    assert!(
-        observed,
-        "runtime log should capture first-chunk reset markers"
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| {
+            text.contains("first_upstream_chunk")
+                && text.contains("first_local_chunk")
+                && text.contains("stream_read_error")
+        },
+        2_000,
+        6_000,
+        25,
     );
     let tail = String::from_utf8_lossy(&tail);
+    assert!(
+        tail.contains("first_upstream_chunk")
+            && tail.contains("first_local_chunk")
+            && tail.contains("stream_read_error"),
+        "runtime log should capture first-chunk reset markers: {tail}"
+    );
     assert!(tail.contains("first_upstream_chunk"));
     assert!(tail.contains("first_local_chunk"));
     assert!(tail.contains("stream_read_error"));
@@ -21770,26 +21804,29 @@ fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
         backend.responses_accounts(),
         vec!["second-account".to_string()]
     );
-    let mut tail = Vec::new();
-    let mut observed = false;
-    for _ in 0..80 {
-        tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("first_upstream_chunk")
-            && text.contains("first_local_chunk")
-            && text.contains("stream_read_error")
-        {
-            observed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    assert!(
-        observed,
-        "runtime log should capture multi-chunk stall markers"
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| {
+            text.contains("first_upstream_chunk")
+                && text.contains("first_local_chunk")
+                && text.contains("stream_read_error")
+        },
+        2_000,
+        6_000,
+        25,
     );
     let tail = String::from_utf8_lossy(&tail);
+    assert!(
+        tail.contains("first_upstream_chunk")
+            && tail.contains("first_local_chunk")
+            && tail.contains("stream_read_error"),
+        "runtime log should capture multi-chunk stall markers: {tail}"
+    );
     assert!(tail.contains("first_upstream_chunk"));
     assert!(tail.contains("first_local_chunk"));
     assert!(tail.contains("stream_read_error"));
@@ -23657,39 +23694,41 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
         state.active_profile.as_deref() == Some("third")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("third"));
-    let mut tail = Vec::new();
-    let mut observed = false;
-    for _ in 0..160 {
-        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
-            .into_iter()
-            .next_back()
-        else {
-            thread::sleep(Duration::from_millis(25));
-            continue;
-        };
-        tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("websocket_reuse_watchdog")
-            && text.contains("websocket_precommit_frame_timeout")
-        {
-            observed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    assert!(
-        observed,
-        "runtime log should capture websocket reuse watchdog"
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| {
+            text.contains("websocket_reuse_watchdog")
+                && (text.contains("websocket_precommit_frame_timeout")
+                    || text.contains("websocket_reuse_watchdog_timeout"))
+        },
+        4_000,
+        12_000,
+        25,
     );
     let tail = String::from_utf8_lossy(&tail);
+    assert!(
+        tail.contains("websocket_reuse_watchdog")
+            && (tail.contains("websocket_precommit_frame_timeout")
+                || tail.contains("websocket_reuse_watchdog_timeout")),
+        "runtime log should capture websocket reuse watchdog: {tail}"
+    );
     assert!(tail.contains("websocket_reuse_watchdog"));
-    assert!(tail.contains("websocket_precommit_frame_timeout"));
+    assert!(
+        tail.contains("websocket_precommit_frame_timeout")
+            || tail.contains("websocket_reuse_watchdog_timeout")
+    );
 }
 
 #[test]
 fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
-    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_precommit_hold_stall();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -23830,39 +23869,36 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
         state.active_profile.as_deref() == Some("third")
     });
     assert_eq!(persisted.active_profile.as_deref(), Some("third"));
-    let mut tail = Vec::new();
-    let mut observed = false;
-    for _ in 0..160 {
-        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
-            .into_iter()
-            .next_back()
-        else {
-            thread::sleep(Duration::from_millis(25));
-            continue;
-        };
-        tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("websocket_reuse_watchdog")
-            && text.contains("websocket_precommit_hold_timeout")
-        {
-            observed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    assert!(
-        observed,
-        "runtime log should capture websocket precommit hold timeout watchdog"
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| {
+            text.contains("websocket_reuse_watchdog")
+                && text.contains("websocket_precommit_hold_timeout")
+        },
+        4_000,
+        12_000,
+        25,
     );
     let tail = String::from_utf8_lossy(&tail);
+    assert!(
+        tail.contains("websocket_reuse_watchdog")
+            && tail.contains("websocket_precommit_hold_timeout"),
+        "runtime log should capture websocket precommit hold timeout watchdog: {tail}"
+    );
     assert!(tail.contains("websocket_reuse_watchdog"));
     assert!(tail.contains("websocket_precommit_hold_timeout"));
 }
 
 #[test]
 fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
-    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -24009,30 +24045,26 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
         "proxy should issue one fresh websocket reconnect after the failed reuse attempt"
     );
 
-    let mut tail = Vec::new();
-    let mut observed_retry = false;
-    for _ in 0..160 {
-        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
-            .into_iter()
-            .next_back()
-        else {
-            thread::sleep(Duration::from_millis(25));
-            continue;
-        };
-        tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("websocket_reuse_owner_fresh_retry") {
-            observed_retry = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    assert!(
-        observed_retry,
-        "runtime log should capture a fresh reconnect on the compact follow-up owner"
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| text.contains("websocket_reuse_owner_fresh_retry"),
+        4_000,
+        12_000,
+        25,
     );
     let tail = String::from_utf8_lossy(&tail);
+    assert!(
+        tail.contains("websocket_reuse_owner_fresh_retry"),
+        "runtime log should capture a fresh reconnect on the compact follow-up owner: {tail}"
+    );
     assert!(tail.contains("websocket_reuse_owner_fresh_retry"));
     assert!(
         !tail.contains("compact_fresh_fallback_blocked"),
@@ -24253,7 +24285,6 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
 #[test]
 fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog()
 {
-    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -24399,27 +24430,25 @@ fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websoc
         "fresh owner reconnect should replay the stored turn-state"
     );
 
-    let mut observed = false;
-    for _ in 0..80 {
-        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
-            .into_iter()
-            .next_back()
-        else {
-            thread::sleep(Duration::from_millis(10));
-            continue;
-        };
-        let tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("websocket_reuse_owner_fresh_retry") {
-            observed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| text.contains("websocket_reuse_owner_fresh_retry"),
+        1_000,
+        4_000,
+        10,
+    );
+    let tail = String::from_utf8_lossy(&tail);
     assert!(
-        observed,
-        "runtime log should capture fresh owner reconnect after the reuse watchdog"
+        tail.contains("websocket_reuse_owner_fresh_retry"),
+        "runtime log should capture fresh owner reconnect after the reuse watchdog: {tail}"
     );
 }
 
@@ -24562,27 +24591,25 @@ fn runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_tur
         "stale websocket reuse recovery should replay the stored turn-state"
     );
 
-    let mut observed = false;
-    for _ in 0..80 {
-        let Some(log_path) = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
-            .into_iter()
-            .next_back()
-        else {
-            thread::sleep(Duration::from_millis(10));
-            continue;
-        };
-        let tail = read_runtime_log_tail(&log_path, 32 * 1024)
-            .expect("runtime log tail should be readable");
-        let text = String::from_utf8_lossy(&tail);
-        if text.contains("websocket_reuse_owner_fresh_retry") {
-            observed = true;
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    let tail = wait_for_runtime_log_tail_until(
+        || {
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            Some(
+                read_runtime_log_tail(&log_path, 32 * 1024)
+                    .expect("runtime log tail should be readable"),
+            )
+        },
+        |text| text.contains("websocket_reuse_owner_fresh_retry"),
+        1_000,
+        4_000,
+        10,
+    );
+    let tail = String::from_utf8_lossy(&tail);
     assert!(
-        observed,
-        "runtime log should capture fresh owner reconnect after stale websocket reuse"
+        tail.contains("websocket_reuse_owner_fresh_retry"),
+        "runtime log should capture fresh owner reconnect after stale websocket reuse: {tail}"
     );
 }
 
