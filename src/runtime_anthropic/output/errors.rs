@@ -62,7 +62,8 @@ pub(crate) fn build_runtime_anthropic_error_parts(
             }
         })
         .to_string()
-        .into_bytes(),
+        .into_bytes()
+        .into(),
     }
 }
 

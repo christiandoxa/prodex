@@ -224,6 +224,9 @@ const RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS: u64 = if cfg!(test) { 2 } el
 const RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS: u64 = if cfg!(test) { 40 } else { 1_000 };
 const RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES: usize =
+    if cfg!(test) { 1024 } else { 1024 * 1024 };
+const RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS: u64 = if cfg!(test) { 0 } else { 2_000 };
 const RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT: usize = if cfg!(test) { 2 } else { 4 };
 const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";

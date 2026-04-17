@@ -3575,16 +3575,21 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
 }
 
 #[test]
-fn runtime_proxy_default_long_lived_capacity_scales_for_terminal_fanout() {
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(1), 32);
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(4), 32);
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(8), 64);
-    assert_eq!(runtime_proxy_long_lived_worker_count_default(32), 128);
+fn runtime_proxy_default_worker_counts_stay_defensive() {
+    assert_eq!(runtime_proxy_worker_count_default(1), 4);
+    assert_eq!(runtime_proxy_worker_count_default(4), 4);
+    assert_eq!(runtime_proxy_worker_count_default(8), 8);
+    assert_eq!(runtime_proxy_worker_count_default(32), 12);
+
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(1), 8);
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(4), 8);
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(8), 16);
+    assert_eq!(runtime_proxy_long_lived_worker_count_default(32), 24);
 
     assert_eq!(runtime_proxy_long_lived_queue_capacity(1), 128);
-    assert_eq!(runtime_proxy_long_lived_queue_capacity(32), 256);
-    assert_eq!(runtime_proxy_long_lived_queue_capacity(64), 512);
-    assert_eq!(runtime_proxy_long_lived_queue_capacity(128), 1024);
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(8), 128);
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(16), 128);
+    assert_eq!(runtime_proxy_long_lived_queue_capacity(24), 192);
 }
 
 #[test]
@@ -3607,22 +3612,53 @@ fn runtime_proxy_async_worker_count_is_bounded() {
 #[test]
 fn runtime_proxy_async_worker_count_default_scales_with_parallelism() {
     assert_eq!(runtime_proxy_async_worker_count_default(1), 2);
-    assert_eq!(runtime_proxy_async_worker_count_default(2), 4);
-    assert_eq!(runtime_proxy_async_worker_count_default(4), 8);
-    assert_eq!(runtime_proxy_async_worker_count_default(64), 8);
+    assert_eq!(runtime_proxy_async_worker_count_default(2), 2);
+    assert_eq!(runtime_proxy_async_worker_count_default(4), 4);
+    assert_eq!(runtime_proxy_async_worker_count_default(64), 4);
 }
 
 #[test]
 fn runtime_proxy_default_active_limit_scales_with_long_lived_streams() {
-    assert_eq!(runtime_proxy_active_request_limit_default(8, 32), 104);
-    assert_eq!(runtime_proxy_active_request_limit_default(32, 64), 224);
-    assert_eq!(runtime_proxy_active_request_limit_default(32, 128), 416);
+    assert_eq!(runtime_proxy_active_request_limit_default(4, 8), 64);
+    assert_eq!(runtime_proxy_active_request_limit_default(12, 24), 84);
+    assert_eq!(runtime_proxy_active_request_limit_default(12, 32), 108);
 
     let lane_limits =
-        runtime_proxy_lane_limits(runtime_proxy_active_request_limit_default(32, 64), 32, 64);
+        runtime_proxy_lane_limits(runtime_proxy_active_request_limit_default(12, 24), 12, 24);
     assert!(lane_limits.responses > lane_limits.compact);
     assert!(lane_limits.responses > lane_limits.standard);
     assert!(lane_limits.responses >= lane_limits.websocket);
+}
+
+#[test]
+fn runtime_buffered_response_parts_drop_requests_heap_trim_after_large_release() {
+    reset_runtime_heap_trim_request_count();
+    drop(RuntimeBufferedResponseParts {
+        status: 200,
+        headers: Vec::new(),
+        body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES].into(),
+    });
+    assert_eq!(runtime_heap_trim_request_count(), 1);
+
+    reset_runtime_heap_trim_request_count();
+    drop(RuntimeBufferedResponseParts {
+        status: 200,
+        headers: Vec::new(),
+        body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES / 2].into(),
+    });
+    assert_eq!(runtime_heap_trim_request_count(), 0);
+}
+
+#[test]
+fn buffered_runtime_proxy_response_drop_requests_heap_trim_after_large_release() {
+    reset_runtime_heap_trim_request_count();
+    let response = build_runtime_proxy_response_from_parts(RuntimeBufferedResponseParts {
+        status: 200,
+        headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
+        body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES].into(),
+    });
+    drop(response);
+    assert_eq!(runtime_heap_trim_request_count(), 1);
 }
 
 #[test]
@@ -18866,7 +18902,7 @@ fn runtime_proxy_does_not_mask_quota_failure_for_route_ineligible_alternative() 
     let (status, body) = match response {
         RuntimeResponsesReply::Buffered(parts) => (
             parts.status,
-            String::from_utf8(parts.body).expect("buffered body should be utf8"),
+            String::from_utf8(parts.body.into_vec()).expect("buffered body should be utf8"),
         ),
         RuntimeResponsesReply::Streaming(mut response) => {
             let mut body = String::new();
@@ -36875,7 +36911,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_mcp_approva
     });
 
     let parts = runtime_anthropic_sse_response_parts_from_message_value(message);
-    let body = String::from_utf8(parts.body).expect("SSE body should decode");
+    let body = String::from_utf8(parts.body.into_vec()).expect("SSE body should decode");
 
     assert!(body.contains("\"mcp_approval_request\""));
     assert!(body.contains("\"mcp_list_tools\""));
@@ -37421,7 +37457,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value_seeds_server_tool_use
     });
 
     let parts = runtime_anthropic_sse_response_parts_from_message_value(message);
-    let body = String::from_utf8(parts.body).expect("SSE body should decode");
+    let body = String::from_utf8(parts.body.into_vec()).expect("SSE body should decode");
 
     assert!(body.contains("\"server_tool_use\""));
     assert!(body.contains("\"web_search_requests\":1"));
@@ -37466,7 +37502,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_web_fetch_t
     });
 
     let parts = runtime_anthropic_sse_response_parts_from_message_value(message);
-    let body = String::from_utf8(parts.body).expect("SSE body should decode");
+    let body = String::from_utf8(parts.body.into_vec()).expect("SSE body should decode");
 
     assert!(body.contains("\"web_fetch_tool_result\""));
     assert!(body.contains("https://example.com/article"));
@@ -37513,7 +37549,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_mcp_server_
     });
 
     let parts = runtime_anthropic_sse_response_parts_from_message_value(message);
-    let body = String::from_utf8(parts.body).expect("SSE body should decode");
+    let body = String::from_utf8(parts.body.into_vec()).expect("SSE body should decode");
 
     assert!(body.contains("\"mcp_tool_use\""));
     assert!(body.contains("\"server_name\":\"local_fs\""));
@@ -37552,7 +37588,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_generic_too
     });
 
     let parts = runtime_anthropic_sse_response_parts_from_message_value(message);
-    let body = String::from_utf8(parts.body).expect("sse body should be valid utf-8");
+    let body = String::from_utf8(parts.body.into_vec()).expect("sse body should be valid utf-8");
     assert!(body.contains("\"bash_code_execution_tool_result\""));
     assert!(body.contains("\"srvtoolu_code\""));
     assert!(body.contains("\"stdout\":\"ok\""));
@@ -37580,7 +37616,7 @@ fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carri
         &RuntimeAnthropicServerTools::default(),
     )
     .expect("buffered SSE translation should succeed");
-    let body = String::from_utf8(parts.body).expect("SSE body should decode");
+    let body = String::from_utf8(parts.body.into_vec()).expect("SSE body should decode");
 
     assert!(body.contains("\"web_search_requests\":1"));
     assert!(body.contains("\"web_fetch_requests\":1"));

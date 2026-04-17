@@ -1,5 +1,10 @@
 use super::*;
 
+#[cfg(all(target_os = "linux", target_env = "gnu", not(test)))]
+unsafe extern "C" {
+    fn malloc_trim(pad: usize) -> i32;
+}
+
 pub(super) fn runtime_proxy_log_dir() -> PathBuf {
     env::var_os("PRODEX_RUNTIME_LOG_DIR")
         .filter(|value| !value.is_empty())
@@ -55,6 +60,10 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
     log_path
 }
 
+pub(super) fn runtime_proxy_worker_count_default(parallelism: usize) -> usize {
+    parallelism.clamp(4, 12)
+}
+
 pub(super) fn runtime_proxy_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
@@ -62,13 +71,13 @@ pub(super) fn runtime_proxy_worker_count() -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
         runtime_policy_proxy().and_then(|policy| policy.worker_count),
-        (parallelism.saturating_mul(4)).clamp(8, 32),
+        runtime_proxy_worker_count_default(parallelism),
     )
     .clamp(1, 64)
 }
 
 pub(super) fn runtime_proxy_long_lived_worker_count_default(parallelism: usize) -> usize {
-    parallelism.saturating_mul(8).clamp(32, 128)
+    parallelism.saturating_mul(2).clamp(8, 24)
 }
 
 pub(super) fn runtime_proxy_long_lived_worker_count() -> usize {
@@ -96,7 +105,7 @@ pub(super) fn runtime_probe_refresh_worker_count() -> usize {
 }
 
 pub(super) fn runtime_proxy_async_worker_count_default(parallelism: usize) -> usize {
-    parallelism.saturating_mul(2).clamp(2, 8)
+    parallelism.clamp(2, 4)
 }
 
 pub(super) fn runtime_proxy_async_worker_count() -> usize {
@@ -140,6 +149,76 @@ pub(super) fn runtime_proxy_active_request_limit(
         runtime_proxy_active_request_limit_default(worker_count, long_lived_worker_count),
     )
     .max(1)
+}
+
+fn runtime_heap_trim_last_requested_at_ms() -> &'static AtomicU64 {
+    static LAST_REQUESTED_AT_MS: OnceLock<AtomicU64> = OnceLock::new();
+    LAST_REQUESTED_AT_MS.get_or_init(|| AtomicU64::new(0))
+}
+
+#[cfg(test)]
+fn runtime_heap_trim_request_count_cell() -> &'static AtomicUsize {
+    static REQUEST_COUNT: OnceLock<AtomicUsize> = OnceLock::new();
+    REQUEST_COUNT.get_or_init(|| AtomicUsize::new(0))
+}
+
+fn runtime_heap_trim_reserve(now_ms: u64) -> bool {
+    let cell = runtime_heap_trim_last_requested_at_ms();
+    loop {
+        let previous = cell.load(Ordering::Relaxed);
+        if RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS > 0
+            && previous > 0
+            && now_ms.saturating_sub(previous) < RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS
+        {
+            return false;
+        }
+        match cell.compare_exchange(previous, now_ms, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(_) => continue,
+        }
+    }
+}
+
+pub(crate) fn runtime_maybe_trim_process_heap(released_bytes: usize) -> bool {
+    if released_bytes < RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES {
+        return false;
+    }
+
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    if !runtime_heap_trim_reserve(now_ms) {
+        return false;
+    }
+
+    #[cfg(test)]
+    {
+        runtime_heap_trim_request_count_cell().fetch_add(1, Ordering::SeqCst);
+        true
+    }
+
+    #[cfg(all(target_os = "linux", target_env = "gnu", not(test)))]
+    unsafe {
+        let _ = malloc_trim(0);
+        true
+    }
+
+    #[cfg(not(any(test, all(target_os = "linux", target_env = "gnu"))))]
+    {
+        false
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn reset_runtime_heap_trim_request_count() {
+    runtime_heap_trim_request_count_cell().store(0, Ordering::SeqCst);
+    runtime_heap_trim_last_requested_at_ms().store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_heap_trim_request_count() -> usize {
+    runtime_heap_trim_request_count_cell().load(Ordering::SeqCst)
 }
 
 #[derive(Debug, Clone, Copy)]
