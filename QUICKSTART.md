@@ -1,16 +1,25 @@
 # Quick Start
 
-One OpenAI profile pool. Three entry points.
+One OpenAI profile pool. Codex, Claude Code, Caveman mode, and optional Claude-Mem overlays.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and `prodex claude caveman` for Caveman-mode Claude Code. All four commands run on top of the same OpenAI-backed Prodex profile pool.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. All of these commands run on top of the same OpenAI-backed Prodex profile pool.
 
 ## Requirements
 
 - An OpenAI account, plus at least one logged-in Prodex profile
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
+- Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
 
 If you install `@christiandoxa/prodex` from npm, the pinned Codex runtime dependency `@openai/codex@0.121.0` is installed for you. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+
+If you want the `mem` path, install Claude-Mem separately with the upstream installer:
+
+```bash
+npx claude-mem install --ide codex-cli
+npx claude-mem install --ide claude-code
+npx claude-mem start
+```
 
 ## Install
 
@@ -34,11 +43,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.21.0`:
+The current local version in this repo is `0.22.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.21.0
-cargo install prodex --force --version 0.21.0
+npm install -g @christiandoxa/prodex@0.22.0
+cargo install prodex --force --version 0.22.0
 ```
 
 Dependency status in this repo:
@@ -121,17 +130,22 @@ Use this path when you want Codex CLI itself to be the front end. Prodex keeps t
 
 ```bash
 prodex caveman
+prodex caveman mem
 prodex caveman --profile second
 prodex caveman exec "review this repo in caveman mode"
 ```
 
 Use this path when you want Codex itself as the front end but want Caveman mode preloaded from the upstream Caveman plugin. Prodex launches Caveman from a temporary overlay `CODEX_HOME` so the base profile home stays unchanged after the session exits.
 
+Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
+
 ## 5. Run Claude Code with `prodex claude`
 
 ```bash
 prodex claude -- -p "summarize this repo"
+prodex claude mem -- -p "recall past work on this repo"
 prodex claude caveman
+prodex claude caveman mem
 prodex claude caveman -- -p "summarize this repo briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
@@ -139,6 +153,8 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 Use this path when you want Claude Code to be the front end while Prodex still routes requests through your OpenAI-backed profile pool.
 
 Use `prodex claude caveman` when you want the same Claude path but with the upstream Caveman plugin loaded through Claude's session-local `--plugin-dir` support. Prodex keeps the plugin bundle stable under `.prodex`, and the adapted Caveman hooks read and write the Prodex-managed `CLAUDE_CONFIG_DIR` instead of your global `~/.claude`.
+
+Use `prodex claude mem` when you want to reuse an existing upstream Claude-Mem Claude Code install, and use `prodex claude caveman mem` when you want Caveman mode and Claude-Mem together in the same Claude session.
 
 What changes on this path:
 

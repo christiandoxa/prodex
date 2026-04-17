@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml/badge.svg)](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml)
 
-Run Codex, Claude Code, and their Caveman-mode variants on top of one OpenAI profile pool.
+Run Codex, Claude Code, Caveman mode, and optional Claude-Mem-assisted sessions on top of one OpenAI profile pool.
 
 `prodex` manages isolated `CODEX_HOME` profiles, checks quota before launch, rotates fresh work to another ready profile when needed, and keeps existing continuations attached to the profile that already owns them.
 
@@ -12,7 +12,9 @@ Run Codex, Claude Code, and their Caveman-mode variants on top of one OpenAI pro
 - Built-in quota preflight and fresh-request rotation
 - Continuation affinity for existing Codex sessions
 - `prodex caveman` launches Codex with Caveman mode preloaded
+- `prodex caveman mem` keeps Caveman mode while pointing Claude-Mem transcript watching at the active Prodex session path
 - `prodex claude caveman` launches Claude Code with Caveman mode preloaded
+- `prodex claude caveman mem` combines Caveman mode with an existing Claude-Mem Claude Code install
 - `prodex claude` runs Claude Code through the same profile pool
 
 ## Requirements
@@ -20,8 +22,17 @@ Run Codex, Claude Code, and their Caveman-mode variants on top of one OpenAI pro
 - At least one logged-in Prodex profile
 - Codex CLI for `prodex` and `prodex caveman`
 - Claude Code (`claude`) for `prodex claude` and `prodex claude caveman`
+- Optional: `claude-mem` if you want to use `mem` prefixes such as `prodex caveman mem` or `prodex claude caveman mem`
 
 Installing `@christiandoxa/prodex` from npm also installs the pinned Codex runtime dependency `@openai/codex@0.121.0` for you. Claude Code is still a separate CLI.
+
+If you want the `mem` path, install Claude-Mem separately with the upstream installer:
+
+```bash
+npx claude-mem install --ide codex-cli
+npx claude-mem install --ide claude-code
+npx claude-mem start
+```
 
 ## Install
 
@@ -40,8 +51,8 @@ cargo install prodex
 Version-pinned install:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.21.0
-cargo install prodex --force --version 0.21.0
+npm install -g @christiandoxa/prodex@0.22.0
+cargo install prodex --force --version 0.22.0
 ```
 
 ## Quick Start
@@ -72,9 +83,12 @@ Run through Prodex:
 ```bash
 prodex
 prodex caveman
+prodex caveman mem
 prodex exec "review this repo"
 prodex claude -- -p "summarize this repo"
+prodex claude mem -- -p "recall past work on this repo"
 prodex claude caveman -- -p "summarize this repo briefly"
+prodex claude caveman mem -- -p "summarize this repo briefly"
 ```
 
 `prodex` without a subcommand is shorthand for `prodex run`.
@@ -109,6 +123,7 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 ```bash
 prodex caveman
+prodex caveman mem
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
 prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -116,12 +131,17 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` uses the Caveman plugin from [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) and launches Codex from a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
+Prefix Codex args with `mem` when you want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of only watching the default `~/.codex/sessions` tree.
+
 ### Claude Code
 
 ```bash
 prodex claude -- -p "summarize this repo"
+prodex claude mem -- -p "recall past work on this repo"
 prodex claude caveman
+prodex claude caveman mem
 prodex claude caveman -- -p "summarize this repo briefly"
+prodex claude caveman mem -- -p "summarize this repo briefly"
 prodex claude --profile second caveman -- -p "review the latest diff briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
@@ -129,6 +149,8 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 Use `prodex claude` for the normal Claude Code path, and use `prodex claude caveman` when you want the same Claude front end with Caveman mode preloaded.
 
 Prefixing Claude args with `caveman` loads the Caveman plugin for that Claude session only while keeping Claude state under Prodex-managed `CLAUDE_CONFIG_DIR`, so the global `~/.claude` state is not the source of truth for the Prodex session.
+
+Prefixing Claude args with `mem` loads an existing upstream Claude-Mem Claude Code plugin install through Claude's repeatable `--plugin-dir` support. `prodex claude caveman mem` combines both prefixes in one session.
 
 ### Export, Quota, and Debugging
 
