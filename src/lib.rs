@@ -443,6 +443,15 @@ impl ProfileProvider {
         }
     }
 
+    fn runtime_pool_priority(&self) -> usize {
+        match self {
+            // Keep the native OpenAI/Codex pool as the primary family. Other providers are
+            // eligible only after the native pool no longer has a viable fresh candidate.
+            Self::Openai => 0,
+            Self::Copilot { .. } => 1,
+        }
+    }
+
     fn supports_codex_runtime(&self) -> bool {
         matches!(self, Self::Openai)
     }
@@ -641,6 +650,7 @@ struct ReadyProfileCandidate {
     usage: UsageResponse,
     order_index: usize,
     preferred: bool,
+    provider_priority: usize,
     quota_source: RuntimeQuotaSource,
 }
 

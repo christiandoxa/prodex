@@ -9819,6 +9819,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
         .collect::<Vec<_>>();
     ready_candidates.sort_by_key(|(index, candidate)| {
         (
+            candidate.provider_priority,
             runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
             runtime_quota_source_sort_key(route_kind, candidate.quota_source),
             runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
@@ -9958,6 +9959,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
                 route_kind,
                 now,
             ),
+            candidate.provider_priority,
             runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
             runtime_quota_source_sort_key(route_kind, candidate.quota_source),
             runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),

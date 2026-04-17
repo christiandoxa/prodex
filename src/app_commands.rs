@@ -498,7 +498,7 @@ struct RuntimeLaunchSelection {
 
 impl RuntimeLaunchSelection {
     fn resolve(state: &AppState, requested: Option<&str>) -> Result<Self> {
-        let profile_name = resolve_profile_name(state, requested)?;
+        let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
         let codex_home = runtime_launch_profile_home(state, &profile_name)?;
 
         Ok(Self {
@@ -514,6 +514,43 @@ impl RuntimeLaunchSelection {
         self.selected_profile_name = profile_name.to_string();
         Ok(())
     }
+}
+
+pub(super) fn resolve_runtime_launch_profile_name(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String> {
+    let profile_name = resolve_profile_name(state, requested)?;
+    if requested.is_some() {
+        return Ok(profile_name);
+    }
+
+    if state
+        .profiles
+        .get(&profile_name)
+        .is_some_and(|profile| profile.provider.supports_codex_runtime())
+    {
+        return Ok(profile_name);
+    }
+
+    active_profile_selection_order(state, &profile_name)
+        .into_iter()
+        .find(|candidate_name| {
+            state.profiles.get(candidate_name).is_some_and(|profile| {
+                profile.codex_home.exists() && profile.provider.supports_codex_runtime()
+            })
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "profile '{}' uses {}. `prodex run` currently supports OpenAI/Codex profiles only.",
+                profile_name,
+                state
+                    .profiles
+                    .get(&profile_name)
+                    .map(|profile| profile.provider.display_name())
+                    .unwrap_or("an unsupported provider"),
+            )
+        })
 }
 
 pub(super) fn prepare_runtime_launch(
@@ -832,6 +869,11 @@ pub(super) fn ready_profile_candidates(
                 usage,
                 order_index: report.order_index,
                 preferred: preferred_profile == Some(report.name.as_str()),
+                provider_priority: state
+                    .profiles
+                    .get(&report.name)
+                    .map(|profile| profile.provider.runtime_pool_priority())
+                    .unwrap_or(usize::MAX),
                 quota_source,
             })
         })
@@ -850,14 +892,26 @@ pub(super) fn schedule_ready_profile_candidates(
     }
 
     let now = Local::now().timestamp();
+    let best_provider_priority = candidates
+        .iter()
+        .map(|candidate| candidate.provider_priority)
+        .min()
+        .unwrap_or(usize::MAX);
     let best_total_pressure = candidates
         .iter()
+        .filter(|candidate| candidate.provider_priority == best_provider_priority)
         .map(|candidate| ready_profile_score(candidate).total_pressure)
         .min()
         .unwrap_or(i64::MAX);
 
     candidates.sort_by_key(|candidate| {
-        ready_profile_runtime_sort_key(candidate, state, best_total_pressure, now)
+        ready_profile_runtime_sort_key(
+            candidate,
+            state,
+            best_provider_priority,
+            best_total_pressure,
+            now,
+        )
     });
 
     if let Some(preferred_name) = preferred_profile
@@ -870,6 +924,7 @@ pub(super) fn schedule_ready_profile_candidates(
         let selected_score = ready_profile_score(&candidates[0]).total_pressure;
 
         if preferred_index > 0
+            && candidates[preferred_index].provider_priority == candidates[0].provider_priority
             && score_within_bps(
                 preferred_score,
                 selected_score,
@@ -885,6 +940,7 @@ pub(super) fn schedule_ready_profile_candidates(
 }
 
 pub(super) type ReadyProfileSortKey = (
+    usize,
     i64,
     i64,
     i64,
@@ -898,20 +954,22 @@ pub(super) type ReadyProfileSortKey = (
     usize,
 );
 
-pub(super) type ReadyProfileRuntimeSortKey = (usize, usize, i64, ReadyProfileSortKey);
+pub(super) type ReadyProfileRuntimeSortKey = (usize, usize, usize, i64, ReadyProfileSortKey);
 
 pub(super) fn ready_profile_runtime_sort_key(
     candidate: &ReadyProfileCandidate,
     state: &AppState,
+    best_provider_priority: usize,
     best_total_pressure: i64,
     now: i64,
 ) -> ReadyProfileRuntimeSortKey {
     let score = ready_profile_score(candidate);
-    let near_optimal = score_within_bps(
-        score.total_pressure,
-        best_total_pressure,
-        RUN_SELECTION_NEAR_OPTIMAL_BPS,
-    );
+    let near_optimal = candidate.provider_priority == best_provider_priority
+        && score_within_bps(
+            score.total_pressure,
+            best_total_pressure,
+            RUN_SELECTION_NEAR_OPTIMAL_BPS,
+        );
     let recently_used =
         near_optimal && profile_in_run_selection_cooldown(state, &candidate.name, now);
     let last_selected_at = if near_optimal {
@@ -925,6 +983,7 @@ pub(super) fn ready_profile_runtime_sort_key(
     };
 
     (
+        candidate.provider_priority,
         if near_optimal { 0usize } else { 1usize },
         if recently_used { 1usize } else { 0usize },
         last_selected_at,
@@ -936,6 +995,7 @@ pub(super) fn ready_profile_sort_key(candidate: &ReadyProfileCandidate) -> Ready
     let score = ready_profile_score(candidate);
 
     (
+        candidate.provider_priority,
         score.total_pressure,
         score.weekly_pressure,
         score.five_hour_pressure,
@@ -1040,9 +1100,11 @@ pub(super) fn active_profile_selection_order(
     state: &AppState,
     current_profile: &str,
 ) -> Vec<String> {
-    std::iter::once(current_profile.to_string())
-        .chain(profile_rotation_order(state, current_profile))
-        .collect()
+    provider_aware_profile_order(
+        state,
+        std::iter::once(current_profile.to_string())
+            .chain(profile_rotation_order(state, current_profile)),
+    )
 }
 
 pub(super) fn map_parallel<I, O, F>(inputs: Vec<I>, func: F) -> Vec<O>
@@ -1093,18 +1155,40 @@ pub(super) fn find_ready_profiles(
 pub(super) fn profile_rotation_order(state: &AppState, current_profile: &str) -> Vec<String> {
     let names: Vec<String> = state.profiles.keys().cloned().collect();
     let Some(index) = names.iter().position(|name| name == current_profile) else {
-        return names
-            .into_iter()
-            .filter(|name| name != current_profile)
-            .collect();
+        return provider_aware_profile_order(
+            state,
+            names.into_iter().filter(|name| name != current_profile),
+        );
     };
 
-    names
-        .iter()
-        .skip(index + 1)
-        .chain(names.iter().take(index))
-        .cloned()
-        .collect()
+    provider_aware_profile_order(
+        state,
+        names
+            .iter()
+            .skip(index + 1)
+            .chain(names.iter().take(index))
+            .cloned(),
+    )
+}
+
+fn provider_aware_profile_order<I>(state: &AppState, names: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut ordered = names
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let provider_priority = state
+                .profiles
+                .get(&name)
+                .map(|profile| profile.provider.runtime_pool_priority())
+                .unwrap_or(usize::MAX);
+            (provider_priority, index, name)
+        })
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|(provider_priority, index, _)| (*provider_priority, *index));
+    ordered.into_iter().map(|(_, _, name)| name).collect()
 }
 
 pub(super) fn prepare_codex_launch_args(codex_args: &[OsString]) -> (Vec<OsString>, bool) {

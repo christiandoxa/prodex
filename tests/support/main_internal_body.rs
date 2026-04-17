@@ -3376,6 +3376,7 @@ fn ready_profile_ranking_prefers_soon_recovering_weekly_capacity() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
@@ -3383,6 +3384,7 @@ fn ready_profile_ranking_prefers_soon_recovering_weekly_capacity() {
             usage: usage_with_main_windows(80, 18_000, 80, 86_400),
             order_index: 1,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
@@ -4149,6 +4151,7 @@ fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
             usage: usage_with_main_windows(65, 18_000, 70, 604_800),
             order_index: 0,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
@@ -4156,6 +4159,7 @@ fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
             usage: usage_with_main_windows(95, 18_000, 98, 604_800),
             order_index: 1,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
@@ -4163,6 +4167,166 @@ fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
     let mut ranked = candidates.clone();
     ranked.sort_by_key(ready_profile_sort_key);
     assert_eq!(ranked[0].name, "deep");
+}
+
+#[test]
+fn active_profile_selection_order_prefers_openai_pool_before_other_providers() {
+    let state = AppState {
+        active_profile: Some("copilot".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "copilot".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/copilot"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Copilot {
+                        host: "https://github.com".to_string(),
+                        login: "copilot-user".to_string(),
+                        api_url: "https://api.business.githubcopilot.com".to_string(),
+                        access_type_sku: None,
+                        copilot_plan: None,
+                    },
+                },
+            ),
+            (
+                "openai-main".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/openai-main"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "openai-second".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/openai-second"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    assert_eq!(
+        active_profile_selection_order(&state, "copilot"),
+        vec![
+            "openai-main".to_string(),
+            "openai-second".to_string(),
+            "copilot".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn ready_profile_candidates_prefer_openai_pool_before_other_providers() {
+    let state = AppState {
+        active_profile: Some("copilot".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "copilot".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/copilot"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Copilot {
+                        host: "https://github.com".to_string(),
+                        login: "copilot-user".to_string(),
+                        api_url: "https://api.business.githubcopilot.com".to_string(),
+                        access_type_sku: None,
+                        copilot_plan: None,
+                    },
+                },
+            ),
+            (
+                "openai-main".to_string(),
+                ProfileEntry {
+                    codex_home: PathBuf::from("/tmp/openai-main"),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let reports = vec![
+        RunProfileProbeReport {
+            name: "copilot".to_string(),
+            order_index: 0,
+            auth: AuthSummary {
+                label: "copilot".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(100, 3_600, 100, 86_400)),
+        },
+        RunProfileProbeReport {
+            name: "openai-main".to_string(),
+            order_index: 1,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(80, 3_600, 80, 86_400)),
+        },
+    ];
+
+    let ranked = ready_profile_candidates(&reports, false, Some("copilot"), &state, None);
+    assert_eq!(ranked[0].name, "openai-main");
+    assert_eq!(ranked[1].name, "copilot");
+}
+
+#[test]
+fn runtime_launch_selection_resolve_falls_back_from_active_copilot_to_openai() {
+    let root = TestDir::new();
+    let copilot_home = root.path.join("copilot");
+    let openai_home = root.path.join("openai-main");
+    fs::create_dir_all(&copilot_home).expect("create copilot home");
+    fs::create_dir_all(&openai_home).expect("create openai home");
+
+    let state = AppState {
+        active_profile: Some("copilot".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "copilot".to_string(),
+                ProfileEntry {
+                    codex_home: copilot_home,
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Copilot {
+                        host: "https://github.com".to_string(),
+                        login: "copilot-user".to_string(),
+                        api_url: "https://api.business.githubcopilot.com".to_string(),
+                        access_type_sku: None,
+                        copilot_plan: None,
+                    },
+                },
+            ),
+            (
+                "openai-main".to_string(),
+                ProfileEntry {
+                    codex_home: openai_home.clone(),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let selected =
+        resolve_runtime_launch_profile_name(&state, None).expect("resolve runtime launch name");
+    assert_eq!(selected, "openai-main");
 }
 
 #[test]
@@ -4184,6 +4348,7 @@ fn scheduler_prefers_rested_profile_within_near_optimal_band() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
@@ -4191,6 +4356,7 @@ fn scheduler_prefers_rested_profile_within_near_optimal_band() {
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
@@ -4214,6 +4380,7 @@ fn scheduler_keeps_preferred_profile_when_gain_is_small() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
@@ -4221,6 +4388,7 @@ fn scheduler_keeps_preferred_profile_when_gain_is_small() {
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: true,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
@@ -4245,6 +4413,7 @@ fn scheduler_allows_switch_when_preferred_profile_is_in_cooldown() {
             usage: usage_with_main_windows(100, 18_000, 100, 604_800),
             order_index: 0,
             preferred: false,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
         ReadyProfileCandidate {
@@ -4252,6 +4421,7 @@ fn scheduler_allows_switch_when_preferred_profile_is_in_cooldown() {
             usage: usage_with_main_windows(96, 18_000, 96, 604_800),
             order_index: 1,
             preferred: true,
+            provider_priority: 0,
             quota_source: RuntimeQuotaSource::LiveProbe,
         },
     ];
