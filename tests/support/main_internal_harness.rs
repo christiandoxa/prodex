@@ -2,7 +2,22 @@
 
 use super::*;
 
-use tungstenite::connect as ws_connect;
+fn ws_connect<Request>(
+    request: Request,
+) -> Result<
+    (
+        WsSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
+        tungstenite::handshake::client::Response,
+    ),
+    tungstenite::Error,
+>
+where
+    Request: tungstenite::client::IntoClientRequest,
+{
+    let (mut socket, response) = tungstenite::connect(request)?;
+    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(5_000, 10_000));
+    Ok((socket, response))
+}
 
 fn runtime_proxy_lane_admission_for_global_limit(global_limit: usize) -> RuntimeProxyLaneAdmission {
     RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {

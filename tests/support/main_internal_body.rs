@@ -23496,6 +23496,7 @@ fn runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate() 
 
 #[test]
 fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -23688,6 +23689,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
 
 #[test]
 fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_precommit_hold_stall();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -23860,6 +23862,7 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
 
 #[test]
 fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -24250,6 +24253,7 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
 #[test]
 fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog()
 {
+    let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
