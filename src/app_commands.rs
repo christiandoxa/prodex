@@ -229,9 +229,13 @@ pub(super) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 },
             ),
             ("Kind".to_string(), kind.to_string()),
+            (
+                "Provider".to_string(),
+                report.summary.provider.display_name().to_string(),
+            ),
             ("Auth".to_string(), report.summary.auth.label),
             (
-                "Email".to_string(),
+                "Identity".to_string(),
                 report.summary.email.as_deref().unwrap_or("-").to_string(),
             ),
             (
@@ -401,12 +405,18 @@ pub(super) fn handle_quota(args: QuotaArgs) -> Result<()> {
     }
 
     let profile_name = resolve_profile_name(&state, args.profile.as_deref())?;
-    let codex_home = state
+    let profile = state
         .profiles
         .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?
-        .codex_home
-        .clone();
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    if !profile.provider.supports_codex_runtime() {
+        bail!(
+            "profile '{}' uses {}. `prodex quota` currently supports OpenAI/Codex profiles only.",
+            profile_name,
+            profile.provider.display_name()
+        );
+    }
+    let codex_home = profile.codex_home.clone();
 
     if args.raw {
         let usage = fetch_usage_json(&codex_home, args.base_url.as_deref())?;
@@ -702,6 +712,7 @@ pub(super) fn collect_run_profile_reports(
             Some(RunProfileProbeJob {
                 name,
                 order_index,
+                provider: profile.provider.clone(),
                 codex_home: profile.codex_home.clone(),
             })
         })
@@ -709,7 +720,7 @@ pub(super) fn collect_run_profile_reports(
     let base_url = base_url.map(str::to_owned);
 
     map_parallel(jobs, |job| {
-        let auth = read_auth_summary(&job.codex_home);
+        let auth = job.provider.auth_summary(&job.codex_home);
         let result = if auth.quota_compatible {
             fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
         } else {
@@ -735,7 +746,7 @@ pub(super) fn probe_run_profile(
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    let auth = read_auth_summary(&profile.codex_home);
+    let auth = profile.provider.auth_summary(&profile.codex_home);
     let result = if auth.quota_compatible {
         fetch_usage(&profile.codex_home, base_url).map_err(|err| err.to_string())
     } else {

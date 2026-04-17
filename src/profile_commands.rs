@@ -7,8 +7,10 @@ use super::shared_codex_fs::{
 };
 use super::*;
 
+mod copilot;
 mod import_export;
 
+use self::copilot::handle_import_copilot_profile;
 #[cfg(test)]
 use self::import_export::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, build_profile_export_payload,
@@ -42,6 +44,8 @@ struct ExportedProfile {
     #[serde(default)]
     email: Option<String>,
     source_managed: bool,
+    #[serde(default)]
+    provider: ProfileProvider,
     auth_json: String,
 }
 
@@ -71,6 +75,7 @@ struct StagedImportedProfile {
     email: Option<String>,
     staging_home: PathBuf,
     final_home: PathBuf,
+    provider: ProfileProvider,
 }
 
 #[derive(Debug)]
@@ -379,6 +384,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
             codex_home: codex_home.clone(),
             managed,
             email: source_email,
+            provider: ProfileProvider::Openai,
         },
     );
 
@@ -441,6 +447,10 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
                 "Import".to_string(),
                 "prodex profile import-current".to_string(),
             ),
+            (
+                "Import Copilot".to_string(),
+                "prodex profile import copilot".to_string(),
+            ),
         ];
         print_panel("Profiles", &fields);
         return Ok(());
@@ -473,9 +483,13 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
                 },
             ),
             ("Kind".to_string(), kind.to_string()),
+            (
+                "Provider".to_string(),
+                summary.provider.display_name().to_string(),
+            ),
             ("Auth".to_string(), summary.auth.label),
             (
-                "Email".to_string(),
+                "Identity".to_string(),
                 summary.email.as_deref().unwrap_or("-").to_string(),
             ),
             ("Path".to_string(), summary.codex_home.display().to_string()),
@@ -812,12 +826,16 @@ pub(crate) fn handle_current_profile() -> Result<()> {
             },
         ),
         (
-            "Email".to_string(),
+            "Provider".to_string(),
+            profile.provider.display_name().to_string(),
+        ),
+        (
+            "Identity".to_string(),
             profile.email.as_deref().unwrap_or("-").to_string(),
         ),
         (
             "Auth".to_string(),
-            read_auth_summary(&profile.codex_home).label,
+            profile.provider.auth_summary(&profile.codex_home).label,
         ),
     ];
     print_panel("Active Profile", &fields);
@@ -861,6 +879,13 @@ fn prepare_profile_login_home(
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    if !profile.provider.supports_codex_runtime() {
+        bail!(
+            "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
+            profile_name,
+            profile.provider.display_name()
+        );
+    }
     let codex_home = profile.codex_home.clone();
     if profile.managed {
         prepare_managed_codex_home(paths, &codex_home)?;
@@ -995,6 +1020,7 @@ fn finish_auto_login_for_new_profile(
             codex_home: codex_home.clone(),
             managed: true,
             email: Some(email.to_string()),
+            provider: ProfileProvider::Openai,
         },
     );
     state.active_profile = Some(profile_name.clone());
@@ -1055,9 +1081,15 @@ pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
     let codex_home = state
         .profiles
         .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?
-        .codex_home
-        .clone();
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    if !codex_home.provider.supports_codex_runtime() {
+        bail!(
+            "profile '{}' uses {}. `prodex logout` currently supports OpenAI/Codex profiles only.",
+            profile_name,
+            codex_home.provider.display_name()
+        );
+    }
+    let codex_home = codex_home.codex_home.clone();
 
     let status = run_child_plan(
         &ChildProcessPlan::new(codex_bin(), codex_home.clone())

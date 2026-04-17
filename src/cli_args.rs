@@ -136,9 +136,15 @@ pub(crate) struct ExportProfileArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct ImportProfileArgs {
-    /// Path to a profile export bundle created by `prodex profile export`.
-    #[arg(value_name = "PATH")]
+    /// Path to a profile export bundle created by `prodex profile export`, or the built-in source `copilot`.
+    #[arg(value_name = "PATH_OR_SOURCE")]
     pub(crate) path: PathBuf,
+    /// Override the imported profile name when using a built-in source such as `copilot`.
+    #[arg(long, value_name = "NAME")]
+    pub(crate) name: Option<String>,
+    /// Activate the imported profile immediately when using a built-in source such as `copilot`.
+    #[arg(long)]
+    pub(crate) activate: bool,
 }
 
 #[derive(Args, Debug)]

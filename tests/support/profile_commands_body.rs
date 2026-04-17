@@ -1,4 +1,7 @@
 use base64::Engine as _;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread::JoinHandle;
 
 struct ProfileCommandsTestDir {
     path: PathBuf,
@@ -140,6 +143,47 @@ fn profile_commands_read_access_token(codex_home: &Path) -> String {
         .to_string()
 }
 
+struct ProfileCommandsOneShotHttpServer {
+    base_url: String,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl ProfileCommandsOneShotHttpServer {
+    fn start_json(body: serde_json::Value) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let base_url = format!(
+            "http://{}",
+            listener.local_addr().expect("server address should resolve")
+        );
+        let body = body.to_string();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("test server should accept");
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("test server should write response");
+        });
+        Self {
+            base_url,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for ProfileCommandsOneShotHttpServer {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 #[test]
 fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
@@ -160,6 +204,7 @@ fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -168,6 +213,7 @@ fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
                     codex_home: second_home.clone(),
                     managed: false,
                     email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -233,6 +279,7 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
             name: "main".to_string(),
             email: Some("main@example.com".to_string()),
             source_managed: true,
+            provider: ProfileProvider::Openai,
             auth_json: profile_commands_sample_auth_json("main"),
         }],
     };
@@ -284,6 +331,143 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
 }
 
 #[test]
+fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let copilot_home = sandbox_dir.path.join("home/.copilot");
+    fs::create_dir_all(&copilot_home).expect("copilot home should be created");
+
+    let server = ProfileCommandsOneShotHttpServer::start_json(serde_json::json!({
+        "login": "copilot-user",
+        "access_type_sku": "copilot_standalone_seat_quota",
+        "copilot_plan": "business",
+        "endpoints": {
+            "api": "https://api.example.githubcopilot.test"
+        }
+    }));
+    let host = server.base_url.clone();
+    let account_key = format!("{host}:copilot-user");
+    fs::write(
+        copilot_home.join("config.json"),
+        serde_json::json!({
+            "lastLoggedInUser": {
+                "host": host,
+                "login": "copilot-user"
+            },
+            "copilotTokens": {
+                account_key: "copilot-token"
+            }
+        })
+        .to_string(),
+    )
+    .expect("copilot config should be written");
+
+    handle_import_profiles(ImportProfileArgs {
+        path: PathBuf::from("copilot"),
+        name: Some("copilot-main".to_string()),
+        activate: true,
+    })
+    .expect("copilot import should succeed");
+
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let state = AppState::load(&paths).expect("state should load");
+    let profile = state
+        .profiles
+        .get("copilot-main")
+        .expect("copilot profile should exist");
+    assert!(profile.managed);
+    assert_eq!(state.active_profile.as_deref(), Some("copilot-main"));
+    assert_eq!(profile.email.as_deref(), Some("copilot-user"));
+    assert!(profile.codex_home.exists());
+    match &profile.provider {
+        ProfileProvider::Copilot {
+            host,
+            login,
+            api_url,
+            access_type_sku,
+            copilot_plan,
+        } => {
+            assert_eq!(host, &server.base_url);
+            assert_eq!(login, "copilot-user");
+            assert_eq!(api_url, "https://api.example.githubcopilot.test");
+            assert_eq!(
+                access_type_sku.as_deref(),
+                Some("copilot_standalone_seat_quota")
+            );
+            assert_eq!(copilot_plan.as_deref(), Some("business"));
+        }
+        other => panic!("expected copilot provider, got {other:?}"),
+    }
+}
+
+#[test]
+fn profile_export_round_trip_preserves_copilot_provider_metadata() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("copilot-export-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let copilot_home = source_paths.managed_profiles_root.join("copilot-main");
+    create_codex_home_if_missing(&copilot_home).expect("copilot home should exist");
+
+    let source_state = AppState {
+        active_profile: Some("copilot-main".to_string()),
+        profiles: BTreeMap::from([(
+            "copilot-main".to_string(),
+            ProfileEntry {
+                codex_home: copilot_home,
+                managed: true,
+                email: Some("copilot-user".to_string()),
+                provider: ProfileProvider::Copilot {
+                    host: "https://github.com".to_string(),
+                    login: "copilot-user".to_string(),
+                    api_url: "https://api.example.githubcopilot.test".to_string(),
+                    access_type_sku: Some("copilot_standalone_seat_quota".to_string()),
+                    copilot_plan: Some("business".to_string()),
+                },
+            },
+        )]),
+        ..AppState::default()
+    };
+
+    let payload = build_profile_export_payload(&source_state, &["copilot-main".to_string()])
+        .expect("payload should build");
+    assert_eq!(payload.profiles.len(), 1);
+    assert!(payload.profiles[0].auth_json.is_empty());
+
+    let target_dir = ProfileCommandsTestDir::new("copilot-export-target");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let mut target_state = AppState::default();
+    import_profile_export_payload(&target_paths, &mut target_state, &payload)
+        .expect("copilot import should succeed");
+
+    let imported = target_state
+        .profiles
+        .get("copilot-main")
+        .expect("copilot profile should be imported");
+    assert_eq!(imported.email.as_deref(), Some("copilot-user"));
+    assert!(!imported.codex_home.join("auth.json").exists());
+    match &imported.provider {
+        ProfileProvider::Copilot {
+            host,
+            login,
+            api_url,
+            access_type_sku,
+            copilot_plan,
+        } => {
+            assert_eq!(host, "https://github.com");
+            assert_eq!(login, "copilot-user");
+            assert_eq!(api_url, "https://api.example.githubcopilot.test");
+            assert_eq!(
+                access_type_sku.as_deref(),
+                Some("copilot_standalone_seat_quota")
+            );
+            assert_eq!(copilot_plan.as_deref(), Some("business"));
+        }
+        other => panic!("expected copilot provider, got {other:?}"),
+    }
+}
+
+#[test]
 fn profile_import_rejects_existing_profile_names() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
@@ -300,6 +484,7 @@ fn profile_import_rejects_existing_profile_names() {
                 codex_home: existing_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()
@@ -312,6 +497,7 @@ fn profile_import_rejects_existing_profile_names() {
             name: "main".to_string(),
             email: Some("imported@example.com".to_string()),
             source_managed: true,
+            provider: ProfileProvider::Openai,
             auth_json: profile_commands_sample_auth_json("main"),
         }],
     };
@@ -342,6 +528,7 @@ fn profile_import_updates_existing_profile_when_email_matches() {
                 codex_home: existing_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()
@@ -354,6 +541,7 @@ fn profile_import_updates_existing_profile_when_email_matches() {
             name: "backup-main".to_string(),
             email: Some("Main@Example.com".to_string()),
             source_managed: true,
+            provider: ProfileProvider::Openai,
             auth_json: profile_commands_auth_json_with_email(
                 "main@example.com",
                 "fresh-token",
@@ -414,6 +602,7 @@ fn import_current_updates_existing_profile_token_for_duplicate_email() {
                 codex_home: existing_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()

@@ -270,10 +270,16 @@ pub(super) fn print_quota_preflight_inspect_hint(profile_name: &str) {
 }
 
 pub(super) fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<PathBuf> {
-    Ok(state
+    let profile = state
         .profiles
         .get(profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?
-        .codex_home
-        .clone())
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    if !profile.provider.supports_codex_runtime() {
+        bail!(
+            "profile '{}' uses {}. `prodex run` currently supports OpenAI/Codex profiles only.",
+            profile_name,
+            profile.provider.display_name()
+        );
+    }
+    Ok(profile.codex_home.clone())
 }

@@ -2474,7 +2474,7 @@ pub(super) fn runtime_has_alternative_quota_compatible_profile(
             {
                 return Ok(true);
             }
-            fallback_profiles.push(profile.codex_home.clone());
+            fallback_profiles.push((profile.codex_home.clone(), profile.provider.clone()));
         }
         fallback_profiles
     };
@@ -2483,7 +2483,7 @@ pub(super) fn runtime_has_alternative_quota_compatible_profile(
     }
     Ok(fallback_profiles
         .into_iter()
-        .any(|codex_home| read_auth_summary(&codex_home).quota_compatible))
+        .any(|(codex_home, provider)| provider.auth_summary(&codex_home).quota_compatible))
 }
 
 pub(super) fn runtime_has_route_eligible_quota_fallback(
@@ -9585,7 +9585,9 @@ pub(super) fn next_runtime_response_candidate_for_route(
             if runtime_profile_probe_cache_freshness(entry, now)
                 != RuntimeProbeCacheFreshness::Fresh
             {
-                schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
+                if profile.provider.supports_codex_runtime() {
+                    schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
+                }
             }
         } else {
             let auth = runtime_profile_auth_summary_for_selection_with_policy(
@@ -9605,6 +9607,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
             cold_start_probe_jobs.push(RunProfileProbeJob {
                 name,
                 order_index,
+                provider: profile.provider.clone(),
                 codex_home: profile.codex_home.clone(),
             });
         }
@@ -9715,6 +9718,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
             .map(|job| RunProfileProbeJob {
                 name: job.name.clone(),
                 order_index: job.order_index,
+                provider: job.provider.clone(),
                 codex_home: job.codex_home.clone(),
             })
             .collect::<Vec<_>>();
@@ -9723,7 +9727,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
             .map(|job| job.name.clone())
             .collect::<BTreeSet<_>>();
         let fresh_reports = map_parallel(sync_jobs, |job| {
-            let auth = read_auth_summary(&job.codex_home);
+            let auth = job.provider.auth_summary(&job.codex_home);
             let result = if auth.quota_compatible {
                 fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
             } else {
@@ -10509,7 +10513,7 @@ pub(super) fn update_runtime_profile_probe_cache_with_usage(
         .state
         .profiles
         .get(profile_name)
-        .map(|profile| read_auth_summary(&profile.codex_home))
+        .map(|profile| profile.provider.auth_summary(&profile.codex_home))
         .unwrap_or(AuthSummary {
             label: "chatgpt".to_string(),
             quota_compatible: true,

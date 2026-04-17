@@ -978,7 +978,9 @@ pub(super) fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProx
         .into_iter()
         .filter_map(|profile_name| {
             let profile = state.profiles.get(&profile_name)?;
-            read_auth_summary(&profile.codex_home)
+            profile
+                .provider
+                .auth_summary(&profile.codex_home)
                 .quota_compatible
                 .then(|| (profile_name, profile.codex_home.clone()))
         })

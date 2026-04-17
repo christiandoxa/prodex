@@ -254,7 +254,12 @@ pub(super) fn should_enable_runtime_rotation_proxy(
     state
         .profiles
         .values()
-        .find(|profile| read_auth_summary(&profile.codex_home).quota_compatible)
+        .find(|profile| {
+            profile
+                .provider
+                .auth_summary(&profile.codex_home)
+                .quota_compatible
+        })
         .is_some()
 }
 

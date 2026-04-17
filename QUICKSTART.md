@@ -71,6 +71,13 @@ If your shared Codex home already contains a login:
 prodex profile import-current main
 ```
 
+If you already use GitHub Copilot CLI on this machine and want Prodex to track that provider identity:
+
+```bash
+prodex profile import copilot
+prodex profile import copilot --name copilot-main --activate
+```
+
 Or create a profile through the normal Codex login flow:
 
 ```bash
@@ -90,6 +97,7 @@ prodex login --profile second
 ```bash
 prodex profile list
 prodex profile export
+prodex profile import copilot
 prodex quota --all
 prodex info
 ```
@@ -110,6 +118,8 @@ prodex profile remove --all
 ```
 
 `prodex profile export` exports all configured profiles by default and asks whether the bundle should use optional password protection.
+
+`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow, but `prodex run`, `prodex login`, `prodex logout`, and `prodex quota` still target OpenAI/Codex profiles only.
 
 ## 3. Run Codex CLI with `prodex`
 

@@ -283,6 +283,8 @@ Examples:
   prodex profile export
   prodex profile export backup.json
   prodex profile import backup.json
+  prodex profile import copilot
+  prodex profile import copilot --name copilot-main --activate
   prodex profile import-current main
   prodex profile remove main
   prodex profile remove --all";
@@ -406,6 +408,65 @@ struct ProfileEntry {
     managed: bool,
     #[serde(default)]
     email: Option<String>,
+    #[serde(default)]
+    provider: ProfileProvider,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "provider_kind", rename_all = "snake_case")]
+enum ProfileProvider {
+    #[default]
+    Openai,
+    Copilot {
+        host: String,
+        login: String,
+        api_url: String,
+        #[serde(default)]
+        access_type_sku: Option<String>,
+        #[serde(default)]
+        copilot_plan: Option<String>,
+    },
+}
+
+impl ProfileProvider {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Openai => "openai",
+            Self::Copilot { .. } => "copilot",
+        }
+    }
+
+    fn display_name(&self) -> &'static str {
+        match self {
+            Self::Openai => "OpenAI/Codex",
+            Self::Copilot { .. } => "GitHub Copilot",
+        }
+    }
+
+    fn supports_codex_runtime(&self) -> bool {
+        matches!(self, Self::Openai)
+    }
+
+    fn auth_summary(&self, codex_home: &Path) -> AuthSummary {
+        match self {
+            Self::Openai => read_auth_summary(codex_home),
+            Self::Copilot { .. } => AuthSummary {
+                label: "copilot".to_string(),
+                quota_compatible: false,
+            },
+        }
+    }
+
+    fn copilot_matches(&self, host: &str, login: &str) -> bool {
+        match self {
+            Self::Copilot {
+                host: stored_host,
+                login: stored_login,
+                ..
+            } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
+            Self::Openai => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -562,6 +623,7 @@ struct ProfileEmailLookupJob {
 struct RunProfileProbeJob {
     name: String,
     order_index: usize,
+    provider: ProfileProvider,
     codex_home: PathBuf,
 }
 

@@ -71,6 +71,13 @@ prodex profile add second
 prodex login --profile second
 ```
 
+Import the currently logged-in Copilot CLI account into Prodex metadata:
+
+```bash
+prodex profile import copilot
+prodex profile import copilot --name copilot-main --activate
+```
+
 Inspect the pool:
 
 ```bash
@@ -100,6 +107,7 @@ prodex claude caveman mem -- -p "summarize this repo briefly"
 ```bash
 prodex profile list
 prodex profile add second
+prodex profile import copilot
 prodex profile import-current main
 prodex login --profile second
 prodex use --profile main
@@ -107,6 +115,8 @@ prodex logout --profile main
 prodex profile remove second
 prodex profile remove --all
 ```
+
+`prodex profile import copilot` keeps the Copilot token in Copilot's own keychain/config storage and records the provider identity plus API endpoint in Prodex. The imported profile is visible in the pool and export/import flow, but `prodex run`, `prodex login`, `prodex logout`, and `prodex quota` still require OpenAI/Codex profiles today.
 
 ### Codex
 

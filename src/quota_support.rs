@@ -54,6 +54,7 @@ pub(crate) struct QuotaReport {
 struct QuotaFetchJob {
     name: String,
     active: bool,
+    provider: ProfileProvider,
     codex_home: PathBuf,
 }
 
@@ -63,6 +64,7 @@ struct ProfileSummaryJob {
     active: bool,
     managed: bool,
     email: Option<String>,
+    provider: ProfileProvider,
     codex_home: PathBuf,
 }
 
@@ -73,6 +75,7 @@ pub(crate) struct ProfileSummaryReport {
     pub(crate) managed: bool,
     pub(crate) auth: AuthSummary,
     pub(crate) email: Option<String>,
+    pub(crate) provider: ProfileProvider,
     pub(crate) codex_home: PathBuf,
 }
 
@@ -89,15 +92,22 @@ pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) ->
         .map(|(name, profile)| QuotaFetchJob {
             name: name.clone(),
             active: state.active_profile.as_deref() == Some(name.as_str()),
+            provider: profile.provider.clone(),
             codex_home: profile.codex_home.clone(),
         })
         .collect();
     let base_url = base_url.map(str::to_owned);
 
     map_parallel(jobs, |job| {
-        let auth = read_auth_summary(&job.codex_home);
-        let result =
-            fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string());
+        let auth = job.provider.auth_summary(&job.codex_home);
+        let result = if auth.quota_compatible {
+            fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
+        } else {
+            Err(format!(
+                "{} profiles do not expose ChatGPT quota",
+                job.provider.display_name()
+            ))
+        };
         QuotaReport {
             name: job.name,
             active: job.active,
@@ -117,6 +127,7 @@ pub(crate) fn collect_profile_summaries(state: &AppState) -> Vec<ProfileSummaryR
             active: state.active_profile.as_deref() == Some(name.as_str()),
             managed: profile.managed,
             email: profile.email.clone(),
+            provider: profile.provider.clone(),
             codex_home: profile.codex_home.clone(),
         })
         .collect();
@@ -125,8 +136,9 @@ pub(crate) fn collect_profile_summaries(state: &AppState) -> Vec<ProfileSummaryR
         name: job.name,
         active: job.active,
         managed: job.managed,
-        auth: read_auth_summary(&job.codex_home),
+        auth: job.provider.auth_summary(&job.codex_home),
         email: job.email,
+        provider: job.provider,
         codex_home: job.codex_home,
     })
 }
@@ -137,8 +149,16 @@ pub(crate) fn collect_doctor_profile_reports(
 ) -> Vec<DoctorProfileReport> {
     map_parallel(collect_profile_summaries(state), |summary| {
         DoctorProfileReport {
-            quota: include_quota
-                .then(|| fetch_usage(&summary.codex_home, None).map_err(|err| err.to_string())),
+            quota: include_quota.then(|| {
+                if summary.auth.quota_compatible {
+                    fetch_usage(&summary.codex_home, None).map_err(|err| err.to_string())
+                } else {
+                    Err(format!(
+                        "{} profiles do not expose ChatGPT quota",
+                        summary.provider.display_name()
+                    ))
+                }
+            }),
             summary,
         }
     })

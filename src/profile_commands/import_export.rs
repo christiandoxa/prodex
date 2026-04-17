@@ -75,6 +75,15 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
 }
 
 pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
+    if super::copilot::is_copilot_import_source(&args.path) {
+        return handle_import_copilot_profile(&args);
+    }
+    if args.name.is_some() || args.activate {
+        bail!(
+            "--name and --activate are only supported for built-in import sources such as `copilot`"
+        );
+    }
+
     let bundle_path = absolutize(args.path)?;
     let (payload, encrypted) = read_profile_export_payload(&bundle_path)?;
     let source_active_profile = payload.active_profile.clone();
@@ -185,16 +194,23 @@ pub(super) fn build_profile_export_payload(
             .profiles
             .get(name)
             .with_context(|| format!("profile '{}' is missing", name))?;
-        let auth_path = secret_store::auth_json_path(&profile.codex_home);
-        let auth_json = read_auth_json_text(&profile.codex_home)
-            .with_context(|| format!("failed to read {}", auth_path.display()))?
-            .with_context(|| format!("failed to read {}", auth_path.display()))?;
-        let _: StoredAuth = serde_json::from_str(&auth_json)
-            .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+        let auth_json = match &profile.provider {
+            ProfileProvider::Openai => {
+                let auth_path = secret_store::auth_json_path(&profile.codex_home);
+                let auth_json = read_auth_json_text(&profile.codex_home)
+                    .with_context(|| format!("failed to read {}", auth_path.display()))?
+                    .with_context(|| format!("failed to read {}", auth_path.display()))?;
+                let _: StoredAuth = serde_json::from_str(&auth_json)
+                    .with_context(|| format!("failed to parse {}", auth_path.display()))?;
+                auth_json
+            }
+            ProfileProvider::Copilot { .. } => String::new(),
+        };
         profiles.push(ExportedProfile {
             name: name.clone(),
             email: profile.email.clone(),
             source_managed: profile.managed,
+            provider: profile.provider.clone(),
             auth_json,
         });
     }
@@ -542,6 +558,7 @@ fn finalize_staged_imported_profiles(
                 codex_home: staged.final_home.clone(),
                 managed: true,
                 email: staged.email.clone(),
+                provider: staged.provider.clone(),
             },
         );
     }
@@ -634,15 +651,21 @@ pub(super) fn stage_imported_profiles(
                 );
             }
 
-            let _: StoredAuth = serde_json::from_str(&exported.auth_json).with_context(|| {
-                format!(
-                    "failed to parse exported auth.json for profile '{}'",
-                    exported.name
-                )
-            })?;
+            let provider = exported.provider.clone();
+            if provider.supports_codex_runtime() {
+                let _: StoredAuth =
+                    serde_json::from_str(&exported.auth_json).with_context(|| {
+                        format!(
+                            "failed to parse exported auth.json for profile '{}'",
+                            exported.name
+                        )
+                    })?;
+            }
             let resolved_email = resolved_exported_profile_email(exported);
 
-            if let Some(email) = resolved_email.as_deref() {
+            if provider.supports_codex_runtime()
+                && let Some(email) = resolved_email.as_deref()
+            {
                 let normalized_email = normalize_email(email);
                 if let Some(target) = email_targets.get(&normalized_email) {
                     match target {
@@ -709,7 +732,9 @@ pub(super) fn stage_imported_profiles(
             let staging_home = unique_import_staging_home(paths, &exported.name);
             create_codex_home_if_missing(&staging_home)?;
             prepare_managed_codex_home(paths, &staging_home)?;
-            write_secret_text_file(&staging_home.join("auth.json"), &exported.auth_json)?;
+            if provider.supports_codex_runtime() {
+                write_secret_text_file(&staging_home.join("auth.json"), &exported.auth_json)?;
+            }
 
             let new_index = staged_profiles.len();
             staged_profiles.push(StagedImportedProfile {
@@ -717,9 +742,12 @@ pub(super) fn stage_imported_profiles(
                 email: resolved_email.clone(),
                 staging_home,
                 final_home,
+                provider: provider.clone(),
             });
             resolved_profile_names.insert(exported.name.clone(), exported.name.clone());
-            if let Some(email) = resolved_email {
+            if provider.supports_codex_runtime()
+                && let Some(email) = resolved_email
+            {
                 email_targets.insert(
                     normalize_email(&email),
                     ImportEmailTarget::PendingNew(new_index),
