@@ -14,7 +14,7 @@ use crate::{
     StateFileLock, VersionedJson, runtime_take_fault_injection,
 };
 
-use super::{AppPaths, AppState, RecoveredLoad};
+use crate::{AppPaths, AppState, RecoveredLoad};
 
 static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
 
