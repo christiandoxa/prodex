@@ -193,37 +193,6 @@ impl RuntimeDoctorJsonBuilder {
     }
 }
 
-struct RuntimeDoctorFieldBuilder {
-    rows: Vec<(String, String)>,
-}
-
-impl RuntimeDoctorFieldBuilder {
-    fn new() -> Self {
-        Self { rows: Vec::new() }
-    }
-
-    fn push(&mut self, label: &str, value: impl Into<String>) -> &mut Self {
-        self.rows.push((label.to_string(), value.into()));
-        self
-    }
-
-    fn push_marker_count(
-        &mut self,
-        label: &str,
-        summary: &RuntimeDoctorSummary,
-        marker: &'static str,
-    ) -> &mut Self {
-        self.push(
-            label,
-            runtime_doctor_marker_count(summary, marker).to_string(),
-        )
-    }
-
-    fn build(self) -> Vec<(String, String)> {
-        self.rows
-    }
-}
-
 struct RuntimeDoctorDegradedRouteBuilder {
     routes: Vec<String>,
 }
@@ -668,7 +637,7 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             summary.suspect_continuation_bindings.join(", ")
         )
     };
-    let mut fields = RuntimeDoctorFieldBuilder::new();
+    let mut fields = FieldRowsBuilder::new();
     fields
         .push(
             "Log pointer",
@@ -685,7 +654,10 @@ pub(crate) fn runtime_doctor_fields_for_summary(
         .push("Latest log", latest_log)
         .push("Log sample", format!("{} lines", summary.line_count));
     for (label, marker) in RUNTIME_DOCTOR_COUNT_FIELD_ROWS {
-        fields.push_marker_count(label, summary, marker);
+        fields.push(
+            *label,
+            runtime_doctor_marker_count(summary, marker).to_string(),
+        );
         if *marker == "runtime_proxy_overload_backoff" {
             fields.push(
                 "Connect failures",

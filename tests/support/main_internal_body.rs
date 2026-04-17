@@ -15151,6 +15151,23 @@ fn field_lines_respect_requested_width() {
 }
 
 #[test]
+fn shared_panel_builder_matches_render_panel_output() {
+    let mut panel = PanelBuilder::new("Doctor");
+    panel.push("Profile", "main");
+    panel.extend([("Status".to_string(), "Ready".to_string())]);
+
+    let expected = render_panel(
+        "Doctor",
+        &[
+            ("Profile".to_string(), "main".to_string()),
+            ("Status".to_string(), "Ready".to_string()),
+        ],
+    );
+
+    assert_eq!(panel.render(), expected);
+}
+
+#[test]
 fn runtime_proxy_injects_codex_backend_overrides() {
     let args = runtime_proxy_codex_args(
         "127.0.0.1:4455".parse().expect("socket addr"),
@@ -30186,6 +30203,24 @@ fn normalize_run_codex_args_rewrites_session_id_to_resume() {
 }
 
 #[test]
+fn prepare_codex_launch_args_preserves_review_detection_after_normalization() {
+    let (args, include_code_review) = prepare_codex_launch_args(&[
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("review"),
+    ]);
+
+    assert_eq!(
+        args,
+        vec![
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("review"),
+        ]
+    );
+    assert!(include_code_review);
+}
+
+#[test]
 fn build_info_quota_aggregate_uses_live_and_snapshot_data() {
     let now = Local::now().timestamp();
     let reports = vec![
@@ -31133,8 +31168,8 @@ fn runtime_broker_command_is_the_only_command_without_update_notice() {
         codex_args: vec![OsString::from("hello")],
     });
 
-    assert!(!ProdexCommand::should_show_update_notice(&runtime_broker));
-    assert!(ProdexCommand::should_show_update_notice(&run));
+    assert!(!runtime_broker.should_show_update_notice());
+    assert!(run.should_show_update_notice());
 }
 
 #[test]

@@ -83,8 +83,7 @@ struct CavemanLaunchStrategy {
 
 impl CavemanLaunchStrategy {
     fn new(args: CavemanArgs) -> Self {
-        let codex_args = normalize_run_codex_args(&args.codex_args);
-        let include_code_review = is_review_invocation(&codex_args);
+        let (codex_args, include_code_review) = prepare_codex_launch_args(&args.codex_args);
         Self {
             args,
             codex_args,

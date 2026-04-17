@@ -74,7 +74,6 @@ mod update_notice;
 use app_commands::*;
 use audit_log::*;
 pub(crate) use cli_args::*;
-use command_dispatch::*;
 use housekeeping::*;
 use profile_commands::*;
 use profile_identity::*;

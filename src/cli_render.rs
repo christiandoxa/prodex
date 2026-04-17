@@ -140,6 +140,59 @@ pub(super) fn terminal_height_lines() -> Option<usize> {
         .or_else(|| terminal_dimensions_from_tty().map(|(rows, _)| rows))
 }
 
+pub(super) struct FieldRowsBuilder {
+    rows: Vec<(String, String)>,
+}
+
+impl FieldRowsBuilder {
+    pub(super) fn new() -> Self {
+        Self { rows: Vec::new() }
+    }
+
+    pub(super) fn push(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
+        self.rows.push((label.into(), value.into()));
+        self
+    }
+
+    pub(super) fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) -> &mut Self {
+        self.rows.extend(rows);
+        self
+    }
+
+    pub(super) fn build(self) -> Vec<(String, String)> {
+        self.rows
+    }
+}
+
+pub(super) struct PanelBuilder {
+    title: String,
+    fields: FieldRowsBuilder,
+}
+
+impl PanelBuilder {
+    pub(super) fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            fields: FieldRowsBuilder::new(),
+        }
+    }
+
+    pub(super) fn push(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
+        self.fields.push(label, value);
+        self
+    }
+
+    pub(super) fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) -> &mut Self {
+        self.fields.extend(rows);
+        self
+    }
+
+    pub(super) fn render(self) -> String {
+        let fields = self.fields.build();
+        render_panel(&self.title, &fields)
+    }
+}
+
 pub(super) fn panel_label_width(fields: &[(String, String)], total_width: usize) -> usize {
     let longest = fields
         .iter()
@@ -175,19 +228,11 @@ pub(super) fn format_field_lines_with_layout(
     lines
 }
 
-pub(super) fn print_panel(title: &str, fields: &[(String, String)]) {
-    let total_width = current_cli_width();
-    let label_width = panel_label_width(fields, total_width);
-    println!("{}", section_header_with_width(title, total_width));
-    for (label, value) in fields {
-        for line in format_field_lines_with_layout(label, value, total_width, label_width) {
-            println!("{line}");
-        }
-    }
-}
-
-pub(super) fn render_panel(title: &str, fields: &[(String, String)]) -> String {
-    let total_width = current_cli_width();
+fn panel_lines_with_layout(
+    title: &str,
+    fields: &[(String, String)],
+    total_width: usize,
+) -> Vec<String> {
     let label_width = panel_label_width(fields, total_width);
     let mut lines = vec![section_header_with_width(title, total_width)];
     for (label, value) in fields {
@@ -198,7 +243,17 @@ pub(super) fn render_panel(title: &str, fields: &[(String, String)]) -> String {
             label_width,
         ));
     }
-    lines.join("\n")
+    lines
+}
+
+pub(super) fn print_panel(title: &str, fields: &[(String, String)]) {
+    for line in panel_lines_with_layout(title, fields, current_cli_width()) {
+        println!("{line}");
+    }
+}
+
+pub(super) fn render_panel(title: &str, fields: &[(String, String)]) -> String {
+    panel_lines_with_layout(title, fields, current_cli_width()).join("\n")
 }
 
 pub(super) fn print_wrapped_stderr(message: &str) {

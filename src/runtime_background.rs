@@ -186,33 +186,22 @@ pub(super) fn schedule_runtime_state_save_request(
         }
         return;
     }
-    let queue = runtime_state_save_queue();
-    let mut pending = queue
-        .pending
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    pending.insert(
+    let backlog = enqueue_runtime_state_save_job(
+        shared,
         request.paths.state_file.clone(),
-        RuntimeStateSaveJob {
-            payload: RuntimeStateSavePayload::Snapshot(RuntimeStateSaveSnapshot {
-                paths: request.paths.clone(),
-                state: request.state,
-                continuations: request.continuations,
-                profile_scores: request.profile_scores,
-                usage_snapshots: request.usage_snapshots,
-                backoffs: request.backoffs,
-            }),
-            revision,
-            latest_revision: Arc::clone(&shared.state_save_revision),
-            log_path: shared.log_path.clone(),
-            reason: request.reason.clone(),
-            queued_at,
-            ready_at,
-        },
+        RuntimeStateSavePayload::Snapshot(RuntimeStateSaveSnapshot {
+            paths: request.paths.clone(),
+            state: request.state,
+            continuations: request.continuations,
+            profile_scores: request.profile_scores,
+            usage_snapshots: request.usage_snapshots,
+            backoffs: request.backoffs,
+        }),
+        revision,
+        &request.reason,
+        queued_at,
+        ready_at,
     );
-    let backlog = pending.len().saturating_sub(1);
-    drop(pending);
-    queue.wake.notify_one();
     runtime_proxy_log(
         shared,
         format!(
@@ -287,26 +276,15 @@ pub(super) fn schedule_runtime_state_save_from_runtime(
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
     let queued_at = Instant::now();
     let ready_at = queued_at + runtime_state_save_debounce(reason);
-    let queue = runtime_state_save_queue();
-    let mut pending = queue
-        .pending
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    pending.insert(
+    let backlog = enqueue_runtime_state_save_job(
+        shared,
         runtime.paths.state_file.clone(),
-        RuntimeStateSaveJob {
-            payload: RuntimeStateSavePayload::Live(shared.clone()),
-            revision,
-            latest_revision: Arc::clone(&shared.state_save_revision),
-            log_path: shared.log_path.clone(),
-            reason: reason.to_string(),
-            queued_at,
-            ready_at,
-        },
+        RuntimeStateSavePayload::Live(shared.clone()),
+        revision,
+        reason,
+        queued_at,
+        ready_at,
     );
-    let backlog = pending.len().saturating_sub(1);
-    drop(pending);
-    queue.wake.notify_one();
     runtime_proxy_log(
         shared,
         format!(
@@ -329,6 +307,38 @@ pub(super) fn schedule_runtime_state_save_from_runtime(
     if runtime_state_save_reason_requires_continuation_journal(reason) {
         schedule_runtime_continuation_journal_save_from_runtime(shared, runtime, reason);
     }
+}
+
+fn enqueue_runtime_state_save_job(
+    shared: &RuntimeRotationProxyShared,
+    state_file: PathBuf,
+    payload: RuntimeStateSavePayload,
+    revision: u64,
+    reason: &str,
+    queued_at: Instant,
+    ready_at: Instant,
+) -> usize {
+    let queue = runtime_state_save_queue();
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pending.insert(
+        state_file,
+        RuntimeStateSaveJob {
+            payload,
+            revision,
+            latest_revision: Arc::clone(&shared.state_save_revision),
+            log_path: shared.log_path.clone(),
+            reason: reason.to_string(),
+            queued_at,
+            ready_at,
+        },
+    );
+    let backlog = pending.len().saturating_sub(1);
+    drop(pending);
+    queue.wake.notify_one();
+    backlog
 }
 
 pub(super) fn schedule_runtime_continuation_journal_save_from_runtime(

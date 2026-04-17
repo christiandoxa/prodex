@@ -1,31 +1,5 @@
 use super::*;
 
-struct PanelFieldBuilder {
-    title: String,
-    fields: Vec<(String, String)>,
-}
-
-impl PanelFieldBuilder {
-    fn new(title: impl Into<String>) -> Self {
-        Self {
-            title: title.into(),
-            fields: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, label: impl Into<String>, value: impl Into<String>) {
-        self.fields.push((label.into(), value.into()));
-    }
-
-    fn extend(&mut self, fields: impl IntoIterator<Item = (String, String)>) {
-        self.fields.extend(fields);
-    }
-
-    fn render(self) -> String {
-        render_panel(&self.title, &self.fields)
-    }
-}
-
 #[derive(Debug)]
 struct QuotaReportViewData {
     email: String,
@@ -808,7 +782,7 @@ pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) ->
     } else {
         format!("Blocked ({})", format_blocked_limits(&blocked))
     };
-    let mut panel = PanelFieldBuilder::new(format!("Quota {profile_name}"));
+    let mut panel = PanelBuilder::new(format!("Quota {profile_name}"));
     panel.push("Profile", profile_name);
     panel.push("Account", display_optional(usage.email.as_deref()));
     panel.push("Plan", display_optional(usage.plan_type.as_deref()));
@@ -864,7 +838,7 @@ pub(crate) fn first_line_of_error(input: &str) -> String {
 }
 
 pub(super) fn render_quota_watch_error_panel(title: &str, message: &str) -> String {
-    let mut panel = PanelFieldBuilder::new(title);
+    let mut panel = PanelBuilder::new(title);
     panel.push("Error", first_line_of_error(message));
     panel.render()
 }

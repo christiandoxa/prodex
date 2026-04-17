@@ -1,12 +1,7 @@
 use super::*;
 
-pub(super) trait ProdexCommand {
-    fn execute(self) -> Result<()>;
-    fn should_show_update_notice(&self) -> bool;
-}
-
-impl ProdexCommand for Commands {
-    fn execute(self) -> Result<()> {
+impl Commands {
+    pub(super) fn execute(self) -> Result<()> {
         match self {
             Commands::Profile(command) => handle_profile_command(command),
             Commands::UseProfile(selector) => handle_set_active_profile(selector),
@@ -25,7 +20,7 @@ impl ProdexCommand for Commands {
         }
     }
 
-    fn should_show_update_notice(&self) -> bool {
+    pub(super) fn should_show_update_notice(&self) -> bool {
         !matches!(self, Commands::RuntimeBroker(_))
     }
 }
