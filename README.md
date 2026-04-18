@@ -2,31 +2,44 @@
 
 [![CI](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml/badge.svg)](https://github.com/christiandoxa/prodex/actions/workflows/ci.yml)
 
-Run Codex, Claude Code, Caveman mode, and optional Claude-Mem-assisted sessions on top of one OpenAI profile pool.
+`prodex` is a wrapper around Codex / Claude Code setups when you want to work with multiple isolated profiles.
 
-`prodex` manages isolated `CODEX_HOME` profiles, checks quota before launch, rotates fresh work to another ready profile when needed, and keeps existing continuations attached to the profile that already owns them.
+Main use case: one account per profile, quota checked before launch, and new sessions can hop to another ready profile when the current one is not a good candidate. Existing sessions stay pinned to the profile they started with.
 
-## Highlights
+It can also launch Caveman mode, and optionally wire Claude-Mem into the selected session path.
 
-- One account = one profile
-- Built-in quota preflight and fresh-request rotation
-- Continuation affinity for existing Codex sessions
-- `prodex caveman` launches Codex with Caveman mode preloaded
-- `prodex caveman mem` keeps Caveman mode while pointing Claude-Mem transcript watching at the active Prodex session path
-- `prodex claude caveman` launches Claude Code with Caveman mode preloaded
-- `prodex claude caveman mem` combines Caveman mode with an existing Claude-Mem Claude Code install
-- `prodex claude` runs Claude Code through the same profile pool
+## Features
+
+- one account = one profile
+- isolated profile homes
+- quota preflight before launch
+- rotates fresh work to another ready profile
+- keeps continuation/session affinity
+- `prodex caveman` for Codex + Caveman
+- `prodex caveman mem` for Codex + Caveman + Claude-Mem
+- `prodex claude` for Claude Code through the same pool
+- `prodex claude caveman` for Claude Code + Caveman
+- `prodex claude caveman mem` for Claude Code + Caveman + Claude-Mem
 
 ## Requirements
 
-- At least one logged-in Prodex profile
+You need at least one logged-in Prodex profile.
+
+Depending on what you want to run:
+
 - Codex CLI for `prodex` and `prodex caveman`
 - Claude Code (`claude`) for `prodex claude` and `prodex claude caveman`
-- Optional: `claude-mem` if you want to use `mem` prefixes such as `prodex caveman mem` or `prodex claude caveman mem`
+- optionally `claude-mem` for `mem` variants
 
-Installing `@christiandoxa/prodex` from npm also installs the pinned Codex runtime dependency `@openai/codex@0.121.0` for you. Claude Code is still a separate CLI.
+Installing `@christiandoxa/prodex` from npm also installs the pinned Codex runtime dependency:
 
-If you want the `mem` path, install Claude-Mem separately with the upstream installer:
+```bash
+npm install -g @christiandoxa/prodex
+````
+
+That pulls in `@openai/codex@0.121.0` as well. Claude Code is still separate.
+
+If you want Claude-Mem support, install it with the upstream installer:
 
 ```bash
 npx claude-mem install --ide codex-cli
@@ -48,22 +61,22 @@ npm install -g @christiandoxa/prodex
 cargo install prodex
 ```
 
-Version-pinned install:
+If you want a pinned version:
 
 ```bash
 npm install -g @christiandoxa/prodex@0.24.0
 cargo install prodex --force --version 0.24.0
 ```
 
-## Quick Start
+## Quick start
 
-If your shared Codex home already contains a login:
+If your current shared Codex home is already logged in:
 
 ```bash
 prodex profile import-current main
 ```
 
-Or create profiles through the normal login flow:
+Or do it from scratch:
 
 ```bash
 prodex login
@@ -71,21 +84,21 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Import the currently logged-in Copilot CLI account into Prodex metadata:
+Import a currently logged-in Copilot CLI account into Prodex metadata:
 
 ```bash
 prodex profile import copilot
 prodex profile import copilot --name copilot-main --activate
 ```
 
-Inspect the pool:
+Check what Prodex sees:
 
 ```bash
 prodex profile list
 prodex quota --all
 ```
 
-Run through Prodex:
+Run stuff through Prodex:
 
 ```bash
 prodex
@@ -98,9 +111,9 @@ prodex claude caveman -- -p "summarize this repo briefly"
 prodex claude caveman mem -- -p "summarize this repo briefly"
 ```
 
-`prodex` without a subcommand is shorthand for `prodex run`.
+`prodex` with no subcommand is just `prodex run`.
 
-## Main Commands
+## Commands
 
 ### Profiles
 
@@ -116,7 +129,11 @@ prodex profile remove second
 prodex profile remove --all
 ```
 
-`prodex profile import copilot` keeps the Copilot token in Copilot's own keychain/config storage and records the provider identity plus API endpoint in Prodex. The imported profile is visible in the pool and export/import flow, but `prodex run`, `prodex login`, `prodex logout`, and `prodex quota` still require OpenAI/Codex profiles today.
+A note on Copilot import:
+
+`prodex profile import copilot` does **not** move the Copilot token into Prodex-managed storage. The token stays where Copilot already keeps it. Prodex only records the provider identity and API endpoint in its own metadata.
+
+The imported profile shows up in the pool and export/import flows, but `prodex run`, `prodex login`, `prodex logout`, and `prodex quota` still only work with OpenAI/Codex profiles right now.
 
 ### Codex
 
@@ -139,9 +156,11 @@ prodex caveman exec "review this repo in caveman mode"
 prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
 
-`prodex caveman` uses the Caveman plugin from [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) and launches Codex from a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
+`prodex caveman` uses the Caveman plugin from [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) and launches Codex with a temporary overlay `CODEX_HOME`.
 
-Prefix Codex args with `mem` when you want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of only watching the default `~/.codex/sessions` tree.
+That matters because the base profile home is left alone after the session exits.
+
+If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup at the active Prodex session path instead of the default `~/.codex/sessions` tree.
 
 ### Claude Code
 
@@ -156,13 +175,17 @@ prodex claude --profile second caveman -- -p "review the latest diff briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
-Use `prodex claude` for the normal Claude Code path, and use `prodex claude caveman` when you want the same Claude front end with Caveman mode preloaded.
+Use `prodex claude` for the normal Claude Code path.
 
-Prefixing Claude args with `caveman` loads the Caveman plugin for that Claude session only while keeping Claude state under Prodex-managed `CLAUDE_CONFIG_DIR`, so the global `~/.claude` state is not the source of truth for the Prodex session.
+Use `prodex claude caveman` if you want Claude Code with Caveman preloaded.
 
-Prefixing Claude args with `mem` loads an existing upstream Claude-Mem Claude Code plugin install through Claude's repeatable `--plugin-dir` support. `prodex claude caveman mem` combines both prefixes in one session.
+The `caveman` prefix loads the plugin for that session only while still keeping state under the Prodex-managed `CLAUDE_CONFIG_DIR`, not global `~/.claude`.
 
-### Export, Quota, and Debugging
+The `mem` prefix loads an existing Claude-Mem Claude Code install via Claude's `--plugin-dir` support.
+
+`prodex claude caveman mem` combines both.
+
+### Export / quota / debug
 
 ```bash
 prodex profile export
@@ -171,6 +194,12 @@ prodex quota --all --once
 prodex doctor --runtime
 ```
 
-## Learn More
+## Notes
 
-For a longer walkthrough and the broader command set, see [QUICKSTART.md](./QUICKSTART.md).
+This is basically a profile/session router for people who do a lot of CLI-driven agent work and do not want everything tied to one mutable global home.
+
+If you only use one account and do not care about quota-aware routing or keeping sessions attached to their original profile, you probably do not need it.
+
+## More
+
+See [QUICKSTART.md](./QUICKSTART.md) for the longer walkthrough.
