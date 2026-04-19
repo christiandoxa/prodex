@@ -8,11 +8,28 @@ impl Drop for RuntimeRotationProxy {
         for _ in 0..self.accept_worker_count {
             self.server.unblock();
         }
+        if !runtime_proxy_join_workers_on_drop() {
+            let detached_workers = self.worker_threads.len();
+            runtime_proxy_log_to_path(
+                &self.log_path,
+                &format!(
+                    "runtime proxy shutdown detach_workers={detached_workers} active_requests={}",
+                    self.active_request_count.load(Ordering::SeqCst)
+                ),
+            );
+            self.worker_threads.clear();
+            let _ = self.owner_lock.take();
+            return;
+        }
         while let Some(worker) = self.worker_threads.pop() {
             let _ = worker.join();
         }
         let _ = self.owner_lock.take();
     }
+}
+
+fn runtime_proxy_join_workers_on_drop() -> bool {
+    cfg!(test)
 }
 
 pub(crate) fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
