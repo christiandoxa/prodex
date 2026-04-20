@@ -1711,16 +1711,20 @@ pub(super) fn proxy_runtime_websocket_text_message(
             }
         };
     }
-    macro_rules! apply_trusted_session_previous_response_fresh_fallback {
+    macro_rules! apply_session_previous_response_fresh_fallback {
         ($profile_name:expr, $has_turn_state_retry:expr, $via:expr) => {
             if !$has_turn_state_retry
                 && previous_response_id.is_some()
                 && request_session_id.is_some()
-                && trusted_previous_response_affinity
                 && !request_requires_previous_response_affinity
                 && !previous_response_fresh_fallback_used
                 && compact_followup_profile.is_none()
-                && bound_profile.as_deref() == Some($profile_name.as_str())
+                && (bound_profile.as_deref() == Some($profile_name.as_str())
+                    || pinned_profile.as_deref() == Some($profile_name.as_str()))
+                && (trusted_previous_response_affinity
+                    || websocket_session.profile_name.as_deref() == Some($profile_name.as_str())
+                    || bound_session_profile.as_deref() == Some($profile_name.as_str())
+                    || session_profile.as_deref() == Some($profile_name.as_str()))
                 && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
             {
@@ -1732,7 +1736,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=trusted_session_not_found via={}",
+                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=session_scoped_not_found via={}",
                         $via
                     ),
                 );
@@ -2053,7 +2057,17 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        apply_trusted_session_previous_response_fresh_fallback!(
+                        if !has_turn_state_retry && request_requires_previous_response_affinity {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} websocket_session={session_id} stale_continuation reason=previous_response_not_found_locked_affinity profile={profile_name} via=direct_current_profile_fallback"
+                                ),
+                            );
+                            send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
+                            return Ok(());
+                        }
+                        apply_session_previous_response_fresh_fallback!(
                             &profile_name,
                             has_turn_state_retry,
                             "direct_current_profile_fallback"
@@ -2502,7 +2516,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        apply_trusted_session_previous_response_fresh_fallback!(
+                        apply_session_previous_response_fresh_fallback!(
                             &profile_name,
                             has_turn_state_retry,
                             "direct_current_profile_fallback"
@@ -3000,6 +3014,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         "request={request_id} websocket_session={session_id} websocket_reuse_watchdog_timeout profile={profile_name} event={event}"
                     ),
                 );
+                if nonreplayable_previous_response_reuse
+                    && request_requires_previous_response_affinity
+                {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} stale_continuation reason=websocket_reuse_watchdog_locked_affinity profile={profile_name} event={event}"
+                        ),
+                    );
+                    send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
+                    return Ok(());
+                }
+                if nonreplayable_previous_response_reuse {
+                    apply_session_previous_response_fresh_fallback!(
+                        &profile_name,
+                        false,
+                        "websocket_reuse_watchdog"
+                    );
+                }
                 if nonreplayable_previous_response_reuse {
                     if !websocket_reuse_fresh_retry_profiles.contains(&profile_name) {
                         websocket_reuse_fresh_retry_profiles.insert(profile_name.clone());
@@ -3125,7 +3158,17 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
-                apply_trusted_session_previous_response_fresh_fallback!(
+                if !has_turn_state_retry && request_requires_previous_response_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} websocket_session={session_id} stale_continuation reason=previous_response_not_found_locked_affinity profile={profile_name}"
+                        ),
+                    );
+                    send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
+                    return Ok(());
+                }
+                apply_session_previous_response_fresh_fallback!(
                     &profile_name,
                     has_turn_state_retry,
                     "candidate"

@@ -28966,6 +28966,172 @@ fn runtime_proxy_trusted_websocket_previous_response_not_found_reapplies_session
 }
 
 #[test]
+fn runtime_proxy_warm_websocket_previous_response_not_found_retries_same_session_without_owner_sweep()
+{
+    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text("{\"input\":[]}".to_string().into()))
+        .expect("first runtime proxy websocket request should be sent");
+
+    let mut first_payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text);
+                first_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!("unexpected websocket read failure: {err}; payloads={first_payloads:?}");
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+    assert!(
+        first_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "first websocket request should establish the warm previous_response binding: {first_payloads:?}"
+    );
+
+    socket
+        .send(WsMessage::Text(
+            r#"{"previous_response_id":"resp-second","session_id":"sess-warm","input":[]}"#
+                .to_string()
+                .into(),
+        ))
+        .expect("warm continuation websocket request should be sent");
+
+    let mut second_payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text)
+                    || text.contains("\"previous_response_not_found\"")
+                    || text.contains("\"stale_continuation\"");
+                second_payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "warm websocket continuation should recover without owner sweep: {err}; payloads={second_payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "warm websocket continuation should retry fresh on the same owner: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "warm websocket continuation should not leak previous_response_not_found: {second_payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string(), "second-account".to_string()],
+        "warm websocket continuation should reconnect only to the same owner instead of sweeping other profiles"
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert_eq!(
+        upstream_requests.len(),
+        3,
+        "proxy should make the initial request, the failed continuation, and one fresh retry"
+    );
+    assert!(
+        upstream_requests
+            .get(1)
+            .is_some_and(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "second upstream request should preserve the original continuation: {upstream_requests:?}"
+    );
+    assert!(
+        upstream_requests
+            .last()
+            .is_some_and(|request| !request.contains("\"previous_response_id\":\"resp-second\"")),
+        "fresh retry should strip previous_response_id after the warm owner fails: {upstream_requests:?}"
+    );
+}
+
+#[test]
 fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_everywhere_http() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
