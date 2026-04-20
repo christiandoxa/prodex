@@ -8,6 +8,7 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use crate::TestEnvVarGuard;
 
 fn running_in_ci() -> bool {
     std::env::var_os("GITHUB_ACTIONS").is_some() || std::env::var_os("CI").is_some()
@@ -327,50 +328,6 @@ fn ready_runtime_usage_snapshot(now: i64, remaining_percent: i64) -> RuntimeProf
 impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-struct TestEnvVarGuard {
-    _lock: crate::TestEnvLockGuard,
-    key: &'static str,
-    previous: Option<std::ffi::OsString>,
-}
-
-impl TestEnvVarGuard {
-    fn set(key: &'static str, value: &str) -> Self {
-        let lock = crate::acquire_test_env_lock();
-        let previous = env::var_os(key);
-        // SAFETY: test env mutation is serialized by the shared env lock guard.
-        unsafe { env::set_var(key, value) };
-        Self {
-            _lock: lock,
-            key,
-            previous,
-        }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let lock = crate::acquire_test_env_lock();
-        let previous = env::var_os(key);
-        // SAFETY: test env mutation is serialized by the shared env lock guard.
-        unsafe { env::remove_var(key) };
-        Self {
-            _lock: lock,
-            key,
-            previous,
-        }
-    }
-}
-
-impl Drop for TestEnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(value) = self.previous.as_ref() {
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::set_var(self.key, value) };
-        } else {
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::remove_var(self.key) };
-        }
     }
 }
 

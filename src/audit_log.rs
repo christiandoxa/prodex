@@ -258,40 +258,8 @@ fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<Vec<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestEnvVarGuard;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct AuditLogEnvGuard {
-        _lock: crate::TestEnvLockGuard,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl AuditLogEnvGuard {
-        fn set(name: &str, value: &str) -> Self {
-            let lock = crate::acquire_test_env_lock();
-            let previous = env::var_os(name);
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::set_var(name, value) };
-            Self {
-                _lock: lock,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for AuditLogEnvGuard {
-        fn drop(&mut self) {
-            match self.previous.as_ref() {
-                Some(value) => {
-                    // SAFETY: test env mutation is serialized by the shared env lock guard.
-                    unsafe { env::set_var("PRODEX_AUDIT_LOG_DIR", value) };
-                }
-                None => {
-                    // SAFETY: test env mutation is serialized by the shared env lock guard.
-                    unsafe { env::remove_var("PRODEX_AUDIT_LOG_DIR") };
-                }
-            }
-        }
-    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -309,7 +277,7 @@ mod tests {
     #[test]
     fn audit_log_path_uses_env_override() {
         let dir = temp_dir("path");
-        let _guard = AuditLogEnvGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
+        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
 
         assert_eq!(audit_log_path(), dir.join(AUDIT_LOG_FILE_NAME));
 
@@ -319,7 +287,7 @@ mod tests {
     #[test]
     fn append_audit_event_writes_json_line() {
         let dir = temp_dir("append");
-        let _guard = AuditLogEnvGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
+        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
 
         append_audit_event(
             "profile",
@@ -357,7 +325,7 @@ mod tests {
     #[test]
     fn read_recent_audit_events_applies_tail_and_filters() {
         let dir = temp_dir("query");
-        let _guard = AuditLogEnvGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
+        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
 
         fs::write(
             audit_log_path(),
@@ -398,7 +366,7 @@ mod tests {
     #[test]
     fn read_recent_audit_events_with_filters_scans_beyond_last_tail_lines() {
         let dir = temp_dir("query-filter-window");
-        let _guard = AuditLogEnvGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
+        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
 
         let mut content = String::new();
         content.push_str(

@@ -14,8 +14,24 @@ pub(crate) struct RuntimeProxyResponsesModelDescriptor {
     pub(crate) display_name: &'static str,
     pub(crate) description: &'static str,
     pub(crate) claude_alias: Option<RuntimeProxyClaudeModelAlias>,
-    pub(crate) claude_picker_model: Option<&'static str>,
+    pub(crate) legacy_claude_picker_model: Option<&'static str>,
     pub(crate) supports_xhigh: bool,
+}
+
+impl RuntimeProxyResponsesModelDescriptor {
+    fn claude_picker_value(self) -> &'static str {
+        self.claude_alias
+            .map(runtime_proxy_claude_alias_picker_value)
+            .unwrap_or(self.id)
+    }
+
+    fn matches_claude_picker_value(self, picker_model: &str) -> bool {
+        self.legacy_claude_picker_model
+            .is_some_and(|value| value.eq_ignore_ascii_case(picker_model))
+            || self
+                .claude_picker_value()
+                .eq_ignore_ascii_case(picker_model)
+    }
 }
 
 pub(crate) fn runtime_proxy_claude_model_override() -> Option<String> {
@@ -125,15 +141,7 @@ pub(crate) fn runtime_proxy_claude_picker_model_descriptor(
     runtime_proxy_responses_model_descriptor(without_extended_context).or_else(|| {
         runtime_proxy_responses_model_descriptors()
             .iter()
-            .find(|descriptor| {
-                descriptor
-                    .claude_picker_model
-                    .is_some_and(|value| value.eq_ignore_ascii_case(without_extended_context))
-                    || descriptor.claude_alias.is_some_and(|alias| {
-                        runtime_proxy_claude_alias_picker_value(alias)
-                            .eq_ignore_ascii_case(without_extended_context)
-                    })
-            })
+            .find(|descriptor| descriptor.matches_claude_picker_value(without_extended_context))
     })
 }
 
@@ -216,10 +224,7 @@ pub(crate) fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
     runtime_proxy_responses_model_descriptor(target_model)
         .map(|descriptor| {
             if runtime_proxy_claude_use_foundry_compat() {
-                descriptor
-                    .claude_alias
-                    .map(runtime_proxy_claude_alias_picker_value)
-                    .unwrap_or(descriptor.id)
+                descriptor.claude_picker_value()
             } else {
                 descriptor.id
             }
@@ -291,7 +296,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.4",
             description: "Latest frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Opus),
-            claude_picker_model: Some("claude-opus-4-6"),
+            legacy_claude_picker_model: Some("claude-opus-4-6"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -299,7 +304,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.4 Mini",
             description: "Smaller frontier agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Haiku),
-            claude_picker_model: Some("claude-haiku-4-5"),
+            legacy_claude_picker_model: Some("claude-haiku-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -307,7 +312,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.3 Codex",
             description: "Frontier Codex-optimized agentic coding model.",
             claude_alias: Some(RuntimeProxyClaudeModelAlias::Sonnet),
-            claude_picker_model: Some("claude-sonnet-4-6"),
+            legacy_claude_picker_model: Some("claude-sonnet-4-6"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -315,7 +320,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.2 Codex",
             description: "Frontier agentic coding model.",
             claude_alias: None,
-            claude_picker_model: Some("claude-sonnet-4-5"),
+            legacy_claude_picker_model: Some("claude-sonnet-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -323,7 +328,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.2",
             description: "Optimized for professional work and long-running agents.",
             claude_alias: None,
-            claude_picker_model: Some("claude-opus-4-5"),
+            legacy_claude_picker_model: Some("claude-opus-4-5"),
             supports_xhigh: true,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -331,7 +336,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.1 Codex Max",
             description: "Codex-optimized model for deep and fast reasoning.",
             claude_alias: None,
-            claude_picker_model: Some("claude-opus-4-1"),
+            legacy_claude_picker_model: Some("claude-opus-4-1"),
             supports_xhigh: false,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -339,7 +344,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5.1 Codex Mini",
             description: "Optimized for Codex. Cheaper, faster, but less capable.",
             claude_alias: None,
-            claude_picker_model: Some("claude-haiku-4"),
+            legacy_claude_picker_model: Some("claude-haiku-4"),
             supports_xhigh: false,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -347,7 +352,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5",
             description: "General-purpose GPT-5 model.",
             claude_alias: None,
-            claude_picker_model: Some("claude-sonnet-4"),
+            legacy_claude_picker_model: Some("claude-sonnet-4"),
             supports_xhigh: false,
         },
         RuntimeProxyResponsesModelDescriptor {
@@ -355,7 +360,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
             display_name: "GPT-5 Mini",
             description: "Smaller GPT-5 model for fast, lower-cost tasks.",
             claude_alias: None,
-            claude_picker_model: Some("claude-haiku-3-5"),
+            legacy_claude_picker_model: Some("claude-haiku-3-5"),
             supports_xhigh: false,
         },
     ]

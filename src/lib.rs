@@ -145,6 +145,63 @@ pub(crate) fn acquire_test_env_lock() -> TestEnvLockGuard {
 }
 
 #[cfg(test)]
+pub(crate) struct TestEnvVarGuard {
+    _lock: Option<TestEnvLockGuard>,
+    key: Option<&'static str>,
+    previous: Option<OsString>,
+}
+
+#[cfg(test)]
+impl TestEnvVarGuard {
+    pub(crate) fn lock() -> Self {
+        Self {
+            _lock: Some(acquire_test_env_lock()),
+            key: None,
+            previous: None,
+        }
+    }
+
+    pub(crate) fn set(key: &'static str, value: &str) -> Self {
+        let lock = acquire_test_env_lock();
+        let previous = env::var_os(key);
+        // SAFETY: test env mutation is serialized by the shared env lock guard.
+        unsafe { env::set_var(key, value) };
+        Self {
+            _lock: Some(lock),
+            key: Some(key),
+            previous,
+        }
+    }
+
+    pub(crate) fn unset(key: &'static str) -> Self {
+        let lock = acquire_test_env_lock();
+        let previous = env::var_os(key);
+        // SAFETY: test env mutation is serialized by the shared env lock guard.
+        unsafe { env::remove_var(key) };
+        Self {
+            _lock: Some(lock),
+            key: Some(key),
+            previous,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestEnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(key) = self.key {
+            if let Some(value) = self.previous.as_ref() {
+                // SAFETY: test env mutation is serialized by the shared env lock guard.
+                unsafe { env::set_var(key, value) };
+            } else {
+                // SAFETY: test env mutation is serialized by the shared env lock guard.
+                unsafe { env::remove_var(key) };
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 impl Drop for TestEnvLockGuard {
     fn drop(&mut self) {
         TEST_ENV_LOCK_DEPTH.with(|depth| {
@@ -198,6 +255,31 @@ impl Drop for TestRuntimeLockGuard {
                 depth.set(current - 1);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod test_env_guard_tests {
+    use super::*;
+
+    #[test]
+    fn test_env_var_guard_restores_previous_value_and_supports_nested_reentry() {
+        let key = "PRODEX_TEST_ENV_GUARD_REENTRY";
+        let previous = env::var_os(key);
+
+        {
+            let _outer = TestEnvVarGuard::set(key, "outer");
+            assert_eq!(env::var(key).ok().as_deref(), Some("outer"));
+
+            {
+                let _inner = TestEnvVarGuard::set(key, "inner");
+                assert_eq!(env::var(key).ok().as_deref(), Some("inner"));
+            }
+
+            assert_eq!(env::var(key).ok().as_deref(), Some("outer"));
+        }
+
+        assert_eq!(env::var_os(key), previous);
     }
 }
 

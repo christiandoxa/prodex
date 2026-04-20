@@ -271,51 +271,8 @@ pub(super) fn toml_string_literal(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestEnvVarGuard;
     use std::path::PathBuf;
-
-    struct TestEnvVarGuard {
-        _lock: crate::TestEnvLockGuard,
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl TestEnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::acquire_test_env_lock();
-            let previous = env::var_os(key);
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::set_var(key, value) };
-            Self {
-                _lock: lock,
-                key,
-                previous,
-            }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let lock = crate::acquire_test_env_lock();
-            let previous = env::var_os(key);
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::remove_var(key) };
-            Self {
-                _lock: lock,
-                key,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for TestEnvVarGuard {
-        fn drop(&mut self) {
-            if let Some(value) = self.previous.as_ref() {
-                // SAFETY: test env mutation is serialized by the shared env lock guard.
-                unsafe { env::set_var(self.key, value) };
-            } else {
-                // SAFETY: test env mutation is serialized by the shared env lock guard.
-                unsafe { env::remove_var(self.key) };
-            }
-        }
-    }
 
     struct TestPolicyDir {
         root: PathBuf,

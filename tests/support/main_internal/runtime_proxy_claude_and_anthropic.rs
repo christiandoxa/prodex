@@ -108,10 +108,9 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5.4-mini".to_string())
     );
-    assert!(
-        env.iter()
-            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
-    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
     assert!(env.iter().all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
     assert_eq!(
         runtime_proxy_claude_removed_env(),
@@ -174,10 +173,9 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5-mini".to_string())
     );
-    assert!(
-        env.iter()
-            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
-    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
 }
 
 #[test]
@@ -228,10 +226,9 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("opus".to_string())
     );
-    assert!(
-        env.iter()
-            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
-    );
+    assert!(env
+        .iter()
+        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
 }
 
 #[test]
@@ -276,6 +273,7 @@ fn runtime_proxy_claude_launch_env_sets_plugin_root_when_mem_enabled() {
 
 #[test]
 fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models() {
+    let _env_guard = TestEnvVarGuard::lock();
     assert_eq!(
         runtime_proxy_claude_target_model("opus"),
         "gpt-5.4".to_string()
@@ -300,6 +298,76 @@ fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models()
         runtime_proxy_claude_target_model("claude-haiku-3-5"),
         "gpt-5-mini".to_string()
     );
+}
+
+#[test]
+fn runtime_proxy_claude_model_mapping_matrix_stays_in_sync() {
+    let _env_guard = TestEnvVarGuard::lock();
+    for descriptor in runtime_proxy_responses_model_descriptors() {
+        assert_eq!(
+            runtime_proxy_responses_model_descriptor(descriptor.id).map(|entry| entry.id),
+            Some(descriptor.id)
+        );
+        assert_eq!(
+            runtime_proxy_responses_model_supports_xhigh(descriptor.id),
+            descriptor.supports_xhigh
+        );
+        assert_eq!(
+            runtime_proxy_responses_model_supported_effort_levels(descriptor.id),
+            if descriptor.supports_xhigh {
+                &["low", "medium", "high", "max"][..]
+            } else {
+                &["low", "medium", "high"][..]
+            }
+        );
+        assert_eq!(
+            runtime_proxy_claude_target_model(descriptor.id),
+            descriptor.id
+        );
+        assert!(runtime_proxy_claude_managed_model_option_value(
+            descriptor.id
+        ));
+
+        let expected_picker_value = descriptor
+            .claude_alias
+            .map(runtime_proxy_claude_alias_picker_value)
+            .unwrap_or(descriptor.id);
+        assert_eq!(
+            runtime_proxy_claude_picker_model(descriptor.id),
+            expected_picker_value
+        );
+
+        if let Some(alias) = descriptor.claude_alias {
+            let alias_picker_value = runtime_proxy_claude_alias_picker_value(alias);
+            assert!(runtime_proxy_claude_managed_model_option_value(
+                alias_picker_value
+            ));
+            assert_eq!(
+                runtime_proxy_claude_picker_model_descriptor(alias_picker_value)
+                    .map(|entry| entry.id),
+                Some(descriptor.id)
+            );
+            assert_eq!(
+                runtime_proxy_claude_target_model(alias_picker_value),
+                descriptor.id
+            );
+        }
+
+        if let Some(legacy_picker_model) = descriptor.legacy_claude_picker_model {
+            assert!(runtime_proxy_claude_managed_model_option_value(
+                legacy_picker_model
+            ));
+            assert_eq!(
+                runtime_proxy_claude_picker_model_descriptor(legacy_picker_model)
+                    .map(|entry| entry.id),
+                Some(descriptor.id)
+            );
+            assert_eq!(
+                runtime_proxy_claude_target_model(legacy_picker_model),
+                descriptor.id
+            );
+        }
+    }
 }
 
 #[test]
@@ -799,20 +867,15 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
             .unwrap_or_default()
             .starts_with("claude-")
     }));
-    assert!(
-        data.iter().any(|model| {
-            model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
-        })
-    );
-    assert!(
-        data.iter().any(|model| {
-            model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
-        })
-    );
-    assert!(
-        data.iter()
-            .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5") })
-    );
+    assert!(data
+        .iter()
+        .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4") }));
+    assert!(data
+        .iter()
+        .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2") }));
+    assert!(data
+        .iter()
+        .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5") }));
     assert!(data.iter().any(|model| {
         model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5-mini")
     }));
@@ -1124,8 +1187,8 @@ fn translate_runtime_anthropic_messages_request_preserves_tool_references() {
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_keeps_upstream_streaming_for_non_stream_client_request()
- {
+fn translate_runtime_anthropic_messages_request_keeps_upstream_streaming_for_non_stream_client_request(
+) {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages".to_string(),
@@ -1431,8 +1494,8 @@ fn translate_runtime_anthropic_messages_request_maps_code_execution_tool_result(
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_preserves_file_backed_document_and_container_blocks()
- {
+fn translate_runtime_anthropic_messages_request_preserves_file_backed_document_and_container_blocks(
+) {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -1866,8 +1929,8 @@ fn translate_runtime_anthropic_messages_request_does_not_buffer_mcp_only_toolset
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_falls_back_for_unrepresentable_mcp_toolset_denylist()
- {
+fn translate_runtime_anthropic_messages_request_falls_back_for_unrepresentable_mcp_toolset_denylist(
+) {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -2424,17 +2487,15 @@ fn translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_t
             .and_then(serde_json::Value::as_str),
         Some("string")
     );
-    assert!(
-        tools[1]
-            .get("parameters")
-            .and_then(|parameters| parameters.get("properties"))
-            .and_then(|properties| properties.get("command"))
-            .and_then(|property| property.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|values| values
-                .iter()
-                .any(|value| value.as_str() == Some("undo_edit")))
-    );
+    assert!(tools[1]
+        .get("parameters")
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(|properties| properties.get("command"))
+        .and_then(|property| property.get("enum"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|values| values
+            .iter()
+            .any(|value| value.as_str() == Some("undo_edit"))));
     assert_eq!(
         tools[1]
             .get("parameters")
@@ -2471,15 +2532,13 @@ fn translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_t
             .and_then(serde_json::Value::as_str),
         Some("string")
     );
-    assert!(
-        tools[3]
-            .get("parameters")
-            .and_then(|parameters| parameters.get("properties"))
-            .and_then(|properties| properties.get("command"))
-            .and_then(|property| property.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("rename")))
-    );
+    assert!(tools[3]
+        .get("parameters")
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(|properties| properties.get("command"))
+        .and_then(|property| property.get("enum"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("rename"))));
     assert_eq!(
         body.get("tool_choice")
             .and_then(|tool_choice| tool_choice.get("type"))
@@ -2495,8 +2554,8 @@ fn translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_t
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_appends_computer_display_context_to_existing_description()
- {
+fn translate_runtime_anthropic_messages_request_appends_computer_display_context_to_existing_description(
+) {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -2625,21 +2684,19 @@ fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_tool_ca
             "Inspect the browser UI.\n\nInteract with the graphical computer display. Display resolution: 1600x900 pixels. Display number: 1. Zoom action enabled."
         )
     );
-    assert!(
-        tools[1]
-            .get("parameters")
-            .and_then(|parameters| parameters.get("properties"))
-            .and_then(|properties| properties.get("action"))
-            .and_then(|property| property.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .collect::<Vec<_>>()
-            })
-            .is_some_and(|values| values.contains(&"zoom"))
-    );
+    assert!(tools[1]
+        .get("parameters")
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(|properties| properties.get("action"))
+        .and_then(|property| property.get("enum"))
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+        })
+        .is_some_and(|values| values.contains(&"zoom")));
     assert_eq!(
         tools[1]
             .get("parameters")
@@ -2702,17 +2759,15 @@ fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_client_
             "Edit local text files with string replacement operations. View results may be truncated to 10000 characters."
         )
     );
-    assert!(
-        !tools[0]
-            .get("parameters")
-            .and_then(|parameters| parameters.get("properties"))
-            .and_then(|properties| properties.get("command"))
-            .and_then(|property| property.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|values| values
-                .iter()
-                .any(|value| value.as_str() == Some("undo_edit")))
-    );
+    assert!(!tools[0]
+        .get("parameters")
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(|properties| properties.get("command"))
+        .and_then(|property| property.get("enum"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|values| values
+            .iter()
+            .any(|value| value.as_str() == Some("undo_edit"))));
     assert_eq!(
         tools[0]
             .get("parameters")
@@ -2730,15 +2785,13 @@ fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_client_
             "Interact with the graphical computer display. Display resolution: 1600x900 pixels. Display number: 1. Zoom action enabled."
         )
     );
-    assert!(
-        tools[1]
-            .get("parameters")
-            .and_then(|parameters| parameters.get("properties"))
-            .and_then(|properties| properties.get("action"))
-            .and_then(|property| property.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("zoom")))
-    );
+    assert!(tools[1]
+        .get("parameters")
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(|properties| properties.get("action"))
+        .and_then(|property| property.get("enum"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("zoom"))));
     assert_eq!(
         tools[1]
             .get("parameters")
@@ -2980,18 +3033,16 @@ fn translate_runtime_anthropic_messages_request_maps_computer_tool_to_native_com
             .and_then(serde_json::Value::as_str),
         Some("computer_screenshot")
     );
-    assert!(
-        input[2]
-            .get("output")
-            .and_then(|output| output.get("image_url"))
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|value| value.starts_with("data:image/png;base64,"))
-    );
+    assert!(input[2]
+        .get("output")
+        .and_then(|output| output.get("image_url"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value.starts_with("data:image/png;base64,")));
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_falls_back_for_ambiguous_native_computer_tool_choice()
- {
+fn translate_runtime_anthropic_messages_request_falls_back_for_ambiguous_native_computer_tool_choice(
+) {
     let _guard = TestEnvVarGuard::set("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS", "computer");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -3201,8 +3252,8 @@ fn translate_runtime_anthropic_messages_request_normalizes_versioned_client_tool
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_roundtrips_versioned_text_editor_tool_use_and_result()
- {
+fn translate_runtime_anthropic_messages_request_roundtrips_versioned_text_editor_tool_use_and_result(
+) {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -3666,8 +3717,8 @@ fn translate_runtime_anthropic_messages_request_maps_memory_tool_definition_to_b
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_appends_memory_tool_guidance_to_system_instructions()
- {
+fn translate_runtime_anthropic_messages_request_appends_memory_tool_guidance_to_system_instructions(
+) {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -6084,8 +6135,8 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_generic_too
 }
 
 #[test]
-fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carried_server_tool_usage()
- {
+fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carried_server_tool_usage(
+) {
     let body = concat!(
         "event: response.completed\r\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"output\":[]}}\r\n",

@@ -1,3 +1,4 @@
+use crate::TestEnvVarGuard;
 use base64::Engine as _;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -28,54 +29,10 @@ impl Drop for ProfileCommandsTestDir {
     }
 }
 
-struct ProfileCommandsEnvVarGuard {
-    _lock: crate::TestEnvLockGuard,
-    key: &'static str,
-    previous: Option<std::ffi::OsString>,
-}
-
-impl ProfileCommandsEnvVarGuard {
-    fn set(key: &'static str, value: &str) -> Self {
-        let lock = crate::acquire_test_env_lock();
-        let previous = env::var_os(key);
-        // SAFETY: test env mutation is serialized by the shared env lock guard.
-        unsafe { env::set_var(key, value) };
-        Self {
-            _lock: lock,
-            key,
-            previous,
-        }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let lock = crate::acquire_test_env_lock();
-        let previous = env::var_os(key);
-        // SAFETY: test env mutation is serialized by the shared env lock guard.
-        unsafe { env::remove_var(key) };
-        Self {
-            _lock: lock,
-            key,
-            previous,
-        }
-    }
-}
-
-impl Drop for ProfileCommandsEnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(value) = self.previous.as_ref() {
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::set_var(self.key, value) };
-        } else {
-            // SAFETY: test env mutation is serialized by the shared env lock guard.
-            unsafe { env::remove_var(self.key) };
-        }
-    }
-}
-
 struct ProfileCommandsTestEnv {
-    _home_guard: ProfileCommandsEnvVarGuard,
-    _prodex_guard: ProfileCommandsEnvVarGuard,
-    _shared_override_guard: ProfileCommandsEnvVarGuard,
+    _home_guard: TestEnvVarGuard,
+    _prodex_guard: TestEnvVarGuard,
+    _shared_override_guard: TestEnvVarGuard,
 }
 
 impl ProfileCommandsTestEnv {
@@ -85,12 +42,9 @@ impl ProfileCommandsTestEnv {
         fs::create_dir_all(&home).expect("test home should be created");
         fs::create_dir_all(&prodex_home).expect("test prodex home should be created");
         Self {
-            _home_guard: ProfileCommandsEnvVarGuard::set("HOME", &home.display().to_string()),
-            _prodex_guard: ProfileCommandsEnvVarGuard::set(
-                "PRODEX_HOME",
-                &prodex_home.display().to_string(),
-            ),
-            _shared_override_guard: ProfileCommandsEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME"),
+            _home_guard: TestEnvVarGuard::set("HOME", &home.display().to_string()),
+            _prodex_guard: TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string()),
+            _shared_override_guard: TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME"),
         }
     }
 }
@@ -168,7 +122,9 @@ impl ProfileCommandsOneShotHttpServer {
         let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
         let base_url = format!(
             "http://{}",
-            listener.local_addr().expect("server address should resolve")
+            listener
+                .local_addr()
+                .expect("server address should resolve")
         );
         let body = body.to_string();
         let handle = std::thread::spawn(move || {
@@ -219,7 +175,7 @@ fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -228,7 +184,7 @@ fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
                     codex_home: second_home.clone(),
                     managed: false,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -499,7 +455,7 @@ fn profile_import_rejects_existing_profile_names() {
                 codex_home: existing_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()
@@ -543,7 +499,7 @@ fn profile_import_updates_existing_profile_when_email_matches() {
                 codex_home: existing_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()
@@ -584,7 +540,10 @@ fn profile_import_updates_existing_profile_when_email_matches() {
         "fresh-token".to_string()
     );
     assert!(
-        !target_paths.managed_profiles_root.join("backup-main").exists(),
+        !target_paths
+            .managed_profiles_root
+            .join("backup-main")
+            .exists(),
         "duplicate import should not create a new managed home"
     );
 }
@@ -617,7 +576,7 @@ fn import_current_updates_existing_profile_token_for_duplicate_email() {
                 codex_home: existing_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()
@@ -634,7 +593,8 @@ fn import_current_updates_existing_profile_token_for_duplicate_email() {
     assert_eq!(state.active_profile.as_deref(), Some("primary"));
     assert_eq!(state.profiles.len(), 1);
     assert_eq!(
-        state.profiles
+        state
+            .profiles
             .get("primary")
             .and_then(|profile| profile.email.as_deref()),
         Some("main@example.com")
