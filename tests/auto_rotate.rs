@@ -1,3 +1,6 @@
+#[path = "support/test_wait.rs"]
+mod test_wait;
+
 use base64::Engine as _;
 use serde_json::{Value, json};
 use std::fs;
@@ -10,7 +13,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct TestDir {
     path: PathBuf,
@@ -596,17 +599,12 @@ fn runtime_broker_registry_path(prodex_home: &Path) -> Option<PathBuf> {
 }
 
 fn wait_for_runtime_broker_registry_path(prodex_home: &Path) -> PathBuf {
-    let started_at = Instant::now();
-    loop {
-        if let Some(path) = runtime_broker_registry_path(prodex_home) {
-            return path;
-        }
-        assert!(
-            started_at.elapsed() < Duration::from_secs(30),
-            "timed out waiting for runtime broker registry"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+    test_wait::wait_for_poll(
+        "runtime broker registry",
+        Duration::from_secs(30),
+        Duration::from_millis(10),
+        || runtime_broker_registry_path(prodex_home),
+    )
 }
 
 fn add_managed_profile(fixture: &Fixture, name: &str, account_id: &str) -> PathBuf {

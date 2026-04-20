@@ -48,6 +48,15 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             return Ok(None);
         };
 
+        if !runtime_process_pid_alive(existing.pid) {
+            remove_runtime_broker_registry_if_token_matches(
+                paths,
+                broker_key,
+                &existing.instance_token,
+            );
+            return Ok(None);
+        }
+
         let health = probe_runtime_broker_health(client, &existing)?;
         match replace_runtime_broker_if_version_mismatch_with_health(
             paths,
@@ -69,15 +78,6 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             && health.instance_token == existing.instance_token
         {
             return Ok(Some(existing));
-        }
-
-        if !runtime_process_pid_alive(existing.pid) {
-            remove_runtime_broker_registry_if_token_matches(
-                paths,
-                broker_key,
-                &existing.instance_token,
-            );
-            return Ok(None);
         }
 
         thread::sleep(poll_interval);

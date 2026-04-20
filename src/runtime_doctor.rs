@@ -6,7 +6,9 @@ mod render;
 mod state;
 
 #[allow(unused_imports)]
-pub(crate) use diagnosis::{runtime_doctor_marker_count, runtime_doctor_top_facet};
+pub(crate) use diagnosis::{
+    runtime_doctor_finalize_summary, runtime_doctor_marker_count, runtime_doctor_top_facet,
+};
 #[allow(unused_imports)]
 pub(crate) use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
 #[allow(unused_imports)]

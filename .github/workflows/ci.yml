@@ -65,27 +65,65 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+
+      - name: Cache cargo supply-chain tools
+        id: cargo-supply-chain-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/bin/cargo-deny
+          key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0
 
       - name: Check locked compile graph
         run: cargo check --locked --all-targets --all-features
 
-      # Keep the requested -D warnings gate visible without blocking the rest of the
-      # supply-chain checks until the existing source warning backlog is cleared.
       - name: Run clippy warning gate
-        continue-on-error: true
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked --version 0.22.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-audit >/dev/null 2>&1; then
+            cargo install cargo-audit --locked --version 0.22.1
+          fi
 
       - name: Run cargo audit
         run: cargo audit
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked --version 0.19.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-deny >/dev/null 2>&1; then
+            cargo install cargo-deny --locked --version 0.19.0
+          fi
 
       - name: Run cargo deny checks
         run: cargo deny check advisories sources
+
+  release-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Verify release/version sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run npm:sync-version
+          git diff --exit-code -- Cargo.toml npm README.md QUICKSTART.md scripts/npm
 
   auto-rotate:
     runs-on: ubuntu-latest

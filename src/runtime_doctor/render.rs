@@ -1,6 +1,56 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::*;
+
+fn runtime_doctor_parse_broker_artifact(line: &str) -> BTreeMap<String, String> {
+    line.split_whitespace()
+        .filter_map(|token| token.split_once('='))
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+}
+
+fn runtime_doctor_runtime_broker_issue_lines(summary: &RuntimeDoctorSummary) -> Vec<String> {
+    summary
+        .runtime_broker_identities
+        .iter()
+        .filter_map(|line| {
+            let artifact = runtime_doctor_parse_broker_artifact(line);
+            let broker_key = artifact.get("broker_key")?;
+            let status = artifact.get("status").map(String::as_str).unwrap_or("unknown");
+            let pid = artifact.get("pid").map(String::as_str).unwrap_or("-");
+            let stale_leases = artifact
+                .get("stale_leases")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0);
+            let issue = match status {
+                "dead_pid" => Some(format!(
+                    "{broker_key}: registry points to dead pid {pid}; run prodex cleanup or restart prodex run"
+                )),
+                "health_timeout" => Some(format!(
+                    "{broker_key}: pid {pid} health probe timed out; check local listener then restart prodex run if it stays stuck"
+                )),
+                "health_unreachable" => Some(format!(
+                    "{broker_key}: pid {pid} health probe unreachable; check local listener then restart prodex run if needed"
+                )),
+                "binary_mismatch" => Some(format!(
+                    "{broker_key}: pid {pid} runs different prodex binary; restart active prodex/codex sessions"
+                )),
+                _ => None,
+            };
+            match (issue, stale_leases) {
+                (Some(issue), leases) if leases > 0 => Some(format!(
+                    "{issue}; {leases} stale lease(s) remain, run prodex cleanup after old terminals exit"
+                )),
+                (Some(issue), _) => Some(issue),
+                (None, leases) if leases > 0 => Some(format!(
+                    "{broker_key}: {leases} stale lease(s) remain; run prodex cleanup after old terminals exit"
+                )),
+                (None, _) => None,
+            }
+        })
+        .collect()
+}
 
 fn runtime_doctor_json_entry<T: serde::Serialize>(
     key: &str,
@@ -258,6 +308,14 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
                 "runtime_broker_identities",
                 summary.runtime_broker_identities.clone(),
             ),
+            runtime_doctor_json_entry(
+                "runtime_broker_artifacts",
+                summary
+                    .runtime_broker_identities
+                    .iter()
+                    .map(|line| runtime_doctor_json_map(runtime_doctor_parse_broker_artifact(line)))
+                    .collect::<Vec<_>>(),
+            ),
             runtime_doctor_json_entry("prodex_binary_mismatch", summary.prodex_binary_mismatch),
             runtime_doctor_json_entry("runtime_broker_mismatch", summary.runtime_broker_mismatch),
             runtime_doctor_json_entry(
@@ -319,6 +377,7 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             summary.suspect_continuation_bindings.join(", ")
         )
     };
+    let broker_issues = runtime_doctor_runtime_broker_issue_lines(summary);
     let mut fields = FieldRowsBuilder::new();
     fields
         .push(
@@ -592,6 +651,14 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                 "-".to_string()
             } else {
                 summary.runtime_broker_identities.join(" | ")
+            },
+        )
+        .push(
+            "Broker issues",
+            if broker_issues.is_empty() {
+                "-".to_string()
+            } else {
+                broker_issues.join(" | ")
             },
         )
         .push(

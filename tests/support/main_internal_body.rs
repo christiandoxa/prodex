@@ -6811,14 +6811,16 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
 fn websocket_reuse_watchdog_fresh_fallback_stays_blocked_for_locked_affinity() {
     assert!(
         !runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed(
-            "second",
-            Some("resp-second"),
-            false,
-            Some("second"),
-            None,
-            true,
-            false,
-            None,
+            RuntimeWebsocketReuseWatchdogPreviousResponseFallback {
+                profile_name: "second",
+                previous_response_id: Some("resp-second"),
+                previous_response_fresh_fallback_used: false,
+                bound_profile: Some("second"),
+                pinned_profile: None,
+                request_requires_previous_response_affinity: true,
+                trusted_previous_response_affinity: false,
+                request_turn_state: None,
+            },
         ),
         "watchdog fallback should stay blocked for non-replayable locked-affinity continuations"
     );
@@ -10087,8 +10089,7 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         )]),
         prodex_binary_identities: vec!["/usr/bin/prodex version=0.29.0 sha256=abc".to_string()],
         runtime_broker_identities: vec![
-            "broker pid=123 version=0.26.0 path=/tmp/prodex sha256=def source=health"
-                .to_string(),
+            "broker_key=broker pid=123 listen_addr=- status=binary_mismatch mismatch=version_mismatch version=0.26.0 path=/tmp/prodex sha256=def source=health stale_leases=0".to_string(),
         ],
         prodex_binary_mismatch: false,
         runtime_broker_mismatch: true,
@@ -10160,7 +10161,15 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
     );
     assert_eq!(
         fields.get("Runtime brokers").map(String::as_str),
-        Some("broker pid=123 version=0.26.0 path=/tmp/prodex sha256=def source=health")
+        Some(
+            "broker_key=broker pid=123 listen_addr=- status=binary_mismatch mismatch=version_mismatch version=0.26.0 path=/tmp/prodex sha256=def source=health stale_leases=0"
+        )
+    );
+    assert_eq!(
+        fields.get("Broker issues").map(String::as_str),
+        Some(
+            "broker: pid 123 runs different prodex binary; restart active prodex/codex sessions"
+        )
     );
     assert_eq!(
         fields.get("Binary mismatch").map(String::as_str),
@@ -10242,11 +10251,166 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
         summary
             .runtime_broker_identities
             .iter()
-            .any(|line| line.contains("doctor-mismatch pid=")
+            .any(|line| line.contains("broker_key=doctor-mismatch")
+                && line.contains("status=binary_mismatch")
+                && line.contains("mismatch=version_mismatch")
                 && line.contains("version=0.26.0")
                 && line.contains("source=health")),
         "doctor should surface the mismatched broker identity: {:?}",
         summary.runtime_broker_identities
+    );
+    summary.pointer_exists = true;
+    summary.log_exists = true;
+    summary.line_count = 1;
+    runtime_doctor_finalize_summary(&mut summary);
+    assert!(
+        summary
+            .diagnosis
+            .contains("Runtime broker doctor-mismatch pid"),
+        "doctor should explain how to resolve live broker mismatch: {}",
+        summary.diagnosis
+    );
+}
+
+#[test]
+fn runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+
+    save_runtime_broker_registry(
+        &paths,
+        "doctor-dead",
+        &RuntimeBrokerRegistry {
+            pid: 999_999,
+            listen_addr: "127.0.0.1:9".to_string(),
+            started_at: Local::now().timestamp(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            instance_token: "dead-instance".to_string(),
+            admin_token: "secret".to_string(),
+            prodex_version: Some("0.1.0".to_string()),
+            executable_path: Some("/tmp/old-prodex".to_string()),
+            executable_sha256: Some("deadbeef".to_string()),
+            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        },
+    )
+    .expect("dead broker registry should save");
+    let lease_dir = runtime_broker_lease_dir(&paths, "doctor-dead");
+    fs::create_dir_all(&lease_dir).expect("lease dir should exist");
+    fs::write(lease_dir.join("stale.lease"), "pid=999998\n").expect("stale lease should write");
+
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    collect_runtime_doctor_state(&paths, &mut summary);
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert!(
+        summary
+            .runtime_broker_identities
+            .iter()
+            .any(|line| line.contains("broker_key=doctor-dead")
+                && line.contains("status=dead_pid")
+                && line.contains("stale_leases=1")),
+        "doctor should keep dead registry artifacts visible: {:?}",
+        summary.runtime_broker_identities
+    );
+    assert!(
+        summary
+            .diagnosis
+            .contains("run `prodex cleanup` or restart `prodex run`"),
+        "doctor should point to cleanup/restart action for dead broker registry: {}",
+        summary.diagnosis
+    );
+}
+
+#[test]
+fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let _connect_timeout_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "20");
+    let _read_timeout_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "20");
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+
+    let server = TinyServer::http("127.0.0.1:0").expect("health timeout server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("health timeout server should expose a TCP address");
+    save_runtime_broker_registry(
+        &paths,
+        "doctor-timeout",
+        &RuntimeBrokerRegistry {
+            pid: std::process::id(),
+            listen_addr: listen_addr.to_string(),
+            started_at: Local::now().timestamp(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            instance_token: "timeout-instance".to_string(),
+            admin_token: "secret".to_string(),
+            prodex_version: Some(runtime_current_prodex_version().to_string()),
+            executable_path: env::current_exe()
+                .ok()
+                .map(|path| path.display().to_string()),
+            executable_sha256: None,
+            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        },
+    )
+    .expect("timeout broker registry should save");
+
+    let health_thread = thread::spawn(move || {
+        let request = server.recv().expect("timeout health request should arrive");
+        thread::sleep(Duration::from_millis(80));
+        let _ = request.respond(TinyResponse::from_string("{}").with_status_code(200));
+    });
+
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    collect_runtime_doctor_state(&paths, &mut summary);
+    runtime_doctor_finalize_summary(&mut summary);
+    health_thread
+        .join()
+        .expect("timeout health thread should join");
+
+    assert!(
+        summary
+            .runtime_broker_identities
+            .iter()
+            .any(|line| line.contains("broker_key=doctor-timeout")
+                && line.contains("status=health_timeout")),
+        "doctor should classify timed-out health probes: {:?}",
+        summary.runtime_broker_identities
+    );
+    assert!(
+        summary.diagnosis.contains("health probe timed out"),
+        "doctor should surface timeout-specific action text: {}",
+        summary.diagnosis
     );
 }
 
@@ -17072,6 +17236,54 @@ fn runtime_proxy_lane_limit_is_enforced_without_blocking_other_lanes() {
 }
 
 #[test]
+fn runtime_proxy_pressure_mode_route_invariants_match_hot_path_expectations() {
+    assert!(
+        runtime_proxy_pressure_mode_for_route(RuntimeRouteKind::Responses, true, false),
+        "local overload should pressure the responses lane"
+    );
+    assert!(
+        runtime_proxy_pressure_mode_for_route(RuntimeRouteKind::Websocket, true, false),
+        "local overload should pressure websocket traffic too"
+    );
+    assert!(
+        !runtime_proxy_pressure_mode_for_route(RuntimeRouteKind::Responses, false, true),
+        "background queue pressure should not block the main responses lane"
+    );
+    assert!(
+        !runtime_proxy_pressure_mode_for_route(RuntimeRouteKind::Websocket, false, true),
+        "background queue pressure should not block websocket continuations"
+    );
+    assert!(
+        runtime_proxy_pressure_mode_for_route(RuntimeRouteKind::Compact, false, true),
+        "background queue pressure should still shed fresh compact work"
+    );
+    assert!(
+        runtime_proxy_pressure_mode_for_route(RuntimeRouteKind::Standard, false, true),
+        "background queue pressure should still shed fresh standard work"
+    );
+}
+
+#[test]
+fn runtime_proxy_lane_limit_global_overload_flag_stays_responses_only() {
+    assert!(
+        runtime_proxy_lane_limit_marks_global_overload(RuntimeRouteKind::Responses),
+        "responses saturation should mark local global overload"
+    );
+    assert!(
+        !runtime_proxy_lane_limit_marks_global_overload(RuntimeRouteKind::Compact),
+        "compact saturation should stay lane-local"
+    );
+    assert!(
+        !runtime_proxy_lane_limit_marks_global_overload(RuntimeRouteKind::Websocket),
+        "websocket saturation should stay lane-local"
+    );
+    assert!(
+        !runtime_proxy_lane_limit_marks_global_overload(RuntimeRouteKind::Standard),
+        "standard saturation should stay lane-local"
+    );
+}
+
+#[test]
 fn runtime_proxy_active_request_wait_recovers_after_short_burst() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(200, 1_000);
     let temp_dir = TestDir::new();
@@ -20815,11 +21027,15 @@ fn runtime_doctor_detects_upstream_without_local_chunk_in_sampled_tail() {
 
 #[test]
 fn runtime_doctor_collect_summary_reports_route_circuit_diagnosis() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex-home");
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should be created");
+    fs::create_dir_all(&prodex_home).expect("prodex home should be created");
     let _runtime_log_dir_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir.to_str().unwrap());
+    let _prodex_home_guard = TestEnvVarGuard::set("PRODEX_HOME", prodex_home.to_str().unwrap());
     let pointer = runtime_proxy_latest_log_pointer_path();
     let log_path = runtime_log_dir.join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-doctor.log"));
     fs::write(
@@ -34412,6 +34628,152 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
     assert!(
         recovered.is_none(),
         "wait should yield once the live unhealthy registry clears"
+    );
+}
+
+#[test]
+fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_registry_without_probe() {
+    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "200");
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "dead-registry-fast-clear";
+    let server = TinyServer::http("127.0.0.1:0").expect("dead registry probe server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("dead registry probe server should expose a TCP address");
+    let probed = Arc::new(AtomicBool::new(false));
+    let probed_for_thread = Arc::clone(&probed);
+    let server_thread = thread::spawn(move || {
+        if let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(250)) {
+            probed_for_thread.store(true, Ordering::SeqCst);
+            let _ = request.respond(TinyResponse::from_string("unexpected probe"));
+        }
+    });
+
+    let registry = RuntimeBrokerRegistry {
+        pid: 999_999_999,
+        listen_addr: listen_addr.to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "dead-instance".to_string(),
+        admin_token: "secret".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+    };
+    save_runtime_broker_registry(&paths, broker_key, &registry)
+        .expect("dead broker registry should save");
+    let client = runtime_broker_client().expect("broker client should build");
+
+    let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
+        &client,
+        &paths,
+        broker_key,
+        &registry.upstream_base_url,
+        registry.include_code_review,
+    )
+    .expect("wait should not fail");
+
+    server_thread
+        .join()
+        .expect("dead registry probe server should join");
+
+    assert!(
+        recovered.is_none(),
+        "dead broker registry should be discarded instead of reused"
+    );
+    assert!(
+        !probed.load(Ordering::SeqCst),
+        "dead broker registry should not trigger a health probe"
+    );
+    assert!(
+        load_runtime_broker_registry(&paths, broker_key)
+            .expect("registry reload should succeed")
+            .is_none(),
+        "dead broker registry should be cleared"
+    );
+}
+
+#[test]
+fn find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "dead-compatible-key";
+    let server =
+        TinyServer::http("127.0.0.1:0").expect("dead compatible probe server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("dead compatible probe server should expose a TCP address");
+    let probed = Arc::new(AtomicBool::new(false));
+    let probed_for_thread = Arc::clone(&probed);
+    let server_thread = thread::spawn(move || {
+        if let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(250)) {
+            probed_for_thread.store(true, Ordering::SeqCst);
+            let _ = request.respond(TinyResponse::from_string("unexpected probe"));
+        }
+    });
+
+    let registry = RuntimeBrokerRegistry {
+        pid: 999_999_999,
+        listen_addr: listen_addr.to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "dead-compatible".to_string(),
+        admin_token: "secret".to_string(),
+        prodex_version: Some(runtime_current_prodex_version().to_string()),
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+    };
+    save_runtime_broker_registry(&paths, broker_key, &registry)
+        .expect("dead compatible registry should save");
+    let client = runtime_broker_client().expect("broker client should build");
+
+    let discovered = find_compatible_runtime_broker_registry(
+        &client,
+        &paths,
+        "excluded-key",
+        &registry.upstream_base_url,
+        registry.include_code_review,
+    )
+    .expect("compatible scan should not fail");
+
+    server_thread
+        .join()
+        .expect("dead compatible probe server should join");
+
+    assert!(
+        discovered.is_none(),
+        "dead compatible registry should not be returned"
+    );
+    assert!(
+        !probed.load(Ordering::SeqCst),
+        "dead compatible registry should be pruned before health probing"
+    );
+    assert!(
+        load_runtime_broker_registry(&paths, broker_key)
+            .expect("registry reload should succeed")
+            .is_none(),
+        "dead compatible registry should be removed from disk"
     );
 }
 

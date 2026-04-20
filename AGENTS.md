@@ -6,9 +6,14 @@ This file applies to the entire repository.
 
 `prodex` is a single-binary Rust CLI that wraps `codex` and manages multiple isolated `CODEX_HOME` profiles.
 
-The project currently lives mostly in one file:
+The codebase is now split across focused modules:
 
-- `src/main.rs`: CLI, profile management, quota logic, runtime proxy, tests
+- `src/main.rs`: binary entrypoint
+- `src/lib.rs`: shared crate wiring and tests
+- `src/cli_args.rs`, `src/command_dispatch.rs`, `src/app_commands/`: CLI parsing and Prodex-owned commands
+- `src/profile_commands/`, `src/quota_support/`, `src/secret_store/`, `src/profile_identity.rs`: profile, quota, secret storage, and credential identity flows
+- `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker logic
+- `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
 - `README.md`: full user-facing documentation
 - `QUICKSTART.md`: shorter installation and usage guide
 

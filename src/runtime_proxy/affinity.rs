@@ -192,7 +192,7 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
     let tool_output_only = !input.is_empty()
         && input
             .iter()
-            .all(|item| runtime_request_value_previous_response_input_item_is_tool_output(item));
+            .all(runtime_request_value_previous_response_input_item_is_tool_output);
 
     Some(if tool_output_only {
         RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly

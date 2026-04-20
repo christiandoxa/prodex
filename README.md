@@ -8,6 +8,18 @@ Main use case: one account per profile, quota checked before launch, and new ses
 
 It can also launch Caveman mode, and optionally wire Claude-Mem into the selected session path.
 
+## Repository layout
+
+The Rust crate is modular now rather than centered on one large source file.
+
+- `src/main.rs`: binary entrypoint
+- `src/lib.rs`: shared crate wiring and test support
+- `src/app_commands/`, `src/command_dispatch.rs`, `src/cli_args.rs`: CLI parsing and top-level command flow
+- `src/profile_commands/`, `src/quota_support/`, `src/secret_store/`, `src/profile_identity.rs`: profile, quota, secret storage, and credential identity management
+- `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker internals
+- `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
+- `scripts/npm/` and `npm/`: npm packaging, version sync, and publish helpers
+
 ## Features
 
 - one account = one profile

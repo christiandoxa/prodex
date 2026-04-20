@@ -4,6 +4,8 @@ One OpenAI profile pool. Codex, Claude Code, Caveman mode, and optional Claude-M
 
 Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. All of these commands run on top of the same OpenAI-backed Prodex profile pool.
 
+For contributors: the crate is split across focused modules now. `src/main.rs` is the entrypoint, command handling lives under `src/app_commands/` and `src/command_dispatch.rs`, profile/quota flows live under `src/profile_commands/` and `src/quota_support/`, and runtime proxy code lives under `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, and `src/runtime_broker/`.
+
 ## Requirements
 
 - An OpenAI account, plus at least one logged-in Prodex profile

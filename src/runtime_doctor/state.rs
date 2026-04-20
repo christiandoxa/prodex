@@ -364,6 +364,76 @@ fn runtime_doctor_collect_binary_identities(summary: &mut RuntimeDoctorSummary) 
             .is_some_and(|hash| !hashes.is_empty() && !hashes.contains(hash));
 }
 
+fn runtime_doctor_runtime_broker_mismatch_reason(
+    current: &RuntimeProdexBinaryIdentity,
+    observed: &RuntimeProdexBinaryIdentity,
+) -> &'static str {
+    match (
+        current.executable_sha256.as_deref(),
+        observed.executable_sha256.as_deref(),
+    ) {
+        (Some(current_sha256), Some(observed_sha256)) if current_sha256 != observed_sha256 => {
+            "sha256_mismatch"
+        }
+        _ => match (
+            current.prodex_version.as_deref(),
+            observed.prodex_version.as_deref(),
+        ) {
+            (Some(current_version), Some(observed_version))
+                if current_version != observed_version =>
+            {
+                "version_mismatch"
+            }
+            _ if observed.is_present() => "identity_mismatch",
+            _ => "none",
+        },
+    }
+}
+
+fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key: &str) -> usize {
+    let lease_dir = runtime_broker_lease_dir(paths, broker_key);
+    let Ok(entries) = fs::read_dir(&lease_dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let path = entry.path();
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                return false;
+            };
+            let pid = file_name
+                .split('-')
+                .next()
+                .and_then(|value| value.parse::<u32>().ok());
+            !pid.is_some_and(runtime_process_pid_alive)
+        })
+        .count()
+}
+
+fn runtime_doctor_probe_runtime_broker_health_status(
+    client: &Client,
+    registry: &RuntimeBrokerRegistry,
+) -> (&'static str, Option<RuntimeBrokerHealth>) {
+    let response = client
+        .get(runtime_broker_health_url(registry))
+        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .send();
+    match response {
+        Ok(response) => {
+            if !response.status().is_success() {
+                return ("health_unreachable", None);
+            }
+            match response.json::<RuntimeBrokerHealth>() {
+                Ok(health) => ("healthy", Some(health)),
+                Err(_) => ("health_unreachable", None),
+            }
+        }
+        Err(err) if err.is_timeout() => ("health_timeout", None),
+        Err(_) => ("health_unreachable", None),
+    }
+}
+
 fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
     let current_identity = runtime_current_prodex_binary_identity();
     let client = runtime_broker_client().ok();
@@ -371,17 +441,27 @@ fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut Runt
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
         };
+        let stale_leases = runtime_doctor_count_stale_runtime_broker_leases(paths, &broker_key);
         if !runtime_process_pid_alive(registry.pid) {
+            summary.runtime_broker_identities.push(format!(
+                "broker_key={} pid={} listen_addr={} status=dead_pid mismatch=none version={} path={} sha256={} source=registry stale_leases={}",
+                broker_key,
+                registry.pid,
+                registry.listen_addr,
+                registry.prodex_version.clone().unwrap_or_else(|| "-".to_string()),
+                registry.executable_path.clone().unwrap_or_else(|| "-".to_string()),
+                registry.executable_sha256.clone().unwrap_or_else(|| "-".to_string()),
+                stale_leases
+            ));
             continue;
         }
-        let (identity, source) = client
+        let (health_status, health) = client
             .as_ref()
-            .and_then(|client| {
-                probe_runtime_broker_health(client, &registry)
-                    .ok()
-                    .flatten()
-            })
-            .map(|health| (runtime_health_prodex_binary_identity(&health), "health"))
+            .map(|client| runtime_doctor_probe_runtime_broker_health_status(client, &registry))
+            .unwrap_or(("health_unreachable", None));
+        let (identity, source) = health
+            .as_ref()
+            .map(|health| (runtime_health_prodex_binary_identity(health), "health"))
             .filter(|(identity, _)| identity.is_present())
             .or_else(|| {
                 let identity = runtime_registry_prodex_binary_identity(&registry);
@@ -392,15 +472,26 @@ fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut Runt
                 identity.is_present().then_some((identity, "process"))
             })
             .unwrap_or((RuntimeProdexBinaryIdentity::default(), "missing"));
-        if identity.is_present()
+        let mismatch = if identity.is_present()
             && !runtime_prodex_binary_identity_matches(&current_identity, &identity)
         {
             summary.runtime_broker_mismatch = true;
-        }
+            runtime_doctor_runtime_broker_mismatch_reason(&current_identity, &identity)
+        } else {
+            "none"
+        };
+        let status = if mismatch != "none" {
+            "binary_mismatch"
+        } else {
+            health_status
+        };
         summary.runtime_broker_identities.push(format!(
-            "{} pid={} version={} path={} sha256={} source={}",
+            "broker_key={} pid={} listen_addr={} status={} mismatch={} version={} path={} sha256={} source={} stale_leases={}",
             broker_key,
             registry.pid,
+            registry.listen_addr,
+            status,
+            mismatch,
             identity.prodex_version.unwrap_or_else(|| "-".to_string()),
             identity
                 .executable_path
@@ -409,7 +500,8 @@ fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut Runt
             identity
                 .executable_sha256
                 .unwrap_or_else(|| "-".to_string()),
-            source
+            source,
+            stale_leases
         ));
     }
 }
@@ -489,14 +581,10 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
     let merged_response_bindings =
         runtime_external_response_profile_bindings(&merged_continuations.response_profile_bindings)
             .len();
-    summary.persisted_turn_state_coverage_percent = if merged_response_bindings > 0 {
-        Some(
-            ((merged_continuations.turn_state_bindings.len() * 100) / merged_response_bindings)
-                .min(100) as u8,
-        )
-    } else {
-        None
-    };
+    summary.persisted_turn_state_coverage_percent =
+        std::num::NonZeroUsize::new(merged_response_bindings).map(|divisor| {
+            ((merged_continuations.turn_state_bindings.len() * 100) / divisor.get()).min(100) as u8
+        });
     summary.continuation_journal_saved_at =
         (continuation_journal.value.saved_at > 0).then_some(continuation_journal.value.saved_at);
     summary.stale_persisted_usage_snapshots = usage_snapshots
