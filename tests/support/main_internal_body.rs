@@ -15337,6 +15337,95 @@ fn runtime_continuation_store_compaction_prunes_response_bindings_to_limit() {
 }
 
 #[test]
+fn runtime_continuation_store_compaction_prunes_response_statuses_to_limit() {
+    let temp_dir = TestDir::new();
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let profiles = BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
+        },
+    )]);
+    let now = Local::now().timestamp();
+    let mut response_profile_bindings = BTreeMap::new();
+    let mut response_statuses = BTreeMap::new();
+    for index in 0..(RUNTIME_CONTINUATION_RESPONSE_STATUS_LIMIT + 3) {
+        let response_id = format!("resp-{index:06}");
+        response_profile_bindings.insert(
+            response_id.clone(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 1_000 + index as i64,
+            },
+        );
+        response_statuses.insert(
+            response_id,
+            RuntimeContinuationBindingStatus {
+                state: RuntimeContinuationBindingLifecycle::Warm,
+                confidence: 1,
+                last_touched_at: Some(now - 1_000 + index as i64),
+                last_verified_at: None,
+                last_verified_route: None,
+                last_not_found_at: None,
+                not_found_streak: 0,
+                success_count: 0,
+                failure_count: 0,
+            },
+        );
+    }
+    response_statuses.insert(
+        "resp-hot".to_string(),
+        RuntimeContinuationBindingStatus {
+            state: RuntimeContinuationBindingLifecycle::Verified,
+            confidence: RUNTIME_CONTINUATION_CONFIDENCE_MAX,
+            last_touched_at: Some(now),
+            last_verified_at: Some(now),
+            last_verified_route: Some("responses".to_string()),
+            last_not_found_at: None,
+            not_found_streak: 0,
+            success_count: 5,
+            failure_count: 0,
+        },
+    );
+    response_profile_bindings.insert(
+        "resp-hot".to_string(),
+        ResponseProfileBinding {
+            profile_name: "main".to_string(),
+            bound_at: now - 2_000,
+        },
+    );
+
+    let compacted = compact_runtime_continuation_store(
+        RuntimeContinuationStore {
+            response_profile_bindings,
+            statuses: RuntimeContinuationStatuses {
+                response: response_statuses,
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+        &profiles,
+    );
+
+    assert_eq!(
+        compacted.statuses.response.len(),
+        RUNTIME_CONTINUATION_RESPONSE_STATUS_LIMIT
+    );
+    assert!(
+        compacted.statuses.response.contains_key("resp-hot"),
+        "verified status should survive hard status cap"
+    );
+    assert!(
+        !compacted.statuses.response.contains_key("resp-000000"),
+        "coldest status should be dropped deterministically"
+    );
+}
+
+#[test]
 fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_cold_binding() {
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");

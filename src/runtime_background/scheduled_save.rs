@@ -187,10 +187,11 @@ pub(crate) fn runtime_state_save_snapshot_from_runtime(
 pub(crate) fn runtime_state_save_snapshot_from_shared(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeStateSaveSnapshot> {
-    let runtime = shared
+    let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    compact_runtime_continuation_state_in_place(&mut runtime);
     Ok(runtime_state_save_snapshot_from_runtime(&runtime))
 }
 
@@ -512,10 +513,11 @@ pub(crate) fn runtime_continuation_journal_snapshot_from_runtime(
 pub(crate) fn runtime_continuation_journal_snapshot_from_shared(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeContinuationJournalSnapshot> {
-    let runtime = shared
+    let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    compact_runtime_continuation_state_in_place(&mut runtime);
     Ok(runtime_continuation_journal_snapshot_from_runtime(&runtime))
 }
 
@@ -525,10 +527,19 @@ pub(crate) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
         &queue.wake,
         queue.active.as_ref(),
         |job| {
-            let snapshot = match &job.payload {
-                RuntimeStateSavePayload::Snapshot(snapshot) => Ok(snapshot.clone()),
+            let RuntimeStateSaveJob {
+                payload,
+                revision,
+                latest_revision,
+                log_path,
+                reason,
+                queued_at,
+                ready_at: _,
+            } = job;
+            let snapshot = match payload {
+                RuntimeStateSavePayload::Snapshot(snapshot) => Ok(snapshot),
                 RuntimeStateSavePayload::Live(shared) => {
-                    runtime_state_save_snapshot_from_shared(shared)
+                    runtime_state_save_snapshot_from_shared(&shared)
                 }
             };
             match snapshot.and_then(|snapshot| {
@@ -539,38 +550,39 @@ pub(crate) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
                     &snapshot.profile_scores,
                     &snapshot.usage_snapshots,
                     &snapshot.backoffs,
-                    job.revision,
-                    &job.latest_revision,
+                    revision,
+                    &latest_revision,
                 )
             }) {
                 Ok(true) => runtime_proxy_log_to_path(
-                    &job.log_path,
+                    &log_path,
                     &format!(
                         "state_save_ok revision={} reason={} lag_ms={}",
-                        job.revision,
-                        job.reason,
-                        job.queued_at.elapsed().as_millis()
+                        revision,
+                        reason,
+                        queued_at.elapsed().as_millis()
                     ),
                 ),
                 Ok(false) => runtime_proxy_log_to_path(
-                    &job.log_path,
+                    &log_path,
                     &format!(
                         "state_save_skipped revision={} reason={} lag_ms={}",
-                        job.revision,
-                        job.reason,
-                        job.queued_at.elapsed().as_millis()
+                        revision,
+                        reason,
+                        queued_at.elapsed().as_millis()
                     ),
                 ),
                 Err(err) => runtime_proxy_log_to_path(
-                    &job.log_path,
+                    &log_path,
                     &format!(
                         "state_save_error revision={} reason={} lag_ms={} stage=write error={err:#}",
-                        job.revision,
-                        job.reason,
-                        job.queued_at.elapsed().as_millis()
+                        revision,
+                        reason,
+                        queued_at.elapsed().as_millis()
                     ),
                 ),
             }
+            runtime_allocator_trim_best_effort();
         },
     )
 }
@@ -583,10 +595,18 @@ pub(crate) fn runtime_continuation_journal_save_worker_loop(
         &queue.wake,
         queue.active.as_ref(),
         |job| {
-            let snapshot = match &job.payload {
-                RuntimeContinuationJournalSavePayload::Snapshot(snapshot) => Ok(snapshot.clone()),
+            let RuntimeContinuationJournalSaveJob {
+                payload,
+                log_path,
+                reason,
+                saved_at,
+                queued_at,
+                ready_at: _,
+            } = job;
+            let snapshot = match payload {
+                RuntimeContinuationJournalSavePayload::Snapshot(snapshot) => Ok(snapshot),
                 RuntimeContinuationJournalSavePayload::Live(shared) => {
-                    runtime_continuation_journal_snapshot_from_shared(shared)
+                    runtime_continuation_journal_snapshot_from_shared(&shared)
                 }
             };
             match snapshot.and_then(|snapshot| {
@@ -594,30 +614,43 @@ pub(crate) fn runtime_continuation_journal_save_worker_loop(
                     &snapshot.paths,
                     &snapshot.continuations,
                     &snapshot.profiles,
-                    job.saved_at,
+                    saved_at,
                 )
             }) {
                 Ok(()) => runtime_proxy_log_to_path(
-                    &job.log_path,
+                    &log_path,
                     &format!(
                         "continuation_journal_save_ok saved_at={} reason={} lag_ms={}",
-                        job.saved_at,
-                        job.reason,
-                        job.queued_at.elapsed().as_millis()
+                        saved_at,
+                        reason,
+                        queued_at.elapsed().as_millis()
                     ),
                 ),
                 Err(err) => runtime_proxy_log_to_path(
-                    &job.log_path,
+                    &log_path,
                     &format!(
                         "continuation_journal_save_error saved_at={} reason={} lag_ms={} stage=write error={err:#}",
-                        job.saved_at,
-                        job.reason,
-                        job.queued_at.elapsed().as_millis()
+                        saved_at,
+                        reason,
+                        queued_at.elapsed().as_millis()
                     ),
                 ),
             }
+            runtime_allocator_trim_best_effort();
         },
     )
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+unsafe extern "C" {
+    fn malloc_trim(pad: usize) -> i32;
+}
+
+pub(crate) fn runtime_allocator_trim_best_effort() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        let _ = malloc_trim(0);
+    }
 }
 
 fn runtime_wait_for_due_scheduled_jobs<K, J>(

@@ -295,7 +295,71 @@ pub(crate) fn compact_runtime_continuation_statuses(
             runtime_continuation_status_should_retain_without_binding(status, now)
         }
     });
+    prune_runtime_continuation_status_map(
+        &mut merged.response,
+        &continuations.response_profile_bindings,
+        RUNTIME_CONTINUATION_RESPONSE_STATUS_LIMIT,
+    );
+    prune_runtime_continuation_status_map(
+        &mut merged.turn_state,
+        &continuations.turn_state_bindings,
+        RUNTIME_CONTINUATION_TURN_STATE_STATUS_LIMIT,
+    );
+    prune_runtime_continuation_status_map(
+        &mut merged.session_id,
+        &continuations.session_id_bindings,
+        RUNTIME_CONTINUATION_SESSION_ID_STATUS_LIMIT,
+    );
     merged
+}
+
+pub(crate) fn runtime_continuation_status_retention_sort_key(
+    key: &str,
+    status: &RuntimeContinuationBindingStatus,
+    bindings: &BTreeMap<String, ResponseProfileBinding>,
+) -> (u8, u8, u32, u32, u32, u8, i64, i64, i64, i64) {
+    let evidence = runtime_continuation_status_evidence_sort_key(status);
+    (
+        if bindings.contains_key(key) { 1 } else { 0 },
+        evidence.0,
+        evidence.1,
+        evidence.2,
+        evidence.3,
+        evidence.4,
+        evidence.5,
+        evidence.6,
+        evidence.7,
+        bindings
+            .get(key)
+            .map(|binding| binding.bound_at)
+            .unwrap_or(i64::MIN),
+    )
+}
+
+pub(crate) fn prune_runtime_continuation_status_map(
+    statuses: &mut BTreeMap<String, RuntimeContinuationBindingStatus>,
+    bindings: &BTreeMap<String, ResponseProfileBinding>,
+    max_entries: usize,
+) {
+    if statuses.len() <= max_entries {
+        return;
+    }
+
+    let excess = statuses.len() - max_entries;
+    let mut coldest = statuses
+        .iter()
+        .map(|(key, status)| {
+            (
+                key.clone(),
+                runtime_continuation_status_retention_sort_key(key, status, bindings),
+            )
+        })
+        .collect::<Vec<_>>();
+    coldest.sort_by_key(|(_, retention)| *retention);
+
+    for (key, _) in coldest.into_iter().take(excess) {
+        statuses.remove(&key);
+    }
 }
 
 pub(crate) fn runtime_continuation_binding_should_retain(

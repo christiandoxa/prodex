@@ -19,9 +19,6 @@ pub(crate) fn compact_runtime_continuation_store(
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> RuntimeContinuationStore {
     let now = Local::now().timestamp();
-    let response_statuses = continuations.statuses.response.clone();
-    let turn_state_statuses = continuations.statuses.turn_state.clone();
-    let session_id_statuses = continuations.statuses.session_id.clone();
     prune_profile_bindings_for_housekeeping_without_retention(
         &mut continuations.response_profile_bindings,
         profiles,
@@ -41,7 +38,11 @@ pub(crate) fn compact_runtime_continuation_store(
     continuations
         .response_profile_bindings
         .retain(|key, binding| {
-            runtime_continuation_binding_should_retain(binding, response_statuses.get(key), now)
+            runtime_continuation_binding_should_retain(
+                binding,
+                continuations.statuses.response.get(key),
+                now,
+            )
         });
     let response_turn_state_keys = continuations
         .response_profile_bindings
@@ -63,19 +64,31 @@ pub(crate) fn compact_runtime_continuation_store(
         }
     }
     continuations.turn_state_bindings.retain(|key, binding| {
-        runtime_continuation_binding_should_retain(binding, turn_state_statuses.get(key), now)
+        runtime_continuation_binding_should_retain(
+            binding,
+            continuations.statuses.turn_state.get(key),
+            now,
+        )
     });
     continuations
         .session_profile_bindings
         .retain(|key, binding| {
-            runtime_continuation_binding_should_retain(binding, session_id_statuses.get(key), now)
+            runtime_continuation_binding_should_retain(
+                binding,
+                continuations.statuses.session_id.get(key),
+                now,
+            )
         });
     continuations.session_id_bindings.retain(|key, binding| {
-        runtime_continuation_binding_should_retain(binding, session_id_statuses.get(key), now)
+        runtime_continuation_binding_should_retain(
+            binding,
+            continuations.statuses.session_id.get(key),
+            now,
+        )
     });
     prune_runtime_continuation_response_bindings(
         &mut continuations.response_profile_bindings,
-        &response_statuses,
+        &continuations.statuses.response,
         RESPONSE_PROFILE_BINDING_LIMIT,
     );
     prune_profile_bindings(
@@ -90,7 +103,7 @@ pub(crate) fn compact_runtime_continuation_store(
         &mut continuations.session_id_bindings,
         SESSION_ID_PROFILE_BINDING_LIMIT,
     );
-    let statuses = continuations.statuses.clone();
+    let statuses = std::mem::take(&mut continuations.statuses);
     continuations.statuses = compact_runtime_continuation_statuses(statuses, &continuations);
     continuations
 }

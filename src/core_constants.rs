@@ -30,9 +30,14 @@ pub(crate) const CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS: i64 =
 pub(crate) const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 pub(crate) const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
 pub(crate) const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
-pub(crate) const RESPONSE_PROFILE_BINDING_LIMIT: usize = 65_536;
-pub(crate) const TURN_STATE_PROFILE_BINDING_LIMIT: usize = 4_096;
-pub(crate) const SESSION_ID_PROFILE_BINDING_LIMIT: usize = 4_096;
+pub(crate) const RESPONSE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 16_384 };
+pub(crate) const TURN_STATE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
+pub(crate) const SESSION_ID_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
+pub(crate) const RUNTIME_CONTINUATION_RESPONSE_STATUS_LIMIT: usize = RESPONSE_PROFILE_BINDING_LIMIT;
+pub(crate) const RUNTIME_CONTINUATION_TURN_STATE_STATUS_LIMIT: usize =
+    TURN_STATE_PROFILE_BINDING_LIMIT;
+pub(crate) const RUNTIME_CONTINUATION_SESSION_ID_STATUS_LIMIT: usize =
+    SESSION_ID_PROFILE_BINDING_LIMIT;
 pub(crate) const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 pub(crate) const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
