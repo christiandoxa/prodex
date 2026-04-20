@@ -25467,7 +25467,6 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
         vec![
             "second-account".to_string(),
             "third-account".to_string(),
-            "third-account".to_string(),
             "second-account".to_string(),
         ]
     );
@@ -28762,6 +28761,207 @@ fn runtime_proxy_reapplies_session_affinity_after_websocket_previous_response_fr
     assert!(
         persisted.last_run_selected_at.contains_key("second"),
         "fresh websocket fallback should persist the selected profile's last-run marker"
+    );
+}
+
+#[test]
+fn runtime_proxy_trusted_websocket_previous_response_not_found_reapplies_session_without_owner_sweep(
+) {
+    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        // Keep second on cooldown so the no-affinity fresh fallback path would otherwise stay on current third.
+        last_run_selected_at: BTreeMap::from([("second".to_string(), now)]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-fallback".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+    };
+    state.save(&paths).expect("failed to save updated state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "resp-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            session_profile_bindings: BTreeMap::from([(
+                "sess-fallback".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            session_id_bindings: BTreeMap::from([(
+                "sess-fallback".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                response: BTreeMap::from([(
+                    "resp-second".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("websocket".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                session_id: BTreeMap::from([(
+                    "sess-fallback".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 2,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("websocket".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save continuation sidecar");
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    set_test_websocket_io_timeout(&mut socket, Duration::from_secs(5));
+    socket
+        .send(WsMessage::Text(
+            r#"{"previous_response_id":"resp-second","session_id":"sess-fallback","input":[]}"#
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket.read() {
+            Ok(WsMessage::Text(text)) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text)
+                    || text.contains("\"previous_response_not_found\"")
+                    || text.contains("\"stale_continuation\"");
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            Ok(WsMessage::Ping(payload)) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {}
+            Ok(WsMessage::Close(_))
+            | Err(WsError::ConnectionClosed)
+            | Err(WsError::AlreadyClosed) => break,
+            Err(err) => {
+                panic!(
+                    "runtime proxy websocket failed while waiting for trusted session fallback payloads: {err}; payloads={payloads:?}"
+                );
+            }
+            Ok(other) => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"resp-second\"")),
+        "trusted websocket previous_response fallback should continue on the bound session owner: {payloads:?}"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "trusted websocket session fallback should not leak previous_response_not_found: {payloads:?}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string(), "second-account".to_string()],
+        "trusted websocket session fallback should not sweep unrelated owners"
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert_eq!(
+        upstream_requests.len(),
+        2,
+        "trusted websocket session fallback should retry once without previous_response_id"
+    );
+    assert!(
+        upstream_requests
+            .first()
+            .is_some_and(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "first trusted websocket request should preserve the original continuation: {upstream_requests:?}"
+    );
+    assert!(
+        upstream_requests
+            .last()
+            .is_some_and(|request| !request.contains("\"previous_response_id\":\"resp-second\"")),
+        "trusted websocket session fallback should strip the stale previous_response_id on retry: {upstream_requests:?}"
     );
 }
 

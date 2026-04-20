@@ -1711,6 +1711,41 @@ pub(super) fn proxy_runtime_websocket_text_message(
             }
         };
     }
+    macro_rules! apply_trusted_session_previous_response_fresh_fallback {
+        ($profile_name:expr, $has_turn_state_retry:expr, $via:expr) => {
+            if !$has_turn_state_retry
+                && previous_response_id.is_some()
+                && request_session_id.is_some()
+                && trusted_previous_response_affinity
+                && !request_requires_previous_response_affinity
+                && !previous_response_fresh_fallback_used
+                && compact_followup_profile.is_none()
+                && bound_profile.as_deref() == Some($profile_name.as_str())
+                && let Some(fresh_request_text) =
+                    runtime_request_text_without_previous_response_id(&request_text)
+            {
+                let _ = clear_runtime_stale_previous_response_binding(
+                    shared,
+                    $profile_name,
+                    previous_response_id.as_deref(),
+                )?;
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=trusted_session_not_found via={}",
+                        $via
+                    ),
+                );
+                apply_runtime_websocket_previous_response_fresh_fallback(
+                    fresh_request_text,
+                    runtime_websocket_fresh_fallback_target!(),
+                    runtime_previous_response_fresh_fallback_state!(),
+                );
+                recompute_route_affinity!("previous_response_fresh_fallback")?;
+                continue;
+            }
+        };
+    }
     loop {
         let pressure_mode =
             runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Websocket);
@@ -2018,6 +2053,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
+                        apply_trusted_session_previous_response_fresh_fallback!(
+                            &profile_name,
+                            has_turn_state_retry,
+                            "direct_current_profile_fallback"
+                        );
                         if !has_turn_state_retry
                             && !runtime_websocket_request_requires_locked_previous_response_affinity(
                                 request_requires_previous_response_affinity,
@@ -2462,6 +2502,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
+                        apply_trusted_session_previous_response_fresh_fallback!(
+                            &profile_name,
+                            has_turn_state_retry,
+                            "direct_current_profile_fallback"
+                        );
                         if !has_turn_state_retry
                             && !runtime_websocket_request_requires_locked_previous_response_affinity(
                                 request_requires_previous_response_affinity,
@@ -3080,6 +3125,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
+                apply_trusted_session_previous_response_fresh_fallback!(
+                    &profile_name,
+                    has_turn_state_retry,
+                    "candidate"
+                );
                 if !has_turn_state_retry
                     && !runtime_websocket_request_requires_locked_previous_response_affinity(
                         request_requires_previous_response_affinity,
