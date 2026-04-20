@@ -19,6 +19,32 @@ struct RuntimeProcessVersionResolution {
     version: Option<String>,
 }
 
+trait RuntimeProcessPlatform {
+    fn pid_alive(pid: u32) -> bool;
+    fn executable_path(pid: u32) -> Option<PathBuf>;
+    fn terminate_step(pid_value: &str, force: bool);
+}
+
+#[cfg(target_os = "linux")]
+struct RuntimeProcessLinux;
+
+#[cfg(windows)]
+struct RuntimeProcessWindows;
+
+#[cfg(not(any(target_os = "linux", windows)))]
+struct RuntimeProcessFallback;
+
+type RuntimeProcessPlatformImpl = RuntimeProcessPlatformForTarget;
+
+#[cfg(target_os = "linux")]
+type RuntimeProcessPlatformForTarget = RuntimeProcessLinux;
+
+#[cfg(windows)]
+type RuntimeProcessPlatformForTarget = RuntimeProcessWindows;
+
+#[cfg(not(any(target_os = "linux", windows)))]
+type RuntimeProcessPlatformForTarget = RuntimeProcessFallback;
+
 fn runtime_process_row(pid: u32) -> Option<ProcessRow> {
     collect_process_rows()
         .into_iter()
@@ -26,42 +52,114 @@ fn runtime_process_row(pid: u32) -> Option<ProcessRow> {
 }
 
 #[cfg(target_os = "linux")]
-fn runtime_process_pid_alive_via_os(pid: u32) -> bool {
-    PathBuf::from(format!("/proc/{pid}")).exists()
+impl RuntimeProcessPlatform for RuntimeProcessLinux {
+    fn pid_alive(pid: u32) -> bool {
+        PathBuf::from(format!("/proc/{pid}")).exists()
+    }
+
+    fn executable_path(pid: u32) -> Option<PathBuf> {
+        fs::read_link(format!("/proc/{pid}/exe")).ok()
+    }
+
+    fn terminate_step(pid_value: &str, force: bool) {
+        let signal = if force { "-KILL" } else { "-TERM" };
+        let _ = Command::new("kill")
+            .args([signal, pid_value])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 #[cfg(windows)]
-fn runtime_process_pid_alive_via_os(pid: u32) -> bool {
-    let Ok(output) = Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-    else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
+impl RuntimeProcessPlatform for RuntimeProcessWindows {
+    fn pid_alive(pid: u32) -> bool {
+        let Ok(output) = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                trimmed
+                    .strip_prefix('"')
+                    .and_then(|value| value.split("\",\"").nth(1))
+                    .and_then(|value| value.parse::<u32>().ok())
+            })
+            .any(|listed_pid| listed_pid == pid)
     }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            trimmed
-                .strip_prefix('"')
-                .and_then(|value| value.split("\",\"").nth(1))
-                .and_then(|value| value.parse::<u32>().ok())
-        })
-        .any(|listed_pid| listed_pid == pid)
+
+    fn executable_path(pid: u32) -> Option<PathBuf> {
+        for shell in ["powershell", "pwsh"] {
+            let Ok(output) = Command::new(shell)
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).Path"),
+                ])
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+            else {
+                continue;
+            };
+            if !output.status.success() {
+                continue;
+            }
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+        None
+    }
+
+    fn terminate_step(pid_value: &str, force: bool) {
+        let mut command = Command::new("taskkill");
+        command.args(["/PID", pid_value, "/T"]);
+        if force {
+            command.arg("/F");
+        }
+        let _ = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn runtime_process_pid_alive_via_os(_pid: u32) -> bool {
-    false
+impl RuntimeProcessPlatform for RuntimeProcessFallback {
+    fn pid_alive(_pid: u32) -> bool {
+        false
+    }
+
+    fn executable_path(_pid: u32) -> Option<PathBuf> {
+        None
+    }
+
+    fn terminate_step(pid_value: &str, force: bool) {
+        let signal = if force { "-KILL" } else { "-TERM" };
+        let _ = Command::new("kill")
+            .args([signal, pid_value])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 pub(crate) fn runtime_process_pid_alive(pid: u32) -> bool {
-    if runtime_process_pid_alive_via_os(pid) {
+    if RuntimeProcessPlatformImpl::pid_alive(pid) {
         return true;
     }
     runtime_process_row(pid).is_some()
@@ -183,42 +281,6 @@ pub(crate) fn read_prodex_version_from_executable(executable: &Path) -> Result<S
     })
 }
 
-#[cfg(target_os = "linux")]
-fn runtime_process_executable_path_via_os(pid: u32) -> Option<PathBuf> {
-    fs::read_link(format!("/proc/{pid}/exe")).ok()
-}
-
-#[cfg(windows)]
-fn runtime_process_executable_path_via_os(pid: u32) -> Option<PathBuf> {
-    for shell in ["powershell", "pwsh"] {
-        let Ok(output) = Command::new(shell)
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).Path"),
-            ])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-        else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
-        }
-    }
-    None
-}
-
-#[cfg(not(any(target_os = "linux", windows)))]
-fn runtime_process_executable_path_via_os(_pid: u32) -> Option<PathBuf> {
-    None
-}
-
 fn push_runtime_process_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
     if !candidates.iter().any(|candidate| candidate == &path) {
         candidates.push(path);
@@ -227,7 +289,7 @@ fn push_runtime_process_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) 
 
 fn runtime_process_executable_candidates(pid: u32, row: Option<&ProcessRow>) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(executable) = runtime_process_executable_path_via_os(pid) {
+    if let Some(executable) = RuntimeProcessPlatformImpl::executable_path(pid) {
         push_runtime_process_candidate(&mut candidates, executable);
     }
     if let Some(row) = row {
@@ -243,7 +305,7 @@ fn runtime_process_executable_candidates(pid: u32, row: Option<&ProcessRow>) -> 
 
 fn runtime_process_version_resolution(pid: u32) -> RuntimeProcessVersionResolution {
     let row = runtime_process_row(pid);
-    let alive = runtime_process_pid_alive_via_os(pid) || row.is_some();
+    let alive = RuntimeProcessPlatformImpl::pid_alive(pid) || row.is_some();
     let executable_candidates = runtime_process_executable_candidates(pid, row.as_ref());
     let executable_path = executable_candidates.first().cloned();
     let version = executable_candidates
@@ -258,31 +320,6 @@ fn runtime_process_version_resolution(pid: u32) -> RuntimeProcessVersionResoluti
 
 pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
     runtime_process_version_resolution(pid).version
-}
-
-#[cfg(windows)]
-fn terminate_runtime_process_step(pid_value: &str, force: bool) {
-    let mut command = Command::new("taskkill");
-    command.args(["/PID", pid_value, "/T"]);
-    if force {
-        command.arg("/F");
-    }
-    let _ = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-#[cfg(not(windows))]
-fn terminate_runtime_process_step(pid_value: &str, force: bool) {
-    let signal = if force { "-KILL" } else { "-TERM" };
-    let _ = Command::new("kill")
-        .args([signal, pid_value])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
 }
 
 pub(crate) fn terminate_runtime_process(pid: u32) {
@@ -302,12 +339,12 @@ pub(crate) fn terminate_runtime_process(pid: u32) {
         !runtime_process_pid_alive(pid)
     };
 
-    terminate_runtime_process_step(&pid_value, false);
+    RuntimeProcessPlatformImpl::terminate_step(&pid_value, false);
     if wait_for_exit(500) {
         return;
     }
 
-    terminate_runtime_process_step(&pid_value, true);
+    RuntimeProcessPlatformImpl::terminate_step(&pid_value, true);
     let _ = wait_for_exit(250);
 }
 
