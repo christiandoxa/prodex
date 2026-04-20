@@ -5330,11 +5330,7 @@ pub(super) fn attempt_runtime_responses_request(
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
     let mut inflight_guard = Some(inflight_guard);
-    let mut recovery_steps = [
-        RuntimeProfileUnauthorizedRecoveryStep::Reload,
-        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
-    ]
-    .into_iter();
+    let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let response = send_runtime_proxy_upstream_responses_request(
             request_id,

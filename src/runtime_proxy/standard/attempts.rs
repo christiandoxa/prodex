@@ -47,11 +47,7 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
-    let mut recovery_steps = [
-        RuntimeProfileUnauthorizedRecoveryStep::Reload,
-        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
-    ]
-    .into_iter();
+    let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let response =
             send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
@@ -237,11 +233,7 @@ pub(super) fn attempt_runtime_standard_request(
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
-    let mut recovery_steps = [
-        RuntimeProfileUnauthorizedRecoveryStep::Reload,
-        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
-    ]
-    .into_iter();
+    let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let response =
             send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)

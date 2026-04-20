@@ -183,14 +183,24 @@ pub(super) enum RuntimeProfileUnauthorizedRecoveryStep {
     Refresh,
 }
 
-fn runtime_try_recover_profile_auth_from_unauthorized(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-    step: RuntimeProfileUnauthorizedRecoveryStep,
-) -> bool {
-    let attempt = (|| -> Result<bool> {
+type RuntimeProfileUnauthorizedRecoverySteps =
+    std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>;
+
+struct RuntimeProfileUnauthorizedRecoveryOutcome {
+    source: &'static str,
+    changed: bool,
+}
+
+impl RuntimeProfileUnauthorizedRecoveryStep {
+    pub(super) fn ordered() -> RuntimeProfileUnauthorizedRecoverySteps {
+        [Self::Reload, Self::Refresh].into_iter()
+    }
+
+    fn recover(
+        self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+    ) -> Result<Option<RuntimeProfileUnauthorizedRecoveryOutcome>> {
         let (cached_entry, codex_home) = {
             let runtime = shared
                 .runtime
@@ -207,14 +217,14 @@ fn runtime_try_recover_profile_auth_from_unauthorized(
             )
         };
 
-        let outcome = match step {
+        match self {
             RuntimeProfileUnauthorizedRecoveryStep::Reload => {
                 let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
                 let auth_changed = cached_entry
                     .as_ref()
                     .is_some_and(|cached_entry| cached_entry.auth != entry.auth);
                 if !auth_changed {
-                    return Ok(false);
+                    return Ok(None);
                 }
                 update_runtime_profile_usage_auth_cache_entry(
                     shared,
@@ -223,7 +233,10 @@ fn runtime_try_recover_profile_auth_from_unauthorized(
                     entry,
                     "auth_reloaded",
                 );
-                ("reloaded", true)
+                Ok(Some(RuntimeProfileUnauthorizedRecoveryOutcome {
+                    source: "reloaded",
+                    changed: true,
+                }))
             }
             RuntimeProfileUnauthorizedRecoveryStep::Refresh => {
                 let outcome = sync_usage_auth_from_disk_or_refresh(
@@ -238,20 +251,33 @@ fn runtime_try_recover_profile_auth_from_unauthorized(
                     entry,
                     &format!("auth_{}", usage_auth_sync_source_label(outcome.source)),
                 );
-                (
-                    usage_auth_sync_source_label(outcome.source),
-                    outcome.auth_changed,
-                )
+                Ok(Some(RuntimeProfileUnauthorizedRecoveryOutcome {
+                    source: usage_auth_sync_source_label(outcome.source),
+                    changed: outcome.auth_changed,
+                }))
             }
-        };
+        }
+    }
+}
 
+fn runtime_try_recover_profile_auth_from_unauthorized(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    step: RuntimeProfileUnauthorizedRecoveryStep,
+) -> bool {
+    let attempt = (|| -> Result<bool> {
+        let Some(outcome) = step.recover(shared, profile_name)? else {
+            return Ok(false);
+        };
         runtime_proxy_log(
             shared,
             format!(
                 "request={request_id} profile_auth_recovered profile={profile_name} route={} source={} changed={}",
                 runtime_route_kind_label(route_kind),
-                outcome.0,
-                outcome.1,
+                outcome.source,
+                outcome.changed,
             ),
         );
         Ok(true)
@@ -277,7 +303,7 @@ pub(super) fn runtime_try_recover_profile_auth_from_unauthorized_steps(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     route_kind: RuntimeRouteKind,
-    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+    recovery_steps: &mut RuntimeProfileUnauthorizedRecoverySteps,
 ) -> bool {
     for step in recovery_steps.by_ref() {
         if runtime_try_recover_profile_auth_from_unauthorized(
@@ -309,11 +335,7 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
         &runtime.upstream_base_url,
         &handshake_request.path_and_query,
     )?;
-    let mut recovery_steps = [
-        RuntimeProfileUnauthorizedRecoveryStep::Reload,
-        RuntimeProfileUnauthorizedRecoveryStep::Refresh,
-    ]
-    .into_iter();
+    let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let auth = runtime_profile_usage_auth(shared, profile_name)?;
         let mut request = upstream_url
