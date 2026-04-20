@@ -12,12 +12,59 @@ pub(crate) fn runtime_current_prodex_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeProcessVersionResolution {
+    alive: bool,
+    executable_path: Option<PathBuf>,
+    version: Option<String>,
+}
+
+fn runtime_process_row(pid: u32) -> Option<ProcessRow> {
+    collect_process_rows()
+        .into_iter()
+        .find(|row| row.pid == pid)
+}
+
+#[cfg(target_os = "linux")]
+fn runtime_process_pid_alive_via_os(pid: u32) -> bool {
+    PathBuf::from(format!("/proc/{pid}")).exists()
+}
+
+#[cfg(windows)]
+fn runtime_process_pid_alive_via_os(pid: u32) -> bool {
+    let Ok(output) = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            trimmed
+                .strip_prefix('"')
+                .and_then(|value| value.split("\",\"").nth(1))
+                .and_then(|value| value.parse::<u32>().ok())
+        })
+        .any(|listed_pid| listed_pid == pid)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn runtime_process_pid_alive_via_os(_pid: u32) -> bool {
+    false
+}
+
 pub(crate) fn runtime_process_pid_alive(pid: u32) -> bool {
-    let proc_dir = PathBuf::from(format!("/proc/{pid}"));
-    if proc_dir.exists() {
+    if runtime_process_pid_alive_via_os(pid) {
         return true;
     }
-    collect_process_rows().into_iter().any(|row| row.pid == pid)
+    runtime_process_row(pid).is_some()
 }
 
 pub(crate) fn runtime_random_token(prefix: &str) -> String {
@@ -136,41 +183,106 @@ pub(crate) fn read_prodex_version_from_executable(executable: &Path) -> Result<S
     })
 }
 
-pub(crate) fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
-    fs::read_link(format!("/proc/{pid}/exe")).ok().or_else(|| {
-        collect_process_rows()
-            .into_iter()
-            .find(|row| row.pid == pid)
-            .and_then(|row| row.args.into_iter().rfind(|arg| Path::new(arg).exists()))
-            .map(PathBuf::from)
-    })
+#[cfg(target_os = "linux")]
+fn runtime_process_executable_path_via_os(pid: u32) -> Option<PathBuf> {
+    fs::read_link(format!("/proc/{pid}/exe")).ok()
 }
 
-pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
-    let mut candidates = Vec::new();
-    if let Some(executable) = runtime_process_executable_path(pid) {
-        candidates.push(executable);
+#[cfg(windows)]
+fn runtime_process_executable_path_via_os(pid: u32) -> Option<PathBuf> {
+    for shell in ["powershell", "pwsh"] {
+        let Ok(output) = Command::new(shell)
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).Path"),
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
     }
-    if let Some(row) = collect_process_rows()
-        .into_iter()
-        .find(|row| row.pid == pid)
-    {
-        for arg in row.args {
-            let path = PathBuf::from(&arg);
-            if path.exists() && !candidates.iter().any(|candidate| candidate == &path) {
-                candidates.push(path);
+    None
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn runtime_process_executable_path_via_os(_pid: u32) -> Option<PathBuf> {
+    None
+}
+
+fn push_runtime_process_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
+    if !candidates.iter().any(|candidate| candidate == &path) {
+        candidates.push(path);
+    }
+}
+
+fn runtime_process_executable_candidates(pid: u32, row: Option<&ProcessRow>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(executable) = runtime_process_executable_path_via_os(pid) {
+        push_runtime_process_candidate(&mut candidates, executable);
+    }
+    if let Some(row) = row {
+        for arg in &row.args {
+            let path = PathBuf::from(arg);
+            if path.exists() {
+                push_runtime_process_candidate(&mut candidates, path);
             }
         }
     }
     candidates
-        .into_iter()
-        .find_map(|executable| read_prodex_version_from_executable(&executable).ok())
 }
 
-pub(crate) fn runtime_broker_matches_current_prodex(registry: &RuntimeBrokerRegistry) -> bool {
-    runtime_process_pid_alive(registry.pid)
-        && runtime_process_prodex_version(registry.pid).as_deref()
-            == Some(runtime_current_prodex_version())
+fn runtime_process_version_resolution(pid: u32) -> RuntimeProcessVersionResolution {
+    let row = runtime_process_row(pid);
+    let alive = runtime_process_pid_alive_via_os(pid) || row.is_some();
+    let executable_candidates = runtime_process_executable_candidates(pid, row.as_ref());
+    let executable_path = executable_candidates.first().cloned();
+    let version = executable_candidates
+        .iter()
+        .find_map(|executable| read_prodex_version_from_executable(executable).ok());
+    RuntimeProcessVersionResolution {
+        alive,
+        executable_path,
+        version,
+    }
+}
+
+pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
+    runtime_process_version_resolution(pid).version
+}
+
+#[cfg(windows)]
+fn terminate_runtime_process_step(pid_value: &str, force: bool) {
+    let mut command = Command::new("taskkill");
+    command.args(["/PID", pid_value, "/T"]);
+    if force {
+        command.arg("/F");
+    }
+    let _ = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(windows))]
+fn terminate_runtime_process_step(pid_value: &str, force: bool) {
+    let signal = if force { "-KILL" } else { "-TERM" };
+    let _ = Command::new("kill")
+        .args([signal, pid_value])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 pub(crate) fn terminate_runtime_process(pid: u32) {
@@ -179,14 +291,6 @@ pub(crate) fn terminate_runtime_process(pid: u32) {
     }
 
     let pid_value = pid.to_string();
-    let signal_process = |signal: &str| {
-        let _ = Command::new("kill")
-            .args([signal, pid_value.as_str()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    };
     let wait_for_exit = |timeout_ms: u64| -> bool {
         let started_at = Instant::now();
         while started_at.elapsed() < Duration::from_millis(timeout_ms) {
@@ -198,12 +302,12 @@ pub(crate) fn terminate_runtime_process(pid: u32) {
         !runtime_process_pid_alive(pid)
     };
 
-    signal_process("-TERM");
+    terminate_runtime_process_step(&pid_value, false);
     if wait_for_exit(500) {
         return;
     }
 
-    signal_process("-KILL");
+    terminate_runtime_process_step(&pid_value, true);
     let _ = wait_for_exit(250);
 }
 
@@ -212,10 +316,42 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> bool {
-    if !runtime_process_pid_alive(registry.pid) || runtime_broker_matches_current_prodex(registry) {
+    let resolution = runtime_process_version_resolution(registry.pid);
+    if !resolution.alive {
         return false;
     }
 
+    let current_version = runtime_current_prodex_version();
+    if resolution.version.as_deref() == Some(current_version) {
+        return false;
+    }
+
+    let replacement_reason = if resolution.version.is_some() {
+        "version_mismatch"
+    } else {
+        "version_unresolved"
+    };
+    audit_log_event_best_effort(
+        "runtime_broker",
+        "replace_stale_broker",
+        "success",
+        serde_json::json!({
+            "reason": replacement_reason,
+            "broker_key": broker_key,
+            "pid": registry.pid,
+            "listen_addr": registry.listen_addr,
+            "started_at": registry.started_at,
+            "instance_token": registry.instance_token,
+            "upstream_base_url": registry.upstream_base_url,
+            "include_code_review": registry.include_code_review,
+            "current_prodex_version": current_version,
+            "detected_prodex_version": resolution.version,
+            "executable_path": resolution
+                .executable_path
+                .map(|path| path.display().to_string()),
+            "platform": env::consts::OS,
+        }),
+    );
     terminate_runtime_process(registry.pid);
     remove_runtime_broker_registry_if_token_matches(paths, broker_key, &registry.instance_token);
     true
