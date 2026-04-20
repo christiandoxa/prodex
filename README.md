@@ -47,7 +47,7 @@ Installing `@christiandoxa/prodex` from npm also installs the pinned Codex runti
 
 ```bash
 npm install -g @christiandoxa/prodex
-````
+```
 
 That pulls in `@openai/codex@0.121.0` as well. Claude Code is still separate.
 

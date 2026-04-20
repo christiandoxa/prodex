@@ -3,9 +3,11 @@ use super::*;
 mod admission;
 mod affinity;
 mod buffered_response;
+mod chain_log;
 mod classification;
 mod continuation;
 mod dispatch;
+mod failure_response;
 mod health;
 mod lifecycle;
 mod lineage;
@@ -23,9 +25,11 @@ mod websocket;
 pub(crate) use self::admission::*;
 pub(crate) use self::affinity::*;
 pub(super) use self::buffered_response::*;
+pub(crate) use self::chain_log::*;
 pub(crate) use self::classification::*;
 pub(super) use self::continuation::*;
 pub(crate) use self::dispatch::*;
+pub(crate) use self::failure_response::*;
 pub(super) use self::health::*;
 pub(crate) use self::lifecycle::*;
 pub(super) use self::lineage::*;
@@ -45,197 +49,6 @@ pub(super) fn runtime_previous_response_retry_delay(retry_index: usize) -> Optio
         .get(retry_index)
         .copied()
         .map(Duration::from_millis)
-}
-
-pub(super) fn runtime_proxy_precommit_budget_exhausted(
-    started_at: Instant,
-    attempts: usize,
-    continuation: bool,
-    pressure_mode: bool,
-) -> bool {
-    let (attempt_limit, budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
-
-    attempts >= attempt_limit || started_at.elapsed() >= budget
-}
-
-pub(super) fn runtime_proxy_final_retryable_http_failure_response(
-    last_failure: Option<(tiny_http::ResponseBox, bool)>,
-    saw_inflight_saturation: bool,
-    json_errors: bool,
-) -> Option<tiny_http::ResponseBox> {
-    let service_unavailable = |message: &str| {
-        if json_errors {
-            build_runtime_proxy_json_error_response(503, "service_unavailable", message)
-        } else {
-            build_runtime_proxy_text_response(503, message)
-        }
-    };
-    match last_failure {
-        Some((response, false)) => Some(response),
-        Some((_response, true)) if saw_inflight_saturation => Some(service_unavailable(
-            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-        )),
-        Some((_response, true)) => Some(service_unavailable(
-            runtime_proxy_local_selection_failure_message(),
-        )),
-        None if saw_inflight_saturation => Some(service_unavailable(
-            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-        )),
-        None => None,
-    }
-}
-
-pub(super) fn runtime_proxy_final_responses_failure_reply(
-    last_failure: Option<(RuntimeUpstreamFailureResponse, bool)>,
-    saw_inflight_saturation: bool,
-) -> RuntimeResponsesReply {
-    match last_failure {
-        Some((failure, false)) => match failure {
-            RuntimeUpstreamFailureResponse::Http(response) => response,
-            RuntimeUpstreamFailureResponse::Websocket(_) => {
-                RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                    503,
-                    "service_unavailable",
-                    runtime_proxy_local_selection_failure_message(),
-                ))
-            }
-        },
-        _ if saw_inflight_saturation => {
-            RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                503,
-                "service_unavailable",
-                "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-            ))
-        }
-        _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-            503,
-            "service_unavailable",
-            runtime_proxy_local_selection_failure_message(),
-        )),
-    }
-}
-
-pub(super) fn send_runtime_proxy_final_websocket_failure(
-    local_socket: &mut RuntimeLocalWebSocket,
-    last_failure: Option<(RuntimeUpstreamFailureResponse, bool)>,
-    saw_inflight_saturation: bool,
-) -> Result<()> {
-    match last_failure {
-        Some((failure, false)) => match failure {
-            RuntimeUpstreamFailureResponse::Websocket(payload)
-                if runtime_websocket_error_payload_is_previous_response_not_found(&payload) =>
-            {
-                send_runtime_proxy_stale_continuation_websocket_error(local_socket)
-            }
-            RuntimeUpstreamFailureResponse::Websocket(payload) => {
-                forward_runtime_proxy_websocket_error(local_socket, &payload)
-            }
-            RuntimeUpstreamFailureResponse::Http(_) => send_runtime_proxy_websocket_error(
-                local_socket,
-                503,
-                "service_unavailable",
-                runtime_proxy_local_selection_failure_message(),
-            ),
-        },
-        _ if saw_inflight_saturation => send_runtime_proxy_websocket_error(
-            local_socket,
-            503,
-            "service_unavailable",
-            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-        ),
-        _ => send_runtime_proxy_websocket_error(
-            local_socket,
-            503,
-            "service_unavailable",
-            runtime_proxy_local_selection_failure_message(),
-        ),
-    }
-}
-
-pub(super) fn runtime_websocket_error_payload_is_previous_response_not_found(
-    payload: &RuntimeWebsocketErrorPayload,
-) -> bool {
-    match payload {
-        RuntimeWebsocketErrorPayload::Text(text) => {
-            extract_runtime_proxy_previous_response_message(text.as_bytes()).is_some()
-        }
-        RuntimeWebsocketErrorPayload::Binary(bytes) => {
-            extract_runtime_proxy_previous_response_message(bytes).is_some()
-        }
-        RuntimeWebsocketErrorPayload::Empty => false,
-    }
-}
-
-pub(super) fn send_runtime_proxy_stale_continuation_websocket_error(
-    local_socket: &mut RuntimeLocalWebSocket,
-) -> Result<()> {
-    send_runtime_proxy_websocket_error(
-        local_socket,
-        409,
-        "stale_continuation",
-        "Upstream no longer recognizes this conversation chain before output started. Retry from the last user message or restart the Codex turn; Prodex will not send a fresh request without the missing context.",
-    )
-}
-
-fn runtime_proxy_log_chain_retried_owner(
-    shared: &RuntimeRotationProxyShared,
-    log: RuntimeProxyChainLog<'_>,
-    delay_ms: u128,
-) {
-    runtime_proxy_log(
-        shared,
-        format!(
-            "request={} transport={} route={} websocket_session={} chain_retried_owner profile={} previous_response_id={} delay_ms={delay_ms} reason={} via={}",
-            log.request_id,
-            log.transport,
-            log.route,
-            log.websocket_session
-                .map(|session_id| session_id.to_string())
-                .as_deref()
-                .unwrap_or("-"),
-            log.profile_name,
-            log.previous_response_id.unwrap_or("-"),
-            log.reason,
-            log.via.unwrap_or("-"),
-        ),
-    );
-}
-
-fn runtime_proxy_log_chain_dead_upstream_confirmed(
-    shared: &RuntimeRotationProxyShared,
-    log: RuntimeProxyChainLog<'_>,
-    event: Option<&str>,
-) {
-    runtime_proxy_log(
-        shared,
-        format!(
-            "request={} transport={} route={} websocket_session={} chain_dead_upstream_confirmed profile={} previous_response_id={} reason={} via={} event={}",
-            log.request_id,
-            log.transport,
-            log.route,
-            log.websocket_session
-                .map(|session_id| session_id.to_string())
-                .as_deref()
-                .unwrap_or("-"),
-            log.profile_name,
-            log.previous_response_id.unwrap_or("-"),
-            log.reason,
-            log.via.unwrap_or("-"),
-            event.unwrap_or("-"),
-        ),
-    );
-}
-
-#[derive(Clone, Copy)]
-struct RuntimeProxyChainLog<'a> {
-    request_id: u64,
-    transport: &'a str,
-    route: &'a str,
-    websocket_session: Option<u64>,
-    profile_name: &'a str,
-    previous_response_id: Option<&'a str>,
-    reason: &'a str,
-    via: Option<&'a str>,
 }
 
 pub(super) fn runtime_proxy_precommit_budget(
@@ -336,6 +149,7 @@ pub(super) fn runtime_profile_codex_home(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(super) fn runtime_has_alternative_quota_compatible_profile(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -783,6 +597,7 @@ pub(super) fn runtime_snapshot_blocks_same_request_cold_start_probe(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(super) fn runtime_profile_auth_summary_for_selection(
     profile_name: &str,
     codex_home: &Path,
@@ -920,7 +735,7 @@ pub(super) struct RuntimeCandidateAffinity<'a> {
 }
 
 impl<'a> RuntimeCandidateAffinity<'a> {
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub(super) fn new(
         route_kind: RuntimeRouteKind,
         candidate_name: &'a str,

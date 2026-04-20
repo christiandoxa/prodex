@@ -95,6 +95,13 @@ jobs:
             exit 1
           fi
 
+      - name: Native smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
+          "${binary}" --version
+
       - name: Prepare binary artifact
         shell: bash
         run: |

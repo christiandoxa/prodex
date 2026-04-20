@@ -33,6 +33,23 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+  docs-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Lint markdown docs
+        run: npm run docs:lint
+
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -119,6 +136,32 @@ jobs:
           set -euo pipefail
           npm run npm:sync-version
           git diff --exit-code -- Cargo.toml npm README.md QUICKSTART.md scripts/npm
+
+  npm-package-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Build host release binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Smoke staged npm package
+        run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
 
   auto-rotate:
     runs-on: ubuntu-latest
@@ -218,165 +261,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run runtime proxy stress tests
-        run: |
-          set -euo pipefail
-          # The main runtime-proxy shard already runs in serialized mode. Keep one extra
-          # focused rerun here, but run this stress pass serialized as well: the shared
-          # process subset still leaks background runtime activity under libtest's default
-          # parallelism, and the resulting queue-idle teardown failures bury the real
-          # signal. Leave the explicitly slow continuation-heavy cases to the dedicated
-          # rerun step below so they are not paid twice in this loop.
-          for iteration in 1; do
-            echo "runtime_proxy_ stress iteration ${iteration}"
-            cargo test --lib main_internal_tests::runtime_proxy_ -- \
-              --test-threads=1 \
-              --skip runtime_proxy_persists_previous_response_affinity_across_restart \
-              --skip runtime_proxy_persists_session_affinity_across_restart_for_compact \
-              --skip runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir \
-              --skip runtime_proxy_claude_launch_env_honors_model_override \
-              --skip runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override \
-              --skip runtime_proxy_claude_launch_env_uses_codex_config_model_by_default \
-              --skip runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_value \
-              --skip runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models \
-              --skip runtime_proxy_claude_reasoning_effort_override_normalizes_env \
-              --skip runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env \
-              --skip runtime_proxy_active_request_wait_recovers_after_short_burst \
-              --skip runtime_proxy_anthropic_admission_wait_recovers_after_short_burst \
-              --skip runtime_proxy_retries_after_websocket_reuse_silent_hang \
-              --skip runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout \
-              --skip runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall \
-              --skip runtime_proxy_sheds_long_lived_queue_overload_fast \
-              --skip runtime_proxy_absorbs_brief_anthropic_queue_burst \
-              --skip runtime_proxy_absorbs_brief_long_lived_queue_burst \
-              --skip runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
-              --skip runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
-              --skip runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog \
-              --skip runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_turn_state \
-              --skip runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
-              --skip runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate \
-              --skip runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request \
-              --skip runtime_proxy_broker_health_endpoint_reports_registered_metadata \
-              --skip runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
-              --skip runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
-              --skip runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds \
-              --skip runtime_proxy_waits_for_responses_inflight_relief_then_succeeds \
-              --skip runtime_proxy_responses_inflight_relief_times_out_without_relief \
-              --skip runtime_proxy_wait_scopes_to_session_owner_relief \
-              --skip runtime_proxy_keeps_previous_response_affinity_for_http_requests \
-              --skip runtime_proxy_keeps_previous_response_affinity_for_websocket_requests \
-              --skip runtime_proxy_restores_compact_followup_owner_across_restart \
-              --skip runtime_proxy_retries_overloaded_compact_on_another_profile \
-              --skip runtime_proxy_retries_quota_blocked_response_on_another_profile \
-              --skip runtime_proxy_reuses_compact_owner_for_followup_until_response_commits \
-              --skip runtime_proxy_retries_usage_limited_response_on_another_profile \
-              --skip runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback \
-              --skip runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
-              --skip runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error \
-              --skip runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota \
-              --skip runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile \
-              --skip runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains \
-              --skip runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remains \
-              --skip runtime_proxy_streams_anthropic_mcp_messages_without_buffering \
-              --skip runtime_proxy_translates_anthropic_messages_to_responses_and_back \
-              --skip runtime_proxy_streams_anthropic_messages_from_buffered_responses \
-              --skip runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_response_when_owner_snapshot_is_exhausted \
-              --skip runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing \
-              --skip runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity \
-              --skip runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests \
-              --skip runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_http_requests \
-              --skip runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_without_turn_state \
-              --skip runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit \
-              --skip runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error \
-              --skip runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_commit \
-              --skip runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile \
-              --skip runtime_proxy_worker_count_env_override_beats_policy_file
-          done
+        run: npm run ci:runtime-stress -- --suite stress
 
       - name: Run serialized runtime-sensitive stress tests
-        run: |
-          set -euo pipefail
-          run_serialized_runtime_stress() {
-            for test_name in \
-              runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir \
-              runtime_proxy_claude_launch_env_honors_model_override \
-              runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override \
-              runtime_proxy_claude_launch_env_uses_codex_config_model_by_default \
-              runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_value \
-              runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models \
-              runtime_proxy_claude_reasoning_effort_override_normalizes_env \
-              runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env \
-              runtime_proxy_active_request_wait_recovers_after_short_burst \
-              runtime_proxy_anthropic_admission_wait_recovers_after_short_burst \
-              runtime_proxy_sheds_long_lived_queue_overload_fast \
-              runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout \
-              runtime_proxy_absorbs_brief_anthropic_queue_burst \
-              runtime_proxy_absorbs_brief_long_lived_queue_burst \
-              runtime_proxy_does_not_rotate_after_first_sse_chunk_reset \
-              runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog \
-              runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog \
-              runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_turn_state \
-              runtime_proxy_logs_local_writer_disconnect_after_first_chunk \
-              runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate \
-              runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request \
-              runtime_proxy_broker_health_endpoint_reports_registered_metadata \
-              runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe \
-              runtime_proxy_reuses_rotated_profile_without_reprobing_quota \
-              runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds \
-              runtime_proxy_waits_for_responses_inflight_relief_then_succeeds \
-              runtime_proxy_responses_inflight_relief_times_out_without_relief \
-              runtime_proxy_wait_scopes_to_session_owner_relief \
-              runtime_proxy_keeps_previous_response_affinity_for_http_requests \
-              runtime_proxy_keeps_previous_response_affinity_for_websocket_requests \
-              runtime_proxy_restores_compact_followup_owner_across_restart \
-              runtime_proxy_retries_overloaded_compact_on_another_profile \
-              runtime_proxy_retries_quota_blocked_response_on_another_profile \
-              runtime_proxy_reuses_compact_owner_for_followup_until_response_commits \
-              runtime_proxy_retries_usage_limited_response_on_another_profile \
-              runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback \
-              runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit \
-              runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error \
-              runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota \
-              runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile \
-              runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains \
-              runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remains \
-              runtime_proxy_streams_anthropic_mcp_messages_without_buffering \
-              runtime_proxy_translates_anthropic_messages_to_responses_and_back \
-              runtime_proxy_streams_anthropic_messages_from_buffered_responses \
-              runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_response_when_owner_snapshot_is_exhausted \
-              runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing \
-              runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity \
-              runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests \
-              runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_http_requests \
-              runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_without_turn_state \
-              runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit \
-              runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error \
-              runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_commit \
-              runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile \
-              runtime_proxy_worker_count_env_override_beats_policy_file
-            do
-              cargo test --lib "main_internal_tests::${test_name}" -- --test-threads=1
-            done
-          }
-
-          for attempt in 1 2; do
-            echo "serialized runtime stress attempt ${attempt}"
-            if run_serialized_runtime_stress; then
-              exit 0
-            fi
-            if [ "${attempt}" -eq 2 ]; then
-              exit 1
-            fi
-            echo "retrying serialized runtime stress after a transient failure"
-            sleep 5
-          done
+        run: npm run ci:runtime-stress -- --suite serialized
 
       - name: Rerun continuation-heavy tests
-        run: |
-          set -euo pipefail
-          for iteration in 1 2; do
-            echo "continuation-heavy iteration ${iteration}"
-            cargo test --lib main_internal_tests::runtime_proxy_persists_previous_response_affinity_across_restart -- --test-threads=1
-            cargo test --lib main_internal_tests::runtime_proxy_persists_session_affinity_across_restart_for_compact -- --test-threads=1
-            cargo test --lib main_internal_tests::runtime_proxy_retries_after_websocket_reuse_silent_hang -- --test-threads=1
-            cargo test --lib main_internal_tests::runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall -- --test-threads=1
-          done
+        run: npm run ci:runtime-stress -- --suite continuation

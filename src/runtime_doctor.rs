@@ -4,6 +4,7 @@ mod diagnosis;
 mod parsing;
 mod render;
 mod state;
+mod types;
 
 #[allow(unused_imports)]
 pub(crate) use diagnosis::{
@@ -18,6 +19,10 @@ pub(crate) use render::{
 #[allow(unused_imports)]
 pub(crate) use state::{
     collect_runtime_doctor_state, collect_runtime_doctor_summary, runtime_doctor_degraded_routes,
+};
+#[allow(unused_imports)]
+pub(crate) use types::{
+    RuntimeDoctorProfileSummary, RuntimeDoctorRouteSummary, RuntimeDoctorSummary,
 };
 
 const RUNTIME_DOCTOR_FACETS: &[&str] = &[

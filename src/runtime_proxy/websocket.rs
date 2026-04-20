@@ -840,6 +840,7 @@ pub(super) fn runtime_response_event_type_from_value(value: &serde_json::Value) 
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(super) fn runtime_response_event_type(payload: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()
@@ -871,6 +872,7 @@ pub(super) fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn is_runtime_terminal_event(payload: &str) -> bool {
     runtime_response_event_type(payload)
         .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))

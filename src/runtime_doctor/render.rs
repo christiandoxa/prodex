@@ -80,6 +80,23 @@ where
         .collect()
 }
 
+fn runtime_doctor_broker_artifact_json(line: &str) -> serde_json::Value {
+    let artifact = runtime_doctor_parse_broker_artifact(line);
+    let mut object = serde_json::Map::new();
+    for (key, value) in artifact {
+        let json_value = if key == "stale_leases" {
+            value
+                .parse::<usize>()
+                .map(serde_json::Value::from)
+                .unwrap_or_else(|_| serde_json::Value::String(value))
+        } else {
+            serde_json::Value::String(value)
+        };
+        object.insert(key, json_value);
+    }
+    serde_json::Value::Object(object)
+}
+
 fn runtime_doctor_profile_json(profile: &RuntimeDoctorProfileSummary) -> serde_json::Value {
     serde_json::json!({
         "profile": profile.profile,
@@ -313,7 +330,7 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
                 summary
                     .runtime_broker_identities
                     .iter()
-                    .map(|line| runtime_doctor_json_map(runtime_doctor_parse_broker_artifact(line)))
+                    .map(|line| runtime_doctor_broker_artifact_json(line))
                     .collect::<Vec<_>>(),
             ),
             runtime_doctor_json_entry("prodex_binary_mismatch", summary.prodex_binary_mismatch),
@@ -678,4 +695,87 @@ pub(crate) fn runtime_doctor_fields_for_summary(
         )
         .push("Diagnosis", summary.diagnosis.clone());
     fields.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+
+    fn json_object_keys(value: &serde_json::Value) -> BTreeSet<String> {
+        value
+            .as_object()
+            .expect("runtime doctor JSON should be an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn runtime_doctor_json_value_keeps_stable_top_level_shape() {
+        let mut summary = RuntimeDoctorSummary {
+            log_path: Some(PathBuf::from("/tmp/prodex-runtime.log")),
+            pointer_exists: true,
+            log_exists: true,
+            line_count: 7,
+            diagnosis: "Runtime broker registry broker-a points to dead pid 123 at 127.0.0.1:1234; run `prodex cleanup` or restart `prodex run` so a fresh broker registry is written."
+                .to_string(),
+            runtime_broker_identities: vec![
+                "broker_key=broker-a pid=123 listen_addr=127.0.0.1:1234 status=dead_pid mismatch=none version=0.1.0 path=/opt/prodex sha256=abc123 source=registry stale_leases=2"
+                    .to_string(),
+            ],
+            ..RuntimeDoctorSummary::default()
+        };
+        summary
+            .marker_counts
+            .insert("runtime_proxy_queue_overloaded", 2);
+        summary.marker_counts.insert("profile_circuit_open", 1);
+        summary.marker_last_fields.insert(
+            "runtime_proxy_queue_overloaded",
+            BTreeMap::from([
+                ("lane".to_string(), "responses".to_string()),
+                ("request".to_string(), "9".to_string()),
+            ]),
+        );
+        summary.failure_class_counts =
+            BTreeMap::from([("admission".to_string(), 2), ("transport".to_string(), 1)]);
+
+        let value = runtime_doctor_json_value(&summary);
+        let keys = json_object_keys(&value);
+        for key in [
+            "log_path",
+            "pointer_exists",
+            "log_exists",
+            "line_count",
+            "marker_counts",
+            "marker_last_fields",
+            "runtime_broker_artifacts",
+            "diagnosis",
+        ] {
+            assert!(keys.contains(key), "missing top-level key {key}");
+        }
+        assert_eq!(value["log_path"], "/tmp/prodex-runtime.log");
+        assert_eq!(value["pointer_exists"], true);
+        assert_eq!(value["log_exists"], true);
+        assert_eq!(value["line_count"], 7);
+        assert_eq!(value["marker_counts"]["runtime_proxy_queue_overloaded"], 2);
+        assert_eq!(value["marker_counts"]["profile_circuit_open"], 1);
+        assert_eq!(
+            value["marker_last_fields"]["runtime_proxy_queue_overloaded"]["lane"],
+            "responses"
+        );
+        assert_eq!(
+            value["runtime_broker_artifacts"][0]["broker_key"],
+            "broker-a"
+        );
+        assert_eq!(value["runtime_broker_artifacts"][0]["status"], "dead_pid");
+        assert_eq!(value["runtime_broker_artifacts"][0]["stale_leases"], 2);
+        assert!(
+            value["diagnosis"]
+                .as_str()
+                .expect("diagnosis should be a string")
+                .contains("dead pid 123")
+        );
+    }
 }
