@@ -54,6 +54,9 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             current_profile: self.metrics.health.current_profile.clone(),
             include_code_review: self.metrics.health.include_code_review,
             persistence_role: self.metrics.health.persistence_role.clone(),
+            prodex_version: self.metrics.health.prodex_version.clone(),
+            executable_path: self.metrics.health.executable_path.clone(),
+            executable_sha256: self.metrics.health.executable_sha256.clone(),
             active_requests: self.metrics.health.active_requests as u64,
             active_request_limit: self.metrics.active_request_limit as u64,
             local_overload_backoff_remaining_seconds: self
@@ -130,6 +133,9 @@ pub(crate) fn runtime_broker_metrics_snapshot(
         } else {
             "follower".to_string()
         },
+        prodex_version: metadata.prodex_version.clone(),
+        executable_path: metadata.executable_path.clone(),
+        executable_sha256: metadata.executable_sha256.clone(),
     };
 
     let degraded_profiles = runtime

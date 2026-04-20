@@ -909,6 +909,16 @@ pub(crate) fn remember_runtime_response_ids_with_turn_state(
                     turn_state.unwrap_or("-"),
                 ),
             );
+        } else if turn_state.is_none() {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "turn_state_coverage route={} profile={profile_name} status=missing response_ids={} first={:?}",
+                    runtime_route_kind_label(verified_route),
+                    response_ids.len(),
+                    response_ids.first(),
+                ),
+            );
         }
     } else {
         drop(runtime);

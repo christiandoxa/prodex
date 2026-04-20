@@ -108,6 +108,23 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
                 "previous_response_not_found_by_transport",
                 runtime_doctor_json_map(summary.previous_response_not_found_by_transport.clone()),
             ),
+            runtime_doctor_json_entry(
+                "chain_retried_owner_by_reason",
+                runtime_doctor_json_map(summary.chain_retried_owner_by_reason.clone()),
+            ),
+            runtime_doctor_json_entry(
+                "chain_dead_upstream_confirmed_by_reason",
+                runtime_doctor_json_map(summary.chain_dead_upstream_confirmed_by_reason.clone()),
+            ),
+            runtime_doctor_json_entry(
+                "stale_continuation_by_reason",
+                runtime_doctor_json_map(summary.stale_continuation_by_reason.clone()),
+            ),
+            runtime_doctor_json_entry("latest_chain_event", summary.latest_chain_event.clone()),
+            runtime_doctor_json_entry(
+                "latest_stale_continuation_reason",
+                summary.latest_stale_continuation_reason.clone(),
+            ),
             runtime_doctor_json_entry("last_marker_line", summary.last_marker_line.clone()),
             runtime_doctor_json_entry("selection_pressure", summary.selection_pressure.clone()),
             runtime_doctor_json_entry("transport_pressure", summary.transport_pressure.clone()),
@@ -178,6 +195,10 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
                 "persisted_continuation_journal_session_id_bindings",
                 summary.persisted_continuation_journal_session_id_bindings,
             ),
+            runtime_doctor_json_entry(
+                "persisted_turn_state_coverage_percent",
+                summary.persisted_turn_state_coverage_percent,
+            ),
             runtime_doctor_json_entry("state_save_queue_backlog", summary.state_save_queue_backlog),
             runtime_doctor_json_entry("state_save_lag_ms", summary.state_save_lag_ms),
             runtime_doctor_json_entry(
@@ -229,6 +250,16 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
             ),
             runtime_doctor_json_entry("degraded_routes", summary.degraded_routes.clone()),
             runtime_doctor_json_entry("orphan_managed_dirs", summary.orphan_managed_dirs.clone()),
+            runtime_doctor_json_entry(
+                "prodex_binary_identities",
+                summary.prodex_binary_identities.clone(),
+            ),
+            runtime_doctor_json_entry(
+                "runtime_broker_identities",
+                summary.runtime_broker_identities.clone(),
+            ),
+            runtime_doctor_json_entry("prodex_binary_mismatch", summary.prodex_binary_mismatch),
+            runtime_doctor_json_entry("runtime_broker_mismatch", summary.runtime_broker_mismatch),
             runtime_doctor_json_entry(
                 "failure_class_counts",
                 runtime_doctor_json_map(summary.failure_class_counts.clone()),
@@ -330,6 +361,41 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                     diagnosis::runtime_doctor_count_breakdown(
                         &summary.previous_response_not_found_by_transport,
                     ),
+                );
+        }
+        if *marker == "stale_continuation" {
+            fields
+                .push(
+                    "Chain retry reasons",
+                    diagnosis::runtime_doctor_count_breakdown(
+                        &summary.chain_retried_owner_by_reason,
+                    ),
+                )
+                .push(
+                    "Chain dead reasons",
+                    diagnosis::runtime_doctor_count_breakdown(
+                        &summary.chain_dead_upstream_confirmed_by_reason,
+                    ),
+                )
+                .push(
+                    "Stale reasons",
+                    diagnosis::runtime_doctor_count_breakdown(
+                        &summary.stale_continuation_by_reason,
+                    ),
+                )
+                .push(
+                    "Latest stale reason",
+                    summary
+                        .latest_stale_continuation_reason
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
+                )
+                .push(
+                    "Latest chain event",
+                    summary
+                        .latest_chain_event
+                        .clone()
+                        .unwrap_or_else(|| "-".to_string()),
                 );
         }
         if *marker == "local_writer_error" {
@@ -448,11 +514,15 @@ pub(crate) fn runtime_doctor_fields_for_summary(
         .push(
             "Persisted continuations",
             format!(
-                "responses={} sessions={} turns={} session_ids={}",
+                "responses={} sessions={} turns={} session_ids={} turn_coverage={}",
                 summary.persisted_response_bindings,
                 summary.persisted_session_bindings,
                 summary.persisted_turn_state_bindings,
-                summary.persisted_session_id_bindings
+                summary.persisted_session_id_bindings,
+                summary
+                    .persisted_turn_state_coverage_percent
+                    .map(|percent| format!("{percent}%"))
+                    .unwrap_or_else(|| "-".to_string())
             ),
         )
         .push(
@@ -507,6 +577,29 @@ pub(crate) fn runtime_doctor_fields_for_summary(
             } else {
                 summary.orphan_managed_dirs.join(", ")
             },
+        )
+        .push(
+            "Prodex binaries",
+            if summary.prodex_binary_identities.is_empty() {
+                "-".to_string()
+            } else {
+                summary.prodex_binary_identities.join(" | ")
+            },
+        )
+        .push(
+            "Runtime brokers",
+            if summary.runtime_broker_identities.is_empty() {
+                "-".to_string()
+            } else {
+                summary.runtime_broker_identities.join(" | ")
+            },
+        )
+        .push(
+            "Binary mismatch",
+            format!(
+                "installed={} broker={}",
+                summary.prodex_binary_mismatch, summary.runtime_broker_mismatch
+            ),
         )
         .push("Suspect continuations", suspect_continuations)
         .push(

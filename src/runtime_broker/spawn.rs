@@ -48,13 +48,24 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             return Ok(None);
         };
 
-        if replace_runtime_broker_if_version_mismatch(paths, broker_key, &existing) {
-            return Ok(None);
+        let health = probe_runtime_broker_health(client, &existing)?;
+        match replace_runtime_broker_if_version_mismatch_with_health(
+            paths,
+            broker_key,
+            &existing,
+            health.as_ref(),
+        ) {
+            RuntimeBrokerVersionGuardOutcome::Compatible => {}
+            RuntimeBrokerVersionGuardOutcome::Replaced => return Ok(None),
+            RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {
+                thread::sleep(poll_interval);
+                continue;
+            }
         }
 
         if existing.upstream_base_url == upstream_base_url
             && existing.include_code_review == include_code_review
-            && let Some(health) = probe_runtime_broker_health(client, &existing)?
+            && let Some(health) = health
             && health.instance_token == existing.instance_token
         {
             return Ok(Some(existing));
@@ -95,9 +106,6 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         {
             continue;
         }
-        if replace_runtime_broker_if_version_mismatch(paths, &broker_key, &registry) {
-            continue;
-        }
         if !runtime_process_pid_alive(registry.pid) {
             remove_runtime_broker_registry_if_token_matches(
                 paths,
@@ -106,7 +114,18 @@ pub(crate) fn find_compatible_runtime_broker_registry(
             );
             continue;
         }
-        if let Some(health) = probe_runtime_broker_health(client, &registry)?
+        let health = probe_runtime_broker_health(client, &registry)?;
+        match replace_runtime_broker_if_version_mismatch_with_health(
+            paths,
+            &broker_key,
+            &registry,
+            health.as_ref(),
+        ) {
+            RuntimeBrokerVersionGuardOutcome::Compatible => {}
+            RuntimeBrokerVersionGuardOutcome::Replaced
+            | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => continue,
+        }
+        if let Some(health) = health
             && health.instance_token == registry.instance_token
         {
             return Ok(Some((broker_key, registry)));
@@ -205,22 +224,38 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
     }
 
-    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)?
-        && !replace_runtime_broker_if_version_mismatch(paths, &broker_key, &existing)
-    {
+    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
         if !runtime_process_pid_alive(existing.pid) {
             remove_runtime_broker_registry_if_token_matches(
                 paths,
                 &broker_key,
                 &existing.instance_token,
             );
-        } else if existing.upstream_base_url == upstream_base_url
-            && existing.include_code_review == include_code_review
-            && let Some(health) = probe_runtime_broker_health(&broker_client, &existing)?
-            && health.instance_token == existing.instance_token
-        {
-            activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
-            return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
+        } else {
+            let health = probe_runtime_broker_health(&broker_client, &existing)?;
+            match replace_runtime_broker_if_version_mismatch_with_health(
+                paths,
+                &broker_key,
+                &existing,
+                health.as_ref(),
+            ) {
+                RuntimeBrokerVersionGuardOutcome::Compatible => {
+                    if existing.upstream_base_url == upstream_base_url
+                        && existing.include_code_review == include_code_review
+                        && let Some(health) = health
+                        && health.instance_token == existing.instance_token
+                    {
+                        activate_runtime_broker_profile(
+                            &broker_client,
+                            &existing,
+                            current_profile,
+                        )?;
+                        return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
+                    }
+                }
+                RuntimeBrokerVersionGuardOutcome::Replaced
+                | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {}
+            }
         }
     }
 

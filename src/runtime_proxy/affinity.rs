@@ -11,6 +11,8 @@ pub(crate) struct RuntimeWebsocketRequestMetadata {
     pub(crate) previous_response_id: Option<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) requires_previous_response_affinity: bool,
+    pub(crate) previous_response_fresh_fallback_shape:
+        Option<RuntimePreviousResponseFreshFallbackShape>,
 }
 
 pub(crate) fn parse_runtime_websocket_request_metadata(
@@ -24,6 +26,8 @@ pub(crate) fn parse_runtime_websocket_request_metadata(
         session_id: runtime_request_session_id_from_value(&value),
         requires_previous_response_affinity:
             runtime_request_value_requires_previous_response_affinity(&value),
+        previous_response_fresh_fallback_shape:
+            runtime_request_value_previous_response_fresh_fallback_shape(&value),
     }
 }
 
@@ -120,6 +124,93 @@ pub(crate) fn runtime_request_value_requires_previous_response_affinity(
                 has_call_id && item_type.ends_with("_call_output")
             })
         })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimePreviousResponseFreshFallbackShape {
+    ToolOutputOnly,
+    ReplayableInput,
+    SessionReplayable,
+    ContinuationOnly,
+}
+
+pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
+    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+) -> &'static str {
+    match shape {
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => "tool_output_only",
+        Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput) => "replayable_input",
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable) => "session_replayable",
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => "continuation_only",
+        None => "none",
+    }
+}
+
+pub(crate) fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
+    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+) -> bool {
+    matches!(
+        shape,
+        Some(
+            RuntimePreviousResponseFreshFallbackShape::ReplayableInput
+                | RuntimePreviousResponseFreshFallbackShape::SessionReplayable
+        )
+    )
+}
+
+fn runtime_request_value_previous_response_input_item_is_tool_output(
+    item: &serde_json::Value,
+) -> bool {
+    let Some(object) = item.as_object() else {
+        return false;
+    };
+    let item_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let has_call_id = object
+        .get("call_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|call_id| !call_id.trim().is_empty());
+    has_call_id && item_type.ends_with("_call_output")
+}
+
+pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
+    value: &serde_json::Value,
+) -> Option<RuntimePreviousResponseFreshFallbackShape> {
+    runtime_request_previous_response_id_from_value(value)?;
+
+    let has_session = runtime_request_session_id_from_value(value).is_some();
+    let input = value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let has_replayable_input = input
+        .iter()
+        .any(|item| !runtime_request_value_previous_response_input_item_is_tool_output(item));
+    let tool_output_only = !input.is_empty()
+        && input
+            .iter()
+            .all(|item| runtime_request_value_previous_response_input_item_is_tool_output(item));
+
+    Some(if tool_output_only {
+        RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly
+    } else if has_replayable_input {
+        RuntimePreviousResponseFreshFallbackShape::ReplayableInput
+    } else if has_session {
+        RuntimePreviousResponseFreshFallbackShape::SessionReplayable
+    } else {
+        RuntimePreviousResponseFreshFallbackShape::ContinuationOnly
+    })
+}
+
+pub(crate) fn runtime_request_previous_response_fresh_fallback_shape(
+    request: &RuntimeProxyRequest,
+) -> Option<RuntimePreviousResponseFreshFallbackShape> {
+    serde_json::from_slice::<serde_json::Value>(&request.body)
+        .ok()
+        .and_then(|value| runtime_request_value_previous_response_fresh_fallback_shape(&value))
 }
 
 pub(crate) fn runtime_request_requires_previous_response_affinity(

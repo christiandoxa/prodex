@@ -354,24 +354,85 @@ pub(crate) fn extract_runtime_turn_state_from_value(value: &serde_json::Value) -
                 .get("headers")
                 .and_then(extract_runtime_turn_state_from_headers_value)
         })
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("turn_state"))
+                .and_then(runtime_json_string)
+        })
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("turnState"))
+                .and_then(runtime_json_string)
+        })
+        .or_else(|| value.get("turn_state").and_then(runtime_json_string))
+        .or_else(|| value.get("turnState").and_then(runtime_json_string))
+}
+
+fn runtime_json_string(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 pub(crate) fn extract_runtime_turn_state_from_headers_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    let headers = value.as_object()?;
-    headers.iter().find_map(|(name, value)| {
-        if name.eq_ignore_ascii_case("x-codex-turn-state") {
-            match value {
-                serde_json::Value::String(value) => Some(value.clone()),
-                serde_json::Value::Array(items) => items.iter().find_map(|item| match item {
-                    serde_json::Value::String(value) => Some(value.clone()),
-                    _ => None,
-                }),
-                _ => None,
+    match value {
+        serde_json::Value::Object(headers) => headers.iter().find_map(|(name, value)| {
+            if name.eq_ignore_ascii_case("x-codex-turn-state") {
+                extract_runtime_turn_state_header_value(value)
+            } else {
+                None
             }
-        } else {
-            None
+        }),
+        serde_json::Value::Array(headers) => headers
+            .iter()
+            .find_map(extract_runtime_turn_state_from_header_entry),
+        _ => None,
+    }
+}
+
+fn extract_runtime_turn_state_from_header_entry(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Array(items) => {
+            let name = items.first()?.as_str()?;
+            if !name.eq_ignore_ascii_case("x-codex-turn-state") {
+                return None;
+            }
+            items
+                .get(1)
+                .and_then(extract_runtime_turn_state_header_value)
         }
-    })
+        serde_json::Value::Object(entry) => {
+            let name = entry
+                .get("name")
+                .or_else(|| entry.get("key"))
+                .and_then(serde_json::Value::as_str)?;
+            if !name.eq_ignore_ascii_case("x-codex-turn-state") {
+                return None;
+            }
+            entry
+                .get("value")
+                .or_else(|| entry.get("values"))
+                .and_then(extract_runtime_turn_state_header_value)
+        }
+        _ => None,
+    }
+}
+
+fn extract_runtime_turn_state_header_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(extract_runtime_turn_state_header_value),
+        _ => None,
+    }
 }

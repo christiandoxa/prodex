@@ -245,8 +245,7 @@ fn wait_for_runtime_background_queues_idle() {
             && continuation_active == 0
             && (probe_refresh_backlog > 0 || probe_refresh_active > 0);
         if only_lingering_probe_refresh {
-            let lingering_since =
-                lingering_probe_refresh_since.get_or_insert_with(Instant::now);
+            let lingering_since = lingering_probe_refresh_since.get_or_insert_with(Instant::now);
             // Tests use isolated state roots, so once every other queue has drained we can
             // discard stale best-effort probe refresh backlog instead of timing out on work
             // that belongs to a previous test. Any workers already in flight can finish in the
@@ -313,10 +312,7 @@ fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapsho
     }
 }
 
-fn ready_runtime_usage_snapshot(
-    now: i64,
-    remaining_percent: i64,
-) -> RuntimeProfileUsageSnapshot {
+fn ready_runtime_usage_snapshot(now: i64, remaining_percent: i64) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: now,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
@@ -433,7 +429,7 @@ fn runtime_shared_for_cold_start_probe_selection(
                             codex_home: main_home,
                             managed: true,
                             email: Some("main@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -442,7 +438,7 @@ fn runtime_shared_for_cold_start_probe_selection(
                             codex_home: second_home,
                             managed: true,
                             email: Some("second@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                 ]),
@@ -697,8 +693,9 @@ fn runtime_test_local_websocket_pair() -> (RuntimeLocalWebSocket, RuntimeUpstrea
     let (server_stream, _addr) = listener
         .accept()
         .expect("test websocket server should accept a connection");
-    let local_socket = tungstenite::accept(Box::new(server_stream) as Box<dyn TinyReadWrite + Send>)
-        .expect("test websocket server handshake should succeed");
+    let local_socket =
+        tungstenite::accept(Box::new(server_stream) as Box<dyn TinyReadWrite + Send>)
+            .expect("test websocket server handshake should succeed");
     let client_socket = client
         .join()
         .expect("test websocket client thread should join");
@@ -743,8 +740,7 @@ where
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut last_state = None;
     loop {
-        if let Ok(state) = AppState::load(paths)
-        {
+        if let Ok(state) = AppState::load(paths) {
             if predicate(&state) {
                 return state;
             }
@@ -850,9 +846,7 @@ fn tiny_http_response_status_content_type_and_body(
         .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
         .expect("response should serialize");
     let text = String::from_utf8(bytes).expect("response bytes should be utf8");
-    let (headers, body) = text
-        .split_once("\r\n\r\n")
-        .unwrap_or((text.as_str(), ""));
+    let (headers, body) = text.split_once("\r\n\r\n").unwrap_or((text.as_str(), ""));
     let content_type = headers.lines().find_map(|line| {
         line.strip_prefix("Content-Type: ")
             .map(|value| value.to_string())
@@ -885,6 +879,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyResetBeforeFirstByte,
     HttpOnlyResetAfterFirstChunk,
     HttpOnlyPreviousResponseNeedsTurnState,
+    HttpOnlySseHeadersArrayTurnState,
     HttpOnlyCompactOverloaded,
     HttpOnlyLargeCompactResponse,
     HttpOnlyUsageLimitMessage,
@@ -952,6 +947,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState)
     }
 
+    fn start_http_sse_headers_array_turn_state() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySseHeadersArrayTurnState)
+    }
+
     fn start_http_compact_overloaded() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactOverloaded)
     }
@@ -1001,7 +1000,9 @@ impl RuntimeProxyBackend {
     }
 
     fn start_websocket_reuse_owned_previous_response_silent_hang() -> Self {
-        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReuseOwnedPreviousResponseSilentHang)
+        Self::start_with_mode(
+            RuntimeProxyBackendMode::WebsocketReuseOwnedPreviousResponseSilentHang,
+        )
     }
 
     fn start_websocket_reuse_previous_response_needs_turn_state() -> Self {
@@ -1009,7 +1010,9 @@ impl RuntimeProxyBackend {
     }
 
     fn start_websocket_previous_response_missing_without_turn_state() -> Self {
-        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState)
+        Self::start_with_mode(
+            RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState,
+        )
     }
 
     fn start_websocket_close_mid_turn() -> Self {
@@ -1560,6 +1563,7 @@ fn handle_runtime_proxy_backend_request(
                     if matches!(
                         mode,
                         RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState
+                            | RuntimeProxyBackendMode::HttpOnlySseHeadersArrayTurnState
                     ) && runtime_proxy_backend_is_owned_continuation(
                         "second-account",
                         previous_response_id.as_deref(),
@@ -1583,6 +1587,34 @@ fn handle_runtime_proxy_backend_request(
                         })
                         .to_string(),
                         Some("turn-second".to_string()),
+                        None,
+                        None,
+                    )
+                }
+                "second-account"
+                    if matches!(mode, RuntimeProxyBackendMode::HttpOnlySseHeadersArrayTurnState)
+                        && previous_response_id.is_none() =>
+                {
+                    let response_id =
+                        runtime_proxy_backend_initial_response_id_for_account("second-account")
+                            .expect("second-account response id should exist");
+                    (
+                        "HTTP/1.1 200 OK",
+                        "text/event-stream",
+                        format!(
+                            concat!(
+                                "event: response.created\r\n",
+                                "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\",\"headers\":[[\"x-codex-turn-state\",\"turn-second\"]]}}}}\r\n",
+                                "\r\n",
+                                "event: response.completed\r\n",
+                                "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                "\r\n"
+                            ),
+                            response_id,
+                            response_id
+                        )
+                        .to_string(),
+                        None,
                         None,
                         None,
                     )
@@ -2976,11 +3008,7 @@ fn write_auth_json_with_tokens(
     if let Some(last_refresh) = last_refresh {
         auth_json["last_refresh"] = serde_json::Value::String(last_refresh.to_string());
     }
-    fs::write(
-        path,
-        auth_json.to_string(),
-    )
-    .expect("failed to write auth.json");
+    fs::write(path, auth_json.to_string()).expect("failed to write auth.json");
 }
 
 fn fake_jwt_with_exp(exp: i64) -> String {
@@ -2988,18 +3016,17 @@ fn fake_jwt_with_exp(exp: i64) -> String {
 }
 
 fn fake_jwt_with_exp_and_account_id(exp: i64, account_id: &str) -> String {
-    let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(br#"{"alg":"none","typ":"JWT"}"#);
-    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(
-            serde_json::json!({
-                "exp": exp,
-                "https://api.openai.com/auth": {
-                    "chatgpt_account_id": account_id,
-                },
-            })
-            .to_string(),
-        );
+    let header =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        serde_json::json!({
+            "exp": exp,
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": account_id,
+            },
+        })
+        .to_string(),
+    );
     format!("{header}.{payload}.signature")
 }
 
@@ -3023,8 +3050,7 @@ impl TokenAwareServer {
         expected_account_id: &str,
         success_body: String,
     ) -> Self {
-        let listener =
-            TcpListener::bind("127.0.0.1:0").expect("failed to bind token-aware server");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind token-aware server");
         let listen_addr = listener
             .local_addr()
             .expect("failed to read token-aware server address");
@@ -3160,7 +3186,8 @@ struct AuthRefreshServer {
 
 impl AuthRefreshServer {
     fn start(access_token: &str, refresh_token: &str) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind auth refresh server");
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("failed to bind auth refresh server");
         let listen_addr = listener
             .local_addr()
             .expect("failed to read auth refresh server address");
@@ -3498,7 +3525,7 @@ fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
                     codex_home: fourth_home,
                     managed: true,
                     email: Some("fourth@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -3507,7 +3534,7 @@ fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -3516,7 +3543,7 @@ fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -3525,7 +3552,7 @@ fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -3588,7 +3615,7 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -3597,7 +3624,7 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -3606,7 +3633,7 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -3720,13 +3747,15 @@ fn buffered_runtime_proxy_response_drop_requests_heap_trim_after_large_release()
 
 #[test]
 fn runtime_profile_inflight_soft_limit_tightens_under_pressure() {
-    let steady_responses =
-        runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, false);
+    let steady_responses = runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, false);
     let pressured_responses =
         runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, true);
     let pressured_compact = runtime_profile_inflight_soft_limit(RuntimeRouteKind::Compact, true);
 
-    assert_eq!(steady_responses, runtime_proxy_profile_inflight_soft_limit().max(1));
+    assert_eq!(
+        steady_responses,
+        runtime_proxy_profile_inflight_soft_limit().max(1)
+    );
     assert!(pressured_responses >= 1);
     assert!(pressured_responses <= steady_responses);
     assert!(pressured_compact >= 1);
@@ -3952,7 +3981,7 @@ fn runtime_softened_backoffs_persist_after_proxy_startup() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -4032,7 +4061,7 @@ fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -4165,6 +4194,88 @@ fn runtime_request_allows_fresh_function_call_output_replay_without_previous_res
 }
 
 #[test]
+fn runtime_request_previous_response_fresh_fallback_shape_classifies_tool_output_only() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
+    };
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+    );
+    assert_eq!(
+        runtime_previous_response_fresh_fallback_shape_label(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        ),
+        "tool_output_only"
+    );
+}
+
+#[test]
+fn runtime_request_previous_response_fresh_fallback_shape_classifies_replayable_input() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp_123","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"retry with full body"}]}]}"#.to_vec(),
+    };
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput)
+    );
+    assert!(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        )
+    );
+}
+
+#[test]
+fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_replayable_empty_input()
+ {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp_123","session_id":"sess_123","input":[]}"#.to_vec(),
+    };
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+    );
+    assert!(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        )
+    );
+}
+
+#[test]
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_empty_continuation_payloads() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp_123","input":[]}"#.to_vec(),
+    };
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+    );
+    assert!(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        )
+    );
+}
+
+#[test]
 fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     let metadata = parse_runtime_websocket_request_metadata(
         r#"{"previous_response_id":"resp_123","client_metadata":{"session_id":"sess_123"},"input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
@@ -4173,6 +4284,10 @@ fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     assert_eq!(metadata.previous_response_id.as_deref(), Some("resp_123"));
     assert_eq!(metadata.session_id.as_deref(), Some("sess_123"));
     assert!(metadata.requires_previous_response_affinity);
+    assert_eq!(
+        metadata.previous_response_fresh_fallback_shape,
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+    );
 }
 
 #[test]
@@ -4487,7 +4602,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
                     codex_home: PathBuf::from("/tmp/main"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -4496,7 +4611,7 @@ fn ready_profile_candidates_use_persisted_snapshot_when_probe_is_unavailable() {
                     codex_home: PathBuf::from("/tmp/second"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -4613,7 +4728,7 @@ fn run_preflight_reports_with_current_first_preserves_current_and_rotation_order
                     codex_home: PathBuf::from("/tmp/main"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -4622,7 +4737,7 @@ fn run_preflight_reports_with_current_first_preserves_current_and_rotation_order
                     codex_home: PathBuf::from("/tmp/second"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -4631,7 +4746,7 @@ fn run_preflight_reports_with_current_first_preserves_current_and_rotation_order
                     codex_home: PathBuf::from("/tmp/third"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -4847,8 +4962,8 @@ fn logout_command_accepts_positional_profile_name() {
 
 #[test]
 fn logout_command_accepts_profile_flag() {
-    let command =
-        parse_cli_command_from(["prodex", "logout", "--profile", "second"]).expect("logout command");
+    let command = parse_cli_command_from(["prodex", "logout", "--profile", "second"])
+        .expect("logout command");
     let Commands::Logout(args) = command else {
         panic!("expected logout command");
     };
@@ -5164,7 +5279,7 @@ fn rotates_profiles_after_current_profile() {
                     codex_home: PathBuf::from("/tmp/alpha"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -5173,7 +5288,7 @@ fn rotates_profiles_after_current_profile() {
                     codex_home: PathBuf::from("/tmp/beta"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -5182,7 +5297,7 @@ fn rotates_profiles_after_current_profile() {
                     codex_home: PathBuf::from("/tmp/gamma"),
                     managed: true,
                     email: None,
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -5222,7 +5337,8 @@ fn custom_base_url_maps_to_codex_usage() {
 #[test]
 fn fetch_usage_json_refreshes_access_token_after_401() {
     let temp_dir = TestDir::new();
-    let usage_server = TokenAwareServer::start_usage("fresh-token", "main-account", "main@example.com");
+    let usage_server =
+        TokenAwareServer::start_usage("fresh-token", "main-account", "main@example.com");
     let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
     let _refresh_guard =
         TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
@@ -5314,7 +5430,7 @@ fn unique_profile_name_adds_numeric_suffix() {
                 codex_home: PathBuf::from("/tmp/existing"),
                 managed: true,
                 email: Some("other@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -5380,7 +5496,7 @@ fn remove_profile_deletes_managed_home_by_default() {
                 codex_home: profile_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -5447,7 +5563,7 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
                     codex_home: managed_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -5456,7 +5572,7 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
                     codex_home: external_home.clone(),
                     managed: false,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -5597,8 +5713,14 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
     .expect("bulk profile remove should succeed");
 
     let reloaded = AppState::load(&paths).expect("state should reload");
-    assert!(reloaded.profiles.is_empty(), "all profiles should be removed");
-    assert!(reloaded.active_profile.is_none(), "active profile should clear");
+    assert!(
+        reloaded.profiles.is_empty(),
+        "all profiles should be removed"
+    );
+    assert!(
+        reloaded.active_profile.is_none(),
+        "active profile should clear"
+    );
     assert!(
         reloaded.last_run_selected_at.is_empty(),
         "selection metadata should be cleared"
@@ -5620,9 +5742,10 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
         "external profile home should remain without --delete-home"
     );
 
-    let restored_continuations = load_runtime_continuations_with_recovery(&paths, &reloaded.profiles)
-        .expect("continuations should load")
-        .value;
+    let restored_continuations =
+        load_runtime_continuations_with_recovery(&paths, &reloaded.profiles)
+            .expect("continuations should load")
+            .value;
     assert!(
         restored_continuations.response_profile_bindings.is_empty(),
         "response continuation bindings should be cleared"
@@ -5659,11 +5782,17 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
         "journal session bindings should be cleared"
     );
     assert!(
-        restored_journal.continuations.turn_state_bindings.is_empty(),
+        restored_journal
+            .continuations
+            .turn_state_bindings
+            .is_empty(),
         "journal turn state bindings should be cleared"
     );
     assert!(
-        restored_journal.continuations.session_id_bindings.is_empty(),
+        restored_journal
+            .continuations
+            .session_id_bindings
+            .is_empty(),
         "journal session id bindings should be cleared"
     );
 }
@@ -5687,7 +5816,7 @@ fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
                 codex_home: external_home.clone(),
                 managed: false,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         ..AppState::default()
@@ -5702,7 +5831,8 @@ fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
     })
     .expect_err("bulk delete should reject external homes");
     assert!(
-        err.to_string().contains("refuses to delete external profiles"),
+        err.to_string()
+            .contains("refuses to delete external profiles"),
         "unexpected error: {err:#}"
     );
 
@@ -5815,7 +5945,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -5824,7 +5954,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -5906,7 +6036,7 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -5949,13 +6079,19 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
     .expect("first verification should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let first_log =
-        fs::read_to_string(&shared.log_path).expect("runtime log should be readable after first bind");
+    let first_log = fs::read_to_string(&shared.log_path)
+        .expect("runtime log should be readable after first bind");
     let binding_marker = "binding previous_response_owner profile=main response_id=resp-1";
     let first_binding_count = first_log.matches(binding_marker).count();
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
-    assert_eq!(first_binding_count, 1, "first bind should be persisted once: {first_log}");
-    assert_eq!(first_revision, 1, "first bind should persist once: {first_log}");
+    assert_eq!(
+        first_binding_count, 1,
+        "first bind should be persisted once: {first_log}"
+    );
+    assert_eq!(
+        first_revision, 1,
+        "first bind should persist once: {first_log}"
+    );
 
     remember_runtime_successful_previous_response_owner(
         &shared,
@@ -6011,7 +6147,7 @@ fn previous_response_owner_profile_changes_still_persist() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -6020,7 +6156,7 @@ fn previous_response_owner_profile_changes_still_persist() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -6058,10 +6194,12 @@ fn previous_response_owner_profile_changes_still_persist() {
     )
     .expect("first owner verification should succeed");
     wait_for_runtime_background_queues_idle();
-    let initial_log =
-        fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let initial_log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     let initial_revision = shared.state_save_revision.load(Ordering::SeqCst);
-    assert_eq!(initial_revision, 1, "first owner save should persist once: {initial_log}");
+    assert_eq!(
+        initial_revision, 1,
+        "first owner save should persist once: {initial_log}"
+    );
 
     remember_runtime_successful_previous_response_owner(
         &shared,
@@ -6072,8 +6210,8 @@ fn previous_response_owner_profile_changes_still_persist() {
     .expect("owner change verification should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let updated_log =
-        fs::read_to_string(&shared.log_path).expect("runtime log should be readable after rebinding");
+    let updated_log = fs::read_to_string(&shared.log_path)
+        .expect("runtime log should be readable after rebinding");
     assert!(
         updated_log.contains("binding previous_response_owner profile=second response_id=resp-2"),
         "owner changes should still be logged and persisted: {updated_log}"
@@ -6119,7 +6257,7 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -6149,36 +6287,24 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
     let response_ids = vec!["resp-1".to_string()];
-    remember_runtime_response_ids(
-        &shared,
-        "main",
-        &response_ids,
-        RuntimeRouteKind::Responses,
-    )
-    .expect("first response id bind should succeed");
+    remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
+        .expect("first response id bind should succeed");
     wait_for_runtime_background_queues_idle();
 
-    let first_log =
-        fs::read_to_string(&shared.log_path).expect("runtime log should be readable after first bind");
+    let first_log = fs::read_to_string(&shared.log_path)
+        .expect("runtime log should be readable after first bind");
     let binding_marker = "binding response_ids profile=main count=1 first=Some(\"resp-1\")";
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
     assert_eq!(first_log.matches(binding_marker).count(), 1);
-    assert_eq!(first_revision, 1, "first bind should persist once: {first_log}");
+    assert_eq!(
+        first_revision, 1,
+        "first bind should persist once: {first_log}"
+    );
 
-    remember_runtime_response_ids(
-        &shared,
-        "main",
-        &response_ids,
-        RuntimeRouteKind::Responses,
-    )
-    .expect("duplicate response id bind should succeed");
-    remember_runtime_response_ids(
-        &shared,
-        "main",
-        &response_ids,
-        RuntimeRouteKind::Responses,
-    )
-    .expect("second duplicate response id bind should succeed");
+    remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
+        .expect("duplicate response id bind should succeed");
+    remember_runtime_response_ids(&shared, "main", &response_ids, RuntimeRouteKind::Responses)
+        .expect("second duplicate response id bind should succeed");
     wait_for_runtime_background_queues_idle();
 
     let second_log = fs::read_to_string(&shared.log_path)
@@ -6216,7 +6342,7 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -6245,13 +6371,8 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
-    remember_runtime_turn_state(
-        &shared,
-        "main",
-        Some("turn-1"),
-        RuntimeRouteKind::Responses,
-    )
-    .expect("turn state verification should succeed");
+    remember_runtime_turn_state(&shared, "main", Some("turn-1"), RuntimeRouteKind::Responses)
+        .expect("turn state verification should succeed");
     remember_runtime_session_id(
         &shared,
         "main",
@@ -6272,7 +6393,10 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
     let first_log = fs::read_to_string(&shared.log_path)
         .expect("runtime log should be readable after initial bindings");
     let first_revision = shared.state_save_revision.load(Ordering::SeqCst);
-    assert_eq!(first_revision, 3, "initial binds should persist once each: {first_log}");
+    assert_eq!(
+        first_revision, 3,
+        "initial binds should persist once each: {first_log}"
+    );
     assert_eq!(
         first_log
             .matches("binding turn_state profile=main value=turn-1")
@@ -6288,13 +6412,8 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
         "session id should be logged once: {first_log}"
     );
 
-    remember_runtime_turn_state(
-        &shared,
-        "main",
-        Some("turn-1"),
-        RuntimeRouteKind::Responses,
-    )
-    .expect("duplicate turn state verification should succeed");
+    remember_runtime_turn_state(&shared, "main", Some("turn-1"), RuntimeRouteKind::Responses)
+        .expect("duplicate turn state verification should succeed");
     remember_runtime_session_id(
         &shared,
         "main",
@@ -6359,7 +6478,7 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -6432,23 +6551,14 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
             ),
         ]),
         continuation_statuses: RuntimeContinuationStatuses {
-            response: BTreeMap::from([(
-                "resp-1".to_string(),
-                verified_status("responses"),
-            )]),
+            response: BTreeMap::from([("resp-1".to_string(), verified_status("responses"))]),
             turn_state: BTreeMap::from([
                 ("turn-1".to_string(), verified_status("responses")),
-                (
-                    compact_turn_state_key.clone(),
-                    verified_status("compact"),
-                ),
+                (compact_turn_state_key.clone(), verified_status("compact")),
             ]),
             session_id: BTreeMap::from([
                 ("session-1".to_string(), verified_status("websocket")),
-                (
-                    compact_session_key.clone(),
-                    verified_status("compact"),
-                ),
+                (compact_session_key.clone(), verified_status("compact")),
             ]),
         },
         profile_probe_cache: BTreeMap::new(),
@@ -6523,7 +6633,7 @@ fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_c
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -6532,7 +6642,7 @@ fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_c
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -6556,7 +6666,7 @@ fn runtime_rotation_proxy_stays_disabled_without_any_quota_compatible_profile() 
                     codex_home: temp_dir.path.join("homes/main"),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -6565,7 +6675,7 @@ fn runtime_rotation_proxy_stays_disabled_without_any_quota_compatible_profile() 
                     codex_home: temp_dir.path.join("homes/second"),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -6598,7 +6708,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -6754,7 +6864,7 @@ fn optimistic_current_candidate_requires_quota_evidence_when_alternatives_exist(
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -6763,7 +6873,7 @@ fn optimistic_current_candidate_requires_quota_evidence_when_alternatives_exist(
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -6850,7 +6960,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -6928,7 +7038,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -7003,7 +7113,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -7086,7 +7196,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -7168,7 +7278,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -7257,7 +7367,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -7406,10 +7516,7 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([(
-            "main".to_string(),
-            hard_limit.saturating_sub(1),
-        )]),
+        profile_inflight: BTreeMap::from([("main".to_string(), hard_limit.saturating_sub(1))]),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -7452,7 +7559,8 @@ fn runtime_profile_inflight_weight_prioritizes_long_lived_routes() {
 #[test]
 fn runtime_profile_inflight_limits_use_configured_overrides() {
     let _soft_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT", "9");
-    let _hard_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT", "10");
+    let _hard_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT", "10");
 
     assert_eq!(
         runtime_profile_inflight_soft_limit(RuntimeRouteKind::Responses, false),
@@ -7619,7 +7727,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -7777,7 +7885,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -7786,7 +7894,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -7889,7 +7997,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -7898,7 +8006,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8010,7 +8118,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8019,7 +8127,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8128,7 +8236,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8137,7 +8245,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8243,7 +8351,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8252,7 +8360,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8367,7 +8475,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8376,7 +8484,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8491,7 +8599,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8500,7 +8608,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8606,7 +8714,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8615,7 +8723,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8715,7 +8823,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8724,7 +8832,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8824,7 +8932,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -8833,7 +8941,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -8936,7 +9044,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -9069,7 +9177,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -9147,7 +9255,7 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -9156,7 +9264,7 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -9238,7 +9346,7 @@ fn commit_runtime_proxy_profile_selection_can_skip_current_profile_tracking() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -9247,7 +9355,7 @@ fn commit_runtime_proxy_profile_selection_can_skip_current_profile_tracking() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -9335,7 +9443,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -9450,7 +9558,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -9560,7 +9668,7 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -9648,6 +9756,11 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary
         .marker_counts
         .insert("previous_response_not_found", 2);
+    summary.marker_counts.insert("chain_retried_owner", 1);
+    summary
+        .marker_counts
+        .insert("chain_dead_upstream_confirmed", 1);
+    summary.marker_counts.insert("stale_continuation", 1);
     summary.marker_counts.insert("compact_followup_owner", 1);
     summary
         .marker_counts
@@ -9666,6 +9779,18 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         BTreeMap::from([("responses".to_string(), 1), ("websocket".to_string(), 1)]);
     summary.previous_response_not_found_by_transport =
         BTreeMap::from([("http".to_string(), 1), ("websocket".to_string(), 1)]);
+    summary.chain_retried_owner_by_reason =
+        BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1)]);
+    summary.chain_dead_upstream_confirmed_by_reason =
+        BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1)]);
+    summary.stale_continuation_by_reason =
+        BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1)]);
+    summary.latest_chain_event = Some(
+        "chain_dead_upstream_confirmed reason=previous_response_not_found_locked_affinity profile=second"
+            .to_string(),
+    );
+    summary.latest_stale_continuation_reason =
+        Some("previous_response_not_found_locked_affinity".to_string());
     summary.marker_last_fields.insert(
         "selection_pick",
         BTreeMap::from([
@@ -9704,6 +9829,9 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["marker_counts"]["selection_pick"], 2);
     assert_eq!(value["marker_counts"]["selection_skip_current"], 1);
     assert_eq!(value["marker_counts"]["previous_response_not_found"], 2);
+    assert_eq!(value["marker_counts"]["chain_retried_owner"], 1);
+    assert_eq!(value["marker_counts"]["chain_dead_upstream_confirmed"], 1);
+    assert_eq!(value["marker_counts"]["stale_continuation"], 1);
     assert_eq!(value["marker_counts"]["compact_followup_owner"], 1);
     assert_eq!(value["marker_counts"]["compact_fresh_fallback_blocked"], 1);
     assert_eq!(
@@ -9718,6 +9846,26 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(
         value["previous_response_not_found_by_transport"]["websocket"],
         1
+    );
+    assert_eq!(
+        value["chain_retried_owner_by_reason"]["previous_response_not_found_locked_affinity"],
+        1
+    );
+    assert_eq!(
+        value["chain_dead_upstream_confirmed_by_reason"]["previous_response_not_found_locked_affinity"],
+        1
+    );
+    assert_eq!(
+        value["stale_continuation_by_reason"]["previous_response_not_found_locked_affinity"],
+        1
+    );
+    assert_eq!(
+        value["latest_chain_event"],
+        "chain_dead_upstream_confirmed reason=previous_response_not_found_locked_affinity profile=second"
+    );
+    assert_eq!(
+        value["latest_stale_continuation_reason"],
+        "previous_response_not_found_locked_affinity"
     );
     assert_eq!(value["facet_counts"]["route"]["responses"], 2);
     assert_eq!(
@@ -9878,7 +10026,10 @@ fn runtime_doctor_degraded_routes_sort_and_cap_output() {
 
     assert_eq!(routes.len(), 8);
     assert_eq!(routes[0], "aardvark/standard bad_pairing=5");
-    assert_eq!(routes[1], format!("alpha/retry retry_backoff until={}", now + 10));
+    assert_eq!(
+        routes[1],
+        format!("alpha/retry retry_backoff until={}", now + 10)
+    );
     assert_eq!(
         routes[3],
         format!("delta/responses circuit=half-open until={}", now - 1)
@@ -9888,14 +10039,13 @@ fn runtime_doctor_degraded_routes_sort_and_cap_output() {
         format!("eta/websocket circuit=open until={}", now + 30)
     );
     assert_eq!(
-        routes[7],
-        "main/responses bad_pairing=2",
+        routes[7], "main/responses bad_pairing=2",
         "helper should keep the first eight sorted entries"
     );
     assert!(
-        !routes
-            .iter()
-            .any(|route| route.starts_with("omega/") || route.starts_with("theta/") || route.starts_with("zeta/")),
+        !routes.iter().any(|route| route.starts_with("omega/")
+            || route.starts_with("theta/")
+            || route.starts_with("zeta/")),
         "later sorted entries should be truncated: {routes:?}"
     );
 }
@@ -9923,6 +10073,32 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
             ("continuation".to_string(), 1),
             ("transport".to_string(), 3),
         ]),
+        chain_retried_owner_by_reason: BTreeMap::from([(
+            "previous_response_not_found_locked_affinity".to_string(),
+            1,
+        )]),
+        chain_dead_upstream_confirmed_by_reason: BTreeMap::from([(
+            "previous_response_not_found_locked_affinity".to_string(),
+            1,
+        )]),
+        stale_continuation_by_reason: BTreeMap::from([(
+            "previous_response_not_found_locked_affinity".to_string(),
+            1,
+        )]),
+        prodex_binary_identities: vec!["/usr/bin/prodex version=0.29.0 sha256=abc".to_string()],
+        runtime_broker_identities: vec![
+            "broker pid=123 version=0.26.0 path=/tmp/prodex sha256=def source=health"
+                .to_string(),
+        ],
+        prodex_binary_mismatch: false,
+        runtime_broker_mismatch: true,
+        latest_chain_event: Some(
+            "chain_dead_upstream_confirmed reason=previous_response_not_found_locked_affinity profile=second"
+                .to_string(),
+        ),
+        latest_stale_continuation_reason: Some(
+            "previous_response_not_found_locked_affinity".to_string(),
+        ),
         diagnosis: "test diagnosis".to_string(),
         ..RuntimeDoctorSummary::default()
     };
@@ -9955,6 +10131,122 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
     assert_eq!(
         fields.get("Suspect continuations").map(String::as_str),
         Some("count=2 bindings=resp-main:suspect, turn-main:suspect")
+    );
+    assert_eq!(
+        fields.get("Chain retry reasons").map(String::as_str),
+        Some("previous_response_not_found_locked_affinity=1")
+    );
+    assert_eq!(
+        fields.get("Chain dead reasons").map(String::as_str),
+        Some("previous_response_not_found_locked_affinity=1")
+    );
+    assert_eq!(
+        fields.get("Stale reasons").map(String::as_str),
+        Some("previous_response_not_found_locked_affinity=1")
+    );
+    assert_eq!(
+        fields.get("Latest stale reason").map(String::as_str),
+        Some("previous_response_not_found_locked_affinity")
+    );
+    assert_eq!(
+        fields.get("Latest chain event").map(String::as_str),
+        Some(
+            "chain_dead_upstream_confirmed reason=previous_response_not_found_locked_affinity profile=second"
+        )
+    );
+    assert_eq!(
+        fields.get("Prodex binaries").map(String::as_str),
+        Some("/usr/bin/prodex version=0.29.0 sha256=abc")
+    );
+    assert_eq!(
+        fields.get("Runtime brokers").map(String::as_str),
+        Some("broker pid=123 version=0.26.0 path=/tmp/prodex sha256=def source=health")
+    );
+    assert_eq!(
+        fields.get("Binary mismatch").map(String::as_str),
+        Some("installed=false broker=true")
+    );
+}
+
+#[test]
+fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+
+    let server = TinyServer::http("127.0.0.1:0").expect("health server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("health server should expose a TCP address");
+    save_runtime_broker_registry(
+        &paths,
+        "doctor-mismatch",
+        &RuntimeBrokerRegistry {
+            pid: std::process::id(),
+            listen_addr: listen_addr.to_string(),
+            started_at: Local::now().timestamp(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            instance_token: "instance".to_string(),
+            admin_token: "secret".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
+            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        },
+    )
+    .expect("doctor mismatch registry should save");
+
+    let health_thread = thread::spawn(move || {
+        let request = server.recv().expect("health request should arrive");
+        let body = serde_json::to_string(&RuntimeBrokerHealth {
+            pid: std::process::id(),
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            active_requests: 0,
+            instance_token: "instance".to_string(),
+            persistence_role: "owner".to_string(),
+            prodex_version: Some("0.26.0".to_string()),
+            executable_path: Some("/tmp/prodex-0.26.0".to_string()),
+            executable_sha256: None,
+        })
+        .expect("health payload should serialize");
+        let response = TinyResponse::from_string(body).with_status_code(200);
+        request
+            .respond(response)
+            .expect("health response should write");
+    });
+
+    let mut summary = RuntimeDoctorSummary::default();
+    collect_runtime_doctor_state(&paths, &mut summary);
+
+    health_thread
+        .join()
+        .expect("health server thread should join");
+
+    assert!(
+        summary.runtime_broker_mismatch,
+        "doctor should flag mismatched live runtime broker identity"
+    );
+    assert!(
+        summary
+            .runtime_broker_identities
+            .iter()
+            .any(|line| line.contains("doctor-mismatch pid=")
+                && line.contains("version=0.26.0")
+                && line.contains("source=health")),
+        "doctor should surface the mismatched broker identity: {:?}",
+        summary.runtime_broker_identities
     );
 }
 
@@ -9990,7 +10282,7 @@ fn collect_orphan_managed_profile_dirs_ignores_tracked_and_fresh_dirs() {
                 codex_home: tracked,
                 managed: true,
                 email: Some("tracked@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -10031,7 +10323,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -10097,7 +10389,8 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     )
     .expect("backoffs should save");
     let journal_saved_at = Local::now().timestamp();
-    save_runtime_continuation_journal(
+    let recent_not_found_at = journal_saved_at + RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS;
+    save_runtime_continuation_journal_for_profiles(
         &paths,
         &RuntimeContinuationStore {
             response_profile_bindings: BTreeMap::from([(
@@ -10116,7 +10409,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
                         last_touched_at: Some(journal_saved_at),
                         last_verified_at: None,
                         last_verified_route: None,
-                        last_not_found_at: Some(journal_saved_at),
+                        last_not_found_at: Some(recent_not_found_at),
                         not_found_streak: 1,
                         success_count: 0,
                         failure_count: 1,
@@ -10126,6 +10419,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
             },
             ..RuntimeContinuationStore::default()
         },
+        &state.profiles,
         journal_saved_at,
     )
     .expect("continuation journal should save");
@@ -10177,7 +10471,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -10264,7 +10558,7 @@ fn optimistic_current_candidate_skips_route_performance_penalty() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -10357,7 +10651,7 @@ fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_pa
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -10468,7 +10762,7 @@ fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapsho
                         codex_home: main_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
                 (
@@ -10477,7 +10771,7 @@ fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapsho
                         codex_home: second_home,
                         managed: true,
                         email: Some("second@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
             ]),
@@ -10546,7 +10840,7 @@ fn optimistic_current_candidate_allows_single_profile_standard_with_unknown_quot
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -10606,7 +10900,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -10615,7 +10909,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -10739,7 +11033,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -10748,7 +11042,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -10841,7 +11135,7 @@ fn fresh_websocket_fallback_skips_precommit_guarded_backoff_candidates() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -10850,7 +11144,7 @@ fn fresh_websocket_fallback_skips_precommit_guarded_backoff_candidates() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -10937,7 +11231,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -11029,7 +11323,7 @@ fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_cha
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -11126,7 +11420,7 @@ fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403()
                         codex_home: profile_home_401,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -11168,7 +11462,7 @@ fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403()
                         codex_home: profile_home_403,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -11244,7 +11538,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
                         codex_home: main_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
                 (
@@ -11253,7 +11547,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
                         codex_home: second_home,
                         managed: true,
                         email: Some("second@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
             ]),
@@ -11361,7 +11655,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
                         codex_home: main_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
                 (
@@ -11370,7 +11664,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
                         codex_home: second_home,
                         managed: true,
                         email: Some("second@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
             ]),
@@ -11484,7 +11778,7 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
                         codex_home: main_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
                 (
@@ -11493,7 +11787,7 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
                         codex_home: second_home,
                         managed: true,
                         email: Some("second@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
             ]),
@@ -11573,43 +11867,23 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
 #[test]
 fn sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure() {
     assert!(
-        !runtime_proxy_sync_probe_pressure_mode_for_route(
-            RuntimeRouteKind::Responses,
-            false,
-            true,
-        ),
+        !runtime_proxy_sync_probe_pressure_mode_for_route(RuntimeRouteKind::Responses, false, true,),
         "responses sync probing should stay enabled under background queue pressure alone"
     );
     assert!(
-        !runtime_proxy_sync_probe_pressure_mode_for_route(
-            RuntimeRouteKind::Websocket,
-            false,
-            true,
-        ),
+        !runtime_proxy_sync_probe_pressure_mode_for_route(RuntimeRouteKind::Websocket, false, true,),
         "websocket sync probing should stay enabled under background queue pressure alone"
     );
     assert!(
-        runtime_proxy_sync_probe_pressure_mode_for_route(
-            RuntimeRouteKind::Compact,
-            false,
-            true,
-        ),
+        runtime_proxy_sync_probe_pressure_mode_for_route(RuntimeRouteKind::Compact, false, true,),
         "compact sync probing should still defer under background queue pressure"
     );
     assert!(
-        runtime_proxy_sync_probe_pressure_mode_for_route(
-            RuntimeRouteKind::Standard,
-            false,
-            true,
-        ),
+        runtime_proxy_sync_probe_pressure_mode_for_route(RuntimeRouteKind::Standard, false, true,),
         "standard sync probing should still defer under background queue pressure"
     );
     assert!(
-        runtime_proxy_sync_probe_pressure_mode_for_route(
-            RuntimeRouteKind::Responses,
-            true,
-            false,
-        ),
+        runtime_proxy_sync_probe_pressure_mode_for_route(RuntimeRouteKind::Responses, true, false,),
         "local overload should still disable sync probing for responses"
     );
 }
@@ -11755,7 +12029,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -11764,7 +12038,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -11873,7 +12147,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -11882,7 +12156,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -11969,7 +12243,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -11978,7 +12252,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -12112,7 +12386,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
             codex_home: PathBuf::from("/tmp/main"),
             managed: true,
             email: None,
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
 
@@ -12220,7 +12494,7 @@ fn app_state_save_merges_existing_runtime_bindings() {
                     codex_home: temp_dir.path.join("homes/main"),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -12229,7 +12503,7 @@ fn app_state_save_merges_existing_runtime_bindings() {
                     codex_home: temp_dir.path.join("homes/second"),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -12312,7 +12586,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::from([
@@ -12450,7 +12724,7 @@ fn app_state_response_bindings_are_not_pruned_just_for_size() {
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -12480,7 +12754,7 @@ fn runtime_sidecar_housekeeping_prunes_stale_entries() {
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let stale = now - RUNTIME_SCORE_RETENTION_SECONDS - 5;
@@ -12727,7 +13001,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
                 codex_home: tracked.clone(),
                 managed: true,
                 email: Some("tracked@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -12748,6 +13022,9 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
             current_profile: "tracked".to_string(),
             instance_token: "stale-instance".to_string(),
             admin_token: "stale-admin".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
             openai_mount_path: None,
         },
     )
@@ -12786,7 +13063,10 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
     assert_eq!(summary.stale_runtime_log_pointer_removed, 1);
     assert_eq!(summary.stale_login_dirs_removed, 1);
     assert_eq!(summary.orphan_managed_profile_dirs_removed, 1);
-    assert_eq!(summary.transient_root_files_removed, transient_root_files.len());
+    assert_eq!(
+        summary.transient_root_files_removed,
+        transient_root_files.len()
+    );
     assert_eq!(summary.stale_root_temp_files_removed, 1);
     assert_eq!(summary.dead_runtime_broker_leases_removed, 2);
     assert_eq!(summary.dead_runtime_broker_registries_removed, 1);
@@ -12866,18 +13146,25 @@ fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
     fs::create_dir_all(&recent_session_dir).expect("recent codex session dir should exist");
     fs::write(old_session_dir.join("old.jsonl"), "{\"old\":true}\n")
         .expect("old codex session should write");
-    fs::write(recent_session_dir.join("recent.jsonl"), "{\"recent\":true}\n")
-        .expect("recent codex session should write");
+    fs::write(
+        recent_session_dir.join("recent.jsonl"),
+        "{\"recent\":true}\n",
+    )
+    .expect("recent codex session should write");
 
-    let shared_claude_project = runtime_proxy_shared_claude_config_dir(&paths)
-        .join("projects/workspace");
+    let shared_claude_project =
+        runtime_proxy_shared_claude_config_dir(&paths).join("projects/workspace");
     fs::create_dir_all(&shared_claude_project).expect("shared claude project should exist");
     fs::write(
         shared_claude_project.join("session.jsonl"),
         format!(
             "{{\"timestamp\":\"{}\",\"message\":\"old\"}}\n\
              {{\"timestamp\":\"{}\",\"message\":\"recent\"}}\n",
-            Local.timestamp_opt(old_ts, 0).single().unwrap().to_rfc3339(),
+            Local
+                .timestamp_opt(old_ts, 0)
+                .single()
+                .unwrap()
+                .to_rfc3339(),
             Local
                 .timestamp_opt(recent_ts, 0)
                 .single()
@@ -12890,8 +13177,11 @@ fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
     let profile_home = paths.managed_profiles_root.join("main");
     let profile_old_session_dir = profile_home.join("sessions/2026/04/09");
     fs::create_dir_all(&profile_old_session_dir).expect("profile old session dir should exist");
-    fs::write(profile_old_session_dir.join("profile-old.json"), "{\"old\":true}\n")
-        .expect("profile old session should write");
+    fs::write(
+        profile_old_session_dir.join("profile-old.json"),
+        "{\"old\":true}\n",
+    )
+    .expect("profile old session should write");
 
     let state = AppState {
         active_profile: Some("main".to_string()),
@@ -12971,7 +13261,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
                     codex_home: primary_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -12980,7 +13270,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
                     codex_home: duplicate_home.clone(),
                     managed: true,
                     email: Some("Main@Example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -13057,8 +13347,14 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         state.session_profile_bindings["sess-1"].profile_name,
         "duplicate"
     );
-    assert!(!primary_home.exists(), "duplicate managed home should be removed");
-    assert!(duplicate_home.exists(), "canonical managed home should remain");
+    assert!(
+        !primary_home.exists(),
+        "duplicate managed home should be removed"
+    );
+    assert!(
+        duplicate_home.exists(),
+        "canonical managed home should remain"
+    );
 
     let saved_state = AppState::load(&paths).expect("saved state should load");
     assert_eq!(saved_state.active_profile.as_deref(), Some("duplicate"));
@@ -13085,10 +13381,9 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
         "duplicate"
     );
 
-    let restored_journal =
-        load_runtime_continuation_journal_with_recovery(&paths, &state.profiles)
-            .expect("continuation journal should load")
-            .value;
+    let restored_journal = load_runtime_continuation_journal_with_recovery(&paths, &state.profiles)
+        .expect("continuation journal should load")
+        .value;
     assert_eq!(
         restored_journal.continuations.response_profile_bindings["resp-2"].profile_name,
         "duplicate"
@@ -13115,7 +13410,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
                     codex_home: temp_dir.path.join("homes/main"),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -13124,7 +13419,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
                     codex_home: temp_dir.path.join("homes/second"),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -13144,7 +13439,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::from([("main".to_string(), now - 10)]),
@@ -13223,7 +13518,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         ),
         (
@@ -13232,7 +13527,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 codex_home: temp_dir.path.join("homes/second"),
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         ),
     ]);
@@ -13383,7 +13678,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 "second",
                 RuntimeRouteKind::Responses,
             ))
-        .is_some_and(|until| *until > Local::now().timestamp())
+            .is_some_and(|until| *until > Local::now().timestamp())
     );
 }
 
@@ -13404,7 +13699,7 @@ fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
 
@@ -13428,7 +13723,10 @@ fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
         .expect("legacy backup recovery should succeed");
 
     assert!(loaded.recovered_from_backup);
-    assert_eq!(loaded.value.retry_backoff_until.get("main"), Some(&(now + 600)));
+    assert_eq!(
+        loaded.value.retry_backoff_until.get("main"),
+        Some(&(now + 600))
+    );
     assert!(loaded.value.transport_backoff_until.is_empty());
     assert!(loaded.value.route_circuit_open_until.is_empty());
 }
@@ -13450,7 +13748,7 @@ fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let snapshot = AppState {
@@ -13498,7 +13796,7 @@ fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -13547,7 +13845,7 @@ fn runtime_continuations_load_legacy_last_good_backup_when_primary_is_invalid() 
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let backup_store = RuntimeContinuationStore {
@@ -13600,7 +13898,7 @@ fn runtime_continuations_reject_stale_generation_overwrite() {
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let initial_store = RuntimeContinuationStore {
@@ -13693,7 +13991,7 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let initial_state = AppState {
@@ -13800,7 +14098,7 @@ fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let initial_state = AppState {
@@ -13911,7 +14209,7 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14003,7 +14301,7 @@ fn runtime_continuation_journal_save_for_profiles_preserves_bindings_without_sta
             codex_home: temp_dir.path.join("homes/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let continuations = RuntimeContinuationStore {
@@ -14053,7 +14351,7 @@ fn runtime_continuation_journal_retry_does_not_resurrect_released_response_bindi
                 codex_home: temp_dir.path.join("homes/main"),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14138,7 +14436,7 @@ fn merge_runtime_continuation_store_keeps_compact_session_release_tombstone() {
             codex_home: PathBuf::from("/tmp/main"),
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -14240,7 +14538,7 @@ fn turn_state_affinity_prefers_bound_profile() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -14249,7 +14547,7 @@ fn turn_state_affinity_prefers_bound_profile() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -14340,7 +14638,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -14349,7 +14647,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -14468,7 +14766,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14560,7 +14858,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14646,7 +14944,7 @@ fn response_affinity_skips_dead_continuation_status() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14739,7 +15037,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14843,7 +15141,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -14952,7 +15250,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -15067,7 +15365,7 @@ fn runtime_continuation_status_pruning_uses_evidence_over_age() {
             codex_home: profile_home,
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -15162,7 +15460,7 @@ fn runtime_dead_continuation_tombstone_blocks_stale_binding_resurrection() {
             codex_home: profile_home,
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -15225,7 +15523,7 @@ fn runtime_dead_continuation_tombstone_overrides_same_second_verified_status() {
             codex_home: profile_home,
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -15290,7 +15588,7 @@ fn runtime_newer_binding_overrides_older_dead_tombstone() {
             codex_home: profile_home,
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -15349,7 +15647,7 @@ fn runtime_continuation_store_compaction_prunes_response_bindings_to_limit() {
             codex_home: profile_home,
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -15515,7 +15813,7 @@ fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_c
             codex_home: profile_home,
             managed: true,
             email: Some("main@example.com".to_string()),
-        provider: ProfileProvider::Openai,
+            provider: ProfileProvider::Openai,
         },
     )]);
     let now = Local::now().timestamp();
@@ -15619,7 +15917,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -15628,7 +15926,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -15723,7 +16021,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -15732,7 +16030,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -15823,7 +16121,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -16023,7 +16321,10 @@ fn runtime_proxy_injects_custom_openai_mount_path_overrides() {
 #[test]
 fn runtime_proxy_passthrough_args_preserve_user_args_without_proxy() {
     let user_args = vec![OsString::from("exec"), OsString::from("hello")];
-    assert_eq!(runtime_proxy_codex_passthrough_args(None, &user_args), user_args);
+    assert_eq!(
+        runtime_proxy_codex_passthrough_args(None, &user_args),
+        user_args
+    );
 }
 
 #[test]
@@ -16209,12 +16510,15 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.096 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
 [2026-03-20 12:00:00.097 +07:00] request=2 transport=http route=responses previous_response_not_found profile=second response_id=resp-second retry_index=0
 [2026-03-20 12:00:00.098 +07:00] request=3 transport=websocket route=websocket previous_response_not_found profile=second response_id=resp-second retry_index=0
-[2026-03-20 12:00:00.099 +07:00] local_writer_error request=1 transport=http profile=main stage=chunk_flush chunks=1 bytes=128 elapsed_ms=20 error=broken_pipe
+[2026-03-20 12:00:00.099 +07:00] request=3 transport=websocket route=websocket websocket_session=sess-1 chain_retried_owner profile=second previous_response_id=resp-second delay_ms=20 reason=previous_response_not_found_locked_affinity via=-
+[2026-03-20 12:00:00.100 +07:00] request=3 transport=websocket route=websocket websocket_session=sess-1 stale_continuation reason=previous_response_not_found_locked_affinity profile=second
+[2026-03-20 12:00:00.101 +07:00] request=3 transport=websocket route=websocket websocket_session=sess-1 chain_dead_upstream_confirmed profile=second previous_response_id=resp-second reason=previous_response_not_found_locked_affinity via=- event=-
+[2026-03-20 12:00:00.102 +07:00] local_writer_error request=1 transport=http profile=main stage=chunk_flush chunks=1 bytes=128 elapsed_ms=20 error=broken_pipe
 [2026-03-20 12:00:00.105 +07:00] runtime_proxy_startup_audit missing_managed_dirs=1 stale_response_bindings=2 stale_session_bindings=1 active_profile_missing_dir=false
 "#,
         );
 
-    assert!((27..=28).contains(&summary.line_count));
+    assert!((30..=31).contains(&summary.line_count));
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -16309,6 +16613,18 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         2
     );
     assert_eq!(
+        runtime_doctor_marker_count(&summary, "chain_retried_owner"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "stale_continuation"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "chain_dead_upstream_confirmed"),
+        1
+    );
+    assert_eq!(
         runtime_doctor_marker_count(&summary, "local_writer_error"),
         1
     );
@@ -16330,7 +16646,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         summary.failure_class_counts,
         BTreeMap::from([
             ("admission".to_string(), 6),
-            ("continuation".to_string(), 2),
+            ("continuation".to_string(), 5),
             ("persistence".to_string(), 1),
             ("quota".to_string(), 5),
             ("transport".to_string(), 1),
@@ -16349,6 +16665,21 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
             .previous_response_not_found_by_route
             .get("websocket"),
         Some(&1)
+    );
+    assert_eq!(
+        summary.latest_stale_continuation_reason.as_deref(),
+        Some("previous_response_not_found_locked_affinity")
+    );
+    assert_eq!(
+        summary.stale_continuation_by_reason,
+        BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1)])
+    );
+    assert!(
+        summary
+            .latest_chain_event
+            .as_deref()
+            .is_some_and(|event| event.contains("chain_dead_upstream_confirmed")
+                && event.contains("previous_response_id=resp-second"))
     );
     assert_eq!(
         summary
@@ -16411,7 +16742,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -16507,7 +16838,7 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -16852,8 +17183,9 @@ fn runtime_proxy_anthropic_admission_wait_recovers_after_short_burst() {
         drop(first);
     });
 
-    let second = acquire_runtime_proxy_active_request_slot_with_wait(&shared, "http", "/v1/messages")
-        .expect("anthropic slot should recover after a short interactive wait");
+    let second =
+        acquire_runtime_proxy_active_request_slot_with_wait(&shared, "http", "/v1/messages")
+            .expect("anthropic slot should recover after a short interactive wait");
     drop(second);
     release.join().expect("release thread should join");
 }
@@ -16880,7 +17212,7 @@ fn runtime_proxy_preserves_codex_headers_on_http_responses_request() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -16969,7 +17301,7 @@ fn runtime_proxy_preserves_codex_headers_on_websocket_responses_request() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -17082,7 +17414,7 @@ fn runtime_proxy_realtime_websocket_uses_realtime_event_boundaries() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -17211,7 +17543,7 @@ fn runtime_proxy_preserves_websocket_request_client_metadata_payload() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -17310,7 +17642,7 @@ fn runtime_profile_usage_auth_proactively_refreshes_expired_access_token() {
                         codex_home: profile_home.clone(),
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -17328,7 +17660,7 @@ fn runtime_profile_usage_auth_proactively_refreshes_expired_access_token() {
                         codex_home: profile_home.clone(),
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -17373,9 +17705,7 @@ fn runtime_profile_usage_auth_proactively_refreshes_near_expiry_access_token() {
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json_with_tokens(
         &profile_home.join("auth.json"),
-        &fake_jwt_with_exp(
-            Local::now().timestamp() + CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS - 5,
-        ),
+        &fake_jwt_with_exp(Local::now().timestamp() + CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS - 5),
         "main-account",
         Some("stale-refresh-token"),
         None,
@@ -17399,7 +17729,7 @@ fn runtime_profile_usage_auth_proactively_refreshes_near_expiry_access_token() {
                         codex_home: profile_home.clone(),
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -17417,7 +17747,7 @@ fn runtime_profile_usage_auth_proactively_refreshes_near_expiry_access_token() {
                         codex_home: profile_home.clone(),
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -17478,7 +17808,7 @@ fn runtime_proxy_standard_request_refreshes_access_token_and_account_id_after_40
                 codex_home: main_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -17547,7 +17877,7 @@ fn runtime_proxy_reloads_auth_json_between_http_requests() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -17627,7 +17957,7 @@ fn runtime_proxy_selection_and_request_paths_stay_in_sync_after_auth_json_change
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -17636,7 +17966,7 @@ fn runtime_proxy_selection_and_request_paths_stay_in_sync_after_auth_json_change
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -17699,11 +18029,15 @@ fn runtime_proxy_selection_and_request_paths_stay_in_sync_after_auth_json_change
     );
     let second_accounts = backend.responses_accounts()[second_start..].to_vec();
     assert!(
-        second_accounts.iter().any(|account| account == "second-account"),
+        second_accounts
+            .iter()
+            .any(|account| account == "second-account"),
         "request path should reach the refreshed quota-compatible profile after auth.json changes: {second_accounts:?}"
     );
     assert!(
-        !second_accounts.iter().any(|account| account == "main-account"),
+        !second_accounts
+            .iter()
+            .any(|account| account == "main-account"),
         "request path should stop using the stale auth profile after auth.json changes: {second_accounts:?}"
     );
 }
@@ -17830,7 +18164,7 @@ fn runtime_proxy_retries_quota_blocked_response_on_another_profile() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -17839,7 +18173,7 @@ fn runtime_proxy_retries_quota_blocked_response_on_another_profile() {
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -17902,7 +18236,7 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -17911,7 +18245,7 @@ fn runtime_proxy_retries_usage_limited_response_on_another_profile() {
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -17979,7 +18313,7 @@ fn runtime_proxy_retries_fresh_function_call_output_transcript_on_another_profil
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -17988,7 +18322,7 @@ fn runtime_proxy_retries_fresh_function_call_output_transcript_on_another_profil
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -18016,7 +18350,11 @@ fn runtime_proxy_retries_fresh_function_call_output_transcript_on_another_profil
     let status = response.status();
     let body = response.text().expect("response body should be readable");
 
-    assert_eq!(status, reqwest::StatusCode::OK, "unexpected status: {status} {body}");
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "unexpected status: {status} {body}"
+    );
     assert!(body.contains("\"response.created\""));
     assert!(!body.contains("You've hit your usage limit"));
     assert_eq!(
@@ -18055,7 +18393,7 @@ fn runtime_proxy_retries_usage_limited_response_after_output_item_added_on_anoth
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -18064,7 +18402,7 @@ fn runtime_proxy_retries_usage_limited_response_after_output_item_added_on_anoth
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -18138,7 +18476,7 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
                             codex_home: main_home,
                             managed: true,
                             email: Some("main@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -18147,7 +18485,7 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
                             codex_home: second_home,
                             managed: true,
                             email: Some("second@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -18156,7 +18494,7 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
                             codex_home: third_home,
                             managed: true,
                             email: Some("third@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -18165,7 +18503,7 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
                             codex_home: fourth_home,
                             managed: true,
                             email: Some("fourth@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -18174,7 +18512,7 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
                             codex_home: fifth_home,
                             managed: true,
                             email: Some("fifth@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                 ]),
@@ -18261,7 +18599,6 @@ fn runtime_proxy_continues_deeper_cold_start_probe_batches_before_surfacing_usag
             .any(|account| account == "fifth-account"),
         "fifth account should eventually be probed and selected: {usage_accounts:?}"
     );
-
 }
 
 #[test]
@@ -18289,7 +18626,7 @@ fn runtime_proxy_standard_request_retries_usage_limited_response_on_another_prof
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -18298,7 +18635,7 @@ fn runtime_proxy_standard_request_retries_usage_limited_response_on_another_prof
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -18355,7 +18692,7 @@ fn runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota() 
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -18364,7 +18701,7 @@ fn runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota() 
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -18388,7 +18725,10 @@ fn runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota() 
 
     assert_eq!(status, reqwest::StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(body, "Too Many Requests");
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]
@@ -18416,7 +18756,7 @@ fn runtime_proxy_realtime_call_stays_on_current_profile_when_main_is_quota_block
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -18425,7 +18765,7 @@ fn runtime_proxy_realtime_call_stays_on_current_profile_when_main_is_quota_block
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -18457,7 +18797,10 @@ fn runtime_proxy_realtime_call_stays_on_current_profile_when_main_is_quota_block
         body.contains("usage limit"),
         "unexpected realtime call response body: {body}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]
@@ -18482,7 +18825,7 @@ fn runtime_proxy_preserves_function_call_output_affinity_when_previous_response_
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -18491,7 +18834,7 @@ fn runtime_proxy_preserves_function_call_output_affinity_when_previous_response_
     };
     state.save(&paths).expect("failed to save initial state");
 
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
         .expect("runtime proxy should start");
     let response = Client::builder()
         .build()
@@ -18540,7 +18883,7 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -18549,7 +18892,7 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
     };
     state.save(&paths).expect("failed to save initial state");
 
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
         .expect("runtime proxy should start");
     let (mut socket, _response) = ws_connect(format!(
         "ws://{}/backend-api/codex/responses",
@@ -18566,7 +18909,10 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
 
     let mut payloads = Vec::new();
     loop {
-        match socket.read().expect("runtime proxy websocket should stay open") {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
             WsMessage::Text(text) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text)
@@ -18602,8 +18948,9 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
 }
 
 #[test]
-fn runtime_proxy_bound_websocket_previous_response_not_found_retries_fresh_without_leaking() {
-    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+fn runtime_proxy_bound_websocket_previous_response_not_found_retries_fresh_with_replayable_input() {
+    let backend =
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -18647,7 +18994,7 @@ fn runtime_proxy_bound_websocket_previous_response_not_found_retries_fresh_witho
     .expect("runtime proxy websocket handshake should succeed");
     socket
         .send(WsMessage::Text(
-            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+            r#"{"previous_response_id":"resp-second","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"retry with full body"}]}]}"#
                 .to_string()
                 .into(),
         ))
@@ -18712,10 +19059,11 @@ fn runtime_proxy_bound_websocket_previous_response_not_found_retries_fresh_witho
 }
 
 #[test]
-fn runtime_proxy_current_owner_websocket_previous_response_not_found_locked_affinity_surfaces_stale_continuation(
-) {
+fn runtime_proxy_current_owner_websocket_previous_response_not_found_locked_affinity_surfaces_stale_continuation()
+ {
     let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
-    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let backend =
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
@@ -18854,10 +19202,11 @@ fn runtime_proxy_current_owner_websocket_previous_response_not_found_locked_affi
 }
 
 #[test]
-fn runtime_proxy_candidate_websocket_previous_response_not_found_locked_affinity_surfaces_stale_continuation(
-) {
+fn runtime_proxy_candidate_websocket_previous_response_not_found_locked_affinity_surfaces_stale_continuation()
+ {
     let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
-    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let backend =
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
@@ -19037,7 +19386,7 @@ fn runtime_shadowed_dead_session_and_compact_session_bindings_stay_usable() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -19093,8 +19442,14 @@ fn runtime_shadowed_dead_session_and_compact_session_bindings_stay_usable() {
             ]),
             continuation_statuses: RuntimeContinuationStatuses {
                 session_id: BTreeMap::from([
-                    ( "sess-main".to_string(), dead_continuation_status(shadowed_dead_at)),
-                    (compact_key.clone(), dead_continuation_status(shadowed_dead_at)),
+                    (
+                        "sess-main".to_string(),
+                        dead_continuation_status(shadowed_dead_at),
+                    ),
+                    (
+                        compact_key.clone(),
+                        dead_continuation_status(shadowed_dead_at),
+                    ),
                 ]),
                 ..RuntimeContinuationStatuses::default()
             },
@@ -19112,17 +19467,13 @@ fn runtime_shadowed_dead_session_and_compact_session_bindings_stay_usable() {
         runtime_session_bound_profile(&shared, "sess-main").expect("session lookup should succeed");
     assert_eq!(session_owner.as_deref(), Some("main"));
 
-    let compact_owner = runtime_compact_route_followup_bound_profile(
-        &shared,
-        None,
-        Some("sess-main"),
-    )
-    .expect("compact session lookup should succeed");
+    let compact_owner =
+        runtime_compact_route_followup_bound_profile(&shared, None, Some("sess-main"))
+            .expect("compact session lookup should succeed");
     assert_eq!(
-        compact_owner.as_ref().map(|(profile_name, source)| (
-            profile_name.as_str(),
-            *source
-        )),
+        compact_owner
+            .as_ref()
+            .map(|(profile_name, source)| (profile_name.as_str(), *source)),
         Some(("main", "session_id"))
     );
 }
@@ -19152,7 +19503,7 @@ fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19161,7 +19512,7 @@ fn runtime_proxy_releases_quota_blocked_session_affinity_and_rotates() {
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -19243,7 +19594,7 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19252,7 +19603,7 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -19310,7 +19661,9 @@ fn runtime_proxy_releases_quota_blocked_previous_response_affinity_and_degrades_
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-main\",\"input\":[]}")
+        .body(
+            r#"{"previous_response_id":"resp-main","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replay this body"}]}]}"#,
+        )
         .send()
         .expect("runtime proxy request should succeed");
     let status = response.status();
@@ -19397,7 +19750,7 @@ fn runtime_proxy_preserves_quota_blocked_function_call_output_previous_response_
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19406,7 +19759,7 @@ fn runtime_proxy_preserves_quota_blocked_function_call_output_previous_response_
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -19505,8 +19858,8 @@ fn runtime_proxy_preserves_quota_blocked_function_call_output_previous_response_
 }
 
 #[test]
-fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owner_snapshot_hits_critical_floor(
-) {
+fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owner_snapshot_hits_critical_floor()
+ {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start();
     let paths = AppPaths {
@@ -19531,7 +19884,7 @@ fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owne
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19540,7 +19893,7 @@ fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owne
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -19608,7 +19961,9 @@ fn runtime_proxy_releases_previous_response_affinity_for_http_requests_when_owne
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-main\",\"input\":[]}")
+        .body(
+            r#"{"previous_response_id":"resp-main","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replay this body"}]}]}"#,
+        )
         .send()
         .expect("runtime proxy request should succeed");
     let status = response.status();
@@ -19652,7 +20007,7 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_ht
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19661,7 +20016,7 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_ht
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -19767,7 +20122,7 @@ fn runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains() 
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19776,7 +20131,7 @@ fn runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains() 
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -19929,7 +20284,7 @@ fn runtime_proxy_only_masks_quota_failures_when_an_alternative_is_quota_compatib
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -19938,7 +20293,7 @@ fn runtime_proxy_only_masks_quota_failures_when_an_alternative_is_quota_compatib
                     codex_home: api_home,
                     managed: true,
                     email: Some("api@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -20012,7 +20367,7 @@ fn runtime_proxy_does_not_mask_quota_failure_for_route_ineligible_alternative() 
                             codex_home: main_home.clone(),
                             managed: true,
                             email: Some("main@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -20021,7 +20376,7 @@ fn runtime_proxy_does_not_mask_quota_failure_for_route_ineligible_alternative() 
                             codex_home: second_home.clone(),
                             managed: true,
                             email: Some("second@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                 ]),
@@ -20121,7 +20476,7 @@ fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_http
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -20130,7 +20485,7 @@ fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_http
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -20177,7 +20532,9 @@ fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_http
         );
     }
 
-    state.save(&paths).expect("failed to restore active profile");
+    state
+        .save(&paths)
+        .expect("failed to restore active profile");
     wait_for_runtime_background_queues_idle();
     let before_second_request = backend.responses_accounts().len();
 
@@ -20232,7 +20589,7 @@ fn runtime_proxy_releases_quota_blocked_compact_session_affinity_and_rotates() {
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -20241,7 +20598,7 @@ fn runtime_proxy_releases_quota_blocked_compact_session_affinity_and_rotates() {
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -20317,7 +20674,7 @@ fn exhausted_usage_snapshot_preserves_persisted_affinity_bindings() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -20553,7 +20910,7 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
                         codex_home: valid_home,
                         managed: true,
                         email: Some("valid@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
                 (
@@ -20562,7 +20919,7 @@ fn startup_audit_prunes_stale_sidecars_for_missing_managed_profile() {
                         codex_home: missing_home,
                         managed: true,
                         email: Some("missing@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 ),
             ]),
@@ -20724,7 +21081,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_is_single_flight() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -20826,7 +21183,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_clears_stale_reopen_sta
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -20913,7 +21270,7 @@ fn bump_runtime_profile_health_score_escalates_reopened_route_circuit() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -21033,7 +21390,7 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_scales_wait_with_health
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             )]),
             last_run_selected_at: BTreeMap::new(),
@@ -21093,9 +21450,8 @@ fn reserve_runtime_profile_route_circuit_half_open_probe_scales_wait_with_health
         .expect("half-open reservation should succeed")
     );
     let reservation_finished_at = Local::now().timestamp();
-    let probe_seconds = runtime_profile_circuit_half_open_probe_seconds(
-        RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
-    );
+    let probe_seconds =
+        runtime_profile_circuit_half_open_probe_seconds(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2);
     let actual_until = shared
         .runtime
         .lock()
@@ -21143,7 +21499,7 @@ fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21152,7 +21508,7 @@ fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21161,7 +21517,7 @@ fn runtime_proxy_retries_overloaded_compact_on_another_profile() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -21226,7 +21582,7 @@ fn runtime_proxy_allows_large_compact_responses_above_default_buffer_limit() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -21260,7 +21616,10 @@ fn runtime_proxy_allows_large_compact_responses_above_default_buffer_limit() {
         body.contains("\"output\""),
         "large compact response should be forwarded intact enough to parse as a compact response"
     );
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]
@@ -21288,7 +21647,7 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21297,7 +21656,7 @@ fn runtime_proxy_preserves_bound_profile_for_overloaded_compact_requests() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -21388,7 +21747,7 @@ fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21397,7 +21756,7 @@ fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21406,7 +21765,7 @@ fn runtime_proxy_persists_compact_lineage_after_overload_retry() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -21510,7 +21869,7 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21519,7 +21878,7 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21528,7 +21887,7 @@ fn runtime_proxy_reuses_compact_owner_for_followup_until_response_commits() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -21630,7 +21989,7 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21639,7 +21998,7 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21648,7 +22007,7 @@ fn runtime_proxy_restores_compact_followup_owner_across_restart() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -21785,7 +22144,7 @@ fn runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -21794,7 +22153,7 @@ fn runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -22119,7 +22478,7 @@ fn unchanged_runtime_probe_result_does_not_requeue_persistence() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -22198,7 +22557,7 @@ fn runtime_proxy_reuses_rotated_profile_without_reprobing_quota() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -22207,7 +22566,7 @@ fn runtime_proxy_reuses_rotated_profile_without_reprobing_quota() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -22291,7 +22650,7 @@ fn runtime_proxy_passes_through_upstream_http_error_response() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -22353,7 +22712,7 @@ fn runtime_proxy_passes_through_plain_429_without_rotating_profiles() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -22362,7 +22721,7 @@ fn runtime_proxy_passes_through_plain_429_without_rotating_profiles() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -22423,7 +22782,7 @@ fn runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_fo
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -22432,7 +22791,7 @@ fn runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_fo
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -22863,7 +23222,7 @@ fn runtime_proxy_returns_503_for_local_candidate_exhaustion_without_upstream_429
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -22917,7 +23276,7 @@ fn runtime_proxy_aborts_stalled_http_fallback_before_long_hang() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -22984,7 +23343,7 @@ fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -23051,7 +23410,7 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -23135,7 +23494,7 @@ fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -23211,7 +23570,7 @@ fn runtime_proxies_bind_distinct_local_ports() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23220,7 +23579,7 @@ fn runtime_proxies_bind_distinct_local_ports() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23272,7 +23631,7 @@ fn runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23281,7 +23640,7 @@ fn runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23377,7 +23736,7 @@ fn runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23386,7 +23745,7 @@ fn runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23412,7 +23771,9 @@ fn runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile() {
     .expect("runtime proxy websocket handshake should succeed");
     socket
         .send(WsMessage::Text(
-            "{\"session_id\":\"sess-fresh\",\"input\":[]}".to_string().into(),
+            "{\"session_id\":\"sess-fresh\",\"input\":[]}"
+                .to_string()
+                .into(),
         ))
         .expect("runtime proxy websocket request should be sent");
 
@@ -23479,7 +23840,7 @@ fn runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23488,7 +23849,7 @@ fn runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23585,7 +23946,7 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23594,7 +23955,7 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23692,7 +24053,9 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit() {
         "delayed quota error should not be surfaced after pre-commit rotate: {second_payloads:?}"
     );
     assert!(
-        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"msg-main\"")),
         "failed quota pre-commit frames should not leak across rotated retry: {second_payloads:?}"
     );
     assert_eq!(
@@ -23730,7 +24093,7 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23739,7 +24102,7 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23837,7 +24200,9 @@ fn runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit() {
         "capacity error should not be surfaced after pre-commit rotate: {second_payloads:?}"
     );
     assert!(
-        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"msg-main\"")),
         "failed pre-commit frames should not leak across rotated retry: {second_payloads:?}"
     );
     assert_eq!(
@@ -23874,7 +24239,7 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_c
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -23883,7 +24248,7 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_c
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -23988,7 +24353,9 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_c
         "capacity error should not be surfaced after session-bound pre-commit rotate: {second_payloads:?}"
     );
     assert!(
-        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"msg-main\"")),
         "failed pre-commit frames should not leak across rotated session retry: {second_payloads:?}"
     );
     assert_eq!(
@@ -24040,7 +24407,7 @@ fn runtime_proxy_websocket_x_session_id_affinity_rotates_without_promoting_activ
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24049,7 +24416,7 @@ fn runtime_proxy_websocket_x_session_id_affinity_rotates_without_promoting_activ
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -24075,9 +24442,7 @@ fn runtime_proxy_websocket_x_session_id_affinity_rotates_without_promoting_activ
     .expect("client request should build");
     request.headers_mut().insert(
         "x-session-id",
-        "sess-ws-overload-alias"
-            .parse()
-            .expect("session header"),
+        "sess-ws-overload-alias".parse().expect("session header"),
     );
     let (mut socket, _response) =
         tungstenite::connect(request).expect("runtime proxy websocket handshake should succeed");
@@ -24156,7 +24521,9 @@ fn runtime_proxy_websocket_x_session_id_affinity_rotates_without_promoting_activ
         "capacity error should not be surfaced after x-session-id bound pre-commit rotate: {second_payloads:?}"
     );
     assert!(
-        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"msg-main\"")),
         "failed pre-commit frames should not leak across x-session-id rotated retry: {second_payloads:?}"
     );
     assert_eq!(
@@ -24208,7 +24575,7 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_quota_before_comm
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24217,7 +24584,7 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_quota_before_comm
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -24322,7 +24689,9 @@ fn runtime_proxy_websocket_session_affinity_rotates_on_delayed_quota_before_comm
         "quota error should not be surfaced after session-bound pre-commit rotate: {second_payloads:?}"
     );
     assert!(
-        !second_payloads.iter().any(|payload| payload.contains("\"msg-main\"")),
+        !second_payloads
+            .iter()
+            .any(|payload| payload.contains("\"msg-main\"")),
         "failed pre-commit frames should not leak across rotated session retry: {second_payloads:?}"
     );
     assert_eq!(
@@ -24374,7 +24743,7 @@ fn runtime_proxy_http_x_session_id_affinity_rotates_like_session_id_on_overload(
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24383,7 +24752,7 @@ fn runtime_proxy_http_x_session_id_affinity_rotates_like_session_id_on_overload(
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -24472,7 +24841,7 @@ fn runtime_proxy_websocket_fresh_fallbacks_quota_blocked_previous_response_witho
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24481,7 +24850,7 @@ fn runtime_proxy_websocket_fresh_fallbacks_quota_blocked_previous_response_witho
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -24609,7 +24978,7 @@ fn runtime_proxy_websocket_fresh_fallbacks_quota_blocked_previous_response_witho
 
 #[test]
 fn runtime_proxy_websocket_reapplies_session_affinity_after_quota_blocked_previous_response_fresh_fallback()
-{
+ {
     let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude();
     let temp_dir = TestDir::new();
@@ -24630,7 +24999,7 @@ fn runtime_proxy_websocket_reapplies_session_affinity_after_quota_blocked_previo
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24639,7 +25008,7 @@ fn runtime_proxy_websocket_reapplies_session_affinity_after_quota_blocked_previo
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24648,7 +25017,7 @@ fn runtime_proxy_websocket_reapplies_session_affinity_after_quota_blocked_previo
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -24803,7 +25172,7 @@ fn runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -24812,7 +25181,7 @@ fn runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -25010,7 +25379,7 @@ fn runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate() 
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -25019,7 +25388,7 @@ fn runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate() 
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -25111,7 +25480,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -25120,7 +25489,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -25129,7 +25498,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -25310,7 +25679,7 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -25319,7 +25688,7 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -25328,7 +25697,7 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -25478,7 +25847,7 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -25654,7 +26023,7 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -25663,7 +26032,7 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -25788,7 +26157,9 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
         "previous_response_not_found should stay pre-commit: {payloads:?}"
     );
 
-    let persisted = wait_for_state(&paths, |state| state.active_profile.as_deref() == Some("third"));
+    let persisted = wait_for_state(&paths, |state| {
+        state.active_profile.as_deref() == Some("third")
+    });
     assert_eq!(persisted.active_profile.as_deref(), Some("third"));
 
     let continuations = wait_for_runtime_continuations(&paths, |continuations| {
@@ -25867,7 +26238,7 @@ fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websoc
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -26112,7 +26483,8 @@ fn runtime_proxy_locked_affinity_previous_response_reuse_retries_owner_after_web
         match socket.read() {
             Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
-                let done = is_runtime_terminal_event(&text) || text.contains("\"stale_continuation\"");
+                let done =
+                    is_runtime_terminal_event(&text) || text.contains("\"stale_continuation\"");
                 second_payloads.push(text);
                 if done {
                     break;
@@ -26210,7 +26582,7 @@ fn runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_tur
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -26509,7 +26881,7 @@ fn runtime_proxy_passes_through_upstream_websocket_error_payload() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -26570,7 +26942,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_http_requests() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26579,7 +26951,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_http_requests() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26588,7 +26960,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_http_requests() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -26686,7 +27058,7 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26695,7 +27067,7 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26704,7 +27076,7 @@ fn runtime_proxy_persists_previous_response_affinity_across_restart() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -26833,7 +27205,7 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar()
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26842,7 +27214,7 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar()
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26851,7 +27223,7 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_sidecar()
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -26924,7 +27296,7 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal()
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26933,7 +27305,7 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal()
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -26942,7 +27314,7 @@ fn runtime_proxy_restores_previous_response_affinity_from_continuation_journal()
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27038,7 +27410,7 @@ fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27047,7 +27419,7 @@ fn runtime_proxy_persists_turn_state_to_continuation_sidecar() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27135,7 +27507,7 @@ fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27144,7 +27516,7 @@ fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27153,7 +27525,7 @@ fn runtime_proxy_restores_turn_state_affinity_from_continuation_sidecar() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27227,7 +27599,7 @@ fn runtime_proxy_persists_previous_response_affinity_for_buffered_json_responses
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27236,7 +27608,7 @@ fn runtime_proxy_persists_previous_response_affinity_for_buffered_json_responses
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27245,7 +27617,7 @@ fn runtime_proxy_persists_previous_response_affinity_for_buffered_json_responses
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27339,7 +27711,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27348,7 +27720,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27357,7 +27729,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_http()
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27445,7 +27817,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27454,7 +27826,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27463,7 +27835,7 @@ fn runtime_proxy_releases_stale_previous_response_binding_after_not_found_websoc
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27629,7 +28001,7 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27638,7 +28010,7 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27647,7 +28019,7 @@ fn runtime_proxy_persists_session_affinity_across_restart_for_compact() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27787,7 +28159,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_http() 
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27796,7 +28168,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_http() 
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27805,7 +28177,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_http() 
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27871,7 +28243,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27880,7 +28252,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27889,7 +28261,7 @@ fn runtime_proxy_discovers_previous_response_owner_without_saved_binding_websock
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -27987,7 +28359,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_http() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -27996,7 +28368,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_http() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28005,7 +28377,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_http() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28089,7 +28461,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28098,7 +28470,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28107,7 +28479,7 @@ fn runtime_proxy_previous_response_discovery_ignores_compact_followup_websocket(
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28222,7 +28594,7 @@ fn start_runtime_proxy_with_session_binding(
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28231,7 +28603,7 @@ fn start_runtime_proxy_with_session_binding(
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28283,7 +28655,7 @@ fn start_runtime_proxy_with_compact_session_owner(
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28292,7 +28664,7 @@ fn start_runtime_proxy_with_compact_session_owner(
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28396,7 +28768,7 @@ fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28405,7 +28777,7 @@ fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28532,7 +28904,7 @@ fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28541,7 +28913,7 @@ fn runtime_proxy_treats_exhausted_compact_session_followup_as_soft_affinity_for_
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28783,7 +29155,9 @@ fn runtime_proxy_rotates_after_upstream_quota_from_compact_session_owner_websock
         "normal websocket request should rotate after compact session owner returns upstream quota: {payloads:?}"
     );
     assert!(
-        !payloads.iter().any(|payload| payload.contains("main quota exhausted")),
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("main quota exhausted")),
         "quota from compact session owner should not interrupt the websocket workflow: {payloads:?}"
     );
     assert_eq!(
@@ -28811,7 +29185,7 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_htt
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -28820,7 +29194,7 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_htt
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -28909,7 +29283,10 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_htt
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .header("x-codex-turn-metadata", r#"{"source":"resume","session_id":"sess-main"}"#)
+        .header(
+            "x-codex-turn-metadata",
+            r#"{"source":"resume","session_id":"sess-main"}"#,
+        )
         .body("{\"input\":[]}")
         .send()
         .expect("runtime proxy request should succeed");
@@ -28921,7 +29298,10 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_htt
         body.contains("\"resp-second\""),
         "turn metadata session_id should not hard-pin normal responses request to exhausted compact owner: {body}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -28951,7 +29331,10 @@ fn runtime_proxy_ignores_body_session_for_ready_compact_followup_affinity_http()
         body.contains("\"resp-second\""),
         "body session_id should not select healthy compact owner on normal responses request: {body}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -28985,7 +29368,10 @@ fn runtime_proxy_ignores_turn_metadata_session_for_ready_compact_followup_affini
         body.contains("\"resp-second\""),
         "turn metadata session_id should not select healthy compact owner on normal responses request: {body}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -29007,7 +29393,7 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_web
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29016,7 +29402,7 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_web
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -29155,7 +29541,10 @@ fn runtime_proxy_ignores_turn_metadata_session_for_compact_followup_affinity_web
             .any(|payload| payload.contains("\"code\":\"service_unavailable\"")),
         "turn metadata session_id should not force local 503 on normal websocket request: {payloads:?}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["second-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
 }
 
 #[test]
@@ -29177,9 +29566,7 @@ fn runtime_proxy_reapplies_session_affinity_after_http_previous_response_fresh_f
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body(
-            r#"{"previous_response_id":"resp-missing","session_id":"sess-fallback","input":[]}"#,
-        )
+        .body(r#"{"previous_response_id":"resp-missing","session_id":"sess-fallback","input":[]}"#)
         .send()
         .expect("runtime proxy request should succeed");
     let status = response.status();
@@ -29310,9 +29697,10 @@ fn runtime_proxy_reapplies_session_affinity_after_websocket_previous_response_fr
 }
 
 #[test]
-fn runtime_proxy_trusted_websocket_previous_response_not_found_reapplies_session_without_owner_sweep(
-) {
-    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+fn runtime_proxy_trusted_websocket_previous_response_not_found_reapplies_session_without_owner_sweep()
+ {
+    let backend =
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
     let third_home = temp_dir.path.join("homes/third");
@@ -29512,8 +29900,9 @@ fn runtime_proxy_trusted_websocket_previous_response_not_found_reapplies_session
 
 #[test]
 fn runtime_proxy_warm_websocket_previous_response_not_found_retries_same_session_without_owner_sweep()
-{
-    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+ {
+    let backend =
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
     let third_home = temp_dir.path.join("homes/third");
@@ -29677,7 +30066,8 @@ fn runtime_proxy_warm_websocket_previous_response_not_found_retries_same_session
 }
 
 #[test]
-fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_everywhere_http() {
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_replayable_input_http()
+ {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -29696,7 +30086,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29705,7 +30095,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29714,7 +30104,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -29740,7 +30130,9 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-missing\",\"input\":[]}")
+        .body(
+            r#"{"previous_response_id":"resp-missing","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replay this body"}]}]}"#,
+        )
         .send()
         .expect("runtime proxy request should succeed");
     let body = response.text().expect("response body should be readable");
@@ -29771,7 +30163,8 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
 }
 
 #[test]
-fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_everywhere_websocket() {
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_replayable_input_websocket()
+ {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -29790,7 +30183,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29799,7 +30192,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29808,7 +30201,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -29834,7 +30227,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
     .expect("runtime proxy websocket handshake should succeed");
     socket
         .send(WsMessage::Text(
-            "{\"previous_response_id\":\"resp-missing\",\"input\":[]}"
+            r#"{"previous_response_id":"resp-missing","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replay this body"}]}]}"#
                 .to_string()
                 .into(),
         ))
@@ -29892,7 +30285,201 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_ever
 }
 
 #[test]
-fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_stale_turn_state_http()
+fn runtime_proxy_keeps_continuation_only_previous_response_missing_http_passthrough() {
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body(r#"{"previous_response_id":"resp-missing","input":[]}"#)
+        .send()
+        .expect("runtime proxy request should succeed");
+    let status = response.status();
+    let body = response.text().expect("response body should be readable");
+
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("\"previous_response_not_found\""),
+        "continuation-only request should pass through upstream missing-chain failure: {body}"
+    );
+    let bodies = backend.responses_bodies();
+    assert!(
+        bodies
+            .iter()
+            .all(|request| request.contains("\"previous_response_id\":\"resp-missing\"")),
+        "continuation-only request must not degrade into a fresh fallback: {bodies:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_keeps_continuation_only_previous_response_missing_websocket_local() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
+
+    let state = AppState {
+        active_profile: Some("third".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "third", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text(
+            r#"{"previous_response_id":"resp-missing","input":[]}"#
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done =
+                    is_runtime_terminal_event(&text) || text.contains("\"stale_continuation\"");
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"stale_continuation\"")),
+        "continuation-only websocket request should fail locally instead of degrading fresh: {payloads:?}"
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert!(
+        upstream_requests
+            .iter()
+            .all(|request| request.contains("\"previous_response_id\":\"resp-missing\"")),
+        "continuation-only websocket request must not strip previous_response_id: {upstream_requests:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with_replayable_input_and_stale_turn_state_http()
  {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();
@@ -29912,7 +30499,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29921,7 +30508,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -29930,7 +30517,7 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -29957,7 +30544,9 @@ fn runtime_proxy_falls_back_to_fresh_request_when_previous_response_missing_with
         ))
         .header("Content-Type", "application/json")
         .header("x-codex-turn-state", "turn-stale")
-        .body("{\"previous_response_id\":\"resp-missing\",\"input\":[]}")
+        .body(
+            r#"{"previous_response_id":"resp-missing","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replay this body"}]}]}"#,
+        )
         .send()
         .expect("runtime proxy request should succeed");
     let status = response.status();
@@ -29996,12 +30585,14 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
+    let third_home = temp_dir.path.join("homes/third");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     write_auth_json(&second_home.join("auth.json"), "second-account");
+    write_auth_json(&third_home.join("auth.json"), "third-account");
     let now = Local::now().timestamp();
 
     let state = AppState {
-        active_profile: Some("second".to_string()),
+        active_profile: Some("third".to_string()),
         profiles: BTreeMap::from([
             (
                 "main".to_string(),
@@ -30009,7 +30600,7 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -30018,7 +30609,16 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "third".to_string(),
+                ProfileEntry {
+                    codex_home: third_home,
+                    managed: true,
+                    email: Some("third@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -30052,7 +30652,9 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
             proxy.listen_addr
         ))
         .header("Content-Type", "application/json")
-        .body("{\"previous_response_id\":\"resp-main\",\"input\":[]}")
+        .body(
+            r#"{"previous_response_id":"resp-main","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"replay this body"}]}]}"#,
+        )
         .send()
         .expect("runtime proxy request should succeed");
     let status = response.status();
@@ -30064,7 +30666,9 @@ fn runtime_proxy_clears_stale_previous_response_binding_after_safe_http_fresh_fa
         "unexpected status: {status} body={body}"
     );
     assert!(
-        body.contains("\"resp-second\""),
+        body.contains("\"resp-main\"")
+            || body.contains("\"resp-second\"")
+            || body.contains("\"resp-third\""),
         "proxy should degrade to a fresh request after clearing stale binding: {body}"
     );
 
@@ -30095,7 +30699,7 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_http() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -30134,7 +30738,11 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_http() {
         vec!["second-account".to_string(), "second-account".to_string()]
     );
     let request_headers = backend.responses_headers();
-    assert_eq!(request_headers.len(), 2, "backend should see both HTTP attempts");
+    assert_eq!(
+        request_headers.len(),
+        2,
+        "backend should see both HTTP attempts"
+    );
     assert_eq!(
         request_headers
             .get(1)
@@ -30160,7 +30768,7 @@ fn runtime_proxy_retries_previous_response_with_upstream_turn_state_websocket() 
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -30262,7 +30870,7 @@ fn runtime_proxy_rehydrates_stored_previous_response_turn_state_http() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -30351,6 +30959,109 @@ fn runtime_proxy_rehydrates_stored_previous_response_turn_state_http() {
 }
 
 #[test]
+fn runtime_proxy_rehydrates_turn_state_from_sse_header_array_http() {
+    let backend = RuntimeProxyBackend::start_http_sse_headers_array_turn_state();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+
+    let first = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"input\":[]}")
+        .send()
+        .expect("first request should succeed");
+    let first_body = first.text().expect("first body should be readable");
+    assert!(
+        first_body.contains("\"resp-second\""),
+        "first response should expose the seeded response id: {first_body}"
+    );
+
+    let second = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header("Content-Type", "application/json")
+        .body("{\"previous_response_id\":\"resp-second\",\"input\":[]}")
+        .send()
+        .expect("second request should succeed");
+    let second_body = second.text().expect("second body should be readable");
+    assert!(
+        second_body.contains("\"resp-second-next\""),
+        "rehydrated follow-up should complete without an upstream miss: {second_body}"
+    );
+
+    let request_headers = backend.responses_headers();
+    assert_eq!(
+        request_headers.len(),
+        2,
+        "event-header turn-state should avoid a retry miss"
+    );
+    assert_eq!(
+        request_headers
+            .get(1)
+            .and_then(|headers| headers.get("x-codex-turn-state"))
+            .map(String::as_str),
+        Some("turn-second"),
+        "follow-up should send the turn-state captured from SSE event headers"
+    );
+
+    wait_for_runtime_background_queues_idle();
+    let continuations = load_runtime_continuations_with_recovery(&paths, &state.profiles)
+        .expect("continuations should load")
+        .value;
+    let lineage_key = runtime_response_turn_state_lineage_key("resp-second", "turn-second");
+    assert_eq!(
+        continuations
+            .response_profile_bindings
+            .get(&lineage_key)
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second"),
+        "SSE event headers should persist response->turn_state lineage"
+    );
+    let log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("binding response_turn_state profile=second"),
+        "captured turn-state coverage should be logged: {log}"
+    );
+    assert!(
+        !log.contains("turn_state_coverage route=responses profile=second status=missing"),
+        "captured SSE turn-state should not be reported as missing: {log}"
+    );
+}
+
+#[test]
 fn runtime_proxy_rehydrates_stored_previous_response_turn_state_websocket() {
     let backend = RuntimeProxyBackend::start_websocket_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
@@ -30365,7 +31076,7 @@ fn runtime_proxy_rehydrates_stored_previous_response_turn_state_websocket() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -30517,7 +31228,7 @@ fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner() {
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -30618,7 +31329,7 @@ fn runtime_proxy_keeps_multi_turn_previous_response_chain_on_websocket_owner_wit
                 codex_home: second_home,
                 managed: true,
                 email: Some("second@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -30723,7 +31434,7 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -30732,7 +31443,7 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -30741,7 +31452,7 @@ fn runtime_proxy_keeps_previous_response_chain_across_multiple_restarts_http() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -30881,7 +31592,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -30890,7 +31601,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -30899,7 +31610,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
                     codex_home: third_home,
                     managed: true,
                     email: Some("third@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31009,7 +31720,7 @@ fn runtime_proxy_keeps_previous_response_affinity_for_websocket_requests() {
 
 #[test]
 fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_when_owner_snapshot_is_exhausted_without_turn_state()
-{
+ {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -31027,7 +31738,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -31036,7 +31747,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31163,10 +31874,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
             .any(|payload| payload.contains("\"resp-second\"")),
         "exhausted-owner non-replayable websocket continuation must not start a fresh chain on another profile: {payloads:?}"
     );
-    assert_eq!(
-        backend.responses_accounts(),
-        Vec::<String>::new()
-    );
+    assert_eq!(backend.responses_accounts(), Vec::<String>::new());
     assert!(
         backend.websocket_requests().is_empty(),
         "exhausted-owner non-replayable websocket continuation should not reach upstream: {:?}",
@@ -31176,7 +31884,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
 
 #[test]
 fn runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_response_when_owner_snapshot_is_exhausted()
-{
+ {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -31195,7 +31903,7 @@ fn runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_respo
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -31204,7 +31912,7 @@ fn runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_respo
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31331,10 +32039,7 @@ fn runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_respo
             .any(|payload| payload.contains("\"resp-second\"")),
         "stale exhausted-owner websocket continuation must not start a fresh chain on another profile: {payloads:?}"
     );
-    assert_eq!(
-        backend.responses_accounts(),
-        Vec::<String>::new()
-    );
+    assert_eq!(backend.responses_accounts(), Vec::<String>::new());
     assert!(
         backend.websocket_requests().is_empty(),
         "stale exhausted-owner websocket continuation should not reach upstream: {:?}",
@@ -31344,7 +32049,7 @@ fn runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_respo
 
 #[test]
 fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_when_owner_snapshot_hits_critical_floor_without_turn_state()
-{
+ {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -31362,7 +32067,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -31371,7 +32076,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31513,8 +32218,7 @@ fn runtime_proxy_preserves_previous_response_affinity_for_websocket_requests_whe
 }
 
 #[test]
-fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests(
-) {
+fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests() {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -31532,7 +32236,7 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_we
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -31541,7 +32245,7 @@ fn runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_we
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31654,7 +32358,7 @@ fn runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remai
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -31663,7 +32367,7 @@ fn runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remai
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31763,8 +32467,7 @@ fn runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remai
 }
 
 #[test]
-fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_websocket_requests(
-) {
+fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_websocket_requests() {
     let backend = RuntimeProxyBackend::start_websocket();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
@@ -31781,7 +32484,7 @@ fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_webs
                     codex_home: main_home,
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -31790,7 +32493,7 @@ fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_webs
                     codex_home: second_home,
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -31867,7 +32570,9 @@ fn runtime_proxy_quarantines_usage_limited_profile_across_restart_for_fresh_webs
         );
     }
 
-    state.save(&paths).expect("failed to restore active profile");
+    state
+        .save(&paths)
+        .expect("failed to restore active profile");
     wait_for_runtime_background_queues_idle();
     let before_second_request = backend.responses_accounts().len();
 
@@ -31956,7 +32661,7 @@ fn runtime_proxy_allows_only_one_persistence_owner_per_state_root() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32008,7 +32713,7 @@ fn runtime_proxy_follower_keeps_persistence_side_effects_in_memory_only() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32069,7 +32774,7 @@ fn runtime_proxy_owner_still_persists_bindings_when_follower_exists() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32130,7 +32835,7 @@ fn runtime_proxy_preserves_websocket_headers_and_payload_metadata() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32623,7 +33328,7 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32639,6 +33344,7 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
     };
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
+    let current_identity = runtime_current_prodex_binary_identity();
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
@@ -32649,6 +33355,12 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
             include_code_review: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
+            prodex_version: current_identity.prodex_version.clone(),
+            executable_path: current_identity
+                .executable_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            executable_sha256: current_identity.executable_sha256.clone(),
         },
     );
 
@@ -32670,6 +33382,17 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
     assert_eq!(health.current_profile, "main");
     assert_eq!(health.instance_token, "instance");
     assert_eq!(health.persistence_role, "owner");
+    assert_eq!(
+        health.prodex_version.as_deref(),
+        Some(runtime_current_prodex_version())
+    );
+    assert!(health.executable_path.is_some());
+    assert!(
+        health
+            .executable_sha256
+            .as_deref()
+            .is_some_and(|hash| hash.len() == 64)
+    );
 }
 
 #[test]
@@ -32687,7 +33410,7 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32713,6 +33436,9 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
             include_code_review: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
+            prodex_version: Some(runtime_current_prodex_version().to_string()),
+            executable_path: None,
+            executable_sha256: None,
         },
     );
 
@@ -32734,6 +33460,10 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     assert_eq!(metrics.health.current_profile, "main");
     assert_eq!(metrics.health.instance_token, "instance");
     assert_eq!(metrics.health.persistence_role, "owner");
+    assert_eq!(
+        metrics.health.prodex_version.as_deref(),
+        Some(runtime_current_prodex_version())
+    );
     assert!(metrics.active_request_limit > 0);
     assert!(metrics.traffic.responses.limit > 0);
     assert_eq!(metrics.local_overload_backoff_remaining_seconds, 0);
@@ -32755,7 +33485,7 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32781,6 +33511,9 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
             include_code_review: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
+            prodex_version: Some(runtime_current_prodex_version().to_string()),
+            executable_path: None,
+            executable_sha256: None,
         },
     );
 
@@ -32807,6 +33540,8 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_runtime_broker_info"));
     assert!(body.contains("broker_key=\""));
     assert!(body.contains("current_profile=\"main\""));
+    assert!(body.contains("prodex_version=\""));
+    assert!(body.contains("executable_sha256=\""));
 }
 
 #[test]
@@ -32866,7 +33601,7 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -32892,6 +33627,9 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
             include_code_review: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
+            prodex_version: Some(runtime_current_prodex_version().to_string()),
+            executable_path: None,
+            executable_sha256: None,
         },
     );
 
@@ -32990,7 +33728,10 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
         .collect::<Result<Vec<_>, _>>()
         .expect("lease dir should be readable");
     assert_eq!(entries.len(), 1, "expected exactly one child lease file");
-    let lease_path = entries.pop().expect("child lease entry should exist").path();
+    let lease_path = entries
+        .pop()
+        .expect("child lease entry should exist")
+        .path();
     let file_name = lease_path
         .file_name()
         .and_then(|value| value.to_str())
@@ -33090,6 +33831,9 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             current_profile: "main".to_string(),
             instance_token: "dead-instance".to_string(),
             admin_token: "secret".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
         },
     )
@@ -33113,6 +33857,9 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             current_profile: "main".to_string(),
             instance_token: "live-instance".to_string(),
             admin_token: "secret".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
         },
     )
@@ -33140,7 +33887,7 @@ fn runtime_rotation_proxy_can_bind_a_requested_listen_addr() {
                 codex_home: main_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -33240,6 +33987,9 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
         openai_mount_path: None,
     };
 
@@ -33302,6 +34052,9 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
@@ -33346,6 +34099,124 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
             .is_none(),
         "terminated mismatched broker should clear its registry"
     );
+}
+
+#[test]
+fn wait_for_existing_runtime_broker_recovery_or_exit_keeps_mismatched_live_broker_with_active_requests()
+ {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "200");
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "defer-version-mismatch";
+    let script_path = temp_dir.path.join("busy-mismatched-broker.sh");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n",
+    )
+    .expect("busy mismatched broker script should write");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("busy mismatched broker script metadata should load")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions)
+        .expect("busy mismatched broker script permissions should update");
+
+    let mut child = Command::new(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("busy mismatched broker script should spawn");
+    let child_pid = child.id();
+    for _ in 0..20 {
+        if runtime_process_pid_alive(child_pid) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let server = TinyServer::http("127.0.0.1:0").expect("busy health server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("busy health server should expose a TCP address");
+    let health_thread = thread::spawn(move || {
+        while let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(250)) {
+            let body = serde_json::to_string(&RuntimeBrokerHealth {
+                pid: child_pid,
+                started_at: Local::now().timestamp(),
+                current_profile: "main".to_string(),
+                include_code_review: false,
+                active_requests: 2,
+                instance_token: "instance".to_string(),
+                persistence_role: "owner".to_string(),
+                prodex_version: Some("0.0.1".to_string()),
+                executable_path: Some("/tmp/busy-mismatched-broker.sh".to_string()),
+                executable_sha256: None,
+            })
+            .expect("busy health response should serialize");
+            let response = TinyResponse::from_string(body).with_status_code(200);
+            request
+                .respond(response)
+                .expect("busy health response should send");
+        }
+    });
+
+    let registry = RuntimeBrokerRegistry {
+        pid: child_pid,
+        listen_addr: listen_addr.to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "instance".to_string(),
+        admin_token: "secret".to_string(),
+        prodex_version: Some("0.0.1".to_string()),
+        executable_path: Some(script_path.display().to_string()),
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+    };
+    save_runtime_broker_registry(&paths, broker_key, &registry)
+        .expect("busy mismatched broker registry should save");
+    let client = runtime_broker_client().expect("broker client should build");
+
+    let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
+        &client,
+        &paths,
+        broker_key,
+        &registry.upstream_base_url,
+        registry.include_code_review,
+    )
+    .expect("wait should not fail");
+
+    assert!(
+        recovered.is_none(),
+        "busy mismatched broker should not be reused"
+    );
+    assert!(
+        runtime_process_pid_alive(registry.pid),
+        "busy mismatched broker should stay alive while it still serves active requests"
+    );
+    assert!(
+        load_runtime_broker_registry(&paths, broker_key)
+            .expect("registry reload should succeed")
+            .is_some(),
+        "busy mismatched broker registry should remain until the session drains"
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+    health_thread
+        .join()
+        .expect("busy mismatched health thread should join");
 }
 
 #[test]
@@ -33402,6 +34273,9 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         current_profile: "main".to_string(),
         instance_token: "legacy-instance".to_string(),
         admin_token: "secret".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
         openai_mount_path: Some("/backend-api/prodex/v0.2.99".to_string()),
     };
     save_runtime_broker_registry(&paths, "legacy-key", &registry)
@@ -33417,6 +34291,9 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
             active_requests: 0,
             instance_token: "legacy-instance".to_string(),
             persistence_role: "owner".to_string(),
+            prodex_version: Some(runtime_current_prodex_version().to_string()),
+            executable_path: None,
+            executable_sha256: None,
         })
         .expect("health payload should serialize");
         let response = TinyResponse::from_string(body).with_status_code(200);
@@ -33496,6 +34373,9 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
@@ -33690,10 +34570,8 @@ fn runtime_proxy_claude_launch_args_prepend_plugin_dirs_when_present() {
         ]
     );
 
-    let launch_args = runtime_proxy_claude_launch_args(
-        &[OsString::from("-p"), OsString::from("hello")],
-        &[],
-    );
+    let launch_args =
+        runtime_proxy_claude_launch_args(&[OsString::from("-p"), OsString::from("hello")], &[]);
     assert_eq!(
         launch_args,
         vec![OsString::from("-p"), OsString::from("hello")]
@@ -33804,14 +34682,10 @@ fn ensure_runtime_mem_prodex_observer_writes_wrapper_and_settings() {
     let wrapper_path = ensure_runtime_mem_prodex_observer_for_home(&home, &paths, &prodex_exe)
         .expect("prodex observer should configure");
 
-    assert_eq!(
-        wrapper_path,
-        runtime_mem_prodex_claude_wrapper_path(&paths)
-    );
-    let settings: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&settings_path).expect("settings should read"),
-    )
-    .expect("settings should parse");
+    assert_eq!(wrapper_path, runtime_mem_prodex_claude_wrapper_path(&paths));
+    let settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("settings should read"))
+            .expect("settings should parse");
     assert_eq!(settings["CLAUDE_MEM_PROVIDER"], serde_json::json!("claude"));
     assert_eq!(
         settings["CLAUDE_CODE_PATH"],
@@ -33840,7 +34714,8 @@ fn ensure_runtime_mem_prodex_observer_writes_wrapper_and_settings() {
 fn ensure_runtime_mem_codex_watch_for_home_adds_prodex_watch_without_clobbering_default_watch() {
     let temp_dir = TestDir::new();
     let config_path = temp_dir.path.join("claude-mem/transcript-watch.json");
-    fs::create_dir_all(config_path.parent().expect("config parent")).expect("config parent should exist");
+    fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("config parent should exist");
     fs::write(
         &config_path,
         serde_json::json!({
@@ -34546,7 +35421,8 @@ fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state
         .expect("legacy Claude config should serialize"),
     )
     .expect("legacy Claude config should write");
-    let _home_guard = TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
+    let _home_guard =
+        TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
 
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -34597,7 +35473,8 @@ fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_
     let temp_dir = TestDir::new();
     let home_dir = temp_dir.path.join("home");
     fs::create_dir_all(&home_dir).expect("home dir should exist");
-    let _home_guard = TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
+    let _home_guard =
+        TestEnvVarGuard::set("HOME", home_dir.to_str().expect("home should be utf-8"));
 
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -34709,7 +35586,7 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -35104,8 +35981,8 @@ fn translate_runtime_anthropic_messages_request_preserves_tool_references() {
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_keeps_upstream_streaming_for_non_stream_client_request(
-) {
+fn translate_runtime_anthropic_messages_request_keeps_upstream_streaming_for_non_stream_client_request()
+ {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages".to_string(),
@@ -35160,8 +36037,9 @@ fn runtime_request_for_anthropic_server_tool_followup_defaults_stream_to_true() 
         .into_bytes(),
     };
 
-    let followup = runtime_request_for_anthropic_server_tool_followup(&request, "resp_followup_123")
-        .expect("follow-up request should serialize");
+    let followup =
+        runtime_request_for_anthropic_server_tool_followup(&request, "resp_followup_123")
+            .expect("follow-up request should serialize");
     let body: serde_json::Value =
         serde_json::from_slice(&followup.body).expect("follow-up body should parse");
 
@@ -35411,7 +36289,7 @@ fn translate_runtime_anthropic_messages_request_maps_code_execution_tool_result(
 
 #[test]
 fn translate_runtime_anthropic_messages_request_preserves_file_backed_document_and_container_blocks()
-{
+ {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -35474,7 +36352,9 @@ fn translate_runtime_anthropic_messages_request_preserves_file_backed_document_a
 
     let output = input
         .iter()
-        .find(|item| item.get("type").and_then(serde_json::Value::as_str) == Some("function_call_output"))
+        .find(|item| {
+            item.get("type").and_then(serde_json::Value::as_str) == Some("function_call_output")
+        })
         .expect("function_call_output should exist");
     let output: serde_json::Value = serde_json::from_str(
         output
@@ -35761,11 +36641,15 @@ fn translate_runtime_anthropic_messages_request_maps_mcp_toolset_to_responses_mc
         Some("mcp")
     );
     assert_eq!(
-        tools[0].get("server_label").and_then(serde_json::Value::as_str),
+        tools[0]
+            .get("server_label")
+            .and_then(serde_json::Value::as_str),
         Some("local_fs")
     );
     assert_eq!(
-        tools[0].get("server_url").and_then(serde_json::Value::as_str),
+        tools[0]
+            .get("server_url")
+            .and_then(serde_json::Value::as_str),
         Some("https://mcp.example.com/sse")
     );
     assert_eq!(
@@ -35840,7 +36724,7 @@ fn translate_runtime_anthropic_messages_request_does_not_buffer_mcp_only_toolset
 
 #[test]
 fn translate_runtime_anthropic_messages_request_falls_back_for_unrepresentable_mcp_toolset_denylist()
-{
+ {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -36451,9 +37335,7 @@ fn translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_t
             .and_then(|properties| properties.get("command"))
             .and_then(|property| property.get("enum"))
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|values| values
-                .iter()
-                .any(|value| value.as_str() == Some("rename")))
+            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("rename")))
     );
     assert_eq!(
         body.get("tool_choice")
@@ -36470,8 +37352,8 @@ fn translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_t
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_appends_computer_display_context_to_existing_description(
-) {
+fn translate_runtime_anthropic_messages_request_appends_computer_display_context_to_existing_description()
+ {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -36965,8 +37847,8 @@ fn translate_runtime_anthropic_messages_request_maps_computer_tool_to_native_com
 }
 
 #[test]
-fn translate_runtime_anthropic_messages_request_falls_back_for_ambiguous_native_computer_tool_choice(
-) {
+fn translate_runtime_anthropic_messages_request_falls_back_for_ambiguous_native_computer_tool_choice()
+ {
     let _guard = TestEnvVarGuard::set("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS", "computer");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -37177,7 +38059,7 @@ fn translate_runtime_anthropic_messages_request_normalizes_versioned_client_tool
 
 #[test]
 fn translate_runtime_anthropic_messages_request_roundtrips_versioned_text_editor_tool_use_and_result()
-{
+ {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -37279,9 +38161,7 @@ fn translate_runtime_anthropic_messages_request_roundtrips_versioned_text_editor
         Some("function_call_output")
     );
     assert_eq!(
-        input[1]
-            .get("output")
-            .and_then(serde_json::Value::as_str),
+        input[1].get("output").and_then(serde_json::Value::as_str),
         Some("Replaced 1 occurrence.")
     );
 }
@@ -37403,7 +38283,9 @@ fn runtime_anthropic_response_from_json_value_maps_shell_call_to_bash_tool_use()
         Some(4096)
     );
     assert_eq!(
-        response.get("stop_reason").and_then(serde_json::Value::as_str),
+        response
+            .get("stop_reason")
+            .and_then(serde_json::Value::as_str),
         Some("tool_use")
     );
 }
@@ -37642,7 +38524,7 @@ fn translate_runtime_anthropic_messages_request_maps_memory_tool_definition_to_b
 
 #[test]
 fn translate_runtime_anthropic_messages_request_appends_memory_tool_guidance_to_system_instructions()
-{
+ {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -38006,7 +38888,8 @@ fn translate_runtime_anthropic_messages_request_compacts_verbose_web_search_tool
             .get("content_blocks")
             .and_then(serde_json::Value::as_array)
             .map(|items| {
-                items.iter()
+                items
+                    .iter()
                     .filter_map(|item| item.get("url").and_then(serde_json::Value::as_str))
                     .collect::<Vec<_>>()
             }),
@@ -39326,8 +40209,7 @@ fn runtime_anthropic_response_from_json_value_preserves_mcp_approval_request_and
 }
 
 #[test]
-fn runtime_anthropic_sse_response_parts_from_message_value_preserves_mcp_approval_and_list_tools()
-{
+fn runtime_anthropic_sse_response_parts_from_message_value_preserves_mcp_approval_and_list_tools() {
     let message = serde_json::json!({
         "id": "msg_mcp_adv",
         "type": "message",
@@ -39844,8 +40726,9 @@ fn runtime_proxy_anthropic_carried_server_tool_usage_counts_latest_tool_chain_su
         }
     ]);
 
-    let usage =
-        runtime_proxy_anthropic_carried_server_tool_usage(messages.as_array().expect("messages should be an array"));
+    let usage = runtime_proxy_anthropic_carried_server_tool_usage(
+        messages.as_array().expect("messages should be an array"),
+    );
 
     assert_eq!(usage.web_search_requests, 1);
     assert_eq!(usage.web_fetch_requests, 0);
@@ -40059,7 +40942,7 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_generic_too
 
 #[test]
 fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carried_server_tool_usage()
-{
+ {
     let body = concat!(
         "event: response.completed\r\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"output\":[]}}\r\n",
@@ -40175,7 +41058,7 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -40301,7 +41184,7 @@ fn runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_pr
                     codex_home: main_home.clone(),
                     managed: true,
                     email: Some("main@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
             (
@@ -40310,7 +41193,7 @@ fn runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_pr
                     codex_home: second_home.clone(),
                     managed: true,
                     email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
+                    provider: ProfileProvider::Openai,
                 },
             ),
         ]),
@@ -40377,9 +41260,17 @@ fn runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_pr
         "unexpected anthropic status: {}",
         response.status()
     );
-    let body = response.text().expect("anthropic stream body should decode");
-    assert!(body.contains("event: message_start"), "unexpected body: {body}");
-    assert!(body.contains("event: message_stop"), "unexpected body: {body}");
+    let body = response
+        .text()
+        .expect("anthropic stream body should decode");
+    assert!(
+        body.contains("event: message_start"),
+        "unexpected body: {body}"
+    );
+    assert!(
+        body.contains("event: message_stop"),
+        "unexpected body: {body}"
+    );
     assert!(
         !body.contains("You've hit your usage limit"),
         "fresh anthropic tool-result transcript should rotate instead of surfacing quota: {body}"
@@ -40417,7 +41308,7 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -40499,7 +41390,7 @@ fn runtime_proxy_streams_anthropic_mcp_messages_without_buffering() {
                         codex_home: profile_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -40608,7 +41499,7 @@ fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -40678,12 +41569,17 @@ fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
     );
 
     let requests = backend.responses_bodies();
-    assert_eq!(requests.len(), 2, "proxy should issue a follow-up continuation");
+    assert_eq!(
+        requests.len(),
+        2,
+        "proxy should issue a follow-up continuation"
+    );
 
     let first_request: serde_json::Value =
         serde_json::from_str(&requests[0]).expect("first request should parse");
     assert_eq!(
-        first_request.get("input")
+        first_request
+            .get("input")
             .and_then(serde_json::Value::as_array)
             .map(Vec::len),
         Some(1)
@@ -40701,7 +41597,9 @@ fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
         "follow-up request should not replay the original input"
     );
     assert_eq!(
-        second_request.get("stream").and_then(serde_json::Value::as_bool),
+        second_request
+            .get("stream")
+            .and_then(serde_json::Value::as_bool),
         Some(true)
     );
 }
@@ -40732,7 +41630,7 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
                 codex_home: profile_home,
                 managed: true,
                 email: Some("main@example.com".to_string()),
-            provider: ProfileProvider::Openai,
+                provider: ProfileProvider::Openai,
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
@@ -40777,7 +41675,9 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
             .send(())
             .expect("first anthropic request should signal readiness");
         thread::sleep(Duration::from_millis(250));
-        let body = response.text().expect("first anthropic stream should decode");
+        let body = response
+            .text()
+            .expect("first anthropic stream should decode");
         assert!(body.contains("event: message_start"));
     });
 
@@ -40858,7 +41758,7 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
                         codex_home: profile_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -40984,7 +41884,7 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
                         codex_home: profile_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -41174,7 +42074,9 @@ fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() 
         "active-request release notify should not count as inflight relief"
     );
 
-    release.join().expect("active-request release thread should join");
+    release
+        .join()
+        .expect("active-request release thread should join");
     assert_eq!(
         runtime_profile_inflight_release_revision(&shared),
         observed_revision,
@@ -41278,7 +42180,9 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
         "lane-release notify should not count as probe-refresh progress"
     );
 
-    release.join().expect("active-request release thread should join");
+    release
+        .join()
+        .expect("active-request release thread should join");
     assert_eq!(
         runtime_probe_refresh_revision(),
         observed_revision,
@@ -41490,7 +42394,7 @@ fn runtime_probe_refresh_suppresses_nonlocal_upstream_in_tests_and_wakes_waiters
                         codex_home: main_home.clone(),
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -41592,7 +42496,7 @@ fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
                         codex_home: main_home.clone(),
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -41621,7 +42525,10 @@ fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
     schedule_runtime_probe_refresh(&shared, "main", &main_home);
 
     assert!(
-        wait_for_runtime_probe_refresh_since(ci_timing_upper_bound_ms(250, 1_000), observed_revision),
+        wait_for_runtime_probe_refresh_since(
+            ci_timing_upper_bound_ms(250, 1_000),
+            observed_revision
+        ),
         "loopback upstreams should still run through the background refresh path in tests"
     );
     wait_for_runtime_background_queues_idle();
@@ -41635,7 +42542,9 @@ fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
 
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
     assert!(
-        !log.contains("profile_probe_refresh_suppressed profile=main reason=test_nonlocal_upstream"),
+        !log.contains(
+            "profile_probe_refresh_suppressed profile=main reason=test_nonlocal_upstream"
+        ),
         "loopback probe refresh should not be suppressed in tests"
     );
 }
@@ -41668,7 +42577,7 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
                         codex_home: profile_home,
                         managed: true,
                         email: Some("main@example.com".to_string()),
-                    provider: ProfileProvider::Openai,
+                        provider: ProfileProvider::Openai,
                     },
                 )]),
                 last_run_selected_at: BTreeMap::new(),
@@ -41721,7 +42630,10 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
     let RuntimeResponsesReply::Buffered(parts) = response else {
         panic!("expected buffered responses reply");
     };
-    assert_eq!(parts.status, 503, "unexpected status without inflight relief");
+    assert_eq!(
+        parts.status, 503,
+        "unexpected status without inflight relief"
+    );
     let body: serde_json::Value =
         serde_json::from_slice(&parts.body).expect("response body should parse");
     assert_eq!(
@@ -41781,7 +42693,7 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
                             codex_home: main_home,
                             managed: true,
                             email: Some("main@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                     (
@@ -41790,7 +42702,7 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
                             codex_home: second_home,
                             managed: true,
                             email: Some("second@example.com".to_string()),
-                        provider: ProfileProvider::Openai,
+                            provider: ProfileProvider::Openai,
                         },
                     ),
                 ]),
@@ -41876,23 +42788,23 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
     };
     let excluded_profiles = BTreeSet::new();
     assert!(
-        !runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-            RuntimeInflightReliefWait::new(
-                45,
-                &request,
-                &shared,
-                &excluded_profiles,
-                RuntimeRouteKind::Responses,
-                Instant::now(),
-                true,
-                Some("main"),
-            ),
-        )
+        !runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait::new(
+            45,
+            &request,
+            &shared,
+            &excluded_profiles,
+            RuntimeRouteKind::Responses,
+            Instant::now(),
+            true,
+            Some("main"),
+        ),)
         .expect("owner-scoped wait should complete"),
         "non-owner release should not count as useful relief"
     );
 
-    release.join().expect("non-owner release thread should join");
+    release
+        .join()
+        .expect("non-owner release thread should join");
     drop(main_inflight);
 
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");

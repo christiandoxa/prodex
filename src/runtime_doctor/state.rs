@@ -1,5 +1,5 @@
 use chrono::Local;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -294,8 +294,130 @@ fn runtime_doctor_profile_summaries(
     profiles
 }
 
+fn runtime_doctor_path_prodex_binaries() -> Vec<PathBuf> {
+    let executable_name = format!("prodex{}", env::consts::EXE_SUFFIX);
+    let mut seen = BTreeSet::new();
+    let mut binaries = Vec::new();
+    if let Some(current_path) = runtime_current_prodex_binary_identity().executable_path {
+        let normalized = fs::canonicalize(&current_path).unwrap_or(current_path);
+        if seen.insert(normalized.clone()) {
+            binaries.push(normalized);
+        }
+    }
+    if let Some(paths) = env::var_os("PATH") {
+        for dir in env::split_paths(&paths) {
+            let candidate = dir.join(&executable_name);
+            if !candidate.is_file() {
+                continue;
+            }
+            let normalized = fs::canonicalize(&candidate).unwrap_or(candidate);
+            if seen.insert(normalized.clone()) {
+                binaries.push(normalized);
+            }
+        }
+    }
+    binaries
+}
+
+fn runtime_doctor_binary_identity_line(path: &Path) -> Option<String> {
+    let version = read_prodex_version_from_executable(path).ok()?;
+    let sha256 = runtime_executable_sha256(path)
+        .ok()
+        .unwrap_or_else(|| "-".to_string());
+    Some(format!(
+        "{} version={} sha256={}",
+        path.display(),
+        version,
+        sha256
+    ))
+}
+
+fn runtime_doctor_collect_binary_identities(summary: &mut RuntimeDoctorSummary) {
+    let current_version = runtime_current_prodex_version();
+    let current_identity = runtime_current_prodex_binary_identity();
+    let mut versions = BTreeSet::new();
+    let mut hashes = BTreeSet::new();
+    for path in runtime_doctor_path_prodex_binaries() {
+        let Some(line) = runtime_doctor_binary_identity_line(&path) else {
+            continue;
+        };
+        if let Some(version) = line
+            .split_whitespace()
+            .find_map(|token| token.strip_prefix("version="))
+        {
+            versions.insert(version.to_string());
+        }
+        if let Some(hash) = line
+            .split_whitespace()
+            .find_map(|token| token.strip_prefix("sha256="))
+            .filter(|value| *value != "-")
+        {
+            hashes.insert(hash.to_string());
+        }
+        summary.prodex_binary_identities.push(line);
+    }
+    summary.prodex_binary_mismatch = versions.iter().any(|version| version != current_version)
+        || hashes.len() > 1
+        || current_identity
+            .executable_sha256
+            .as_ref()
+            .is_some_and(|hash| !hashes.is_empty() && !hashes.contains(hash));
+}
+
+fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
+    let current_identity = runtime_current_prodex_binary_identity();
+    let client = runtime_broker_client().ok();
+    for broker_key in runtime_broker_registry_keys(paths) {
+        let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
+            continue;
+        };
+        if !runtime_process_pid_alive(registry.pid) {
+            continue;
+        }
+        let (identity, source) = client
+            .as_ref()
+            .and_then(|client| {
+                probe_runtime_broker_health(client, &registry)
+                    .ok()
+                    .flatten()
+            })
+            .map(|health| (runtime_health_prodex_binary_identity(&health), "health"))
+            .filter(|(identity, _)| identity.is_present())
+            .or_else(|| {
+                let identity = runtime_registry_prodex_binary_identity(&registry);
+                identity.is_present().then_some((identity, "registry"))
+            })
+            .or_else(|| {
+                let identity = runtime_process_prodex_binary_identity(registry.pid);
+                identity.is_present().then_some((identity, "process"))
+            })
+            .unwrap_or((RuntimeProdexBinaryIdentity::default(), "missing"));
+        if identity.is_present()
+            && !runtime_prodex_binary_identity_matches(&current_identity, &identity)
+        {
+            summary.runtime_broker_mismatch = true;
+        }
+        summary.runtime_broker_identities.push(format!(
+            "{} pid={} version={} path={} sha256={} source={}",
+            broker_key,
+            registry.pid,
+            identity.prodex_version.unwrap_or_else(|| "-".to_string()),
+            identity
+                .executable_path
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            identity
+                .executable_sha256
+                .unwrap_or_else(|| "-".to_string()),
+            source
+        ));
+    }
+}
+
 pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
     let Ok(state) = AppState::load_with_recovery(paths) else {
+        runtime_doctor_collect_binary_identities(summary);
+        runtime_doctor_collect_broker_identities(paths, summary);
         return;
     };
     let now = Local::now().timestamp();
@@ -364,6 +486,17 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
         .continuations
         .session_id_bindings
         .len();
+    let merged_response_bindings =
+        runtime_external_response_profile_bindings(&merged_continuations.response_profile_bindings)
+            .len();
+    summary.persisted_turn_state_coverage_percent = if merged_response_bindings > 0 {
+        Some(
+            ((merged_continuations.turn_state_bindings.len() * 100) / merged_response_bindings)
+                .min(100) as u8,
+        )
+    } else {
+        None
+    };
     summary.continuation_journal_saved_at =
         (continuation_journal.value.saved_at > 0).then_some(continuation_journal.value.saved_at);
     summary.stale_persisted_usage_snapshots = usage_snapshots
@@ -424,6 +557,8 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
         now,
     );
     summary.degraded_routes = runtime_doctor_degraded_routes(&backoffs.value, &scores.value, now);
+    runtime_doctor_collect_binary_identities(summary);
+    runtime_doctor_collect_broker_identities(paths, summary);
 }
 
 pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {

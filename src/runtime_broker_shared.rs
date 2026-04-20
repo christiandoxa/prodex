@@ -11,6 +11,12 @@ pub(super) struct RuntimeBrokerRegistry {
     pub(super) instance_token: String,
     pub(super) admin_token: String,
     #[serde(default)]
+    pub(super) prodex_version: Option<String>,
+    #[serde(default)]
+    pub(super) executable_path: Option<String>,
+    #[serde(default)]
+    pub(super) executable_sha256: Option<String>,
+    #[serde(default)]
     pub(super) openai_mount_path: Option<String>,
 }
 
@@ -23,6 +29,12 @@ pub(super) struct RuntimeBrokerHealth {
     pub(super) active_requests: usize,
     pub(super) instance_token: String,
     pub(super) persistence_role: String,
+    #[serde(default)]
+    pub(super) prodex_version: Option<String>,
+    #[serde(default)]
+    pub(super) executable_path: Option<String>,
+    #[serde(default)]
+    pub(super) executable_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,6 +94,9 @@ pub(super) struct RuntimeBrokerMetadata {
     pub(super) include_code_review: bool,
     pub(super) instance_token: String,
     pub(super) admin_token: String,
+    pub(super) prodex_version: Option<String>,
+    pub(super) executable_path: Option<String>,
+    pub(super) executable_sha256: Option<String>,
 }
 
 #[derive(Debug)]

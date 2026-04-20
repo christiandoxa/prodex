@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub(crate) fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
     let mut hasher = DefaultHasher::new();
@@ -12,11 +13,47 @@ pub(crate) fn runtime_current_prodex_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+pub(crate) fn runtime_executable_sha256(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let digest = Sha256::digest(&bytes);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub(crate) fn runtime_current_binary_identity() -> (Option<String>, Option<String>) {
+    let path = env::current_exe().ok();
+    let sha256 = path
+        .as_deref()
+        .and_then(|path| runtime_executable_sha256(path).ok());
+    (path.map(|path| path.display().to_string()), sha256)
+}
+
 #[derive(Debug, Clone)]
 struct RuntimeProcessVersionResolution {
-    alive: bool,
     executable_path: Option<PathBuf>,
     version: Option<String>,
+    executable_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RuntimeProdexBinaryIdentity {
+    pub(crate) prodex_version: Option<String>,
+    pub(crate) executable_path: Option<PathBuf>,
+    pub(crate) executable_sha256: Option<String>,
+}
+
+impl RuntimeProdexBinaryIdentity {
+    pub(crate) fn is_present(&self) -> bool {
+        self.prodex_version.is_some()
+            || self.executable_path.is_some()
+            || self.executable_sha256.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeBrokerVersionGuardOutcome {
+    Compatible,
+    Replaced,
+    DeferredActiveRequests,
 }
 
 trait RuntimeProcessPlatform {
@@ -254,6 +291,10 @@ pub(crate) fn parse_prodex_version_output(output: &str) -> Option<String> {
     None
 }
 
+pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
+    runtime_executable_sha256(executable)
+}
+
 pub(crate) fn read_prodex_version_from_executable(executable: &Path) -> Result<String> {
     let output = Command::new(executable)
         .arg("--version")
@@ -281,6 +322,30 @@ pub(crate) fn read_prodex_version_from_executable(executable: &Path) -> Result<S
     })
 }
 
+fn resolve_prodex_executable_identity(
+    executable_candidates: &[PathBuf],
+) -> (Option<PathBuf>, Option<String>, Option<String>) {
+    let mut first_candidate = None;
+    let mut first_sha256 = None;
+    for executable in executable_candidates {
+        if first_candidate.is_none() {
+            first_candidate = Some(executable.clone());
+        }
+        let candidate_sha256 = read_prodex_sha256_from_executable(executable).ok();
+        if first_sha256.is_none() {
+            first_sha256 = candidate_sha256.clone();
+        }
+        if let Ok(version) = read_prodex_version_from_executable(executable) {
+            return (
+                Some(executable.clone()),
+                Some(version),
+                candidate_sha256.or(first_sha256),
+            );
+        }
+    }
+    (first_candidate, None, first_sha256)
+}
+
 fn push_runtime_process_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
     if !candidates.iter().any(|candidate| candidate == &path) {
         candidates.push(path);
@@ -305,17 +370,119 @@ fn runtime_process_executable_candidates(pid: u32, row: Option<&ProcessRow>) -> 
 
 fn runtime_process_version_resolution(pid: u32) -> RuntimeProcessVersionResolution {
     let row = runtime_process_row(pid);
-    let alive = RuntimeProcessPlatformImpl::pid_alive(pid) || row.is_some();
     let executable_candidates = runtime_process_executable_candidates(pid, row.as_ref());
-    let executable_path = executable_candidates.first().cloned();
-    let version = executable_candidates
-        .iter()
-        .find_map(|executable| read_prodex_version_from_executable(executable).ok());
+    let (executable_path, version, executable_sha256) =
+        resolve_prodex_executable_identity(&executable_candidates);
     RuntimeProcessVersionResolution {
-        alive,
         executable_path,
         version,
+        executable_sha256,
     }
+}
+
+pub(crate) fn runtime_current_prodex_binary_identity() -> RuntimeProdexBinaryIdentity {
+    let executable_path = env::current_exe().ok();
+    let executable_sha256 = executable_path
+        .as_ref()
+        .and_then(|path| read_prodex_sha256_from_executable(path).ok());
+    RuntimeProdexBinaryIdentity {
+        prodex_version: Some(runtime_current_prodex_version().to_string()),
+        executable_path,
+        executable_sha256,
+    }
+}
+
+pub(crate) fn runtime_process_prodex_binary_identity(pid: u32) -> RuntimeProdexBinaryIdentity {
+    let resolution = runtime_process_version_resolution(pid);
+    RuntimeProdexBinaryIdentity {
+        prodex_version: resolution.version,
+        executable_path: resolution.executable_path,
+        executable_sha256: resolution.executable_sha256,
+    }
+}
+
+pub(crate) fn runtime_registry_prodex_binary_identity(
+    registry: &RuntimeBrokerRegistry,
+) -> RuntimeProdexBinaryIdentity {
+    RuntimeProdexBinaryIdentity {
+        prodex_version: registry.prodex_version.clone(),
+        executable_path: registry.executable_path.clone().map(PathBuf::from),
+        executable_sha256: registry.executable_sha256.clone(),
+    }
+}
+
+pub(crate) fn runtime_health_prodex_binary_identity(
+    health: &RuntimeBrokerHealth,
+) -> RuntimeProdexBinaryIdentity {
+    RuntimeProdexBinaryIdentity {
+        prodex_version: health.prodex_version.clone(),
+        executable_path: health.executable_path.clone().map(PathBuf::from),
+        executable_sha256: health.executable_sha256.clone(),
+    }
+}
+
+pub(crate) fn runtime_prodex_binary_identity_matches(
+    current: &RuntimeProdexBinaryIdentity,
+    other: &RuntimeProdexBinaryIdentity,
+) -> bool {
+    if let (Some(current_sha256), Some(other_sha256)) = (
+        current.executable_sha256.as_deref(),
+        other.executable_sha256.as_deref(),
+    ) {
+        return current_sha256 == other_sha256;
+    }
+    if let (Some(current_version), Some(other_version)) = (
+        current.prodex_version.as_deref(),
+        other.prodex_version.as_deref(),
+    ) {
+        return current_version == other_version;
+    }
+    false
+}
+
+fn runtime_broker_replacement_reason(
+    current: &RuntimeProdexBinaryIdentity,
+    observed: &RuntimeProdexBinaryIdentity,
+) -> &'static str {
+    match (
+        current.executable_sha256.as_deref(),
+        observed.executable_sha256.as_deref(),
+    ) {
+        (Some(current_sha256), Some(observed_sha256)) if current_sha256 != observed_sha256 => {
+            "sha256_mismatch"
+        }
+        _ => match (
+            current.prodex_version.as_deref(),
+            observed.prodex_version.as_deref(),
+        ) {
+            (Some(current_version), Some(observed_version))
+                if current_version != observed_version =>
+            {
+                "version_mismatch"
+            }
+            _ if observed.is_present() => "identity_mismatch",
+            _ => "identity_unresolved",
+        },
+    }
+}
+
+fn runtime_broker_observed_binary_identity(
+    registry: &RuntimeBrokerRegistry,
+    health: Option<&RuntimeBrokerHealth>,
+) -> RuntimeProdexBinaryIdentity {
+    health
+        .filter(|health| health.instance_token == registry.instance_token)
+        .map(runtime_health_prodex_binary_identity)
+        .filter(RuntimeProdexBinaryIdentity::is_present)
+        .or_else(|| {
+            let identity = runtime_registry_prodex_binary_identity(registry);
+            identity.is_present().then_some(identity)
+        })
+        .or_else(|| {
+            let identity = runtime_process_prodex_binary_identity(registry.pid);
+            identity.is_present().then_some(identity)
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
@@ -348,26 +515,32 @@ pub(crate) fn terminate_runtime_process(pid: u32) {
     let _ = wait_for_exit(250);
 }
 
-pub(crate) fn replace_runtime_broker_if_version_mismatch(
+pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
     paths: &AppPaths,
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
-) -> bool {
-    let resolution = runtime_process_version_resolution(registry.pid);
-    if !resolution.alive {
-        return false;
+    health: Option<&RuntimeBrokerHealth>,
+) -> RuntimeBrokerVersionGuardOutcome {
+    if !runtime_process_pid_alive(registry.pid) {
+        return RuntimeBrokerVersionGuardOutcome::Compatible;
     }
 
-    let current_version = runtime_current_prodex_version();
-    if resolution.version.as_deref() == Some(current_version) {
-        return false;
+    let current_identity = runtime_current_prodex_binary_identity();
+    let observed_identity = runtime_broker_observed_binary_identity(registry, health);
+    if observed_identity.is_present()
+        && runtime_prodex_binary_identity_matches(&current_identity, &observed_identity)
+    {
+        return RuntimeBrokerVersionGuardOutcome::Compatible;
     }
 
-    let replacement_reason = if resolution.version.is_some() {
-        "version_mismatch"
-    } else {
-        "version_unresolved"
-    };
+    if health.is_some_and(|health| {
+        health.instance_token == registry.instance_token && health.active_requests > 0
+    }) {
+        return RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests;
+    }
+
+    let replacement_reason =
+        runtime_broker_replacement_reason(&current_identity, &observed_identity);
     audit_log_event_best_effort(
         "runtime_broker",
         "replace_stale_broker",
@@ -381,17 +554,23 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch(
             "instance_token": registry.instance_token,
             "upstream_base_url": registry.upstream_base_url,
             "include_code_review": registry.include_code_review,
-            "current_prodex_version": current_version,
-            "detected_prodex_version": resolution.version,
-            "executable_path": resolution
+            "current_prodex_version": current_identity.prodex_version,
+            "current_executable_path": current_identity
                 .executable_path
                 .map(|path| path.display().to_string()),
+            "current_executable_sha256": current_identity.executable_sha256,
+            "detected_prodex_version": observed_identity.prodex_version,
+            "detected_executable_sha256": observed_identity.executable_sha256,
+            "executable_path": observed_identity
+                .executable_path
+                .map(|path| path.display().to_string()),
+            "active_requests": health.map(|health| health.active_requests),
             "platform": env::consts::OS,
         }),
     );
     terminate_runtime_process(registry.pid);
     remove_runtime_broker_registry_if_token_matches(paths, broker_key, &registry.instance_token);
-    true
+    RuntimeBrokerVersionGuardOutcome::Replaced
 }
 
 pub(crate) fn runtime_broker_openai_mount_path(registry: &RuntimeBrokerRegistry) -> Result<String> {

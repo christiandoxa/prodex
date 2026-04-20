@@ -43,6 +43,37 @@ pub(crate) fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             *summary.marker_counts.entry(marker).or_insert(0) += 1;
             summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
             let fields = runtime_doctor_parse_fields(line);
+            if matches!(
+                marker,
+                "chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"
+            ) {
+                summary.latest_chain_event =
+                    Some(runtime_doctor_chain_event_summary(marker, &fields));
+            }
+            if let Some(reason) = fields.get("reason").cloned() {
+                match marker {
+                    "chain_retried_owner" => {
+                        *summary
+                            .chain_retried_owner_by_reason
+                            .entry(reason)
+                            .or_insert(0) += 1;
+                    }
+                    "chain_dead_upstream_confirmed" => {
+                        *summary
+                            .chain_dead_upstream_confirmed_by_reason
+                            .entry(reason)
+                            .or_insert(0) += 1;
+                    }
+                    "stale_continuation" => {
+                        summary.latest_stale_continuation_reason = Some(reason.clone());
+                        *summary
+                            .stale_continuation_by_reason
+                            .entry(reason)
+                            .or_insert(0) += 1;
+                    }
+                    _ => {}
+                }
+            }
             if marker == "previous_response_not_found" {
                 if let Some(route) = fields.get("route").cloned() {
                     *summary
@@ -147,10 +178,41 @@ fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
 
 fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
     let message = runtime_doctor_line_message(line);
+    for token in message.split_whitespace() {
+        if token.contains('=') {
+            continue;
+        }
+        if let Some(marker) = RUNTIME_DOCTOR_MARKERS
+            .iter()
+            .copied()
+            .find(|marker| *marker == token)
+        {
+            return Some(marker);
+        }
+    }
     RUNTIME_DOCTOR_MARKERS
         .iter()
         .copied()
         .find(|marker| message.contains(marker))
+}
+
+fn runtime_doctor_chain_event_summary(marker: &str, fields: &BTreeMap<String, String>) -> String {
+    let mut parts = vec![marker.to_string()];
+    for key in [
+        "reason",
+        "profile",
+        "transport",
+        "route",
+        "websocket_session",
+        "previous_response_id",
+        "event",
+        "via",
+    ] {
+        if let Some(value) = fields.get(key) {
+            parts.push(format!("{key}={value}"));
+        }
+    }
+    parts.join(" ")
 }
 
 fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {

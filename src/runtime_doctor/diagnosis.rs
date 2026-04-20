@@ -91,6 +91,9 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
             &[
                 "previous_response_not_found",
                 "previous_response_negative_cache",
+                "chain_retried_owner",
+                "chain_dead_upstream_confirmed",
+                "stale_continuation",
                 "compact_fresh_fallback_blocked",
                 "compact_pressure_shed",
             ],
@@ -306,6 +309,30 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
     } else if runtime_doctor_marker_count(summary, "compact_pressure_shed") > 0 {
         "Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic.".to_string()
+    } else if runtime_doctor_marker_count(summary, "chain_dead_upstream_confirmed") > 0 {
+        format!(
+            "Recent previous_response_id chain was confirmed dead upstream after owner retries. Latest chain event: {}.",
+            summary
+                .latest_chain_event
+                .clone()
+                .unwrap_or_else(|| "inspect chain_dead_upstream_confirmed markers".to_string())
+        )
+    } else if runtime_doctor_marker_count(summary, "stale_continuation") > 0 {
+        format!(
+            "Recent stale continuation was surfaced to Codex. Latest reason: {}.",
+            summary
+                .latest_stale_continuation_reason
+                .clone()
+                .unwrap_or_else(|| "inspect stale_continuation markers".to_string())
+        )
+    } else if runtime_doctor_marker_count(summary, "chain_retried_owner") > 0 {
+        format!(
+            "Recent continuation chain was retried on the owning profile before commit. Latest chain event: {}.",
+            summary
+                .latest_chain_event
+                .clone()
+                .unwrap_or_else(|| "inspect chain_retried_owner markers".to_string())
+        )
     } else if runtime_doctor_marker_count(summary, "previous_response_not_found") > 0 {
         format!(
             "Recent previous_response_id continuity failures were observed: {}.",
@@ -379,6 +406,10 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
     {
         "Likely writer stall: upstream produced data but the local writer did not emit a first chunk in the sampled tail."
             .to_string()
+    } else if summary.runtime_broker_mismatch {
+        "A running runtime broker uses a different prodex binary than this command; restart active prodex/codex sessions so the patched runtime is loaded.".to_string()
+    } else if summary.prodex_binary_mismatch {
+        "Multiple prodex binaries on PATH differ by version or hash; align installs so new sessions use the patched runtime.".to_string()
     } else {
         "No recent overload or stream-failure markers were detected in the sampled runtime tail."
             .to_string()

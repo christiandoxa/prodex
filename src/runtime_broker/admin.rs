@@ -121,6 +121,9 @@ fn runtime_broker_health_response(
         } else {
             "follower".to_string()
         },
+        prodex_version: metadata.prodex_version,
+        executable_path: metadata.executable_path,
+        executable_sha256: metadata.executable_sha256,
     };
     let body = serde_json::to_string(&health).ok()?;
     Some(build_runtime_proxy_json_response(200, body))

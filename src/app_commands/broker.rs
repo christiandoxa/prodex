@@ -15,6 +15,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         return Ok(());
     }
 
+    let current_identity = runtime_current_prodex_binary_identity();
     let metadata = RuntimeBrokerMetadata {
         broker_key: runtime_broker_key(&args.upstream_base_url, args.include_code_review),
         listen_addr: proxy.listen_addr.to_string(),
@@ -23,6 +24,12 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         include_code_review: args.include_code_review,
         instance_token: args.instance_token.clone(),
         admin_token: args.admin_token.clone(),
+        prodex_version: current_identity.prodex_version.clone(),
+        executable_path: current_identity
+            .executable_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        executable_sha256: current_identity.executable_sha256.clone(),
     };
     register_runtime_broker_metadata(&proxy.log_path, metadata.clone());
     let registry = RuntimeBrokerRegistry {
@@ -34,14 +41,26 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         current_profile: args.current_profile.clone(),
         instance_token: args.instance_token.clone(),
         admin_token: args.admin_token.clone(),
+        prodex_version: current_identity.prodex_version.clone(),
+        executable_path: current_identity
+            .executable_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        executable_sha256: current_identity.executable_sha256.clone(),
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
     save_runtime_broker_registry(&paths, &args.broker_key, &registry)?;
     runtime_proxy_log_to_path(
         &proxy.log_path,
         &format!(
-            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={}",
-            proxy.listen_addr, args.broker_key, args.current_profile, args.include_code_review
+            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={} prodex_version={} executable_path={} executable_sha256={}",
+            proxy.listen_addr,
+            args.broker_key,
+            args.current_profile,
+            args.include_code_review,
+            metadata.prodex_version.as_deref().unwrap_or("-"),
+            metadata.executable_path.as_deref().unwrap_or("-"),
+            metadata.executable_sha256.as_deref().unwrap_or("-")
         ),
     );
     audit_log_event_best_effort(
@@ -54,6 +73,9 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             "current_profile": args.current_profile,
             "include_code_review": args.include_code_review,
             "upstream_base_url": args.upstream_base_url,
+            "prodex_version": metadata.prodex_version,
+            "executable_path": metadata.executable_path,
+            "executable_sha256": metadata.executable_sha256,
         }),
     );
 

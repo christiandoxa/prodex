@@ -35,6 +35,9 @@ pub struct RuntimeBrokerSnapshot {
     pub current_profile: String,
     pub include_code_review: bool,
     pub persistence_role: String,
+    pub prodex_version: Option<String>,
+    pub executable_path: Option<String>,
+    pub executable_sha256: Option<String>,
     pub active_requests: u64,
     pub active_request_limit: u64,
     pub local_overload_backoff_remaining_seconds: u64,
@@ -165,6 +168,18 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
                     bool_label(self.snapshot.include_code_review),
                 ),
                 ("persistence_role", self.snapshot.persistence_role.as_str()),
+                (
+                    "prodex_version",
+                    self.snapshot.prodex_version.as_deref().unwrap_or("-"),
+                ),
+                (
+                    "executable_path",
+                    self.snapshot.executable_path.as_deref().unwrap_or("-"),
+                ),
+                (
+                    "executable_sha256",
+                    self.snapshot.executable_sha256.as_deref().unwrap_or("-"),
+                ),
             ]),
             1.0,
         );
@@ -405,6 +420,9 @@ mod tests {
             current_profile: "main".to_string(),
             include_code_review: false,
             persistence_role: "owner".to_string(),
+            prodex_version: Some("0.29.0".to_string()),
+            executable_path: Some("/tmp/prodex".to_string()),
+            executable_sha256: Some("abcd1234".to_string()),
             active_requests: 5,
             active_request_limit: 12,
             local_overload_backoff_remaining_seconds: 0,
@@ -453,6 +471,8 @@ mod tests {
         assert!(rendered.contains("broker_key=\"broker-123\""));
         assert!(rendered.contains("listen_addr=\"127.0.0.1:8080\""));
         assert!(rendered.contains("current_profile=\"main\""));
+        assert!(rendered.contains("prodex_version=\"0.29.0\""));
+        assert!(rendered.contains("executable_sha256=\"abcd1234\""));
         assert!(rendered.contains("lane=\"responses\""));
         assert!(rendered.contains("profile=\"main\""));
     }

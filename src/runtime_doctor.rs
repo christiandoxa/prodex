@@ -43,6 +43,9 @@ const RUNTIME_DOCTOR_FACETS: &[&str] = &[
 ];
 
 const RUNTIME_DOCTOR_MARKERS: &[&str] = &[
+    "chain_retried_owner",
+    "chain_dead_upstream_confirmed",
+    "stale_continuation",
     "runtime_proxy_queue_overloaded",
     "runtime_proxy_active_limit_reached",
     "runtime_proxy_lane_limit_reached",
@@ -126,6 +129,9 @@ const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Health penalties", "profile_health"),
     ("Latency penalties", "profile_latency"),
     ("Bad pairing", "profile_bad_pairing"),
+    ("Chain owner retries", "chain_retried_owner"),
+    ("Chain dead upstream", "chain_dead_upstream_confirmed"),
+    ("Stale continuations", "stale_continuation"),
     ("Prev not found", "previous_response_not_found"),
     ("Prev negative cache", "previous_response_negative_cache"),
     ("Compact guard", "compact_fresh_fallback_blocked"),

@@ -46,15 +46,19 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
         runtime_proxy_latest_log_pointer_path(),
         format!("{}\n", log_path.display()),
     );
+    let (executable_path, executable_sha256) = runtime_current_binary_identity();
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime proxy log initialized pid={} cwd={}",
+            "runtime proxy log initialized pid={} cwd={} prodex_version={} executable_path={} executable_sha256={}",
             std::process::id(),
             std::env::current_dir()
                 .ok()
                 .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "<unknown>".to_string())
+                .unwrap_or_else(|| "<unknown>".to_string()),
+            runtime_current_prodex_version(),
+            executable_path.unwrap_or_else(|| "-".to_string()),
+            executable_sha256.unwrap_or_else(|| "-".to_string())
         ),
     );
     log_path
