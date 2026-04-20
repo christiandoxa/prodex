@@ -64,8 +64,8 @@ cargo install prodex
 If you want a pinned version:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.27.0
-cargo install prodex --force --version 0.27.0
+npm install -g @christiandoxa/prodex@0.28.0
+cargo install prodex --force --version 0.28.0
 ```
 
 ## Quick start
