@@ -34,6 +34,33 @@ pub(crate) enum RuntimeProfileUsageAuthCacheFreshness {
     Unknown,
 }
 
+impl RuntimeProfileUsageAuthCacheFreshness {
+    fn resolve_cached_entry(
+        self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        codex_home: &Path,
+        previous_auth: Option<&UsageAuth>,
+        entry: RuntimeProfileUsageAuthCacheEntry,
+    ) -> Result<UsageAuth> {
+        match self {
+            Self::Fresh => runtime_profile_usage_auth_from_fresh_cache_entry(
+                shared,
+                profile_name,
+                codex_home,
+                entry,
+            ),
+            Self::Stale => {
+                reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
+            }
+            Self::Unknown => {
+                reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
+                    .or(Ok(entry.auth))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RuntimeProfileUsageAuthLookup {
     cached_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
@@ -153,23 +180,13 @@ fn runtime_profile_usage_auth_from_cached_entry(
     previous_auth: Option<&UsageAuth>,
     entry: RuntimeProfileUsageAuthCacheEntry,
 ) -> Result<UsageAuth> {
-    match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
-        RuntimeProfileUsageAuthCacheFreshness::Fresh => {
-            runtime_profile_usage_auth_from_fresh_cache_entry(
-                shared,
-                profile_name,
-                codex_home,
-                entry,
-            )
-        }
-        RuntimeProfileUsageAuthCacheFreshness::Stale => {
-            reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
-        }
-        RuntimeProfileUsageAuthCacheFreshness::Unknown => {
-            reload_runtime_profile_usage_auth(shared, profile_name, codex_home, previous_auth)
-                .or(Ok(entry.auth))
-        }
-    }
+    runtime_profile_usage_auth_cache_entry_freshness(&entry).resolve_cached_entry(
+        shared,
+        profile_name,
+        codex_home,
+        previous_auth,
+        entry,
+    )
 }
 
 fn runtime_profile_usage_auth_from_fresh_cache_entry(
