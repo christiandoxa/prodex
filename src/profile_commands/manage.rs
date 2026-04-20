@@ -96,13 +96,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
             home
         }
         None => {
-            fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
-                format!(
-                    "failed to create managed profile root {}",
-                    paths.managed_profiles_root.display()
-                )
-            })?;
-            let home = absolutize(paths.managed_profiles_root.join(&args.name))?;
+            let home = managed_profile_home_path(&paths, &args.name)?;
             if let Some(source) = source_home.as_deref() {
                 copy_codex_home(source, &home)?;
             } else {

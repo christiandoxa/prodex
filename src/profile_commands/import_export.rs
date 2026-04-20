@@ -629,12 +629,7 @@ pub(super) fn stage_imported_profiles(
         bail!("profile export bundle does not contain any profiles");
     }
 
-    fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
-        format!(
-            "failed to create managed profile root {}",
-            paths.managed_profiles_root.display()
-        )
-    })?;
+    ensure_managed_profiles_root(paths)?;
 
     let mut seen_names = BTreeSet::new();
     let mut staged_profiles = Vec::with_capacity(payload.profiles.len());
@@ -720,7 +715,7 @@ pub(super) fn stage_imported_profiles(
                 bail!("profile '{}' already exists", exported.name);
             }
 
-            let final_home = absolutize(paths.managed_profiles_root.join(&exported.name))?;
+            let final_home = managed_profile_home_path(paths, &exported.name)?;
             ensure_path_is_unique(state, &final_home)?;
             if final_home.exists() {
                 bail!(

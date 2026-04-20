@@ -191,6 +191,20 @@ pub(super) fn required_auth_json_text(codex_home: &Path) -> Result<String> {
         .with_context(|| format!("failed to read {}", auth_path.display()))
 }
 
+pub(super) fn ensure_managed_profiles_root(paths: &AppPaths) -> Result<()> {
+    fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
+        format!(
+            "failed to create managed profile root {}",
+            paths.managed_profiles_root.display()
+        )
+    })
+}
+
+pub(super) fn managed_profile_home_path(paths: &AppPaths, profile_name: &str) -> Result<PathBuf> {
+    ensure_managed_profiles_root(paths)?;
+    absolutize(paths.managed_profiles_root.join(profile_name))
+}
+
 pub(super) fn update_existing_profile_auth(
     paths: &AppPaths,
     state: &mut AppState,

@@ -147,14 +147,7 @@ pub(super) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
         None => default_copilot_profile_name(&paths, &state, &context.login),
     };
 
-    fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
-        format!(
-            "failed to create managed profile root {}",
-            paths.managed_profiles_root.display()
-        )
-    })?;
-
-    let codex_home = absolutize(paths.managed_profiles_root.join(&profile_name))?;
+    let codex_home = managed_profile_home_path(&paths, &profile_name)?;
     ensure_path_is_unique(&state, &codex_home)?;
     if codex_home.exists() {
         bail!(

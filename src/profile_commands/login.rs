@@ -168,7 +168,7 @@ fn finish_auto_login_for_new_profile(
     email: &str,
 ) -> Result<()> {
     let profile_name = unique_profile_name_for_email(paths, state, email);
-    let codex_home = absolutize(paths.managed_profiles_root.join(&profile_name))?;
+    let codex_home = managed_profile_home_path(paths, &profile_name)?;
     persist_login_home(login_home, &codex_home)?;
     prepare_managed_codex_home(paths, &codex_home)?;
 
@@ -207,12 +207,7 @@ fn run_codex_login(codex_home: &Path, codex_args: &[OsString]) -> Result<ExitSta
 }
 
 fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
-    fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
-        format!(
-            "failed to create managed profile root {}",
-            paths.managed_profiles_root.display()
-        )
-    })?;
+    ensure_managed_profiles_root(paths)?;
 
     for attempt in 0..100 {
         let stamp = SystemTime::now()
