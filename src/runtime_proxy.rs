@@ -5392,10 +5392,9 @@ pub(super) fn next_runtime_response_candidate_for_route(
             });
             if runtime_profile_probe_cache_freshness(entry, now)
                 != RuntimeProbeCacheFreshness::Fresh
+                && profile.provider.supports_codex_runtime()
             {
-                if profile.provider.supports_codex_runtime() {
-                    schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
-                }
+                schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
             }
         } else {
             let auth = runtime_profile_auth_summary_for_selection_with_policy(
@@ -6174,6 +6173,7 @@ pub(super) struct RuntimeInflightReliefWait<'a> {
 
 impl<'a> RuntimeInflightReliefWait<'a> {
     #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         request_id: u64,
         request: &'a RuntimeProxyRequest,

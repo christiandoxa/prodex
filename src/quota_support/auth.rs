@@ -154,10 +154,10 @@ pub(super) struct UsageFetchFlow<'a> {
 impl<'a> UsageFetchFlow<'a> {
     pub(super) fn new(codex_home: &'a Path, base_url: Option<&str>) -> Result<Self> {
         let mut auth = read_usage_auth(codex_home)?;
-        if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp()) {
-            if let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth)) {
-                auth = outcome.auth;
-            }
+        if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp())
+            && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth))
+        {
+            auth = outcome.auth;
         }
 
         Ok(Self {

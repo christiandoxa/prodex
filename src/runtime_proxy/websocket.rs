@@ -279,7 +279,7 @@ pub(super) fn runtime_try_recover_profile_auth_from_unauthorized_steps(
     route_kind: RuntimeRouteKind,
     recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
 ) -> bool {
-    while let Some(step) = recovery_steps.next() {
+    for step in recovery_steps.by_ref() {
         if runtime_try_recover_profile_auth_from_unauthorized(
             request_id,
             shared,

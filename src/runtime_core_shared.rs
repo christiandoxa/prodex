@@ -164,11 +164,12 @@ fn runtime_heap_trim_request_count_cell() -> &'static AtomicUsize {
 
 fn runtime_heap_trim_reserve(now_ms: u64) -> bool {
     let cell = runtime_heap_trim_last_requested_at_ms();
+    let min_interval_ms = std::num::NonZeroU64::new(RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS);
     loop {
         let previous = cell.load(Ordering::Relaxed);
-        if RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS > 0
+        if let Some(min_interval_ms) = min_interval_ms
             && previous > 0
-            && now_ms.saturating_sub(previous) < RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS
+            && now_ms.saturating_sub(previous) < min_interval_ms.get()
         {
             return false;
         }
