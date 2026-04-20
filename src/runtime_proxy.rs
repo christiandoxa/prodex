@@ -3090,6 +3090,16 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 if nonreplayable_previous_response_reuse
                     && request_requires_previous_response_affinity
                 {
+                    if !websocket_reuse_fresh_retry_profiles.contains(&profile_name) {
+                        websocket_reuse_fresh_retry_profiles.insert(profile_name.clone());
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} websocket_session={session_id} websocket_reuse_locked_affinity_owner_fresh_retry profile={profile_name} event={event}"
+                            ),
+                        );
+                        continue;
+                    }
                     runtime_proxy_log(
                         shared,
                         format!(

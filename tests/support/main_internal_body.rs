@@ -26009,7 +26009,7 @@ fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websoc
 }
 
 #[test]
-fn runtime_proxy_locked_affinity_previous_response_reuse_surfaces_stale_after_websocket_watchdog() {
+fn runtime_proxy_locked_affinity_previous_response_reuse_retries_owner_after_websocket_watchdog() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let backend = RuntimeProxyBackend::start_websocket_reuse_owned_previous_response_silent_hang();
     let temp_dir = TestDir::new();
@@ -26101,8 +26101,7 @@ fn runtime_proxy_locked_affinity_previous_response_reuse_surfaces_stale_after_we
         match socket.read() {
             Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
-                let done = is_runtime_terminal_event(&text)
-                    || text.contains("\"stale_continuation\"");
+                let done = is_runtime_terminal_event(&text) || text.contains("\"stale_continuation\"");
                 second_payloads.push(text);
                 if done {
                     break;
@@ -26118,12 +26117,12 @@ fn runtime_proxy_locked_affinity_previous_response_reuse_surfaces_stale_after_we
             | Err(WsError::ConnectionClosed)
             | Err(WsError::AlreadyClosed) => {
                 panic!(
-                    "locked-affinity watchdog should surface stale_continuation instead of closing: payloads={second_payloads:?}"
+                    "locked-affinity watchdog should retry the owner before closing: payloads={second_payloads:?}"
                 );
             }
             Err(err) => {
                 panic!(
-                    "locked-affinity watchdog should surface stale_continuation: {err}; payloads={second_payloads:?}"
+                    "locked-affinity watchdog should retry the owner: {err}; payloads={second_payloads:?}"
                 );
             }
             Ok(other) => panic!("unexpected websocket message: {other:?}"),
@@ -26133,13 +26132,27 @@ fn runtime_proxy_locked_affinity_previous_response_reuse_surfaces_stale_after_we
     assert!(
         second_payloads
             .iter()
+            .any(|payload| payload.contains("\"resp-second-next\"")),
+        "locked-affinity watchdog should replay the previous_response on a fresh owner connection: {second_payloads:?}"
+    );
+    assert!(
+        !second_payloads
+            .iter()
             .any(|payload| payload.contains("\"stale_continuation\"")),
-        "locked-affinity watchdog should fail locally instead of degrading to a fresh request: {second_payloads:?}"
+        "first locked-affinity watchdog should not surface stale_continuation before one owner reconnect: {second_payloads:?}"
     );
     assert_eq!(
         backend.websocket_requests().len(),
-        2,
-        "proxy should stop after the hung reuse attempt instead of issuing a fresh fallback request"
+        3,
+        "proxy should make the initial request, the hung reuse attempt, and one owner reconnect"
+    );
+    assert!(
+        backend
+            .websocket_requests()
+            .last()
+            .is_some_and(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "owner reconnect must preserve previous_response_id instead of degrading to a fresh request: {:?}",
+        backend.websocket_requests()
     );
 
     let tail = wait_for_runtime_log_tail_until(
@@ -26152,15 +26165,15 @@ fn runtime_proxy_locked_affinity_previous_response_reuse_surfaces_stale_after_we
                     .expect("runtime log tail should be readable"),
             )
         },
-        |text| text.contains("stale_continuation reason=websocket_reuse_watchdog_locked_affinity"),
+        |text| text.contains("websocket_reuse_locked_affinity_owner_fresh_retry"),
         4_000,
         12_000,
         10,
     );
     let tail = String::from_utf8_lossy(&tail);
     assert!(
-        tail.contains("stale_continuation reason=websocket_reuse_watchdog_locked_affinity"),
-        "runtime log should capture the locked-affinity watchdog stale continuation: {tail}"
+        tail.contains("websocket_reuse_locked_affinity_owner_fresh_retry"),
+        "runtime log should capture the locked-affinity owner reconnect: {tail}"
     );
 }
 
