@@ -261,15 +261,20 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct AuditLogEnvGuard {
+        _lock: crate::TestEnvLockGuard,
         previous: Option<std::ffi::OsString>,
     }
 
     impl AuditLogEnvGuard {
         fn set(name: &str, value: &str) -> Self {
+            let lock = crate::acquire_test_env_lock();
             let previous = env::var_os(name);
-            // SAFETY: tests serialize on a single thread when they mutate process env.
+            // SAFETY: test env mutation is serialized by the shared env lock guard.
             unsafe { env::set_var(name, value) };
-            Self { previous }
+            Self {
+                _lock: lock,
+                previous,
+            }
         }
     }
 
@@ -277,11 +282,11 @@ mod tests {
         fn drop(&mut self) {
             match self.previous.as_ref() {
                 Some(value) => {
-                    // SAFETY: tests serialize on a single thread when they mutate process env.
+                    // SAFETY: test env mutation is serialized by the shared env lock guard.
                     unsafe { env::set_var("PRODEX_AUDIT_LOG_DIR", value) };
                 }
                 None => {
-                    // SAFETY: tests serialize on a single thread when they mutate process env.
+                    // SAFETY: test env mutation is serialized by the shared env lock guard.
                     unsafe { env::remove_var("PRODEX_AUDIT_LOG_DIR") };
                 }
             }

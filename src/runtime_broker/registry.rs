@@ -8,6 +8,10 @@ pub(crate) fn runtime_broker_key(upstream_base_url: &str, include_code_review: b
     format!("{:016x}", hasher.finish())
 }
 
+pub(crate) fn runtime_current_prodex_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 pub(crate) fn runtime_process_pid_alive(pid: u32) -> bool {
     let proc_dir = PathBuf::from(format!("/proc/{pid}"));
     if proc_dir.exists() {
@@ -133,12 +137,88 @@ pub(crate) fn read_prodex_version_from_executable(executable: &Path) -> Result<S
 }
 
 pub(crate) fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
-    collect_process_rows()
+    fs::read_link(format!("/proc/{pid}/exe")).ok().or_else(|| {
+        collect_process_rows()
+            .into_iter()
+            .find(|row| row.pid == pid)
+            .and_then(|row| row.args.into_iter().rfind(|arg| Path::new(arg).exists()))
+            .map(PathBuf::from)
+    })
+}
+
+pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
+    let mut candidates = Vec::new();
+    if let Some(executable) = runtime_process_executable_path(pid) {
+        candidates.push(executable);
+    }
+    if let Some(row) = collect_process_rows()
         .into_iter()
         .find(|row| row.pid == pid)
-        .and_then(|row| row.args.into_iter().rfind(|arg| Path::new(arg).exists()))
-        .map(PathBuf::from)
-        .or_else(|| fs::read_link(format!("/proc/{pid}/exe")).ok())
+    {
+        for arg in row.args {
+            let path = PathBuf::from(&arg);
+            if path.exists() && !candidates.iter().any(|candidate| candidate == &path) {
+                candidates.push(path);
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .find_map(|executable| read_prodex_version_from_executable(&executable).ok())
+}
+
+pub(crate) fn runtime_broker_matches_current_prodex(registry: &RuntimeBrokerRegistry) -> bool {
+    runtime_process_pid_alive(registry.pid)
+        && runtime_process_prodex_version(registry.pid).as_deref()
+            == Some(runtime_current_prodex_version())
+}
+
+pub(crate) fn terminate_runtime_process(pid: u32) {
+    if !runtime_process_pid_alive(pid) {
+        return;
+    }
+
+    let pid_value = pid.to_string();
+    let signal_process = |signal: &str| {
+        let _ = Command::new("kill")
+            .args([signal, pid_value.as_str()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    };
+    let wait_for_exit = |timeout_ms: u64| -> bool {
+        let started_at = Instant::now();
+        while started_at.elapsed() < Duration::from_millis(timeout_ms) {
+            if !runtime_process_pid_alive(pid) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        !runtime_process_pid_alive(pid)
+    };
+
+    signal_process("-TERM");
+    if wait_for_exit(500) {
+        return;
+    }
+
+    signal_process("-KILL");
+    let _ = wait_for_exit(250);
+}
+
+pub(crate) fn replace_runtime_broker_if_version_mismatch(
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+) -> bool {
+    if !runtime_process_pid_alive(registry.pid) || runtime_broker_matches_current_prodex(registry) {
+        return false;
+    }
+
+    terminate_runtime_process(registry.pid);
+    remove_runtime_broker_registry_if_token_matches(paths, broker_key, &registry.instance_token);
+    true
 }
 
 pub(crate) fn runtime_broker_openai_mount_path(registry: &RuntimeBrokerRegistry) -> Result<String> {
@@ -146,13 +226,12 @@ pub(crate) fn runtime_broker_openai_mount_path(registry: &RuntimeBrokerRegistry)
         return Ok(openai_mount_path.to_string());
     }
 
-    let executable = runtime_process_executable_path(registry.pid).with_context(|| {
+    let version = runtime_process_prodex_version(registry.pid).with_context(|| {
         format!(
-            "failed to resolve executable for runtime broker pid {}",
+            "failed to resolve prodex version for runtime broker pid {}",
             registry.pid
         )
     })?;
-    let version = read_prodex_version_from_executable(&executable)?;
     Ok(legacy_runtime_proxy_openai_mount_path(&version))
 }
 

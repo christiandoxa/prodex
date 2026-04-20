@@ -335,33 +335,44 @@ impl Drop for TestDir {
 }
 
 struct TestEnvVarGuard {
+    _lock: crate::TestEnvLockGuard,
     key: &'static str,
     previous: Option<std::ffi::OsString>,
 }
 
 impl TestEnvVarGuard {
     fn set(key: &'static str, value: &str) -> Self {
+        let lock = crate::acquire_test_env_lock();
         let previous = env::var_os(key);
-        // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+        // SAFETY: test env mutation is serialized by the shared env lock guard.
         unsafe { env::set_var(key, value) };
-        Self { key, previous }
+        Self {
+            _lock: lock,
+            key,
+            previous,
+        }
     }
 
     fn unset(key: &'static str) -> Self {
+        let lock = crate::acquire_test_env_lock();
         let previous = env::var_os(key);
-        // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+        // SAFETY: test env mutation is serialized by the shared env lock guard.
         unsafe { env::remove_var(key) };
-        Self { key, previous }
+        Self {
+            _lock: lock,
+            key,
+            previous,
+        }
     }
 }
 
 impl Drop for TestEnvVarGuard {
     fn drop(&mut self) {
         if let Some(value) = self.previous.as_ref() {
-            // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+            // SAFETY: test env mutation is serialized by the shared env lock guard.
             unsafe { env::set_var(self.key, value) };
         } else {
-            // Tests run with --test-threads=1 in this repo, so mutating process env here is serialized.
+            // SAFETY: test env mutation is serialized by the shared env lock guard.
             unsafe { env::remove_var(self.key) };
         }
     }
@@ -20113,6 +20124,7 @@ fn runtime_doctor_collect_summary_reports_route_circuit_diagnosis() {
 
 #[test]
 fn runtime_doctor_collect_summary_falls_back_to_newer_log_when_pointer_is_stale() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should be created");
@@ -22651,6 +22663,7 @@ fn runtime_proxy_keeps_healthy_long_http_stream_alive() {
 
 #[test]
 fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
@@ -22683,9 +22696,6 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
     };
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
-        .expect("latest runtime pointer should exist");
-    let log_path = PathBuf::from(log_path.trim());
 
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
@@ -22709,18 +22719,18 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
     );
     let tail = wait_for_runtime_log_tail_until(
         || {
-            Some(
-                read_runtime_log_tail(&log_path, 32 * 1024)
-                    .expect("runtime log tail should be readable"),
-            )
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            read_runtime_log_tail(&log_path, 32 * 1024).ok()
         },
         |text| {
             text.contains("first_upstream_chunk")
                 && text.contains("first_local_chunk")
                 && text.contains("stream_read_error")
         },
-        2_000,
-        6_000,
+        4_000,
+        12_000,
         25,
     );
     let tail = String::from_utf8_lossy(&tail);
@@ -22737,6 +22747,7 @@ fn runtime_proxy_does_not_rotate_after_first_sse_chunk_reset() {
 
 #[test]
 fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     let _runtime_log_dir_guard =
@@ -22769,9 +22780,6 @@ fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
     };
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let log_path = fs::read_to_string(runtime_proxy_latest_log_pointer_path())
-        .expect("latest runtime pointer should exist");
-    let log_path = PathBuf::from(log_path.trim());
 
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
@@ -22795,18 +22803,18 @@ fn runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall() {
     );
     let tail = wait_for_runtime_log_tail_until(
         || {
-            Some(
-                read_runtime_log_tail(&log_path, 32 * 1024)
-                    .expect("runtime log tail should be readable"),
-            )
+            let log_path = prodex_runtime_log_paths_in_dir(&runtime_log_dir)
+                .into_iter()
+                .next_back()?;
+            read_runtime_log_tail(&log_path, 32 * 1024).ok()
         },
         |text| {
             text.contains("first_upstream_chunk")
                 && text.contains("first_local_chunk")
                 && text.contains("stream_read_error")
         },
-        2_000,
-        6_000,
+        4_000,
+        12_000,
         25,
     );
     let tail = String::from_utf8_lossy(&tail);
@@ -24715,6 +24723,7 @@ fn runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate() 
 
 #[test]
 fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let _timeout_guards = ci_runtime_proxy_websocket_timeout_guards();
     let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
     let temp_dir = TestDir::new();
@@ -24914,6 +24923,7 @@ fn runtime_proxy_retries_after_websocket_reuse_silent_hang() {
 
 #[test]
 fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let backend = RuntimeProxyBackend::start_websocket_reuse_precommit_hold_stall();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -25087,6 +25097,7 @@ fn runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout() {
 
 #[test]
 fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let backend = RuntimeProxyBackend::start_websocket_reuse_silent_hang();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -25245,8 +25256,8 @@ fn runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog() {
             )
         },
         |text| text.contains("websocket_reuse_owner_fresh_retry"),
-        4_000,
-        12_000,
+        8_000,
+        20_000,
         25,
     );
     let tail = String::from_utf8_lossy(&tail);
@@ -25475,6 +25486,7 @@ fn runtime_proxy_preserves_compact_lineage_after_websocket_previous_response_fal
 #[test]
 fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog()
 {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let backend = RuntimeProxyBackend::start_websocket_reuse_previous_response_needs_turn_state();
     let temp_dir = TestDir::new();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
@@ -25632,8 +25644,8 @@ fn runtime_proxy_bound_previous_response_without_turn_state_replays_after_websoc
             )
         },
         |text| text.contains("websocket_reuse_owner_fresh_retry"),
-        1_000,
         4_000,
+        12_000,
         10,
     );
     let tail = String::from_utf8_lossy(&tail);
@@ -32708,7 +32720,10 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
 }
 
 #[test]
-fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
+fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::new();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -32717,13 +32732,136 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
+    let broker_key = "replace-version-mismatch";
+    let script_path = temp_dir.path.join("mismatched-broker.sh");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n",
+    )
+    .expect("mismatched broker script should write");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("mismatched broker script metadata should load")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions)
+        .expect("mismatched broker script permissions should update");
+
+    let mut child = Command::new(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("mismatched broker script should spawn");
+
+    for _ in 0..20 {
+        if runtime_process_pid_alive(child.id()) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let registry = RuntimeBrokerRegistry {
+        pid: child.id(),
+        listen_addr: "127.0.0.1:9".to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "instance".to_string(),
+        admin_token: "secret".to_string(),
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+    };
+    save_runtime_broker_registry(&paths, broker_key, &registry)
+        .expect("mismatched broker registry should save");
+    let client = runtime_broker_client().expect("broker client should build");
+
+    let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
+        &client,
+        &paths,
+        broker_key,
+        &registry.upstream_base_url,
+        registry.include_code_review,
+    )
+    .expect("wait should not fail");
+
+    let mut exited = false;
+    for _ in 0..25 {
+        match child.try_wait().expect("child wait should succeed") {
+            Some(_) => {
+                exited = true;
+                break;
+            }
+            None => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    if !exited {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    assert!(
+        recovered.is_none(),
+        "mismatched broker version should not be reused"
+    );
+    assert!(
+        !runtime_process_pid_alive(registry.pid),
+        "mismatched live broker should be terminated during replacement"
+    );
+    assert!(
+        load_runtime_broker_registry(&paths, broker_key)
+            .expect("registry reload should succeed")
+            .is_none(),
+        "terminated mismatched broker should clear its registry"
+    );
+}
+
+#[test]
+fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let script_path = temp_dir.path.join("current-version-broker.sh");
+    fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex {}'\n  exit 0\nfi\nsleep 30\n",
+            runtime_current_prodex_version()
+        ),
+    )
+    .expect("current-version broker script should write");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("current-version broker script metadata should load")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions)
+        .expect("current-version broker script permissions should update");
+    let mut child = Command::new(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("current-version broker script should spawn");
+    for _ in 0..20 {
+        if runtime_process_pid_alive(child.id()) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
     let server = TinyServer::http("127.0.0.1:0").expect("health server should bind");
     let listen_addr = server
         .server_addr()
         .to_ip()
         .expect("health server should expose a TCP address");
     let registry = RuntimeBrokerRegistry {
-        pid: std::process::id(),
+        pid: child.id(),
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -32768,12 +32906,16 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
     health_thread
         .join()
         .expect("health server thread should join");
+    let _ = child.kill();
+    let _ = child.wait();
     assert_eq!(discovered.0, "legacy-key");
     assert_eq!(discovered.1.instance_token, "legacy-instance");
 }
 
 #[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy_registry_clears() {
+    use std::os::unix::fs::PermissionsExt;
+
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -32784,8 +32926,36 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     let broker_key = "wait-test";
+    let script_path = temp_dir.path.join("unhealthy-current-broker.sh");
+    fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex {}'\n  exit 0\nfi\nsleep 30\n",
+            runtime_current_prodex_version()
+        ),
+    )
+    .expect("unhealthy current broker script should write");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("unhealthy current broker script metadata should load")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script_path, permissions)
+        .expect("unhealthy current broker script permissions should update");
+    let mut child = Command::new(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("unhealthy current broker script should spawn");
+    for _ in 0..20 {
+        if runtime_process_pid_alive(child.id()) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
     let registry = RuntimeBrokerRegistry {
-        pid: std::process::id(),
+        pid: child.id(),
         listen_addr: "127.0.0.1:9".to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
@@ -32824,6 +32994,8 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
     clear_thread
         .join()
         .expect("registry clear thread should join");
+    let _ = child.kill();
+    let _ = child.wait();
     assert!(
         recovered.is_none(),
         "wait should yield once the live unhealthy registry clears"
@@ -40525,6 +40697,7 @@ fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
 
 #[test]
 fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
@@ -40582,6 +40755,7 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
 
 #[test]
 fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,

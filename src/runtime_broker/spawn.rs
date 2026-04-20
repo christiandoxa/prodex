@@ -48,6 +48,10 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             return Ok(None);
         };
 
+        if replace_runtime_broker_if_version_mismatch(paths, broker_key, &existing) {
+            return Ok(None);
+        }
+
         if existing.upstream_base_url == upstream_base_url
             && existing.include_code_review == include_code_review
             && let Some(health) = probe_runtime_broker_health(client, &existing)?
@@ -89,6 +93,9 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         if registry.upstream_base_url != upstream_base_url
             || registry.include_code_review != include_code_review
         {
+            continue;
+        }
+        if replace_runtime_broker_if_version_mismatch(paths, &broker_key, &registry) {
             continue;
         }
         if !runtime_process_pid_alive(registry.pid) {
@@ -198,7 +205,9 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
     }
 
-    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
+    if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)?
+        && !replace_runtime_broker_if_version_mismatch(paths, &broker_key, &existing)
+    {
         if !runtime_process_pid_alive(existing.pid) {
             remove_runtime_broker_registry_if_token_matches(
                 paths,
