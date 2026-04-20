@@ -866,6 +866,7 @@ enum RuntimeProxyBackendMode {
     WebsocketReuseSilentHang,
     WebsocketReusePrecommitHoldStall,
     WebsocketReusePreviousResponseNeedsTurnState,
+    WebsocketPreviousResponseMissingWithoutTurnState,
     WebsocketCloseMidTurn,
     WebsocketPreviousResponseNeedsTurnState,
     WebsocketStaleReuseNeedsTurnState,
@@ -970,6 +971,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState)
     }
 
+    fn start_websocket_previous_response_missing_without_turn_state() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState)
+    }
+
     fn start_websocket_close_mid_turn() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketCloseMidTurn)
     }
@@ -1032,6 +1037,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketReuseSilentHang
                                 | RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
+                                | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
@@ -2461,6 +2467,7 @@ fn handle_runtime_proxy_backend_websocket(
                     mode,
                     RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                         | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
+                        | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                         | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                 ) && runtime_proxy_backend_is_owned_continuation(
                     "second-account",
@@ -18487,14 +18494,12 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
 
     let mut payloads = Vec::new();
     loop {
-        match socket
-            .read()
-            .expect("runtime proxy websocket should stay open")
-        {
+        match socket.read().expect("runtime proxy websocket should stay open") {
             WsMessage::Text(text) => {
                 let text = text.to_string();
                 let done = is_runtime_terminal_event(&text)
-                    || text.contains("\"previous_response_not_found\"");
+                    || text.contains("\"previous_response_not_found\"")
+                    || text.contains("\"stale_continuation\"");
                 payloads.push(text);
                 if done {
                     break;
@@ -18511,10 +18516,126 @@ fn runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous
     }
 
     assert!(
-        payloads
+        !payloads
             .iter()
             .any(|payload| payload.contains("\"previous_response_not_found\"")),
-        "function call output websocket request should preserve previous_response failure instead of degrading to fresh: {payloads:?}"
+        "function call output websocket request should not leak upstream previous_response_not_found: {payloads:?}"
+    );
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("\"stale_continuation\"")),
+        "function call output websocket request should surface a local stale continuation error instead of degrading to fresh: {payloads:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_bound_websocket_previous_response_not_found_retries_fresh_without_leaking() {
+    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let now = Local::now().timestamp();
+
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/responses",
+        proxy.listen_addr
+    ))
+    .expect("runtime proxy websocket handshake should succeed");
+    socket
+        .send(WsMessage::Text(
+            "{\"previous_response_id\":\"resp-second\",\"input\":[]}"
+                .to_string()
+                .into(),
+        ))
+        .expect("runtime proxy websocket request should be sent");
+
+    let mut payloads = Vec::new();
+    loop {
+        match socket
+            .read()
+            .expect("runtime proxy websocket should stay open")
+        {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let done = is_runtime_terminal_event(&text)
+                    || text.contains("\"previous_response_not_found\"")
+                    || text.contains("\"stale_continuation\"");
+                payloads.push(text);
+                if done {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .expect("pong should be sent");
+            }
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket message: {other:?}"),
+        }
+    }
+
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| payload.contains("\"previous_response_not_found\"")),
+        "bound stale websocket continuation should not leak upstream previous_response_not_found: {payloads:?}"
+    );
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| payload.contains("resp-second")),
+        "bound stale websocket continuation should retry as a fresh request: {payloads:?}"
+    );
+    let upstream_requests = backend.websocket_requests();
+    assert_eq!(
+        upstream_requests.len(),
+        2,
+        "proxy should retry once after clearing stale previous_response_id"
+    );
+    assert!(
+        upstream_requests
+            .first()
+            .is_some_and(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "first upstream request should preserve the original continuation: {upstream_requests:?}"
+    );
+    assert!(
+        upstream_requests.last().is_some_and(|request| {
+            !request.contains("\"previous_response_id\":\"resp-second\"")
+        }),
+        "fresh retry should strip stale previous_response_id: {upstream_requests:?}"
     );
 }
 

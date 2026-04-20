@@ -122,6 +122,11 @@ pub(super) fn send_runtime_proxy_final_websocket_failure(
 ) -> Result<()> {
     match last_failure {
         Some((failure, false)) => match failure {
+            RuntimeUpstreamFailureResponse::Websocket(payload)
+                if runtime_websocket_error_payload_is_previous_response_not_found(&payload) =>
+            {
+                send_runtime_proxy_stale_continuation_websocket_error(local_socket)
+            }
             RuntimeUpstreamFailureResponse::Websocket(payload) => {
                 forward_runtime_proxy_websocket_error(local_socket, &payload)
             }
@@ -145,6 +150,31 @@ pub(super) fn send_runtime_proxy_final_websocket_failure(
             runtime_proxy_local_selection_failure_message(),
         ),
     }
+}
+
+pub(super) fn runtime_websocket_error_payload_is_previous_response_not_found(
+    payload: &RuntimeWebsocketErrorPayload,
+) -> bool {
+    match payload {
+        RuntimeWebsocketErrorPayload::Text(text) => {
+            extract_runtime_proxy_previous_response_message(text.as_bytes()).is_some()
+        }
+        RuntimeWebsocketErrorPayload::Binary(bytes) => {
+            extract_runtime_proxy_previous_response_message(bytes).is_some()
+        }
+        RuntimeWebsocketErrorPayload::Empty => false,
+    }
+}
+
+pub(super) fn send_runtime_proxy_stale_continuation_websocket_error(
+    local_socket: &mut RuntimeLocalWebSocket,
+) -> Result<()> {
+    send_runtime_proxy_websocket_error(
+        local_socket,
+        409,
+        "stale_continuation",
+        "Upstream lost the conversation chain before output started. Prodex cleared the stale chain; retry the request.",
+    )
 }
 
 pub(super) fn runtime_proxy_precommit_budget(
@@ -1681,7 +1711,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
             }
         };
     }
-
     loop {
         let pressure_mode =
             runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Websocket);
