@@ -18809,14 +18809,15 @@ fn runtime_proxy_current_owner_websocket_previous_response_not_found_locked_affi
             .any(|payload| payload.contains("\"previous_response_not_found\"")),
         "current-owner locked websocket continuation should not leak upstream previous_response_not_found: {payloads:?}"
     );
+    let expected_locked_retry_attempts = RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS.len() + 1;
     assert_eq!(
         backend.responses_accounts(),
-        vec!["second-account".to_string()]
+        vec!["second-account".to_string(); expected_locked_retry_attempts]
     );
     assert_eq!(
         backend.websocket_requests().len(),
-        1,
-        "locked current-owner continuation should not retry after the owner reports previous_response_not_found"
+        expected_locked_retry_attempts,
+        "locked current-owner continuation should retry the owner before surfacing stale_continuation"
     );
 
     let tail = wait_for_runtime_log_tail_until(
@@ -18839,6 +18840,11 @@ fn runtime_proxy_current_owner_websocket_previous_response_not_found_locked_affi
         25,
     );
     let tail = String::from_utf8_lossy(&tail);
+    assert!(
+        tail.contains("previous_response_retry_immediate profile=second")
+            && tail.contains("reason=locked_affinity_no_turn_state"),
+        "runtime log should capture bounded locked-affinity retries: {tail}"
+    );
     assert!(
         tail.contains(
             "stale_continuation reason=previous_response_not_found_locked_affinity profile=second",
@@ -18960,13 +18966,13 @@ fn runtime_proxy_candidate_websocket_previous_response_not_found_locked_affinity
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["second-account".to_string()],
+        vec!["second-account".to_string(); RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS.len() + 1],
         "candidate locked websocket continuation should stay on the bound owner"
     );
     assert_eq!(
         backend.websocket_requests().len(),
-        1,
-        "candidate locked websocket continuation should not fresh-retry after the owner reports previous_response_not_found"
+        RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS.len() + 1,
+        "candidate locked websocket continuation should retry only the bound owner before surfacing stale_continuation"
     );
 
     let tail = wait_for_runtime_log_tail_until(
@@ -18991,6 +18997,11 @@ fn runtime_proxy_candidate_websocket_previous_response_not_found_locked_affinity
     );
     let tail = String::from_utf8_lossy(&tail);
     assert!(tail.contains("candidate=second"));
+    assert!(
+        tail.contains("previous_response_retry_immediate profile=second")
+            && tail.contains("reason=locked_affinity_no_turn_state"),
+        "runtime log should capture bounded locked-affinity retries: {tail}"
+    );
     assert!(
         tail.contains(
             "stale_continuation reason=previous_response_not_found_locked_affinity profile=second",

@@ -2102,18 +2102,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             candidate_turn_state_retry_profile = Some(profile_name.clone());
                             candidate_turn_state_retry_value = turn_state;
                         }
-                        if has_turn_state_retry
+                        let locked_previous_response_retry =
+                            request_requires_previous_response_affinity && !has_turn_state_retry;
+                        if (has_turn_state_retry || locked_previous_response_retry)
                             && let Some(delay) =
                                 runtime_previous_response_retry_delay(previous_response_retry_index)
                         {
                             previous_response_retry_index += 1;
                             last_failure =
                                 Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+                            let retry_reason = if has_turn_state_retry {
+                                "non_blocking_retry"
+                            } else {
+                                "locked_affinity_no_turn_state"
+                            };
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                    delay.as_millis()
+                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={retry_reason} via=direct_current_profile_fallback",
+                                    delay.as_millis(),
                                 ),
                             );
                             continue;
@@ -2564,18 +2571,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             candidate_turn_state_retry_profile = Some(profile_name.clone());
                             candidate_turn_state_retry_value = turn_state;
                         }
-                        if has_turn_state_retry
+                        let locked_previous_response_retry =
+                            request_requires_previous_response_affinity && !has_turn_state_retry;
+                        if (has_turn_state_retry || locked_previous_response_retry)
                             && let Some(delay) =
                                 runtime_previous_response_retry_delay(previous_response_retry_index)
                         {
                             previous_response_retry_index += 1;
                             last_failure =
                                 Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+                            let retry_reason = if has_turn_state_retry {
+                                "non_blocking_retry"
+                            } else {
+                                "locked_affinity_no_turn_state"
+                            };
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                    delay.as_millis()
+                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={retry_reason} via=direct_current_profile_fallback",
+                                    delay.as_millis(),
                                 ),
                             );
                             continue;
@@ -3217,18 +3231,25 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     candidate_turn_state_retry_profile = Some(profile_name.clone());
                     candidate_turn_state_retry_value = turn_state;
                 }
-                if has_turn_state_retry
+                let locked_previous_response_retry =
+                    request_requires_previous_response_affinity && !has_turn_state_retry;
+                if (has_turn_state_retry || locked_previous_response_retry)
                     && let Some(delay) =
                         runtime_previous_response_retry_delay(previous_response_retry_index)
                 {
                     previous_response_retry_index += 1;
                     last_failure =
                         Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+                    let retry_reason = if has_turn_state_retry {
+                        "non_blocking_retry"
+                    } else {
+                        "locked_affinity_no_turn_state"
+                    };
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry",
-                            delay.as_millis()
+                            "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={retry_reason}",
+                            delay.as_millis(),
                         ),
                     );
                     continue;
