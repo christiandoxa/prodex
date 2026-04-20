@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeDoctorSummary {
     pub(crate) log_path: Option<PathBuf>,
@@ -74,7 +76,7 @@ pub(crate) struct RuntimeDoctorSummary {
     pub(crate) diagnosis: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct RuntimeDoctorProfileSummary {
     pub(crate) profile: String,
     pub(crate) quota_freshness: String,
@@ -84,7 +86,7 @@ pub(crate) struct RuntimeDoctorProfileSummary {
     pub(crate) routes: Vec<RuntimeDoctorRouteSummary>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct RuntimeDoctorRouteSummary {
     pub(crate) route: String,
     pub(crate) circuit_state: String,

@@ -115,6 +115,91 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_empty_continuat
 }
 
 #[test]
+fn websocket_previous_response_not_found_decision_prefers_locked_retry_before_stale() {
+    let decision = runtime_previous_response_not_found_decision(
+        RuntimePreviousResponseNotFoundDecisionInput {
+            route: RuntimePreviousResponseNotFoundRoute::Websocket,
+            previous_response_id: Some("resp_123"),
+            has_turn_state_retry: false,
+            request_requires_previous_response_affinity: true,
+            trusted_previous_response_affinity: false,
+            request_turn_state: None,
+            previous_response_fresh_fallback_used: false,
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            retry_index: 0,
+        },
+    );
+
+    assert_eq!(
+        decision.retry_delay,
+        Some(Duration::from_millis(
+            RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS[0]
+        ))
+    );
+    assert_eq!(decision.retry_reason, Some("locked_affinity_no_turn_state"));
+    assert_eq!(
+        decision.chain_retry_reason,
+        Some("previous_response_not_found_locked_affinity")
+    );
+    assert!(
+        decision.stale_continuation,
+        "locked affinity remains stale if retries exhaust; caller still gets the immediate retry first"
+    );
+}
+
+#[test]
+fn websocket_previous_response_not_found_decision_marks_nonreplayable_continuation_stale() {
+    let decision = runtime_previous_response_not_found_decision(
+        RuntimePreviousResponseNotFoundDecisionInput {
+            route: RuntimePreviousResponseNotFoundRoute::Websocket,
+            previous_response_id: Some("resp_123"),
+            has_turn_state_retry: false,
+            request_requires_previous_response_affinity: false,
+            trusted_previous_response_affinity: false,
+            request_turn_state: None,
+            previous_response_fresh_fallback_used: false,
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            retry_index: 0,
+        },
+    );
+
+    assert_eq!(decision.retry_delay, None);
+    assert!(decision.stale_continuation);
+    assert!(!decision.fresh_fallback_allowed);
+    assert!(decision.fresh_fallback_blocked_without_affinity);
+}
+
+#[test]
+fn responses_previous_response_not_found_decision_keeps_turn_state_retry_shared() {
+    let decision = runtime_previous_response_not_found_decision(
+        RuntimePreviousResponseNotFoundDecisionInput {
+            route: RuntimePreviousResponseNotFoundRoute::Responses,
+            previous_response_id: Some("resp_123"),
+            has_turn_state_retry: true,
+            request_requires_previous_response_affinity: false,
+            trusted_previous_response_affinity: true,
+            request_turn_state: Some("turn_state"),
+            previous_response_fresh_fallback_used: false,
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput),
+            retry_index: 1,
+        },
+    );
+
+    assert_eq!(
+        decision.retry_delay,
+        Some(Duration::from_millis(
+            RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS[1]
+        ))
+    );
+    assert_eq!(decision.retry_reason, Some("non_blocking_retry"));
+    assert_eq!(
+        decision.chain_retry_reason,
+        Some("previous_response_not_found")
+    );
+    assert!(!decision.stale_continuation);
+}
+
+#[test]
 fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     let metadata = parse_runtime_websocket_request_metadata(
         r#"{"previous_response_id":"resp_123","client_metadata":{"session_id":"sess_123"},"input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#,
@@ -1106,4 +1191,3 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
 
     assert!(output.lines().all(|line| text_width(line) <= 72));
 }
-

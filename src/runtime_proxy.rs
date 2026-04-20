@@ -2,6 +2,7 @@ use super::*;
 
 mod admission;
 mod affinity;
+mod attempt_outcome;
 mod buffered_response;
 mod chain_log;
 mod classification;
@@ -25,6 +26,7 @@ mod websocket;
 
 pub(crate) use self::admission::*;
 pub(crate) use self::affinity::*;
+pub(crate) use self::attempt_outcome::*;
 pub(super) use self::buffered_response::*;
 pub(crate) use self::chain_log::*;
 pub(crate) use self::classification::*;
@@ -1106,39 +1108,41 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             ),
                         );
                         saw_previous_response_not_found = true;
-                        if previous_response_retry_candidate.as_deref()
-                            != Some(profile_name.as_str())
-                        {
-                            previous_response_retry_candidate = Some(profile_name.clone());
-                            previous_response_retry_index = 0;
-                        }
-                        let has_turn_state_retry = turn_state.is_some();
-                        if has_turn_state_retry {
-                            candidate_turn_state_retry_profile = Some(profile_name.clone());
-                            candidate_turn_state_retry_value = turn_state;
-                        }
-                        let locked_previous_response_retry =
-                            request_requires_previous_response_affinity && !has_turn_state_retry;
-                        if (has_turn_state_retry || locked_previous_response_retry)
-                            && let Some(delay) =
-                                runtime_previous_response_retry_delay(previous_response_retry_index)
-                        {
+                        let has_turn_state_retry =
+                            runtime_record_previous_response_not_found_retry_state(
+                                &profile_name,
+                                turn_state,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                            );
+                        let decision = runtime_previous_response_not_found_decision(
+                            RuntimePreviousResponseNotFoundDecisionInput {
+                                route: RuntimePreviousResponseNotFoundRoute::Websocket,
+                                previous_response_id: previous_response_id.as_deref(),
+                                has_turn_state_retry,
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                request_turn_state: request_turn_state.as_deref(),
+                                previous_response_fresh_fallback_used,
+                                fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                                retry_index: previous_response_retry_index,
+                            },
+                        );
+                        if let Some(delay) = decision.retry_delay {
                             previous_response_retry_index += 1;
                             last_failure =
                                 Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
-                            let retry_reason = if has_turn_state_retry {
-                                "non_blocking_retry"
-                            } else {
-                                "locked_affinity_no_turn_state"
-                            };
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={retry_reason} via=direct_current_profile_fallback",
+                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
                                     delay.as_millis(),
+                                    decision.retry_reason.unwrap_or("-"),
                                 ),
                             );
-                            if locked_previous_response_retry {
+                            if let Some(chain_reason) = decision.chain_retry_reason {
                                 runtime_proxy_log_chain_retried_owner(
                                     shared,
                                     RuntimeProxyChainLog {
@@ -1148,7 +1152,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                         websocket_session: Some(session_id),
                                         profile_name: &profile_name,
                                         previous_response_id: previous_response_id.as_deref(),
-                                        reason: "previous_response_not_found_locked_affinity",
+                                        reason: chain_reason,
                                         via: Some("direct_current_profile_fallback"),
                                     },
                                     delay.as_millis(),
@@ -1158,19 +1162,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        let request_requires_locked_previous_response_affinity =
-                            runtime_websocket_request_requires_locked_previous_response_affinity(
-                                request_requires_previous_response_affinity,
-                                trusted_previous_response_affinity,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                            );
-                        if runtime_websocket_previous_response_not_found_requires_stale_continuation(
-                            previous_response_id.as_deref(),
-                            has_turn_state_retry,
-                            request_requires_locked_previous_response_affinity,
-                            previous_response_fresh_fallback_shape,
-                        ) {
+                        if decision.stale_continuation {
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -1199,17 +1191,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             has_turn_state_retry,
                             "direct_current_profile_fallback"
                         );
-                        let previous_response_fresh_fallback_allowed =
-                            runtime_previous_response_not_found_fresh_fallback_allowed(
-                                previous_response_id.as_deref(),
-                                previous_response_fresh_fallback_used,
-                                request_requires_locked_previous_response_affinity,
-                                previous_response_fresh_fallback_shape,
-                            );
-                        if !has_turn_state_retry
-                            && !previous_response_fresh_fallback_allowed
-                            && !request_requires_locked_previous_response_affinity
-                        {
+                        if decision.fresh_fallback_blocked_without_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -1220,7 +1202,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 ),
                             );
                         }
-                        if !has_turn_state_retry && previous_response_fresh_fallback_allowed {
+                        if !has_turn_state_retry && decision.fresh_fallback_allowed {
                             let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
@@ -1635,39 +1617,41 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             ),
                         );
                         saw_previous_response_not_found = true;
-                        if previous_response_retry_candidate.as_deref()
-                            != Some(profile_name.as_str())
-                        {
-                            previous_response_retry_candidate = Some(profile_name.clone());
-                            previous_response_retry_index = 0;
-                        }
-                        let has_turn_state_retry = turn_state.is_some();
-                        if has_turn_state_retry {
-                            candidate_turn_state_retry_profile = Some(profile_name.clone());
-                            candidate_turn_state_retry_value = turn_state;
-                        }
-                        let locked_previous_response_retry =
-                            request_requires_previous_response_affinity && !has_turn_state_retry;
-                        if (has_turn_state_retry || locked_previous_response_retry)
-                            && let Some(delay) =
-                                runtime_previous_response_retry_delay(previous_response_retry_index)
-                        {
+                        let has_turn_state_retry =
+                            runtime_record_previous_response_not_found_retry_state(
+                                &profile_name,
+                                turn_state,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                            );
+                        let decision = runtime_previous_response_not_found_decision(
+                            RuntimePreviousResponseNotFoundDecisionInput {
+                                route: RuntimePreviousResponseNotFoundRoute::Websocket,
+                                previous_response_id: previous_response_id.as_deref(),
+                                has_turn_state_retry,
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                request_turn_state: request_turn_state.as_deref(),
+                                previous_response_fresh_fallback_used,
+                                fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                                retry_index: previous_response_retry_index,
+                            },
+                        );
+                        if let Some(delay) = decision.retry_delay {
                             previous_response_retry_index += 1;
                             last_failure =
                                 Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
-                            let retry_reason = if has_turn_state_retry {
-                                "non_blocking_retry"
-                            } else {
-                                "locked_affinity_no_turn_state"
-                            };
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={retry_reason} via=direct_current_profile_fallback",
+                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
                                     delay.as_millis(),
+                                    decision.retry_reason.unwrap_or("-"),
                                 ),
                             );
-                            if locked_previous_response_retry {
+                            if let Some(chain_reason) = decision.chain_retry_reason {
                                 runtime_proxy_log_chain_retried_owner(
                                     shared,
                                     RuntimeProxyChainLog {
@@ -1677,7 +1661,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                         websocket_session: Some(session_id),
                                         profile_name: &profile_name,
                                         previous_response_id: previous_response_id.as_deref(),
-                                        reason: "previous_response_not_found_locked_affinity",
+                                        reason: chain_reason,
                                         via: Some("direct_current_profile_fallback"),
                                     },
                                     delay.as_millis(),
@@ -1687,19 +1671,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        let request_requires_locked_previous_response_affinity =
-                            runtime_websocket_request_requires_locked_previous_response_affinity(
-                                request_requires_previous_response_affinity,
-                                trusted_previous_response_affinity,
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                            );
-                        if runtime_websocket_previous_response_not_found_requires_stale_continuation(
-                            previous_response_id.as_deref(),
-                            has_turn_state_retry,
-                            request_requires_locked_previous_response_affinity,
-                            previous_response_fresh_fallback_shape,
-                        ) {
+                        if decision.stale_continuation {
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -1729,7 +1701,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "direct_current_profile_fallback"
                         );
                         if !has_turn_state_retry
-                            && !request_requires_locked_previous_response_affinity
+                            && !decision.request_requires_locked_previous_response_affinity
                         {
                             let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
@@ -2374,37 +2346,40 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     ),
                 );
                 saw_previous_response_not_found = true;
-                if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
-                    previous_response_retry_candidate = Some(profile_name.clone());
-                    previous_response_retry_index = 0;
-                }
-                let has_turn_state_retry = turn_state.is_some();
-                if has_turn_state_retry {
-                    candidate_turn_state_retry_profile = Some(profile_name.clone());
-                    candidate_turn_state_retry_value = turn_state;
-                }
-                let locked_previous_response_retry =
-                    request_requires_previous_response_affinity && !has_turn_state_retry;
-                if (has_turn_state_retry || locked_previous_response_retry)
-                    && let Some(delay) =
-                        runtime_previous_response_retry_delay(previous_response_retry_index)
-                {
+                let has_turn_state_retry = runtime_record_previous_response_not_found_retry_state(
+                    &profile_name,
+                    turn_state,
+                    &mut previous_response_retry_candidate,
+                    &mut previous_response_retry_index,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                );
+                let decision = runtime_previous_response_not_found_decision(
+                    RuntimePreviousResponseNotFoundDecisionInput {
+                        route: RuntimePreviousResponseNotFoundRoute::Websocket,
+                        previous_response_id: previous_response_id.as_deref(),
+                        has_turn_state_retry,
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        request_turn_state: request_turn_state.as_deref(),
+                        previous_response_fresh_fallback_used,
+                        fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                        retry_index: previous_response_retry_index,
+                    },
+                );
+                if let Some(delay) = decision.retry_delay {
                     previous_response_retry_index += 1;
                     last_failure =
                         Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
-                    let retry_reason = if has_turn_state_retry {
-                        "non_blocking_retry"
-                    } else {
-                        "locked_affinity_no_turn_state"
-                    };
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={retry_reason}",
+                            "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={}",
                             delay.as_millis(),
+                            decision.retry_reason.unwrap_or("-"),
                         ),
                     );
-                    if locked_previous_response_retry {
+                    if let Some(chain_reason) = decision.chain_retry_reason {
                         runtime_proxy_log_chain_retried_owner(
                             shared,
                             RuntimeProxyChainLog {
@@ -2414,7 +2389,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 websocket_session: Some(session_id),
                                 profile_name: &profile_name,
                                 previous_response_id: previous_response_id.as_deref(),
-                                reason: "previous_response_not_found_locked_affinity",
+                                reason: chain_reason,
                                 via: None,
                             },
                             delay.as_millis(),
@@ -2424,19 +2399,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
-                let request_requires_locked_previous_response_affinity =
-                    runtime_websocket_request_requires_locked_previous_response_affinity(
-                        request_requires_previous_response_affinity,
-                        trusted_previous_response_affinity,
-                        previous_response_id.as_deref(),
-                        request_turn_state.as_deref(),
-                    );
-                if runtime_websocket_previous_response_not_found_requires_stale_continuation(
-                    previous_response_id.as_deref(),
-                    has_turn_state_retry,
-                    request_requires_locked_previous_response_affinity,
-                    previous_response_fresh_fallback_shape,
-                ) {
+                if decision.stale_continuation {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -2465,17 +2428,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     has_turn_state_retry,
                     "candidate"
                 );
-                let previous_response_fresh_fallback_allowed =
-                    runtime_previous_response_not_found_fresh_fallback_allowed(
-                        previous_response_id.as_deref(),
-                        previous_response_fresh_fallback_used,
-                        request_requires_locked_previous_response_affinity,
-                        previous_response_fresh_fallback_shape,
-                    );
-                if !has_turn_state_retry
-                    && !previous_response_fresh_fallback_allowed
-                    && !request_requires_locked_previous_response_affinity
-                {
+                if decision.fresh_fallback_blocked_without_affinity {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -2486,7 +2439,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         ),
                     );
                 }
-                if !has_turn_state_retry && previous_response_fresh_fallback_allowed {
+                if !has_turn_state_retry && decision.fresh_fallback_allowed {
                     let _ = clear_runtime_stale_previous_response_binding(
                         shared,
                         &profile_name,
@@ -3556,60 +3509,61 @@ pub(super) fn proxy_runtime_responses_request(
                             ),
                         );
                         saw_previous_response_not_found = true;
-                        if previous_response_retry_candidate.as_deref()
-                            != Some(profile_name.as_str())
-                        {
-                            previous_response_retry_candidate = Some(profile_name.clone());
-                            previous_response_retry_index = 0;
-                        }
-                        let has_turn_state_retry = turn_state.is_some();
-                        if has_turn_state_retry {
-                            candidate_turn_state_retry_profile = Some(profile_name.clone());
-                            candidate_turn_state_retry_value = turn_state;
-                        }
-                        if has_turn_state_retry
-                            && let Some(delay) =
-                                runtime_previous_response_retry_delay(previous_response_retry_index)
-                        {
+                        let has_turn_state_retry =
+                            runtime_record_previous_response_not_found_retry_state(
+                                &profile_name,
+                                turn_state,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                            );
+                        let decision = runtime_previous_response_not_found_decision(
+                            RuntimePreviousResponseNotFoundDecisionInput {
+                                route: RuntimePreviousResponseNotFoundRoute::Responses,
+                                previous_response_id: previous_response_id.as_deref(),
+                                has_turn_state_retry,
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                request_turn_state: request_turn_state.as_deref(),
+                                previous_response_fresh_fallback_used,
+                                fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                                retry_index: previous_response_retry_index,
+                            },
+                        );
+                        if let Some(delay) = decision.retry_delay {
                             previous_response_retry_index += 1;
                             last_failure =
                                 Some((RuntimeUpstreamFailureResponse::Http(response), false));
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                    delay.as_millis()
+                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
+                                    delay.as_millis(),
+                                    decision.retry_reason.unwrap_or("-")
                                 ),
                             );
-                            runtime_proxy_log_chain_retried_owner(
-                                shared,
-                                RuntimeProxyChainLog {
-                                    request_id,
-                                    transport: "http",
-                                    route: "responses",
-                                    websocket_session: None,
-                                    profile_name: &profile_name,
-                                    previous_response_id: previous_response_id.as_deref(),
-                                    reason: "previous_response_not_found",
-                                    via: Some("direct_current_profile_fallback"),
-                                },
-                                delay.as_millis(),
-                            );
+                            if let Some(chain_reason) = decision.chain_retry_reason {
+                                runtime_proxy_log_chain_retried_owner(
+                                    shared,
+                                    RuntimeProxyChainLog {
+                                        request_id,
+                                        transport: "http",
+                                        route: "responses",
+                                        websocket_session: None,
+                                        profile_name: &profile_name,
+                                        previous_response_id: previous_response_id.as_deref(),
+                                        reason: chain_reason,
+                                        via: Some("direct_current_profile_fallback"),
+                                    },
+                                    delay.as_millis(),
+                                );
+                            }
                             continue;
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        let previous_response_fresh_fallback_allowed =
-                            runtime_previous_response_not_found_fresh_fallback_allowed(
-                                previous_response_id.as_deref(),
-                                previous_response_fresh_fallback_used,
-                                request_requires_previous_response_affinity,
-                                previous_response_fresh_fallback_shape,
-                            );
-                        if !has_turn_state_retry
-                            && !previous_response_fresh_fallback_allowed
-                            && !request_requires_previous_response_affinity
-                        {
+                        if decision.fresh_fallback_blocked_without_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -3620,7 +3574,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if !has_turn_state_retry && previous_response_fresh_fallback_allowed {
+                        if !has_turn_state_retry && decision.fresh_fallback_allowed {
                             let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
@@ -4010,60 +3964,61 @@ pub(super) fn proxy_runtime_responses_request(
                             ),
                         );
                         saw_previous_response_not_found = true;
-                        if previous_response_retry_candidate.as_deref()
-                            != Some(profile_name.as_str())
-                        {
-                            previous_response_retry_candidate = Some(profile_name.clone());
-                            previous_response_retry_index = 0;
-                        }
-                        let has_turn_state_retry = turn_state.is_some();
-                        if has_turn_state_retry {
-                            candidate_turn_state_retry_profile = Some(profile_name.clone());
-                            candidate_turn_state_retry_value = turn_state;
-                        }
-                        if has_turn_state_retry
-                            && let Some(delay) =
-                                runtime_previous_response_retry_delay(previous_response_retry_index)
-                        {
+                        let has_turn_state_retry =
+                            runtime_record_previous_response_not_found_retry_state(
+                                &profile_name,
+                                turn_state,
+                                &mut previous_response_retry_candidate,
+                                &mut previous_response_retry_index,
+                                &mut candidate_turn_state_retry_profile,
+                                &mut candidate_turn_state_retry_value,
+                            );
+                        let decision = runtime_previous_response_not_found_decision(
+                            RuntimePreviousResponseNotFoundDecisionInput {
+                                route: RuntimePreviousResponseNotFoundRoute::Responses,
+                                previous_response_id: previous_response_id.as_deref(),
+                                has_turn_state_retry,
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                request_turn_state: request_turn_state.as_deref(),
+                                previous_response_fresh_fallback_used,
+                                fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                                retry_index: previous_response_retry_index,
+                            },
+                        );
+                        if let Some(delay) = decision.retry_delay {
                             previous_response_retry_index += 1;
                             last_failure =
                                 Some((RuntimeUpstreamFailureResponse::Http(response), false));
                             runtime_proxy_log(
                                 shared,
                                 format!(
-                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry via=direct_current_profile_fallback",
-                                    delay.as_millis()
+                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
+                                    delay.as_millis(),
+                                    decision.retry_reason.unwrap_or("-")
                                 ),
                             );
-                            runtime_proxy_log_chain_retried_owner(
-                                shared,
-                                RuntimeProxyChainLog {
-                                    request_id,
-                                    transport: "http",
-                                    route: "responses",
-                                    websocket_session: None,
-                                    profile_name: &profile_name,
-                                    previous_response_id: previous_response_id.as_deref(),
-                                    reason: "previous_response_not_found",
-                                    via: Some("direct_current_profile_fallback"),
-                                },
-                                delay.as_millis(),
-                            );
+                            if let Some(chain_reason) = decision.chain_retry_reason {
+                                runtime_proxy_log_chain_retried_owner(
+                                    shared,
+                                    RuntimeProxyChainLog {
+                                        request_id,
+                                        transport: "http",
+                                        route: "responses",
+                                        websocket_session: None,
+                                        profile_name: &profile_name,
+                                        previous_response_id: previous_response_id.as_deref(),
+                                        reason: chain_reason,
+                                        via: Some("direct_current_profile_fallback"),
+                                    },
+                                    delay.as_millis(),
+                                );
+                            }
                             continue;
                         }
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
-                        let previous_response_fresh_fallback_allowed =
-                            runtime_previous_response_not_found_fresh_fallback_allowed(
-                                previous_response_id.as_deref(),
-                                previous_response_fresh_fallback_used,
-                                request_requires_previous_response_affinity,
-                                previous_response_fresh_fallback_shape,
-                            );
-                        if !has_turn_state_retry
-                            && !previous_response_fresh_fallback_allowed
-                            && !request_requires_previous_response_affinity
-                        {
+                        if decision.fresh_fallback_blocked_without_affinity {
                             runtime_proxy_log(
                                 shared,
                                 format!(
@@ -4074,7 +4029,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 ),
                             );
                         }
-                        if !has_turn_state_retry && previous_response_fresh_fallback_allowed {
+                        if !has_turn_state_retry && decision.fresh_fallback_allowed {
                             let _ = clear_runtime_stale_previous_response_binding(
                                 shared,
                                 &profile_name,
@@ -4492,57 +4447,59 @@ pub(super) fn proxy_runtime_responses_request(
                     ),
                 );
                 saw_previous_response_not_found = true;
-                if previous_response_retry_candidate.as_deref() != Some(profile_name.as_str()) {
-                    previous_response_retry_candidate = Some(profile_name.clone());
-                    previous_response_retry_index = 0;
-                }
-                let has_turn_state_retry = turn_state.is_some();
-                if has_turn_state_retry {
-                    candidate_turn_state_retry_profile = Some(profile_name.clone());
-                    candidate_turn_state_retry_value = turn_state;
-                }
-                if has_turn_state_retry
-                    && let Some(delay) =
-                        runtime_previous_response_retry_delay(previous_response_retry_index)
-                {
+                let has_turn_state_retry = runtime_record_previous_response_not_found_retry_state(
+                    &profile_name,
+                    turn_state,
+                    &mut previous_response_retry_candidate,
+                    &mut previous_response_retry_index,
+                    &mut candidate_turn_state_retry_profile,
+                    &mut candidate_turn_state_retry_value,
+                );
+                let decision = runtime_previous_response_not_found_decision(
+                    RuntimePreviousResponseNotFoundDecisionInput {
+                        route: RuntimePreviousResponseNotFoundRoute::Responses,
+                        previous_response_id: previous_response_id.as_deref(),
+                        has_turn_state_retry,
+                        request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity,
+                        request_turn_state: request_turn_state.as_deref(),
+                        previous_response_fresh_fallback_used,
+                        fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                        retry_index: previous_response_retry_index,
+                    },
+                );
+                if let Some(delay) = decision.retry_delay {
                     previous_response_retry_index += 1;
                     last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
                     runtime_proxy_log(
                         shared,
                         format!(
-                            "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason=non_blocking_retry",
-                            delay.as_millis()
+                            "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason={}",
+                            delay.as_millis(),
+                            decision.retry_reason.unwrap_or("-")
                         ),
                     );
-                    runtime_proxy_log_chain_retried_owner(
-                        shared,
-                        RuntimeProxyChainLog {
-                            request_id,
-                            transport: "http",
-                            route: "responses",
-                            websocket_session: None,
-                            profile_name: &profile_name,
-                            previous_response_id: previous_response_id.as_deref(),
-                            reason: "previous_response_not_found",
-                            via: None,
-                        },
-                        delay.as_millis(),
-                    );
+                    if let Some(chain_reason) = decision.chain_retry_reason {
+                        runtime_proxy_log_chain_retried_owner(
+                            shared,
+                            RuntimeProxyChainLog {
+                                request_id,
+                                transport: "http",
+                                route: "responses",
+                                websocket_session: None,
+                                profile_name: &profile_name,
+                                previous_response_id: previous_response_id.as_deref(),
+                                reason: chain_reason,
+                                via: None,
+                            },
+                            delay.as_millis(),
+                        );
+                    }
                     continue;
                 }
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
-                let previous_response_fresh_fallback_allowed =
-                    runtime_previous_response_not_found_fresh_fallback_allowed(
-                        previous_response_id.as_deref(),
-                        previous_response_fresh_fallback_used,
-                        request_requires_previous_response_affinity,
-                        previous_response_fresh_fallback_shape,
-                    );
-                if !has_turn_state_retry
-                    && !previous_response_fresh_fallback_allowed
-                    && !request_requires_previous_response_affinity
-                {
+                if decision.fresh_fallback_blocked_without_affinity {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -4553,7 +4510,7 @@ pub(super) fn proxy_runtime_responses_request(
                         ),
                     );
                 }
-                if !has_turn_state_retry && previous_response_fresh_fallback_allowed {
+                if !has_turn_state_retry && decision.fresh_fallback_allowed {
                     let _ = clear_runtime_stale_previous_response_binding(
                         shared,
                         &profile_name,

@@ -3,6 +3,86 @@ use std::path::Path;
 
 use super::*;
 
+#[derive(serde::Serialize)]
+struct RuntimeDoctorBrokerArtifactJsonView {
+    #[serde(flatten)]
+    fields: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(serde::Serialize)]
+struct RuntimeDoctorJsonView {
+    log_path: Option<String>,
+    pointer_exists: bool,
+    log_exists: bool,
+    line_count: usize,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
+    compat_warning_count: usize,
+    top_client_family: Option<String>,
+    top_client: Option<String>,
+    top_tool_surface: Option<String>,
+    top_compat_warning: Option<String>,
+    marker_counts: BTreeMap<String, usize>,
+    marker_last_fields: BTreeMap<String, BTreeMap<String, String>>,
+    facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
+    previous_response_not_found_by_route: BTreeMap<String, usize>,
+    previous_response_not_found_by_transport: BTreeMap<String, usize>,
+    chain_retried_owner_by_reason: BTreeMap<String, usize>,
+    chain_dead_upstream_confirmed_by_reason: BTreeMap<String, usize>,
+    stale_continuation_by_reason: BTreeMap<String, usize>,
+    latest_chain_event: Option<String>,
+    latest_stale_continuation_reason: Option<String>,
+    last_marker_line: Option<String>,
+    selection_pressure: String,
+    transport_pressure: String,
+    persistence_pressure: String,
+    quota_freshness_pressure: String,
+    startup_audit_pressure: String,
+    persisted_retry_backoffs: usize,
+    persisted_transport_backoffs: usize,
+    persisted_route_circuits: usize,
+    persisted_usage_snapshots: usize,
+    persisted_response_bindings: usize,
+    persisted_session_bindings: usize,
+    persisted_turn_state_bindings: usize,
+    persisted_session_id_bindings: usize,
+    persisted_verified_continuations: usize,
+    persisted_warm_continuations: usize,
+    persisted_suspect_continuations: usize,
+    persisted_dead_continuations: usize,
+    persisted_continuation_journal_response_bindings: usize,
+    persisted_continuation_journal_session_bindings: usize,
+    persisted_continuation_journal_turn_state_bindings: usize,
+    persisted_continuation_journal_session_id_bindings: usize,
+    persisted_turn_state_coverage_percent: Option<u8>,
+    state_save_queue_backlog: Option<usize>,
+    state_save_lag_ms: Option<u64>,
+    continuation_journal_save_backlog: Option<usize>,
+    continuation_journal_save_lag_ms: Option<u64>,
+    profile_probe_refresh_backlog: Option<usize>,
+    profile_probe_refresh_lag_ms: Option<u64>,
+    continuation_journal_saved_at: Option<i64>,
+    suspect_continuation_bindings: Vec<String>,
+    stale_persisted_usage_snapshots: usize,
+    recovered_state_file: bool,
+    recovered_continuations_file: bool,
+    recovered_continuation_journal_file: bool,
+    recovered_scores_file: bool,
+    recovered_usage_snapshots_file: bool,
+    recovered_backoffs_file: bool,
+    last_good_backups_present: usize,
+    degraded_routes: Vec<String>,
+    orphan_managed_dirs: Vec<String>,
+    prodex_binary_identities: Vec<String>,
+    runtime_broker_identities: Vec<String>,
+    runtime_broker_artifacts: Vec<RuntimeDoctorBrokerArtifactJsonView>,
+    prodex_binary_mismatch: bool,
+    runtime_broker_mismatch: bool,
+    failure_class_counts: BTreeMap<String, usize>,
+    profiles: Vec<RuntimeDoctorProfileSummary>,
+    diagnosis: String,
+}
+
 fn runtime_doctor_parse_broker_artifact(line: &str) -> BTreeMap<String, String> {
     line.split_whitespace()
         .filter_map(|token| token.split_once('='))
@@ -52,37 +132,9 @@ fn runtime_doctor_runtime_broker_issue_lines(summary: &RuntimeDoctorSummary) -> 
         .collect()
 }
 
-fn runtime_doctor_json_entry<T: serde::Serialize>(
-    key: &str,
-    value: T,
-) -> (String, serde_json::Value) {
-    (
-        key.to_string(),
-        serde_json::to_value(value).expect("runtime doctor serialization should always succeed"),
-    )
-}
-
-fn runtime_doctor_json_map<K, V, I>(entries: I) -> serde_json::Map<String, serde_json::Value>
-where
-    K: Into<String>,
-    V: serde::Serialize,
-    I: IntoIterator<Item = (K, V)>,
-{
-    entries
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                key.into(),
-                serde_json::to_value(value)
-                    .expect("runtime doctor serialization should always succeed"),
-            )
-        })
-        .collect()
-}
-
-fn runtime_doctor_broker_artifact_json(line: &str) -> serde_json::Value {
+fn runtime_doctor_broker_artifact_json_view(line: &str) -> RuntimeDoctorBrokerArtifactJsonView {
     let artifact = runtime_doctor_parse_broker_artifact(line);
-    let mut object = serde_json::Map::new();
+    let mut fields = BTreeMap::new();
     for (key, value) in artifact {
         let json_value = if key == "stale_leases" {
             value
@@ -92,266 +144,116 @@ fn runtime_doctor_broker_artifact_json(line: &str) -> serde_json::Value {
         } else {
             serde_json::Value::String(value)
         };
-        object.insert(key, json_value);
+        fields.insert(key, json_value);
     }
-    serde_json::Value::Object(object)
+    RuntimeDoctorBrokerArtifactJsonView { fields }
 }
 
-fn runtime_doctor_profile_json(profile: &RuntimeDoctorProfileSummary) -> serde_json::Value {
-    serde_json::json!({
-        "profile": profile.profile,
-        "quota_freshness": profile.quota_freshness,
-        "quota_age_seconds": profile.quota_age_seconds,
-        "retry_backoff_until": profile.retry_backoff_until,
-        "transport_backoff_until": profile.transport_backoff_until,
-        "routes": profile.routes.iter().map(|route| {
-            serde_json::json!({
-                "route": route.route,
-                "circuit_state": route.circuit_state,
-                "circuit_until": route.circuit_until,
-                "transport_backoff_until": route.transport_backoff_until,
-                "health_score": route.health_score,
-                "bad_pairing_score": route.bad_pairing_score,
-                "performance_score": route.performance_score,
-                "quota_band": route.quota_band,
-                "five_hour_status": route.five_hour_status,
-                "weekly_status": route.weekly_status,
-            })
-        }).collect::<Vec<_>>(),
-    })
+impl From<&RuntimeDoctorSummary> for RuntimeDoctorJsonView {
+    fn from(summary: &RuntimeDoctorSummary) -> Self {
+        Self {
+            log_path: summary
+                .log_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            pointer_exists: summary.pointer_exists,
+            log_exists: summary.log_exists,
+            line_count: summary.line_count,
+            first_timestamp: summary.first_timestamp.clone(),
+            last_timestamp: summary.last_timestamp.clone(),
+            compat_warning_count: summary.compat_warning_count,
+            top_client_family: summary.top_client_family.clone(),
+            top_client: summary.top_client.clone(),
+            top_tool_surface: summary.top_tool_surface.clone(),
+            top_compat_warning: summary.top_compat_warning.clone(),
+            marker_counts: summary
+                .marker_counts
+                .iter()
+                .map(|(marker, count)| ((*marker).to_string(), *count))
+                .collect(),
+            marker_last_fields: summary
+                .marker_last_fields
+                .iter()
+                .map(|(marker, fields)| ((*marker).to_string(), fields.clone()))
+                .collect(),
+            facet_counts: summary.facet_counts.clone(),
+            previous_response_not_found_by_route: summary
+                .previous_response_not_found_by_route
+                .clone(),
+            previous_response_not_found_by_transport: summary
+                .previous_response_not_found_by_transport
+                .clone(),
+            chain_retried_owner_by_reason: summary.chain_retried_owner_by_reason.clone(),
+            chain_dead_upstream_confirmed_by_reason: summary
+                .chain_dead_upstream_confirmed_by_reason
+                .clone(),
+            stale_continuation_by_reason: summary.stale_continuation_by_reason.clone(),
+            latest_chain_event: summary.latest_chain_event.clone(),
+            latest_stale_continuation_reason: summary.latest_stale_continuation_reason.clone(),
+            last_marker_line: summary.last_marker_line.clone(),
+            selection_pressure: summary.selection_pressure.clone(),
+            transport_pressure: summary.transport_pressure.clone(),
+            persistence_pressure: summary.persistence_pressure.clone(),
+            quota_freshness_pressure: summary.quota_freshness_pressure.clone(),
+            startup_audit_pressure: summary.startup_audit_pressure.clone(),
+            persisted_retry_backoffs: summary.persisted_retry_backoffs,
+            persisted_transport_backoffs: summary.persisted_transport_backoffs,
+            persisted_route_circuits: summary.persisted_route_circuits,
+            persisted_usage_snapshots: summary.persisted_usage_snapshots,
+            persisted_response_bindings: summary.persisted_response_bindings,
+            persisted_session_bindings: summary.persisted_session_bindings,
+            persisted_turn_state_bindings: summary.persisted_turn_state_bindings,
+            persisted_session_id_bindings: summary.persisted_session_id_bindings,
+            persisted_verified_continuations: summary.persisted_verified_continuations,
+            persisted_warm_continuations: summary.persisted_warm_continuations,
+            persisted_suspect_continuations: summary.persisted_suspect_continuations,
+            persisted_dead_continuations: summary.persisted_dead_continuations,
+            persisted_continuation_journal_response_bindings: summary
+                .persisted_continuation_journal_response_bindings,
+            persisted_continuation_journal_session_bindings: summary
+                .persisted_continuation_journal_session_bindings,
+            persisted_continuation_journal_turn_state_bindings: summary
+                .persisted_continuation_journal_turn_state_bindings,
+            persisted_continuation_journal_session_id_bindings: summary
+                .persisted_continuation_journal_session_id_bindings,
+            persisted_turn_state_coverage_percent: summary.persisted_turn_state_coverage_percent,
+            state_save_queue_backlog: summary.state_save_queue_backlog,
+            state_save_lag_ms: summary.state_save_lag_ms,
+            continuation_journal_save_backlog: summary.continuation_journal_save_backlog,
+            continuation_journal_save_lag_ms: summary.continuation_journal_save_lag_ms,
+            profile_probe_refresh_backlog: summary.profile_probe_refresh_backlog,
+            profile_probe_refresh_lag_ms: summary.profile_probe_refresh_lag_ms,
+            continuation_journal_saved_at: summary.continuation_journal_saved_at,
+            suspect_continuation_bindings: summary.suspect_continuation_bindings.clone(),
+            stale_persisted_usage_snapshots: summary.stale_persisted_usage_snapshots,
+            recovered_state_file: summary.recovered_state_file,
+            recovered_continuations_file: summary.recovered_continuations_file,
+            recovered_continuation_journal_file: summary.recovered_continuation_journal_file,
+            recovered_scores_file: summary.recovered_scores_file,
+            recovered_usage_snapshots_file: summary.recovered_usage_snapshots_file,
+            recovered_backoffs_file: summary.recovered_backoffs_file,
+            last_good_backups_present: summary.last_good_backups_present,
+            degraded_routes: summary.degraded_routes.clone(),
+            orphan_managed_dirs: summary.orphan_managed_dirs.clone(),
+            prodex_binary_identities: summary.prodex_binary_identities.clone(),
+            runtime_broker_identities: summary.runtime_broker_identities.clone(),
+            runtime_broker_artifacts: summary
+                .runtime_broker_identities
+                .iter()
+                .map(|line| runtime_doctor_broker_artifact_json_view(line))
+                .collect(),
+            prodex_binary_mismatch: summary.prodex_binary_mismatch,
+            runtime_broker_mismatch: summary.runtime_broker_mismatch,
+            failure_class_counts: summary.failure_class_counts.clone(),
+            profiles: summary.profiles.clone(),
+            diagnosis: summary.diagnosis.clone(),
+        }
+    }
 }
 
 pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde_json::Value {
-    serde_json::Value::Object(
-        [
-            runtime_doctor_json_entry(
-                "log_path",
-                summary
-                    .log_path
-                    .as_ref()
-                    .map(|path| path.display().to_string()),
-            ),
-            runtime_doctor_json_entry("pointer_exists", summary.pointer_exists),
-            runtime_doctor_json_entry("log_exists", summary.log_exists),
-            runtime_doctor_json_entry("line_count", summary.line_count),
-            runtime_doctor_json_entry("first_timestamp", summary.first_timestamp.clone()),
-            runtime_doctor_json_entry("last_timestamp", summary.last_timestamp.clone()),
-            runtime_doctor_json_entry("compat_warning_count", summary.compat_warning_count),
-            runtime_doctor_json_entry("top_client_family", summary.top_client_family.clone()),
-            runtime_doctor_json_entry("top_client", summary.top_client.clone()),
-            runtime_doctor_json_entry("top_tool_surface", summary.top_tool_surface.clone()),
-            runtime_doctor_json_entry("top_compat_warning", summary.top_compat_warning.clone()),
-            runtime_doctor_json_entry(
-                "marker_counts",
-                runtime_doctor_json_map(
-                    summary
-                        .marker_counts
-                        .iter()
-                        .map(|(marker, count)| ((*marker).to_string(), *count)),
-                ),
-            ),
-            runtime_doctor_json_entry(
-                "marker_last_fields",
-                runtime_doctor_json_map(summary.marker_last_fields.iter().map(
-                    |(marker, fields)| {
-                        (
-                            (*marker).to_string(),
-                            runtime_doctor_json_map(fields.clone()),
-                        )
-                    },
-                )),
-            ),
-            runtime_doctor_json_entry(
-                "facet_counts",
-                runtime_doctor_json_map(summary.facet_counts.iter().map(|(facet, counts)| {
-                    (facet.clone(), runtime_doctor_json_map(counts.clone()))
-                })),
-            ),
-            runtime_doctor_json_entry(
-                "previous_response_not_found_by_route",
-                runtime_doctor_json_map(summary.previous_response_not_found_by_route.clone()),
-            ),
-            runtime_doctor_json_entry(
-                "previous_response_not_found_by_transport",
-                runtime_doctor_json_map(summary.previous_response_not_found_by_transport.clone()),
-            ),
-            runtime_doctor_json_entry(
-                "chain_retried_owner_by_reason",
-                runtime_doctor_json_map(summary.chain_retried_owner_by_reason.clone()),
-            ),
-            runtime_doctor_json_entry(
-                "chain_dead_upstream_confirmed_by_reason",
-                runtime_doctor_json_map(summary.chain_dead_upstream_confirmed_by_reason.clone()),
-            ),
-            runtime_doctor_json_entry(
-                "stale_continuation_by_reason",
-                runtime_doctor_json_map(summary.stale_continuation_by_reason.clone()),
-            ),
-            runtime_doctor_json_entry("latest_chain_event", summary.latest_chain_event.clone()),
-            runtime_doctor_json_entry(
-                "latest_stale_continuation_reason",
-                summary.latest_stale_continuation_reason.clone(),
-            ),
-            runtime_doctor_json_entry("last_marker_line", summary.last_marker_line.clone()),
-            runtime_doctor_json_entry("selection_pressure", summary.selection_pressure.clone()),
-            runtime_doctor_json_entry("transport_pressure", summary.transport_pressure.clone()),
-            runtime_doctor_json_entry("persistence_pressure", summary.persistence_pressure.clone()),
-            runtime_doctor_json_entry(
-                "quota_freshness_pressure",
-                summary.quota_freshness_pressure.clone(),
-            ),
-            runtime_doctor_json_entry(
-                "startup_audit_pressure",
-                summary.startup_audit_pressure.clone(),
-            ),
-            runtime_doctor_json_entry("persisted_retry_backoffs", summary.persisted_retry_backoffs),
-            runtime_doctor_json_entry(
-                "persisted_transport_backoffs",
-                summary.persisted_transport_backoffs,
-            ),
-            runtime_doctor_json_entry("persisted_route_circuits", summary.persisted_route_circuits),
-            runtime_doctor_json_entry(
-                "persisted_usage_snapshots",
-                summary.persisted_usage_snapshots,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_response_bindings",
-                summary.persisted_response_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_session_bindings",
-                summary.persisted_session_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_turn_state_bindings",
-                summary.persisted_turn_state_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_session_id_bindings",
-                summary.persisted_session_id_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_verified_continuations",
-                summary.persisted_verified_continuations,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_warm_continuations",
-                summary.persisted_warm_continuations,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_suspect_continuations",
-                summary.persisted_suspect_continuations,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_dead_continuations",
-                summary.persisted_dead_continuations,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_continuation_journal_response_bindings",
-                summary.persisted_continuation_journal_response_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_continuation_journal_session_bindings",
-                summary.persisted_continuation_journal_session_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_continuation_journal_turn_state_bindings",
-                summary.persisted_continuation_journal_turn_state_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_continuation_journal_session_id_bindings",
-                summary.persisted_continuation_journal_session_id_bindings,
-            ),
-            runtime_doctor_json_entry(
-                "persisted_turn_state_coverage_percent",
-                summary.persisted_turn_state_coverage_percent,
-            ),
-            runtime_doctor_json_entry("state_save_queue_backlog", summary.state_save_queue_backlog),
-            runtime_doctor_json_entry("state_save_lag_ms", summary.state_save_lag_ms),
-            runtime_doctor_json_entry(
-                "continuation_journal_save_backlog",
-                summary.continuation_journal_save_backlog,
-            ),
-            runtime_doctor_json_entry(
-                "continuation_journal_save_lag_ms",
-                summary.continuation_journal_save_lag_ms,
-            ),
-            runtime_doctor_json_entry(
-                "profile_probe_refresh_backlog",
-                summary.profile_probe_refresh_backlog,
-            ),
-            runtime_doctor_json_entry(
-                "profile_probe_refresh_lag_ms",
-                summary.profile_probe_refresh_lag_ms,
-            ),
-            runtime_doctor_json_entry(
-                "continuation_journal_saved_at",
-                summary.continuation_journal_saved_at,
-            ),
-            runtime_doctor_json_entry(
-                "suspect_continuation_bindings",
-                summary.suspect_continuation_bindings.clone(),
-            ),
-            runtime_doctor_json_entry(
-                "stale_persisted_usage_snapshots",
-                summary.stale_persisted_usage_snapshots,
-            ),
-            runtime_doctor_json_entry("recovered_state_file", summary.recovered_state_file),
-            runtime_doctor_json_entry(
-                "recovered_continuations_file",
-                summary.recovered_continuations_file,
-            ),
-            runtime_doctor_json_entry(
-                "recovered_continuation_journal_file",
-                summary.recovered_continuation_journal_file,
-            ),
-            runtime_doctor_json_entry("recovered_scores_file", summary.recovered_scores_file),
-            runtime_doctor_json_entry(
-                "recovered_usage_snapshots_file",
-                summary.recovered_usage_snapshots_file,
-            ),
-            runtime_doctor_json_entry("recovered_backoffs_file", summary.recovered_backoffs_file),
-            runtime_doctor_json_entry(
-                "last_good_backups_present",
-                summary.last_good_backups_present,
-            ),
-            runtime_doctor_json_entry("degraded_routes", summary.degraded_routes.clone()),
-            runtime_doctor_json_entry("orphan_managed_dirs", summary.orphan_managed_dirs.clone()),
-            runtime_doctor_json_entry(
-                "prodex_binary_identities",
-                summary.prodex_binary_identities.clone(),
-            ),
-            runtime_doctor_json_entry(
-                "runtime_broker_identities",
-                summary.runtime_broker_identities.clone(),
-            ),
-            runtime_doctor_json_entry(
-                "runtime_broker_artifacts",
-                summary
-                    .runtime_broker_identities
-                    .iter()
-                    .map(|line| runtime_doctor_broker_artifact_json(line))
-                    .collect::<Vec<_>>(),
-            ),
-            runtime_doctor_json_entry("prodex_binary_mismatch", summary.prodex_binary_mismatch),
-            runtime_doctor_json_entry("runtime_broker_mismatch", summary.runtime_broker_mismatch),
-            runtime_doctor_json_entry(
-                "failure_class_counts",
-                runtime_doctor_json_map(summary.failure_class_counts.clone()),
-            ),
-            runtime_doctor_json_entry(
-                "profiles",
-                summary
-                    .profiles
-                    .iter()
-                    .map(runtime_doctor_profile_json)
-                    .collect::<Vec<_>>(),
-            ),
-            runtime_doctor_json_entry("diagnosis", summary.diagnosis.clone()),
-        ]
-        .into_iter()
-        .collect(),
-    )
+    serde_json::to_value(RuntimeDoctorJsonView::from(summary))
+        .expect("runtime doctor serialization should always succeed")
 }
 
 pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
@@ -366,202 +268,160 @@ fn runtime_doctor_format_option<T: ToString>(value: Option<T>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-pub(crate) fn runtime_doctor_fields_for_summary(
+fn runtime_doctor_push_marker_detail_rows(
+    fields: &mut FieldRowsBuilder,
     summary: &RuntimeDoctorSummary,
-    pointer_path: &Path,
-) -> Vec<(String, String)> {
-    let latest_log = summary
-        .log_path
-        .as_ref()
-        .map(|path| {
-            format!(
-                "{} ({})",
-                path.display(),
-                if summary.log_exists {
-                    "exists"
-                } else {
-                    "missing"
-                }
-            )
-        })
-        .unwrap_or_else(|| "-".to_string());
-    let suspect_continuations = if summary.suspect_continuation_bindings.is_empty() {
-        "-".to_string()
-    } else {
-        format!(
-            "count={} bindings={}",
-            summary.persisted_suspect_continuations,
-            summary.suspect_continuation_bindings.join(", ")
-        )
-    };
-    let broker_issues = runtime_doctor_runtime_broker_issue_lines(summary);
-    let mut fields = FieldRowsBuilder::new();
-    fields
-        .push(
-            "Log pointer",
-            format!(
-                "{} ({})",
-                pointer_path.display(),
-                if summary.pointer_exists {
-                    "exists"
-                } else {
-                    "missing"
-                }
-            ),
-        )
-        .push("Latest log", latest_log)
-        .push("Log sample", format!("{} lines", summary.line_count));
-    for (label, marker) in RUNTIME_DOCTOR_COUNT_FIELD_ROWS {
+    marker: &str,
+) {
+    if marker == "runtime_proxy_overload_backoff" {
         fields.push(
-            *label,
-            diagnosis::runtime_doctor_marker_count(summary, marker).to_string(),
+            "Connect failures",
+            (diagnosis::runtime_doctor_marker_count(summary, "upstream_connect_timeout")
+                + diagnosis::runtime_doctor_marker_count(summary, "upstream_connect_error"))
+            .to_string(),
         );
-        if *marker == "runtime_proxy_overload_backoff" {
-            fields.push(
-                "Connect failures",
-                (diagnosis::runtime_doctor_marker_count(summary, "upstream_connect_timeout")
-                    + diagnosis::runtime_doctor_marker_count(summary, "upstream_connect_error"))
-                .to_string(),
-            );
-        }
-        if *marker == "previous_response_not_found" {
-            fields
-                .push(
-                    "Prev not found routes",
-                    diagnosis::runtime_doctor_count_breakdown(
-                        &summary.previous_response_not_found_by_route,
-                    ),
-                )
-                .push(
-                    "Prev not found xport",
-                    diagnosis::runtime_doctor_count_breakdown(
-                        &summary.previous_response_not_found_by_transport,
-                    ),
-                );
-        }
-        if *marker == "stale_continuation" {
-            fields
-                .push(
-                    "Chain retry reasons",
-                    diagnosis::runtime_doctor_count_breakdown(
-                        &summary.chain_retried_owner_by_reason,
-                    ),
-                )
-                .push(
-                    "Chain dead reasons",
-                    diagnosis::runtime_doctor_count_breakdown(
-                        &summary.chain_dead_upstream_confirmed_by_reason,
-                    ),
-                )
-                .push(
-                    "Stale reasons",
-                    diagnosis::runtime_doctor_count_breakdown(
-                        &summary.stale_continuation_by_reason,
-                    ),
-                )
-                .push(
-                    "Latest stale reason",
-                    summary
-                        .latest_stale_continuation_reason
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Latest chain event",
-                    summary
-                        .latest_chain_event
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                );
-        }
-        if *marker == "local_writer_error" {
-            fields
-                .push(
-                    "State save backlog",
-                    runtime_doctor_format_option(summary.state_save_queue_backlog),
-                )
-                .push(
-                    "State save lag",
-                    runtime_doctor_format_option(summary.state_save_lag_ms),
-                )
-                .push(
-                    "Cont journal backlog",
-                    runtime_doctor_format_option(summary.continuation_journal_save_backlog),
-                )
-                .push(
-                    "Cont journal lag",
-                    runtime_doctor_format_option(summary.continuation_journal_save_lag_ms),
-                )
-                .push(
-                    "Probe backlog",
-                    runtime_doctor_format_option(summary.profile_probe_refresh_backlog),
-                )
-                .push(
-                    "Probe lag",
-                    runtime_doctor_format_option(summary.profile_probe_refresh_lag_ms),
-                );
-        }
-        if *marker == "runtime_proxy_startup_audit" {
-            fields.push("Startup pressure", summary.startup_audit_pressure.clone());
-        }
-        if *marker == "compat_request_surface" {
-            fields
-                .push("Compat warnings", summary.compat_warning_count.to_string())
-                .push(
-                    "Client family",
-                    summary
-                        .top_client_family
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Top client",
-                    summary
-                        .top_client
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Tool surface",
-                    summary
-                        .top_tool_surface
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Compat warning",
-                    summary
-                        .top_compat_warning
-                        .clone()
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Hot lane",
-                    diagnosis::runtime_doctor_top_facet(summary, "lane")
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Hot route",
-                    diagnosis::runtime_doctor_top_facet(summary, "route")
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Hot profile",
-                    diagnosis::runtime_doctor_top_facet(summary, "profile")
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Hot reason",
-                    diagnosis::runtime_doctor_top_facet(summary, "reason")
-                        .unwrap_or_else(|| "-".to_string()),
-                )
-                .push(
-                    "Quota source",
-                    diagnosis::runtime_doctor_top_facet(summary, "quota_source")
-                        .unwrap_or_else(|| "-".to_string()),
-                );
-        }
     }
+    if marker == "previous_response_not_found" {
+        fields
+            .push(
+                "Prev not found routes",
+                diagnosis::runtime_doctor_count_breakdown(
+                    &summary.previous_response_not_found_by_route,
+                ),
+            )
+            .push(
+                "Prev not found xport",
+                diagnosis::runtime_doctor_count_breakdown(
+                    &summary.previous_response_not_found_by_transport,
+                ),
+            );
+    }
+    if marker == "stale_continuation" {
+        fields
+            .push(
+                "Chain retry reasons",
+                diagnosis::runtime_doctor_count_breakdown(&summary.chain_retried_owner_by_reason),
+            )
+            .push(
+                "Chain dead reasons",
+                diagnosis::runtime_doctor_count_breakdown(
+                    &summary.chain_dead_upstream_confirmed_by_reason,
+                ),
+            )
+            .push(
+                "Stale reasons",
+                diagnosis::runtime_doctor_count_breakdown(&summary.stale_continuation_by_reason),
+            )
+            .push(
+                "Latest stale reason",
+                summary
+                    .latest_stale_continuation_reason
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Latest chain event",
+                summary
+                    .latest_chain_event
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+    }
+    if marker == "local_writer_error" {
+        fields
+            .push(
+                "State save backlog",
+                runtime_doctor_format_option(summary.state_save_queue_backlog),
+            )
+            .push(
+                "State save lag",
+                runtime_doctor_format_option(summary.state_save_lag_ms),
+            )
+            .push(
+                "Cont journal backlog",
+                runtime_doctor_format_option(summary.continuation_journal_save_backlog),
+            )
+            .push(
+                "Cont journal lag",
+                runtime_doctor_format_option(summary.continuation_journal_save_lag_ms),
+            )
+            .push(
+                "Probe backlog",
+                runtime_doctor_format_option(summary.profile_probe_refresh_backlog),
+            )
+            .push(
+                "Probe lag",
+                runtime_doctor_format_option(summary.profile_probe_refresh_lag_ms),
+            );
+    }
+    if marker == "runtime_proxy_startup_audit" {
+        fields.push("Startup pressure", summary.startup_audit_pressure.clone());
+    }
+    if marker == "compat_request_surface" {
+        fields
+            .push("Compat warnings", summary.compat_warning_count.to_string())
+            .push(
+                "Client family",
+                summary
+                    .top_client_family
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Top client",
+                summary
+                    .top_client
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Tool surface",
+                summary
+                    .top_tool_surface
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Compat warning",
+                summary
+                    .top_compat_warning
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Hot lane",
+                diagnosis::runtime_doctor_top_facet(summary, "lane")
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Hot route",
+                diagnosis::runtime_doctor_top_facet(summary, "route")
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Hot profile",
+                diagnosis::runtime_doctor_top_facet(summary, "profile")
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Hot reason",
+                diagnosis::runtime_doctor_top_facet(summary, "reason")
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Quota source",
+                diagnosis::runtime_doctor_top_facet(summary, "quota_source")
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+    }
+}
+
+fn runtime_doctor_push_summary_tail_rows(
+    fields: &mut FieldRowsBuilder,
+    summary: &RuntimeDoctorSummary,
+    broker_issues: &[String],
+    suspect_continuations: &str,
+) {
     fields
         .push("Selection pressure", summary.selection_pressure.clone())
         .push("Transport pressure", summary.transport_pressure.clone())
@@ -694,6 +554,66 @@ pub(crate) fn runtime_doctor_fields_for_summary(
                 .unwrap_or_else(|| "-".to_string()),
         )
         .push("Diagnosis", summary.diagnosis.clone());
+}
+
+pub(crate) fn runtime_doctor_fields_for_summary(
+    summary: &RuntimeDoctorSummary,
+    pointer_path: &Path,
+) -> Vec<(String, String)> {
+    let latest_log = summary
+        .log_path
+        .as_ref()
+        .map(|path| {
+            format!(
+                "{} ({})",
+                path.display(),
+                if summary.log_exists {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            )
+        })
+        .unwrap_or_else(|| "-".to_string());
+    let suspect_continuations = if summary.suspect_continuation_bindings.is_empty() {
+        "-".to_string()
+    } else {
+        format!(
+            "count={} bindings={}",
+            summary.persisted_suspect_continuations,
+            summary.suspect_continuation_bindings.join(", ")
+        )
+    };
+    let broker_issues = runtime_doctor_runtime_broker_issue_lines(summary);
+    let mut fields = FieldRowsBuilder::new();
+    fields
+        .push(
+            "Log pointer",
+            format!(
+                "{} ({})",
+                pointer_path.display(),
+                if summary.pointer_exists {
+                    "exists"
+                } else {
+                    "missing"
+                }
+            ),
+        )
+        .push("Latest log", latest_log)
+        .push("Log sample", format!("{} lines", summary.line_count));
+    for (label, marker) in RUNTIME_DOCTOR_COUNT_FIELD_ROWS {
+        fields.push(
+            *label,
+            diagnosis::runtime_doctor_marker_count(summary, marker).to_string(),
+        );
+        runtime_doctor_push_marker_detail_rows(&mut fields, summary, marker);
+    }
+    runtime_doctor_push_summary_tail_rows(
+        &mut fields,
+        summary,
+        &broker_issues,
+        &suspect_continuations,
+    );
     fields.build()
 }
 
@@ -743,18 +663,82 @@ mod tests {
 
         let value = runtime_doctor_json_value(&summary);
         let keys = json_object_keys(&value);
-        for key in [
+        let expected_keys = [
             "log_path",
             "pointer_exists",
             "log_exists",
             "line_count",
+            "first_timestamp",
+            "last_timestamp",
+            "compat_warning_count",
+            "top_client_family",
+            "top_client",
+            "top_tool_surface",
+            "top_compat_warning",
             "marker_counts",
             "marker_last_fields",
+            "facet_counts",
+            "previous_response_not_found_by_route",
+            "previous_response_not_found_by_transport",
+            "chain_retried_owner_by_reason",
+            "chain_dead_upstream_confirmed_by_reason",
+            "stale_continuation_by_reason",
+            "latest_chain_event",
+            "latest_stale_continuation_reason",
+            "last_marker_line",
+            "selection_pressure",
+            "transport_pressure",
+            "persistence_pressure",
+            "quota_freshness_pressure",
+            "startup_audit_pressure",
+            "persisted_retry_backoffs",
+            "persisted_transport_backoffs",
+            "persisted_route_circuits",
+            "persisted_usage_snapshots",
+            "persisted_response_bindings",
+            "persisted_session_bindings",
+            "persisted_turn_state_bindings",
+            "persisted_session_id_bindings",
+            "persisted_verified_continuations",
+            "persisted_warm_continuations",
+            "persisted_suspect_continuations",
+            "persisted_dead_continuations",
+            "persisted_continuation_journal_response_bindings",
+            "persisted_continuation_journal_session_bindings",
+            "persisted_continuation_journal_turn_state_bindings",
+            "persisted_continuation_journal_session_id_bindings",
+            "persisted_turn_state_coverage_percent",
+            "state_save_queue_backlog",
+            "state_save_lag_ms",
+            "continuation_journal_save_backlog",
+            "continuation_journal_save_lag_ms",
+            "profile_probe_refresh_backlog",
+            "profile_probe_refresh_lag_ms",
+            "continuation_journal_saved_at",
+            "suspect_continuation_bindings",
+            "stale_persisted_usage_snapshots",
+            "recovered_state_file",
+            "recovered_continuations_file",
+            "recovered_continuation_journal_file",
+            "recovered_scores_file",
+            "recovered_usage_snapshots_file",
+            "recovered_backoffs_file",
+            "last_good_backups_present",
+            "degraded_routes",
+            "orphan_managed_dirs",
+            "prodex_binary_identities",
+            "runtime_broker_identities",
             "runtime_broker_artifacts",
+            "prodex_binary_mismatch",
+            "runtime_broker_mismatch",
+            "failure_class_counts",
+            "profiles",
             "diagnosis",
-        ] {
-            assert!(keys.contains(key), "missing top-level key {key}");
-        }
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+        assert_eq!(keys, expected_keys);
         assert_eq!(value["log_path"], "/tmp/prodex-runtime.log");
         assert_eq!(value["pointer_exists"], true);
         assert_eq!(value["log_exists"], true);
@@ -777,5 +761,65 @@ mod tests {
                 .expect("diagnosis should be a string")
                 .contains("dead pid 123")
         );
+    }
+
+    #[test]
+    fn runtime_doctor_json_value_keeps_profile_and_route_shape() {
+        let summary = RuntimeDoctorSummary {
+            profiles: vec![RuntimeDoctorProfileSummary {
+                profile: "alpha".to_string(),
+                quota_freshness: "fresh".to_string(),
+                quota_age_seconds: 5,
+                retry_backoff_until: Some(11),
+                transport_backoff_until: Some(13),
+                routes: vec![RuntimeDoctorRouteSummary {
+                    route: "responses".to_string(),
+                    circuit_state: "closed".to_string(),
+                    circuit_until: Some(17),
+                    transport_backoff_until: Some(19),
+                    health_score: 21,
+                    bad_pairing_score: 23,
+                    performance_score: 25,
+                    quota_band: "healthy".to_string(),
+                    five_hour_status: "ok".to_string(),
+                    weekly_status: "ok".to_string(),
+                }],
+            }],
+            ..RuntimeDoctorSummary::default()
+        };
+
+        let value = runtime_doctor_json_value(&summary);
+        let profile = &value["profiles"][0];
+        let route = &profile["routes"][0];
+
+        assert_eq!(
+            json_object_keys(profile),
+            BTreeSet::from([
+                "profile".to_string(),
+                "quota_freshness".to_string(),
+                "quota_age_seconds".to_string(),
+                "retry_backoff_until".to_string(),
+                "transport_backoff_until".to_string(),
+                "routes".to_string(),
+            ])
+        );
+        assert_eq!(
+            json_object_keys(route),
+            BTreeSet::from([
+                "route".to_string(),
+                "circuit_state".to_string(),
+                "circuit_until".to_string(),
+                "transport_backoff_until".to_string(),
+                "health_score".to_string(),
+                "bad_pairing_score".to_string(),
+                "performance_score".to_string(),
+                "quota_band".to_string(),
+                "five_hour_status".to_string(),
+                "weekly_status".to_string(),
+            ])
+        );
+        assert_eq!(profile["profile"], "alpha");
+        assert_eq!(route["route"], "responses");
+        assert_eq!(route["health_score"], 21);
     }
 }
