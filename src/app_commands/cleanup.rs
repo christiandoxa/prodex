@@ -49,6 +49,10 @@ pub(crate) fn handle_cleanup() -> Result<()> {
             summary.stale_root_temp_files_removed.to_string(),
         ),
         (
+            "Chat history over 7 days".to_string(),
+            summary.chat_history_entries_removed.to_string(),
+        ),
+        (
             "Dead broker leases".to_string(),
             summary.dead_runtime_broker_leases_removed.to_string(),
         ),

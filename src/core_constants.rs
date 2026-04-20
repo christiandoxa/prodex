@@ -48,6 +48,7 @@ pub(crate) const ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS: i64 =
 pub(crate) const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
 pub(crate) const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
+pub(crate) const PRODEX_CHAT_HISTORY_RETENTION_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub(crate) const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 
 pub(crate) const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
@@ -284,7 +285,10 @@ Examples:
   prodex audit --json";
 pub(crate) const CLI_CLEANUP_AFTER_HELP: &str = "\
 Examples:
-  prodex cleanup";
+  prodex cleanup
+
+Notes:
+  Removes stale local artifacts and prunes Codex/Claude chat history older than one week.";
 pub(crate) const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "sessions",
     "archived_sessions",
