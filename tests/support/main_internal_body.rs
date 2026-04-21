@@ -5623,6 +5623,7 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
     let rendered_config = fs::read_to_string(&temp_config).expect("temp config should read");
     assert!(rendered_config.contains("plugins = true"));
     assert!(rendered_config.contains("codex_hooks = true"));
+    assert!(rendered_config.contains("suppress_unstable_features_warning = true"));
     assert!(rendered_config.contains("[marketplaces.prodex-caveman]"));
     assert!(rendered_config.contains("[plugins.\"caveman@prodex-caveman\"]"));
     assert!(rendered_config.contains("enabled = true"));

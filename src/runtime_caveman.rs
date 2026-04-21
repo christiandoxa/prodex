@@ -222,6 +222,10 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
     let features = ensure_child_table(&mut table, "features");
     features.insert("plugins".to_string(), toml::Value::Boolean(true));
     features.insert("codex_hooks".to_string(), toml::Value::Boolean(true));
+    table.insert(
+        "suppress_unstable_features_warning".to_string(),
+        toml::Value::Boolean(true),
+    );
 
     let marketplaces = ensure_child_table(&mut table, "marketplaces");
     let caveman_marketplace = ensure_child_table(marketplaces, PRODEX_CAVEMAN_MARKETPLACE_NAME);
