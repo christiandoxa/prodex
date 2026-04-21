@@ -148,7 +148,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_tool_output
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_keeps_session_tool_output_owner_locked(
+fn runtime_request_previous_response_fresh_fallback_shape_promotes_session_tool_output_to_replayable(
 ) {
     let request = tool_output_only_request()
         .previous_response_id("resp_123")
@@ -157,18 +157,18 @@ fn runtime_request_previous_response_fresh_fallback_shape_keeps_session_tool_out
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
     );
     assert!(
-        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
         ),
-        "tool outputs still need owning tool-call context even when session_id is present"
+        "session-scoped tool outputs should be recoverable after previous_response loss"
     );
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_keeps_header_session_tool_output_owner_locked(
+fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_session_tool_output_to_replayable(
 ) {
     let request = tool_output_only_request()
         .previous_response_id("resp_123")
@@ -177,13 +177,13 @@ fn runtime_request_previous_response_fresh_fallback_shape_keeps_header_session_t
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
     );
     assert!(
-        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
         ),
-        "explicit session headers should not permit fresh tool-output replay after upstream forgets previous_response_id"
+        "explicit session headers should permit fresh tool-output recovery after previous_response loss"
     );
 }
 
@@ -377,13 +377,13 @@ fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     assert!(metadata.requires_previous_response_affinity);
     assert_eq!(
         metadata.previous_response_fresh_fallback_shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
     );
     assert!(
-        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
             metadata.previous_response_fresh_fallback_shape
         ),
-        "websocket metadata must keep tool outputs owner-locked even when a session_id is present"
+        "websocket metadata should allow session replay recovery for tool outputs"
     );
 }
 

@@ -115,6 +115,8 @@ pub(super) fn prepare_runtime_proxy_responses_success(
                 response_turn_state.as_deref(),
                 RuntimeRouteKind::Responses,
             )?;
+        }
+        if !response_ids.is_empty() && response_turn_state.is_some() {
             let _ = release_runtime_compact_lineage(
                 shared,
                 profile_name,
@@ -226,7 +228,7 @@ pub(super) fn prepare_runtime_proxy_responses_success(
         response_turn_state.as_deref(),
         RuntimeRouteKind::Responses,
     )?;
-    if !response_ids.is_empty() {
+    if !response_ids.is_empty() && response_turn_state.is_some() {
         let _ = release_runtime_compact_lineage(
             shared,
             profile_name,

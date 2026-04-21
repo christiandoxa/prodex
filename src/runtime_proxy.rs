@@ -1243,6 +1243,17 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &profile_name,
                                 previous_response_id.as_deref(),
                             )?;
+                            if let Some(fresh_request_text) =
+                                runtime_request_text_without_previous_response_id(&request_text)
+                            {
+                                apply_runtime_websocket_previous_response_fresh_fallback(
+                                    fresh_request_text,
+                                    runtime_websocket_fresh_fallback_target!(),
+                                    runtime_previous_response_fresh_fallback_state!(),
+                                );
+                                recompute_route_affinity!("previous_response_fresh_fallback")?;
+                                continue;
+                            }
                         }
                         let released_affinity = release_runtime_previous_response_affinity(
                             shared,
@@ -2521,6 +2532,17 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         &profile_name,
                         previous_response_id.as_deref(),
                     )?;
+                    if let Some(fresh_request_text) =
+                        runtime_request_text_without_previous_response_id(&request_text)
+                    {
+                        apply_runtime_websocket_previous_response_fresh_fallback(
+                            fresh_request_text,
+                            runtime_websocket_fresh_fallback_target!(),
+                            runtime_previous_response_fresh_fallback_state!(),
+                        );
+                        recompute_route_affinity!("previous_response_fresh_fallback")?;
+                        continue;
+                    }
                 }
                 let released_affinity = release_runtime_previous_response_affinity(
                     shared,
@@ -3481,13 +3503,6 @@ pub(super) fn proxy_runtime_responses_request(
                             &profile_name,
                             RuntimeRouteKind::Responses,
                         )?;
-                        let _ = release_runtime_compact_lineage(
-                            shared,
-                            &profile_name,
-                            request_session_id.as_deref(),
-                            request_turn_state.as_deref(),
-                            "response_committed_post_commit",
-                        );
                         runtime_proxy_log(
                             shared,
                             format!(
@@ -3679,6 +3694,17 @@ pub(super) fn proxy_runtime_responses_request(
                                 &profile_name,
                                 previous_response_id.as_deref(),
                             )?;
+                            if let Some(fresh_request) =
+                                runtime_request_without_previous_response_id(&request)
+                            {
+                                apply_runtime_responses_previous_response_fresh_fallback(
+                                    &mut request,
+                                    fresh_request,
+                                    runtime_previous_response_fresh_fallback_state!(),
+                                );
+                                recompute_route_affinity!("previous_response_fresh_fallback")?;
+                                continue;
+                            }
                         }
                         let released_affinity = release_runtime_previous_response_affinity(
                             shared,
@@ -3960,13 +3986,6 @@ pub(super) fn proxy_runtime_responses_request(
                             &profile_name,
                             RuntimeRouteKind::Responses,
                         )?;
-                        let _ = release_runtime_compact_lineage(
-                            shared,
-                            &profile_name,
-                            request_session_id.as_deref(),
-                            request_turn_state.as_deref(),
-                            "response_committed_post_commit",
-                        );
                         runtime_proxy_log(
                             shared,
                             format!(
@@ -4158,6 +4177,17 @@ pub(super) fn proxy_runtime_responses_request(
                                 &profile_name,
                                 previous_response_id.as_deref(),
                             )?;
+                            if let Some(fresh_request) =
+                                runtime_request_without_previous_response_id(&request)
+                            {
+                                apply_runtime_responses_previous_response_fresh_fallback(
+                                    &mut request,
+                                    fresh_request,
+                                    runtime_previous_response_fresh_fallback_state!(),
+                                );
+                                recompute_route_affinity!("previous_response_fresh_fallback")?;
+                                continue;
+                            }
                         }
                         let released_affinity = release_runtime_previous_response_affinity(
                             shared,
@@ -4372,13 +4402,6 @@ pub(super) fn proxy_runtime_responses_request(
                     &profile_name,
                     RuntimeRouteKind::Responses,
                 )?;
-                let _ = release_runtime_compact_lineage(
-                    shared,
-                    &profile_name,
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    "response_committed_post_commit",
-                );
                 runtime_proxy_log(
                     shared,
                     format!("request={request_id} transport=http committed profile={profile_name}"),
@@ -4664,6 +4687,17 @@ pub(super) fn proxy_runtime_responses_request(
                         &profile_name,
                         previous_response_id.as_deref(),
                     )?;
+                    if let Some(fresh_request) =
+                        runtime_request_without_previous_response_id(&request)
+                    {
+                        apply_runtime_responses_previous_response_fresh_fallback(
+                            &mut request,
+                            fresh_request,
+                            runtime_previous_response_fresh_fallback_state!(),
+                        );
+                        recompute_route_affinity!("previous_response_fresh_fallback")?;
+                        continue;
+                    }
                 }
                 let released_affinity = release_runtime_previous_response_affinity(
                     shared,

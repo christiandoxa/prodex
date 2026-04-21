@@ -727,16 +727,16 @@ pub(super) fn forward_runtime_proxy_websocket_error(
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct RuntimeWebsocketResponseBindingContext<'a> {
-    pub(super) shared: &'a RuntimeRotationProxyShared,
-    pub(super) profile_name: &'a str,
-    pub(super) request_previous_response_id: Option<&'a str>,
-    pub(super) request_session_id: Option<&'a str>,
-    pub(super) request_turn_state: Option<&'a str>,
-    pub(super) response_turn_state: Option<&'a str>,
+pub(crate) struct RuntimeWebsocketResponseBindingContext<'a> {
+    pub(crate) shared: &'a RuntimeRotationProxyShared,
+    pub(crate) profile_name: &'a str,
+    pub(crate) request_previous_response_id: Option<&'a str>,
+    pub(crate) request_session_id: Option<&'a str>,
+    pub(crate) request_turn_state: Option<&'a str>,
+    pub(crate) response_turn_state: Option<&'a str>,
 }
 
-pub(super) fn remember_runtime_websocket_response_ids(
+pub(crate) fn remember_runtime_websocket_response_ids(
     context: RuntimeWebsocketResponseBindingContext<'_>,
     response_ids: &[String],
     previous_response_owner_recorded: &mut bool,
@@ -766,7 +766,7 @@ pub(super) fn remember_runtime_websocket_response_ids(
         response_turn_state,
         RuntimeRouteKind::Websocket,
     )?;
-    if !response_ids.is_empty() {
+    if !response_ids.is_empty() && response_turn_state.is_some() {
         let _ = release_runtime_compact_lineage(
             shared,
             profile_name,

@@ -2680,7 +2680,8 @@ fn handle_runtime_proxy_backend_websocket(
                     mode,
                     RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                 ) && previous_response_id.is_none()
-                    && request_body_contains_only_function_call_output(&request) =>
+                    && request_body_contains_only_function_call_output(&request)
+                    && !request_body_contains_session_id(&request) =>
             {
                 let (call_id, item_label) = serde_json::from_str::<serde_json::Value>(&request)
                     .ok()
@@ -3028,6 +3029,21 @@ fn request_body_contains_only_function_call_output(request_body: &str) -> bool {
                 .filter(|value| !value.is_empty());
             call_id.is_some() && item_type.ends_with("_call_output")
         })
+}
+
+fn request_body_contains_session_id(request_body: &str) -> bool {
+    let Ok(body) = serde_json::from_str::<serde_json::Value>(request_body) else {
+        return false;
+    };
+    body.get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            body.get("client_metadata")
+                .and_then(|metadata| metadata.get("session_id"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
 }
 
 fn runtime_proxy_usage_body(email: &str) -> String {
@@ -4597,7 +4613,7 @@ fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without
 }
 
 #[test]
-fn runtime_proxy_websocket_tool_output_with_session_stays_owner_locked() {
+fn runtime_proxy_websocket_tool_output_with_session_recovers_via_fresh_fallback() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -4665,17 +4681,9 @@ fn runtime_proxy_websocket_tool_output_with_session_stays_owner_locked() {
         .expect("websocket request should send");
 
     let mut response_messages = Vec::new();
-    loop {
+    while response_messages.len() < 2 {
         match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => {
-                response_messages.push(text.to_string());
-                if response_messages
-                    .last()
-                    .is_some_and(|message| message.contains("\"stale_continuation\""))
-                {
-                    break;
-                }
-            }
+            WsMessage::Text(text) => response_messages.push(text.to_string()),
             WsMessage::Ping(payload) => socket
                 .send(WsMessage::Pong(payload))
                 .expect("websocket pong should send"),
@@ -4685,34 +4693,43 @@ fn runtime_proxy_websocket_tool_output_with_session_stays_owner_locked() {
     }
     let _ = socket.close(None);
 
-    let final_message = response_messages
-        .last()
-        .expect("websocket should produce a final error");
     assert!(
-        final_message.contains("\"stale_continuation\""),
-        "owner-locked tool output should fail as stale continuation: {response_messages:?}"
+        response_messages
+            .iter()
+            .any(|message| message.contains("\"type\":\"response.created\"")),
+        "tool-output recovery should emit response.created: {response_messages:?}"
     );
     assert!(
-        !final_message.contains("No tool call found"),
-        "proxy should not degrade into a fresh tool-output retry: {response_messages:?}"
+        response_messages
+            .iter()
+            .any(|message| message.contains("\"type\":\"response.completed\"")),
+        "tool-output recovery should emit response.completed: {response_messages:?}"
     );
 
     let websocket_requests = backend.websocket_requests();
-    assert!(
-        !websocket_requests.is_empty(),
-        "backend should observe the owned continuation attempt"
+    assert_eq!(
+        websocket_requests.len(),
+        2,
+        "backend should observe the original continuation plus fresh fallback"
     );
     assert!(
-        websocket_requests
-            .iter()
-            .all(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
-        "proxy should never send a fresh websocket retry without previous_response_id: {websocket_requests:?}"
+        websocket_requests[0].contains("\"previous_response_id\":\"resp-second\""),
+        "first websocket attempt should preserve previous_response_id: {websocket_requests:?}"
+    );
+    assert!(
+        !websocket_requests[1].contains("\"previous_response_id\":\"resp-second\""),
+        "fresh websocket fallback must clear previous_response_id: {websocket_requests:?}"
+    );
+    assert!(
+        websocket_requests[1].contains("\"session_id\":\"sess-replayable\""),
+        "fresh websocket fallback must preserve session_id: {websocket_requests:?}"
     );
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
         |log| {
-            log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+            log.contains("previous_response_fresh_fallback")
+                && log.contains("request_shape=session_replayable")
         },
         2_000,
         5_000,
@@ -4720,12 +4737,13 @@ fn runtime_proxy_websocket_tool_output_with_session_stays_owner_locked() {
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
-        "runtime log should show the owner-locked stale continuation path: {log}"
+        log.contains("previous_response_fresh_fallback")
+            && log.contains("request_shape=session_replayable"),
+        "runtime log should show the websocket fresh fallback recovery path: {log}"
     );
     assert!(
-        !log.contains("previous_response_fresh_fallback reason=previous_response_not_found request_shape=session_replayable"),
-        "tool outputs should not be logged as session-replayable fallback anymore: {log}"
+        !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "session-scoped tool outputs should avoid stale continuation failure: {log}"
     );
 }
 
