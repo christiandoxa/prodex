@@ -4578,7 +4578,7 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
 }
 
 #[test]
-fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without_turn_state() {
+fn runtime_proxy_websocket_empty_session_previous_response_does_not_fresh_fallback() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -4641,37 +4641,28 @@ fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without
         ))
         .expect("websocket request should send");
 
-    let mut response_messages = Vec::new();
-    while response_messages.len() < 2 {
+    let response_message = loop {
         match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => response_messages.push(text.to_string()),
+            WsMessage::Text(text) => break text.to_string(),
             WsMessage::Ping(payload) => socket
                 .send(WsMessage::Pong(payload))
                 .expect("websocket pong should send"),
             WsMessage::Pong(_) | WsMessage::Frame(_) => {}
             other => panic!("unexpected websocket response: {other:?}"),
         }
-    }
+    };
     let _ = socket.close(None);
 
     assert!(
-        response_messages
-            .iter()
-            .any(|message| message.contains("\"type\":\"response.created\"")),
-        "websocket fallback should emit response.created: {response_messages:?}"
-    );
-    assert!(
-        response_messages
-            .iter()
-            .any(|message| message.contains("\"type\":\"response.completed\"")),
-        "websocket fallback should emit response.completed: {response_messages:?}"
+        response_message.contains("\"code\":\"stale_continuation\""),
+        "empty session-scoped previous_response continuation should fail stale instead of replaying fresh: {response_message}"
     );
 
     let websocket_requests = backend.websocket_requests();
     assert_eq!(
         websocket_requests.len(),
-        2,
-        "backend should observe original continuation plus fresh fallback"
+        1,
+        "backend should observe only the original continuation"
     );
 
     let first_request: serde_json::Value =
@@ -4689,38 +4680,21 @@ fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without
         Some("sess-replayable")
     );
 
-    let second_request: serde_json::Value = serde_json::from_str(&websocket_requests[1])
-        .expect("fresh fallback websocket request should parse");
-    assert!(
-        second_request.get("previous_response_id").is_none(),
-        "fresh fallback must strip previous_response_id: {second_request}"
-    );
-    assert_eq!(
-        second_request
-            .get("session_id")
-            .and_then(serde_json::Value::as_str),
-        Some("sess-replayable")
-    );
-
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| {
-            log.contains("previous_response_fresh_fallback")
-                && log.contains("request_shape=session_replayable")
-        },
+        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         2_000,
         5_000,
         20,
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        log.contains("previous_response_fresh_fallback")
-            && log.contains("request_shape=session_replayable"),
-        "fresh fallback should be logged: {log}"
+        !log.contains("previous_response_fresh_fallback reason="),
+        "empty session-scoped continuations must not drop previous_response_id: {log}"
     );
     assert!(
-        !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
-        "session-replayable recovery should avoid stale continuation failure: {log}"
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "runtime log should show guarded stale-continuation behavior: {log}"
     );
 }
 
@@ -4985,7 +4959,7 @@ fn runtime_proxy_websocket_tool_output_with_session_blocks_proactive_session_rep
 }
 
 #[test]
-fn runtime_proxy_http_session_replayable_previous_response_strips_turn_state_on_fresh_fallback() {
+fn runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let second_home = temp_dir.path.join("homes/second");
@@ -5032,7 +5006,6 @@ fn runtime_proxy_http_session_replayable_previous_response_strips_turn_state_on_
             proxy.listen_addr
         ))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header("x-codex-turn-state", "turn-stale")
         .body(
             serde_json::json!({
                 "previous_response_id": "resp-missing",
@@ -5044,68 +5017,48 @@ fn runtime_proxy_http_session_replayable_previous_response_strips_turn_state_on_
         .send()
         .expect("responses request should succeed");
 
-    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.status().as_u16(), 400);
     let body = response.text().expect("responses body should decode");
     assert!(
-        body.contains("\"id\":\"resp-second\""),
-        "fresh fallback should recover on the owning session profile: {body}"
+        body.contains("previous_response_not_found"),
+        "client should see the upstream continuity failure: {body}"
     );
 
     let responses_bodies = backend.responses_bodies();
     assert_eq!(
         responses_bodies.len(),
-        2,
-        "backend should observe original continuation plus fresh fallback: {responses_bodies:?}"
+        1,
+        "backend should observe only the original continuation: {responses_bodies:?}"
     );
     assert!(
         responses_bodies[0].contains("\"previous_response_id\":\"resp-missing\""),
-        "first request should preserve previous_response_id: {}",
+        "request should preserve previous_response_id: {}",
         responses_bodies[0]
     );
     assert!(
-        !responses_bodies[1].contains("\"previous_response_id\":\"resp-missing\""),
-        "fresh fallback must clear previous_response_id: {}",
-        responses_bodies[1]
-    );
-    assert!(
-        responses_bodies[1].contains("\"session_id\":\"sess-replayable\""),
-        "fresh fallback must preserve session_id: {}",
-        responses_bodies[1]
+        responses_bodies[0].contains("\"session_id\":\"sess-replayable\""),
+        "request should preserve session_id: {}",
+        responses_bodies[0]
     );
 
     let responses_headers = backend.responses_headers();
     assert_eq!(
         responses_headers.len(),
-        2,
-        "backend should record headers for both attempts: {responses_headers:?}"
-    );
-    assert_eq!(
-        responses_headers[0]
-            .get("x-codex-turn-state")
-            .map(String::as_str),
-        Some("turn-stale")
-    );
-    assert!(
-        !responses_headers[1].contains_key("x-codex-turn-state"),
-        "fresh fallback must strip stale x-codex-turn-state: {:?}",
-        responses_headers[1]
+        1,
+        "backend should record only the original attempt: {responses_headers:?}"
     );
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| {
-            log.contains("previous_response_fresh_fallback")
-                && log.contains("request_shape=session_replayable")
-        },
+        |log| log.contains("previous_response_not_found"),
         2_000,
         5_000,
         20,
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        log.contains("previous_response_fresh_fallback")
-            && log.contains("request_shape=session_replayable"),
-        "fresh fallback should be logged: {log}"
+        !log.contains("previous_response_fresh_fallback reason="),
+        "empty session-scoped continuations must not drop previous_response_id: {log}"
     );
 }
 
@@ -6051,6 +6004,34 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
 }
 
 #[test]
+fn runtime_broker_key_is_scoped_to_prodex_version() {
+    let first = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        false,
+        "version=0.39.0",
+    );
+    let second = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        false,
+        "version=0.40.0",
+    );
+    let review = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        true,
+        "version=0.39.0",
+    );
+
+    assert_ne!(
+        first, second,
+        "runtime broker keys must not reuse brokers from a different prodex version"
+    );
+    assert_ne!(
+        first, review,
+        "review and non-review broker routes should stay isolated"
+    );
+}
+
+#[test]
 fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -6344,11 +6325,11 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
 }
 
 #[test]
-fn wait_for_existing_runtime_broker_recovery_or_exit_keeps_mismatched_live_broker_with_active_requests()
- {
+fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_broker_with_active_requests()
+{
     use std::os::unix::fs::PermissionsExt;
 
-    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "200");
+    let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "2000");
     let temp_dir = TestDir::new();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -6430,6 +6411,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_keeps_mismatched_live_broke
         .expect("busy mismatched broker registry should save");
     let client = runtime_broker_client().expect("broker client should build");
 
+    let started_at = Instant::now();
     let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
         &client,
         &paths,
@@ -6438,6 +6420,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_keeps_mismatched_live_broke
         registry.include_code_review,
     )
     .expect("wait should not fail");
+    let elapsed = started_at.elapsed();
 
     assert!(
         recovered.is_none(),
@@ -6446,6 +6429,10 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_keeps_mismatched_live_broke
     assert!(
         runtime_process_pid_alive(registry.pid),
         "busy mismatched broker should stay alive while it still serves active requests"
+    );
+    assert!(
+        elapsed < Duration::from_millis(1_000),
+        "launcher should yield quickly to spawn a current broker instead of waiting for a busy stale broker: {elapsed:?}"
     );
     assert!(
         load_runtime_broker_registry(&paths, broker_key)

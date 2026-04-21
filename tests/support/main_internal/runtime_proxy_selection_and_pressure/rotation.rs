@@ -2322,13 +2322,13 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
         "available replay turn state should keep previous_response retries alive"
     );
     assert!(
-        !runtime_websocket_previous_response_not_found_requires_stale_continuation(
+        runtime_websocket_previous_response_not_found_requires_stale_continuation(
             Some("resp-second"),
             false,
             false,
             Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
         ),
-        "fresh fallback remains available only for session-replayable websocket requests"
+        "session metadata is not enough to replay a missing previous_response chain"
     );
     assert!(
         runtime_websocket_previous_response_not_found_requires_stale_continuation(

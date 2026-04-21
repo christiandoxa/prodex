@@ -67,8 +67,7 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             RuntimeBrokerVersionGuardOutcome::Compatible => {}
             RuntimeBrokerVersionGuardOutcome::Replaced => return Ok(None),
             RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => {
-                thread::sleep(poll_interval);
-                continue;
+                return Ok(None);
             }
         }
 

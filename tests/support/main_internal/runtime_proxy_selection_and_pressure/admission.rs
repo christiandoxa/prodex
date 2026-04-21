@@ -2974,23 +2974,28 @@ fn runtime_request_explicit_session_id_ignores_turn_metadata_session_id() {
 fn runtime_proxy_broker_key_uses_stable_mount_path() {
     let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false);
 
-    let stable_key = {
-        let mut hasher = DefaultHasher::new();
-        "https://chatgpt.com/backend-api".hash(&mut hasher);
-        false.hash(&mut hasher);
-        "/backend-api/prodex".hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
+    let stable_key = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        false,
+        &runtime_broker_current_binary_identity_key(),
+    );
+    let previous_version_key = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        false,
+        "version=0.29.0",
+    );
 
     let versioned_key = {
         let mut hasher = DefaultHasher::new();
         "https://chatgpt.com/backend-api".hash(&mut hasher);
         false.hash(&mut hasher);
         "/backend-api/prodex/v0.2.99".hash(&mut hasher);
+        runtime_broker_current_binary_identity_key().hash(&mut hasher);
         format!("{:016x}", hasher.finish())
     };
 
     assert_eq!(current_key, stable_key);
+    assert_ne!(current_key, previous_version_key);
     assert_ne!(current_key, versioned_key);
 }
 

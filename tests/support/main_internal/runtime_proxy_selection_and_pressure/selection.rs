@@ -188,8 +188,8 @@ impl PreviousResponseFreshFallbackRequestShape {
         }
     }
 
-    fn can_drop_previous_response_id(self, has_session: bool) -> bool {
-        has_session && matches!(self, Self::EmptyInput)
+    fn can_drop_previous_response_id(self, _has_session: bool) -> bool {
+        false
     }
 }
 
@@ -512,9 +512,10 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_rep
         Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
     );
     assert!(
-        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
-        )
+        ),
+        "session_id is affinity metadata, not a replayable transcript"
     );
 }
 
@@ -546,9 +547,12 @@ fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_sessio
         runtime_request_previous_response_fresh_fallback_shape(&request),
         Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
     );
-    assert!(runtime_previous_response_fresh_fallback_shape_allows_recovery(
-        runtime_request_previous_response_fresh_fallback_shape(&request)
-    ));
+    assert!(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        ),
+        "session headers must not make empty previous_response continuations replayable"
+    );
 }
 
 #[test]
@@ -754,8 +758,8 @@ fn quota_blocked_previous_response_fresh_fallback_blocks_tool_output_only() {
 }
 
 #[test]
-fn quota_blocked_previous_response_fresh_fallback_allows_only_session_replayable_requests() {
-    assert!(runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+fn quota_blocked_previous_response_fresh_fallback_blocks_session_replayable_requests() {
+    assert!(!runtime_quota_blocked_previous_response_fresh_fallback_allowed(
         Some("resp_123"),
         true,
         false,
@@ -804,8 +808,8 @@ fn quota_blocked_affinity_release_blocks_nonreplayable_message_followups() {
 }
 
 #[test]
-fn quota_blocked_affinity_release_allows_session_replayable_empty_inputs() {
-    assert!(runtime_quota_blocked_affinity_is_releasable(
+fn quota_blocked_affinity_release_blocks_session_replayable_empty_inputs() {
+    assert!(!runtime_quota_blocked_affinity_is_releasable(
         RuntimeCandidateAffinity::new(
             RuntimeRouteKind::Responses,
             "main",

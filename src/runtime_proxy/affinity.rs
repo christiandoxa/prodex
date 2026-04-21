@@ -151,12 +151,14 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
 }
 
 pub(crate) fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
-    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    _shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    matches!(
-        shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
-    )
+    // A previous_response_id is the only durable upstream handle for incremental Codex turns.
+    // Session metadata is useful for affinity, but it does not prove the target account can
+    // reconstruct the missing response chain. Dropping previous_response_id here can silently
+    // erase context or detach tool outputs from their tool calls, so all chain continuations stay
+    // non-replayable.
+    false
 }
 
 pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
@@ -221,6 +223,8 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
         // context, so these requests must stay chained even when session metadata is present.
         RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation
     } else if has_session {
+        // Keep the label for diagnostics, but do not allow recovery. Session metadata alone is
+        // not a replay transcript.
         RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay
     } else {
         RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly

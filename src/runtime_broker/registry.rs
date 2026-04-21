@@ -1,12 +1,29 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
-pub(crate) fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
+pub(crate) fn runtime_broker_key_for_binary_identity(
+    upstream_base_url: &str,
+    include_code_review: bool,
+    binary_identity_key: &str,
+) -> String {
     let mut hasher = DefaultHasher::new();
     upstream_base_url.hash(&mut hasher);
     include_code_review.hash(&mut hasher);
     RUNTIME_PROXY_OPENAI_MOUNT_PATH.hash(&mut hasher);
+    binary_identity_key.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+pub(crate) fn runtime_broker_current_binary_identity_key() -> String {
+    format!("version={}", runtime_current_prodex_version())
+}
+
+pub(crate) fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
+    runtime_broker_key_for_binary_identity(
+        upstream_base_url,
+        include_code_review,
+        &runtime_broker_current_binary_identity_key(),
+    )
 }
 
 pub(crate) fn runtime_current_prodex_version() -> &'static str {
@@ -392,6 +409,14 @@ pub(crate) fn runtime_current_prodex_binary_identity() -> RuntimeProdexBinaryIde
     }
 }
 
+pub(crate) fn runtime_current_prodex_version_identity() -> RuntimeProdexBinaryIdentity {
+    RuntimeProdexBinaryIdentity {
+        prodex_version: Some(runtime_current_prodex_version().to_string()),
+        executable_path: env::current_exe().ok(),
+        executable_sha256: None,
+    }
+}
+
 pub(crate) fn runtime_process_prodex_binary_identity(pid: u32) -> RuntimeProdexBinaryIdentity {
     let resolution = runtime_process_version_resolution(pid);
     RuntimeProdexBinaryIdentity {
@@ -525,8 +550,16 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
         return RuntimeBrokerVersionGuardOutcome::Compatible;
     }
 
-    let current_identity = runtime_current_prodex_binary_identity();
     let observed_identity = runtime_broker_observed_binary_identity(registry, health);
+    let observed_version_mismatch = observed_identity
+        .prodex_version
+        .as_deref()
+        .is_some_and(|version| version != runtime_current_prodex_version());
+    let current_identity = if observed_version_mismatch {
+        runtime_current_prodex_version_identity()
+    } else {
+        runtime_current_prodex_binary_identity()
+    };
     if observed_identity.is_present()
         && runtime_prodex_binary_identity_matches(&current_identity, &observed_identity)
     {
