@@ -78,8 +78,8 @@ Cargo installs still use the `codex` binary from your `PATH`. Keep that binary u
 If you want a pinned version:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.30.0
-cargo install prodex --force --version 0.30.0
+npm install -g @christiandoxa/prodex@0.31.0
+cargo install prodex --force --version 0.31.0
 ```
 
 ## Quick start
