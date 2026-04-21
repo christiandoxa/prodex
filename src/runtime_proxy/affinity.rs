@@ -167,8 +167,7 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
     }
 
     match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
-        | Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => {
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => {
             Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
         }
         other => other,
@@ -211,9 +210,7 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
             .iter()
             .all(runtime_request_value_previous_response_input_item_is_tool_output);
 
-    Some(if tool_output_only && has_session {
-        RuntimePreviousResponseFreshFallbackShape::SessionReplayable
-    } else if tool_output_only {
+    Some(if tool_output_only {
         RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly
     } else if has_replayable_input {
         RuntimePreviousResponseFreshFallbackShape::ReplayableInput

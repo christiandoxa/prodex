@@ -2675,6 +2675,54 @@ fn handle_runtime_proxy_backend_websocket(
                     ))
                     .expect("previous_response_not_found should be sent");
             }
+            "second-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
+                ) && previous_response_id.is_none()
+                    && request_body_contains_only_function_call_output(&request) =>
+            {
+                let (call_id, item_label) = serde_json::from_str::<serde_json::Value>(&request)
+                    .ok()
+                    .and_then(|body_json| {
+                        body_json
+                            .get("input")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|input| input.first())
+                            .map(|item| {
+                                let call_id = item
+                                    .get("call_id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("call_missing");
+                                let item_label = item
+                                    .get("type")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("tool_call_output")
+                                    .replace('_', " ");
+                                (call_id.to_string(), item_label)
+                            })
+                    })
+                    .unwrap_or_else(|| {
+                        ("call_missing".to_string(), "tool call output".to_string())
+                    });
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": format!(
+                                    "No tool call found for {item_label} with call_id {call_id}."
+                                ),
+                                "param": "input",
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("tool output mismatch should be sent");
+            }
             "second-account" => {
                 let response_id =
                     runtime_proxy_backend_initial_response_id_for_account("second-account")
@@ -4545,6 +4593,139 @@ fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without
     assert!(
         !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         "session-replayable recovery should avoid stale continuation failure: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_websocket_tool_output_with_session_stays_owner_locked() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/realtime?call_id=call-123",
+        proxy.listen_addr
+    ))
+    .expect("websocket client should connect");
+    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "previous_response_id": "resp-second",
+                "session_id": "sess-replayable",
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_h7GvfUPAvb95drykPBrTw65i",
+                    "output": "ok"
+                }],
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("websocket request should send");
+
+    let mut response_messages = Vec::new();
+    loop {
+        match socket.read().expect("websocket response should read") {
+            WsMessage::Text(text) => {
+                response_messages.push(text.to_string());
+                if response_messages
+                    .last()
+                    .is_some_and(|message| message.contains("\"stale_continuation\""))
+                {
+                    break;
+                }
+            }
+            WsMessage::Ping(payload) => socket
+                .send(WsMessage::Pong(payload))
+                .expect("websocket pong should send"),
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket response: {other:?}"),
+        }
+    }
+    let _ = socket.close(None);
+
+    let final_message = response_messages
+        .last()
+        .expect("websocket should produce a final error");
+    assert!(
+        final_message.contains("\"stale_continuation\""),
+        "owner-locked tool output should fail as stale continuation: {response_messages:?}"
+    );
+    assert!(
+        !final_message.contains("No tool call found"),
+        "proxy should not degrade into a fresh tool-output retry: {response_messages:?}"
+    );
+
+    let websocket_requests = backend.websocket_requests();
+    assert!(
+        websocket_requests.len() >= 1,
+        "backend should observe the owned continuation attempt"
+    );
+    assert!(
+        websocket_requests
+            .iter()
+            .all(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "proxy should never send a fresh websocket retry without previous_response_id: {websocket_requests:?}"
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| {
+            log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+        },
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "runtime log should show the owner-locked stale continuation path: {log}"
+    );
+    assert!(
+        !log.contains("previous_response_fresh_fallback reason=previous_response_not_found request_shape=session_replayable"),
+        "tool outputs should not be logged as session-replayable fallback anymore: {log}"
     );
 }
 
