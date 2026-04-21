@@ -43,13 +43,13 @@ Depending on what you want to run:
 - Claude Code (`claude`) for `prodex claude` and `prodex claude caveman`
 - optionally `claude-mem` for `mem` variants
 
-Installing `@christiandoxa/prodex` from npm also installs the pinned Codex runtime dependency:
+Installing `@christiandoxa/prodex` from npm also installs the current Codex runtime dependency:
 
 ```bash
 npm install -g @christiandoxa/prodex
 ```
 
-That pulls in `@openai/codex@0.121.0` as well. Claude Code is still separate.
+That pulls in `@openai/codex@latest` at install or update time. Claude Code is still separate.
 
 If you want Claude-Mem support, install it with the upstream installer:
 
@@ -72,6 +72,8 @@ npm install -g @christiandoxa/prodex
 ```bash
 cargo install prodex
 ```
+
+Cargo installs still use the `codex` binary from your `PATH`. Keep that binary updated separately if you want the newest Codex there too.
 
 If you want a pinned version:
 

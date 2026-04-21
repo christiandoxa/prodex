@@ -13,7 +13,7 @@ For contributors: the crate is split across focused modules now. `src/main.rs` i
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
 
-If you install `@christiandoxa/prodex` from npm, the pinned Codex runtime dependency `@openai/codex@0.121.0` is installed for you. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+If you install `@christiandoxa/prodex` from npm, the runtime dependency `@openai/codex@latest` is installed for you at install or update time. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
 If you want the `mem` path, install Claude-Mem separately with the upstream installer:
 
@@ -54,7 +54,8 @@ cargo install prodex --force --version 0.30.0
 
 Dependency status in this repo:
 
-- The npm runtime dependency is pinned to `@openai/codex@0.121.0` in the workspace package manifest
+- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest
+- Cargo installs still use whatever `codex` binary is on your `PATH`
 - Run `cargo update` whenever dependency metadata changes so the published lockfile stays in sync
 - Versioned install snippets in this guide and `README.md` are synced from `Cargo.toml`
 

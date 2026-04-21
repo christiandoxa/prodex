@@ -8,7 +8,7 @@ export const repoRoot = path.resolve(scriptDir, "..", "..");
 export const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
 export const npmScope = "@christiandoxa";
 export const mainPackageName = `${npmScope}/prodex`;
-export const openaiCodexDependencySpecifier = "0.121.0";
+export const openaiCodexDependencySpecifier = "latest";
 export const packageVersionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 export const platformPackages = [
