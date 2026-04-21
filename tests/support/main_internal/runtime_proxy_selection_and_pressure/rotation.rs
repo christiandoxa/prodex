@@ -1347,6 +1347,217 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
 }
 
 #[test]
+fn previous_response_release_preserves_session_and_compact_session_lineage_for_compact_followups() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths,
+        state,
+        upstream_base_url: backend.base_url(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
+
+    remember_runtime_response_ids_with_turn_state(
+        &shared,
+        "second",
+        &[String::from("resp-second")],
+        Some("turn-second"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("response affinity should be recorded");
+    remember_runtime_turn_state(
+        &shared,
+        "second",
+        Some("turn-second"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("turn-state affinity should be recorded");
+    remember_runtime_session_id(
+        &shared,
+        "second",
+        Some("sess-compact"),
+        RuntimeRouteKind::Websocket,
+    )
+    .expect("session affinity should be recorded");
+    remember_runtime_compact_lineage(
+        &shared,
+        "second",
+        Some("sess-compact"),
+        None,
+        RuntimeRouteKind::Compact,
+    )
+    .expect("compact session lineage should be recorded");
+    wait_for_runtime_background_queues_idle();
+
+    assert!(!release_runtime_previous_response_affinity(
+        &shared,
+        "second",
+        Some("resp-second"),
+        Some("turn-second"),
+        Some("sess-compact"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("first not-found should defer release"));
+    assert!(release_runtime_previous_response_affinity(
+        &shared,
+        "second",
+        Some("resp-second"),
+        Some("turn-second"),
+        Some("sess-compact"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("second not-found should release response and turn-state affinity"));
+    wait_for_runtime_background_queues_idle();
+
+    let compact_session_key = runtime_compact_session_lineage_key("sess-compact");
+    {
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        assert!(
+            !runtime
+                .state
+                .response_profile_bindings
+                .contains_key("resp-second"),
+            "released previous_response affinity should be removed"
+        );
+        assert!(
+            !runtime.turn_state_bindings.contains_key("turn-second"),
+            "released turn_state affinity should be removed"
+        );
+        assert!(
+            runtime.session_id_bindings.contains_key("sess-compact"),
+            "existing session affinity should survive response/turn-state release"
+        );
+        assert!(
+            runtime
+                .state
+                .session_profile_bindings
+                .contains_key("sess-compact"),
+            "persisted session affinity should survive response/turn-state release"
+        );
+        assert!(
+            runtime
+                .session_id_bindings
+                .contains_key(&compact_session_key),
+            "compact session lineage should survive response/turn-state release"
+        );
+        assert_eq!(
+            runtime
+                .continuation_statuses
+                .response
+                .get("resp-second")
+                .map(|status| status.state),
+            Some(RuntimeContinuationBindingLifecycle::Dead)
+        );
+        assert_eq!(
+            runtime
+                .continuation_statuses
+                .turn_state
+                .get("turn-second")
+                .map(|status| status.state),
+            Some(RuntimeContinuationBindingLifecycle::Dead)
+        );
+        assert_eq!(
+            runtime
+                .continuation_statuses
+                .session_id
+                .get("sess-compact")
+                .map(|status| status.state),
+            Some(RuntimeContinuationBindingLifecycle::Verified)
+        );
+        assert_eq!(
+            runtime
+                .continuation_statuses
+                .session_id
+                .get(&compact_session_key)
+                .map(|status| status.state),
+            Some(RuntimeContinuationBindingLifecycle::Verified)
+        );
+    }
+
+    assert_eq!(
+        runtime_compact_route_followup_bound_profile(&shared, None, Some("sess-compact"))
+            .expect("compact session lookup should succeed"),
+        Some(("second".to_string(), "session_id"))
+    );
+
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("session_id".to_string(), "sess-compact".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+    let _response = proxy_runtime_standard_request(1, &request, &shared)
+        .expect("compact follow-up request should succeed");
+    wait_for_runtime_background_queues_idle();
+
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()]
+    );
+    let log = fs::read_to_string(&shared.log_path)
+        .expect("runtime log should be readable after compact follow-up");
+    assert!(
+        log.contains("compact_followup_owner profile=second source=session_id"),
+        "compact follow-up should still resolve the preserved session lineage owner: {log}"
+    );
+}
+
+#[test]
 fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_compatible() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");

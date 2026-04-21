@@ -799,9 +799,12 @@ fn session_affinity_skips_stale_verified_continuation_status() {
     );
 }
 
-#[test]
-fn previous_response_affinity_release_requires_repeated_not_found() {
-    let temp_dir = TestDir::new();
+fn previous_response_affinity_test_shared(
+    temp_dir: &TestDir,
+    response_id: &str,
+    now: i64,
+    profile_health: BTreeMap<String, RuntimeProfileHealth>,
+) -> RuntimeRotationProxyShared {
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let paths = AppPaths {
@@ -811,7 +814,6 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
-    let now = Local::now().timestamp();
     let state = AppState {
         active_profile: Some("main".to_string()),
         profiles: BTreeMap::from([(
@@ -825,7 +827,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
         )]),
         last_run_selected_at: BTreeMap::new(),
         response_profile_bindings: BTreeMap::from([(
-            "resp-main".to_string(),
+            response_id.to_string(),
             ResponseProfileBinding {
                 profile_name: "main".to_string(),
                 bound_at: now,
@@ -834,7 +836,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
         session_profile_bindings: BTreeMap::new(),
     };
 
-    let shared = RuntimeRotationProxyShared {
+    RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -866,9 +868,17 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
-            profile_health: BTreeMap::new(),
+            profile_health,
         })),
-    };
+    }
+}
+
+#[test]
+fn previous_response_affinity_release_requires_repeated_not_found() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let shared =
+        previous_response_affinity_test_shared(&temp_dir, "resp-main", now, BTreeMap::new());
 
     assert!(
         !release_runtime_previous_response_affinity(
@@ -921,6 +931,149 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
             .get("resp-main")
             .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn previous_response_affinity_release_triggers_at_negative_cache_threshold() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let response_id = "resp-main";
+    let negative_cache_key = runtime_previous_response_negative_cache_key(
+        response_id,
+        "main",
+        RuntimeRouteKind::Responses,
+    );
+    let seeded_failures = RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD - 1;
+    let shared = previous_response_affinity_test_shared(
+        &temp_dir,
+        response_id,
+        now,
+        BTreeMap::from([(
+            negative_cache_key.clone(),
+            RuntimeProfileHealth {
+                score: seeded_failures,
+                updated_at: now,
+            },
+        )]),
+    );
+
+    assert!(
+        release_runtime_previous_response_affinity(
+            &shared,
+            "main",
+            Some(response_id),
+            None,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("threshold-reaching not-found should release affinity")
+    );
+
+    let runtime = shared.runtime.lock().expect("runtime lock");
+    assert!(
+        !runtime
+            .state
+            .response_profile_bindings
+            .contains_key(response_id),
+        "binding should release once negative cache hits threshold"
+    );
+    assert_eq!(
+        runtime
+            .profile_health
+            .get(&negative_cache_key)
+            .map(|health| health.score),
+        Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD)
+    );
+    assert_eq!(
+        runtime
+            .continuation_statuses
+            .response
+            .get(response_id)
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
+fn previous_response_affinity_ignores_expired_negative_cache_until_threshold_rebuilds() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let response_id = "resp-main";
+    let negative_cache_key = runtime_previous_response_negative_cache_key(
+        response_id,
+        "main",
+        RuntimeRouteKind::Responses,
+    );
+    let shared = previous_response_affinity_test_shared(
+        &temp_dir,
+        response_id,
+        now,
+        BTreeMap::from([(
+            negative_cache_key.clone(),
+            RuntimeProfileHealth {
+                score: RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD - 1,
+                updated_at: now - RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS - 1,
+            },
+        )]),
+    );
+
+    assert!(
+        !release_runtime_previous_response_affinity(
+            &shared,
+            "main",
+            Some(response_id),
+            None,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("expired negative cache should not force early release")
+    );
+
+    {
+        let runtime = shared.runtime.lock().expect("runtime lock");
+        assert!(
+            runtime
+                .state
+                .response_profile_bindings
+                .contains_key(response_id),
+            "expired failures should not release affinity on first fresh miss"
+        );
+        assert_eq!(
+            runtime
+                .profile_health
+                .get(&negative_cache_key)
+                .map(|health| health.score),
+            Some(1)
+        );
+    }
+
+    assert!(
+        release_runtime_previous_response_affinity(
+            &shared,
+            "main",
+            Some(response_id),
+            None,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("freshly rebuilt threshold should still release on second miss")
+    );
+
+    let runtime = shared.runtime.lock().expect("runtime lock");
+    assert!(
+        !runtime
+            .state
+            .response_profile_bindings
+            .contains_key(response_id),
+        "binding should release after fresh misses rebuild threshold"
+    );
+    assert_eq!(
+        runtime
+            .profile_health
+            .get(&negative_cache_key)
+            .map(|health| health.score),
+        Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD)
     );
 }
 
@@ -1667,6 +1820,387 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
     assert!(
         backend.responses_accounts().is_empty(),
         "fresh compact request should be shed before reaching upstream"
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("compact_final_failure exit=pressure reason=pressure"),
+        "compact pressure failure should emit a terminal marker: {log}"
+    );
+}
+
+#[test]
+fn compact_final_failure_logs_overload_terminal_reason() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_overloaded();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let now = Local::now().timestamp();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                    five_hour_remaining_percent: 80,
+                    five_hour_reset_at: now + 3600,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                },
+            )]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(41, &request, &shared)
+        .expect("compact overload request should return upstream failure");
+    let (status, _body) = tiny_http_response_status_and_body(response);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 500);
+    assert!(
+        log.contains("compact_final_failure exit=candidate_exhausted reason=overload"),
+        "compact overload terminal marker should identify overload exhaustion: {log}"
+    );
+    assert!(
+        log.contains("last_failure=overload"),
+        "compact overload terminal marker should preserve the last failure class: {log}"
+    );
+}
+
+#[test]
+fn compact_final_failure_logs_quota_terminal_reason() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::from([(
+                "sess-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )]),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("session_id".to_string(), "sess-main".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(42, &request, &shared)
+        .expect("hard-affinity compact quota request should return upstream failure");
+    let (status, body) = tiny_http_response_status_and_body(response);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 429);
+    assert!(
+        body.contains("The usage limit has been reached"),
+        "unexpected compact quota response body: {body}"
+    );
+    assert!(
+        log.contains("compact_final_failure exit=quota_fallback_exhausted reason=quota"),
+        "compact quota terminal marker should identify quota exhaustion: {log}"
+    );
+}
+
+#[test]
+fn compact_final_failure_logs_local_selection_terminal_reason() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let now = Local::now().timestamp();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::from([(
+                "main".to_string(),
+                RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                    five_hour_remaining_percent: 0,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 90,
+                    weekly_reset_at: now + 86_400,
+                },
+            )]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(43, &request, &shared)
+        .expect("exhausted compact request should receive a local failure");
+    let (status, body) = tiny_http_response_status_and_body(response);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 503);
+    assert!(
+        body.contains(runtime_proxy_local_selection_failure_message()),
+        "unexpected compact local-selection response body: {body}"
+    );
+    assert!(
+        log.contains(
+            "compact_final_failure exit=candidate_exhausted_fallback reason=local_selection"
+        ),
+        "compact local-selection terminal marker should identify fallback-local-selection: {log}"
+    );
+    assert!(
+        log.contains("last_failure=none"),
+        "compact local-selection terminal marker should preserve that no upstream failure existed: {log}"
+    );
+}
+
+#[test]
+fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home,
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    RuntimeProfileUsageSnapshot {
+                        checked_at: now,
+                        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                        five_hour_remaining_percent: 80,
+                        five_hour_reset_at: now + 3600,
+                        weekly_status: RuntimeQuotaWindowStatus::Ready,
+                        weekly_remaining_percent: 80,
+                        weekly_reset_at: now + 86_400,
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    RuntimeProfileUsageSnapshot {
+                        checked_at: now,
+                        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                        five_hour_remaining_percent: 75,
+                        five_hour_reset_at: now + 3600,
+                        weekly_status: RuntimeQuotaWindowStatus::Ready,
+                        weekly_remaining_percent: 78,
+                        weekly_reset_at: now + 86_400,
+                    },
+                ),
+            ]),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::from([
+                ("main".to_string(), hard_limit),
+                ("second".to_string(), hard_limit),
+            ]),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(44, &request, &shared)
+        .expect("saturated compact request should receive a local failure");
+    let (status, body) = tiny_http_response_status_and_body(response);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 503);
+    assert!(
+        body.contains("temporarily saturated"),
+        "unexpected compact inflight saturation response body: {body}"
+    );
+    assert!(
+        log.contains("compact_final_failure exit=candidate_exhausted reason=inflight_saturation"),
+        "compact saturation terminal marker should identify inflight saturation: {log}"
+    );
+    assert!(
+        log.contains("saw_inflight_saturation=true"),
+        "compact saturation terminal marker should preserve the saturation flag: {log}"
     );
 }
 
@@ -2478,4 +3012,3 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         _ => panic!("expected exhausted pre-send compact skip"),
     }
 }
-

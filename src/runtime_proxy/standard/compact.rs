@@ -1,5 +1,51 @@
 use super::*;
 
+fn runtime_proxy_compact_last_failure_kind(
+    last_failure: Option<&(tiny_http::ResponseBox, bool)>,
+) -> &'static str {
+    match last_failure {
+        Some((_response, true)) => "quota",
+        Some((_response, false)) => "overload",
+        None => "none",
+    }
+}
+
+fn runtime_proxy_compact_final_failure_reason(
+    last_failure: Option<&(tiny_http::ResponseBox, bool)>,
+    saw_inflight_saturation: bool,
+) -> Option<&'static str> {
+    match last_failure {
+        Some((_response, false)) => Some("overload"),
+        Some((_response, true)) if saw_inflight_saturation => Some("inflight_saturation"),
+        Some((_response, true)) => Some("quota"),
+        None if saw_inflight_saturation => Some("inflight_saturation"),
+        None => None,
+    }
+}
+
+fn log_runtime_proxy_compact_final_failure(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    exit: &str,
+    reason: &str,
+    selection_attempts: usize,
+    selection_started_at: Instant,
+    pressure_mode: bool,
+    last_failure_kind: &str,
+    saw_inflight_saturation: bool,
+    profile_name: Option<&str>,
+) {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http compact_final_failure exit={exit} reason={reason} attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode} last_failure={} saw_inflight_saturation={saw_inflight_saturation} profile={}",
+            selection_started_at.elapsed().as_millis(),
+            last_failure_kind,
+            profile_name.unwrap_or("-"),
+        ),
+    );
+}
+
 pub(super) fn proxy_runtime_compact_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -37,6 +83,8 @@ pub(super) fn proxy_runtime_compact_request(
         .unwrap_or_else(|| current_profile.clone());
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Compact);
+    let selection_started_at = Instant::now();
+    let mut selection_attempts = 0usize;
     if runtime_proxy_should_shed_fresh_compact_request(
         pressure_mode,
         initial_compact_affinity_profile,
@@ -46,6 +94,18 @@ pub(super) fn proxy_runtime_compact_request(
             format!(
                 "request={request_id} transport=http compact_pressure_shed reason=fresh_request pressure_mode={pressure_mode}"
             ),
+        );
+        log_runtime_proxy_compact_final_failure(
+            shared,
+            request_id,
+            "pressure",
+            "pressure",
+            selection_attempts,
+            selection_started_at,
+            pressure_mode,
+            "none",
+            false,
+            None,
         );
         return Ok(build_runtime_proxy_json_error_response(
             503,
@@ -57,8 +117,6 @@ pub(super) fn proxy_runtime_compact_request(
     let mut conservative_overload_retried_profiles = BTreeSet::new();
     let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
     let mut saw_inflight_saturation = false;
-    let selection_started_at = Instant::now();
-    let mut selection_attempts = 0usize;
 
     loop {
         if runtime_proxy_precommit_budget_exhausted(
@@ -74,14 +132,43 @@ pub(super) fn proxy_runtime_compact_request(
                     selection_started_at.elapsed().as_millis()
                 ),
             );
+            let final_reason = runtime_proxy_compact_final_failure_reason(
+                last_failure.as_ref(),
+                saw_inflight_saturation,
+            );
+            let last_failure_kind = runtime_proxy_compact_last_failure_kind(last_failure.as_ref());
             if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
                 last_failure,
                 saw_inflight_saturation,
                 true,
             ) {
+                log_runtime_proxy_compact_final_failure(
+                    shared,
+                    request_id,
+                    "precommit_budget_exhausted",
+                    final_reason.unwrap_or("local_selection"),
+                    selection_attempts,
+                    selection_started_at,
+                    pressure_mode,
+                    last_failure_kind,
+                    saw_inflight_saturation,
+                    None,
+                );
                 return Ok(response);
             }
             if compact_followup_profile.is_some() || session_profile.is_some() {
+                log_runtime_proxy_compact_final_failure(
+                    shared,
+                    request_id,
+                    "precommit_budget_exhausted",
+                    "local_selection",
+                    selection_attempts,
+                    selection_started_at,
+                    pressure_mode,
+                    last_failure_kind,
+                    saw_inflight_saturation,
+                    None,
+                );
                 return Ok(build_runtime_proxy_json_error_response(
                     503,
                     "service_unavailable",
@@ -116,8 +203,38 @@ pub(super) fn proxy_runtime_compact_request(
                     )?;
                     Ok(response)
                 }
-                RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
-                RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
+                RuntimeStandardAttempt::RetryableFailure {
+                    profile_name,
+                    response,
+                    overload,
+                } => {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        request_id,
+                        "precommit_budget_exhausted_fallback",
+                        if overload { "overload" } else { "quota" },
+                        selection_attempts,
+                        selection_started_at,
+                        pressure_mode,
+                        last_failure_kind,
+                        saw_inflight_saturation,
+                        Some(&profile_name),
+                    );
+                    Ok(response)
+                }
+                RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        request_id,
+                        "precommit_budget_exhausted_fallback",
+                        "local_selection",
+                        selection_attempts,
+                        selection_started_at,
+                        pressure_mode,
+                        last_failure_kind,
+                        saw_inflight_saturation,
+                        Some(&profile_name),
+                    );
                     Ok(build_runtime_proxy_json_error_response(
                         503,
                         "service_unavailable",
@@ -155,6 +272,11 @@ pub(super) fn proxy_runtime_compact_request(
                     }
                 ),
             );
+            let final_reason = runtime_proxy_compact_final_failure_reason(
+                last_failure.as_ref(),
+                saw_inflight_saturation,
+            );
+            let last_failure_kind = runtime_proxy_compact_last_failure_kind(last_failure.as_ref());
             let remaining_cold_start_profiles =
                 runtime_remaining_sync_probe_cold_start_profiles_for_route(
                     shared,
@@ -179,9 +301,33 @@ pub(super) fn proxy_runtime_compact_request(
                 saw_inflight_saturation,
                 true,
             ) {
+                log_runtime_proxy_compact_final_failure(
+                    shared,
+                    request_id,
+                    "candidate_exhausted",
+                    final_reason.unwrap_or("local_selection"),
+                    selection_attempts,
+                    selection_started_at,
+                    pressure_mode,
+                    last_failure_kind,
+                    saw_inflight_saturation,
+                    None,
+                );
                 return Ok(response);
             }
             if compact_followup_profile.is_some() || session_profile.is_some() {
+                log_runtime_proxy_compact_final_failure(
+                    shared,
+                    request_id,
+                    "candidate_exhausted",
+                    "local_selection",
+                    selection_attempts,
+                    selection_started_at,
+                    pressure_mode,
+                    last_failure_kind,
+                    saw_inflight_saturation,
+                    None,
+                );
                 return Ok(build_runtime_proxy_json_error_response(
                     503,
                     "service_unavailable",
@@ -216,8 +362,38 @@ pub(super) fn proxy_runtime_compact_request(
                     )?;
                     Ok(response)
                 }
-                RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
-                RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
+                RuntimeStandardAttempt::RetryableFailure {
+                    profile_name,
+                    response,
+                    overload,
+                } => {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        request_id,
+                        "candidate_exhausted_fallback",
+                        if overload { "overload" } else { "quota" },
+                        selection_attempts,
+                        selection_started_at,
+                        pressure_mode,
+                        last_failure_kind,
+                        saw_inflight_saturation,
+                        Some(&profile_name),
+                    );
+                    Ok(response)
+                }
+                RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        request_id,
+                        "candidate_exhausted_fallback",
+                        "local_selection",
+                        selection_attempts,
+                        selection_started_at,
+                        pressure_mode,
+                        last_failure_kind,
+                        saw_inflight_saturation,
+                        Some(&profile_name),
+                    );
                     Ok(build_runtime_proxy_json_error_response(
                         503,
                         "service_unavailable",
@@ -348,7 +524,8 @@ pub(super) fn proxy_runtime_compact_request(
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} transport=http compact_retryable_failure profile={profile_name}"
+                        "request={request_id} transport=http compact_retryable_failure profile={profile_name} reason={}",
+                        if overload { "overload" } else { "quota" }
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
@@ -365,6 +542,18 @@ pub(super) fn proxy_runtime_compact_request(
                         trusted_previous_response_affinity: false,
                     })
                 {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        request_id,
+                        "hard_affinity_retryable_failure",
+                        "quota",
+                        selection_attempts,
+                        selection_started_at,
+                        pressure_mode,
+                        runtime_proxy_compact_last_failure_kind(last_failure.as_ref()),
+                        saw_inflight_saturation,
+                        Some(&profile_name),
+                    );
                     return Ok(response);
                 }
                 if released_affinity {
@@ -407,6 +596,18 @@ pub(super) fn proxy_runtime_compact_request(
                         RuntimeRouteKind::Compact,
                     )?
                 {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        request_id,
+                        "quota_fallback_exhausted",
+                        "quota",
+                        selection_attempts,
+                        selection_started_at,
+                        pressure_mode,
+                        runtime_proxy_compact_last_failure_kind(last_failure.as_ref()),
+                        saw_inflight_saturation,
+                        Some(&profile_name),
+                    );
                     return Ok(response);
                 }
                 excluded_profiles.insert(profile_name);

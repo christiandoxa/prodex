@@ -296,6 +296,29 @@ fn runtime_doctor_push_marker_detail_rows(
                 ),
             );
     }
+    if marker == "previous_response_fresh_fallback"
+        || marker == "previous_response_fresh_fallback_blocked"
+    {
+        fields
+            .push(
+                "Replay shape",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("request_shape"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Replay reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+    }
     if marker == "stale_continuation" {
         fields
             .push(
@@ -356,6 +379,36 @@ fn runtime_doctor_push_marker_detail_rows(
     }
     if marker == "runtime_proxy_startup_audit" {
         fields.push("Startup pressure", summary.startup_audit_pressure.clone());
+    }
+    if marker == "compact_final_failure" {
+        fields
+            .push(
+                "Compact exit",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("exit"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Compact reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Compact last fail",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("last_failure"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            );
     }
     if marker == "compat_request_surface" {
         fields

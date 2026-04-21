@@ -187,6 +187,13 @@ fn websocket_previous_response_not_found_decision_prefers_session_fallback_for_t
     assert_eq!(decision.retry_delay, None);
     assert!(!decision.stale_continuation);
     assert!(decision.fresh_fallback_allowed);
+    assert_eq!(
+        runtime_previous_response_not_found_observability_outcome(
+            decision,
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        ),
+        Some("session_replayable_recovery")
+    );
 }
 
 #[test]
@@ -209,6 +216,13 @@ fn websocket_previous_response_not_found_decision_marks_nonreplayable_continuati
     assert!(decision.stale_continuation);
     assert!(!decision.fresh_fallback_allowed);
     assert!(decision.fresh_fallback_blocked_without_affinity);
+    assert_eq!(
+        runtime_previous_response_not_found_observability_outcome(
+            decision,
+            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        ),
+        Some("blocked_nonreplayable_without_affinity")
+    );
 }
 
 #[test]

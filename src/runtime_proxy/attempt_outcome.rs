@@ -122,3 +122,28 @@ pub(crate) fn runtime_previous_response_not_found_decision(
             && !request_requires_locked_previous_response_affinity,
     }
 }
+
+pub(crate) fn runtime_previous_response_not_found_observability_outcome(
+    decision: RuntimePreviousResponseNotFoundDecision,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+) -> Option<&'static str> {
+    if decision.fresh_fallback_allowed
+        && matches!(
+            fresh_fallback_shape,
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        )
+    {
+        Some("session_replayable_recovery")
+    } else if decision.fresh_fallback_blocked_without_affinity
+        && matches!(
+            fresh_fallback_shape,
+            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        )
+    {
+        Some("blocked_nonreplayable_without_affinity")
+    } else if decision.fresh_fallback_blocked_without_affinity {
+        Some("blocked_without_affinity")
+    } else {
+        None
+    }
+}

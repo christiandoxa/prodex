@@ -4323,6 +4323,153 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
 }
 
 #[test]
+fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without_turn_state() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/codex/realtime?call_id=call-123",
+        proxy.listen_addr
+    ))
+    .expect("websocket client should connect");
+    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "previous_response_id": "resp-second",
+                "session_id": "sess-replayable",
+                "input": [],
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("websocket request should send");
+
+    let mut response_messages = Vec::new();
+    while response_messages.len() < 2 {
+        match socket.read().expect("websocket response should read") {
+            WsMessage::Text(text) => response_messages.push(text.to_string()),
+            WsMessage::Ping(payload) => socket
+                .send(WsMessage::Pong(payload))
+                .expect("websocket pong should send"),
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket response: {other:?}"),
+        }
+    }
+    let _ = socket.close(None);
+
+    assert!(
+        response_messages
+            .iter()
+            .any(|message| message.contains("\"type\":\"response.created\"")),
+        "websocket fallback should emit response.created: {response_messages:?}"
+    );
+    assert!(
+        response_messages
+            .iter()
+            .any(|message| message.contains("\"type\":\"response.completed\"")),
+        "websocket fallback should emit response.completed: {response_messages:?}"
+    );
+
+    let websocket_requests = backend.websocket_requests();
+    assert_eq!(
+        websocket_requests.len(),
+        2,
+        "backend should observe original continuation plus fresh fallback"
+    );
+
+    let first_request: serde_json::Value =
+        serde_json::from_str(&websocket_requests[0]).expect("first websocket request should parse");
+    assert_eq!(
+        first_request
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str),
+        Some("resp-second")
+    );
+    assert_eq!(
+        first_request
+            .get("session_id")
+            .and_then(serde_json::Value::as_str),
+        Some("sess-replayable")
+    );
+
+    let second_request: serde_json::Value = serde_json::from_str(&websocket_requests[1])
+        .expect("fresh fallback websocket request should parse");
+    assert!(
+        second_request.get("previous_response_id").is_none(),
+        "fresh fallback must strip previous_response_id: {second_request}"
+    );
+    assert_eq!(
+        second_request
+            .get("session_id")
+            .and_then(serde_json::Value::as_str),
+        Some("sess-replayable")
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| {
+            log.contains("previous_response_fresh_fallback")
+                && log.contains("request_shape=session_replayable")
+        },
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log.contains("previous_response_fresh_fallback")
+            && log.contains("request_shape=session_replayable"),
+        "fresh fallback should be logged: {log}"
+    );
+    assert!(
+        !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "session-replayable recovery should avoid stale continuation failure: {log}"
+    );
+}
+
+#[test]
 fn runtime_proxy_worker_count_env_override_beats_policy_file() {
     let temp_dir = TestDir::new();
     let prodex_home = temp_dir.path.join("prodex");

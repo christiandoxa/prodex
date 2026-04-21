@@ -14,7 +14,18 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         .marker_counts
         .insert("chain_dead_upstream_confirmed", 1);
     summary.marker_counts.insert("stale_continuation", 1);
+    summary
+        .marker_counts
+        .insert("previous_response_fresh_fallback", 1);
+    summary
+        .marker_counts
+        .insert("previous_response_fresh_fallback_blocked", 1);
     summary.marker_counts.insert("compact_followup_owner", 1);
+    summary.marker_counts.insert("compact_committed", 1);
+    summary
+        .marker_counts
+        .insert("compact_candidate_exhausted", 1);
+    summary.marker_counts.insert("compact_final_failure", 1);
     summary
         .marker_counts
         .insert("compact_fresh_fallback_blocked", 1);
@@ -27,6 +38,10 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.facet_counts.insert(
         "quota_source".to_string(),
         BTreeMap::from([("persisted_snapshot".to_string(), 1)]),
+    );
+    summary.facet_counts.insert(
+        "request_shape".to_string(),
+        BTreeMap::from([("session_replayable".to_string(), 2)]),
     );
     summary.previous_response_not_found_by_route =
         BTreeMap::from([("responses".to_string(), 1), ("websocket".to_string(), 1)]);
@@ -50,6 +65,41 @@ fn runtime_doctor_json_value_includes_selection_markers() {
             ("profile".to_string(), "second".to_string()),
             ("route".to_string(), "responses".to_string()),
             ("quota_source".to_string(), "persisted_snapshot".to_string()),
+        ]),
+    );
+    summary.marker_last_fields.insert(
+        "previous_response_fresh_fallback",
+        BTreeMap::from([
+            ("reason".to_string(), "quota_blocked".to_string()),
+            (
+                "request_shape".to_string(),
+                "session_replayable".to_string(),
+            ),
+        ]),
+    );
+    summary.marker_last_fields.insert(
+        "previous_response_fresh_fallback_blocked",
+        BTreeMap::from([
+            (
+                "reason".to_string(),
+                "previous_response_not_found".to_string(),
+            ),
+            (
+                "request_shape".to_string(),
+                "session_replayable".to_string(),
+            ),
+        ]),
+    );
+    summary.marker_last_fields.insert(
+        "compact_candidate_exhausted",
+        BTreeMap::from([("transport".to_string(), "http".to_string())]),
+    );
+    summary.marker_last_fields.insert(
+        "compact_final_failure",
+        BTreeMap::from([
+            ("exit".to_string(), "candidate_exhausted".to_string()),
+            ("reason".to_string(), "quota".to_string()),
+            ("last_failure".to_string(), "quota".to_string()),
         ]),
     );
     summary.diagnosis = "Recent selection decisions were logged.".to_string();
@@ -85,7 +135,18 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(value["marker_counts"]["chain_retried_owner"], 1);
     assert_eq!(value["marker_counts"]["chain_dead_upstream_confirmed"], 1);
     assert_eq!(value["marker_counts"]["stale_continuation"], 1);
+    assert_eq!(
+        value["marker_counts"]["previous_response_fresh_fallback"],
+        1
+    );
+    assert_eq!(
+        value["marker_counts"]["previous_response_fresh_fallback_blocked"],
+        1
+    );
     assert_eq!(value["marker_counts"]["compact_followup_owner"], 1);
+    assert_eq!(value["marker_counts"]["compact_committed"], 1);
+    assert_eq!(value["marker_counts"]["compact_candidate_exhausted"], 1);
+    assert_eq!(value["marker_counts"]["compact_final_failure"], 1);
     assert_eq!(value["marker_counts"]["compact_fresh_fallback_blocked"], 1);
     assert_eq!(
         value["previous_response_not_found_by_route"]["responses"],
@@ -126,12 +187,28 @@ fn runtime_doctor_json_value_includes_selection_markers() {
         1
     );
     assert_eq!(
+        value["facet_counts"]["request_shape"]["session_replayable"],
+        2
+    );
+    assert_eq!(
         value["marker_last_fields"]["selection_pick"]["profile"],
         "second"
     );
     assert_eq!(
         value["marker_last_fields"]["selection_pick"]["quota_source"],
         "persisted_snapshot"
+    );
+    assert_eq!(
+        value["marker_last_fields"]["previous_response_fresh_fallback"]["request_shape"],
+        "session_replayable"
+    );
+    assert_eq!(
+        value["marker_last_fields"]["previous_response_fresh_fallback_blocked"]["reason"],
+        "previous_response_not_found"
+    );
+    assert_eq!(
+        value["marker_last_fields"]["compact_final_failure"]["exit"],
+        "candidate_exhausted"
     );
     assert_eq!(value["persisted_verified_continuations"], 2);
     assert_eq!(value["persisted_warm_continuations"], 1);
@@ -326,6 +403,41 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
             ("continuation".to_string(), 1),
             ("transport".to_string(), 3),
         ]),
+        marker_counts: BTreeMap::from([
+            ("previous_response_fresh_fallback", 2),
+            ("previous_response_fresh_fallback_blocked", 1),
+            ("compact_committed", 1),
+            ("compact_candidate_exhausted", 2),
+            ("compact_retryable_failure", 1),
+            ("compact_final_failure", 1),
+        ]),
+        marker_last_fields: BTreeMap::from([
+            (
+                "previous_response_fresh_fallback",
+                BTreeMap::from([
+                    ("reason".to_string(), "quota_blocked".to_string()),
+                    ("request_shape".to_string(), "session_replayable".to_string()),
+                ]),
+            ),
+            (
+                "previous_response_fresh_fallback_blocked",
+                BTreeMap::from([
+                    (
+                        "reason".to_string(),
+                        "previous_response_not_found".to_string(),
+                    ),
+                    ("request_shape".to_string(), "session_replayable".to_string()),
+                ]),
+            ),
+            (
+                "compact_final_failure",
+                BTreeMap::from([
+                    ("exit".to_string(), "candidate_exhausted".to_string()),
+                    ("reason".to_string(), "quota".to_string()),
+                    ("last_failure".to_string(), "quota".to_string()),
+                ]),
+            ),
+        ]),
         chain_retried_owner_by_reason: BTreeMap::from([(
             "previous_response_not_found_locked_affinity".to_string(),
             1,
@@ -389,6 +501,29 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         Some("previous_response_not_found_locked_affinity=1")
     );
     assert_eq!(
+        fields.get("Replay fallback ok").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        fields.get("Replay fallback blocked").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("Compact committed").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("Compact exhausted").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(fields.get("Compact retry").map(String::as_str), Some("1"));
+    assert_eq!(fields.get("Compact final").map(String::as_str), Some("1"));
+    assert_eq!(
+        fields.get("Compact exit").map(String::as_str),
+        Some("candidate_exhausted")
+    );
+    assert_eq!(fields.get("Compact reason").map(String::as_str), Some("quota"));
+    assert_eq!(
         fields.get("Chain dead reasons").map(String::as_str),
         Some("previous_response_not_found_locked_affinity=1")
     );
@@ -418,13 +553,69 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
     );
     assert_eq!(
         fields.get("Broker issues").map(String::as_str),
-        Some(
-            "broker: pid 123 runs different prodex binary; restart active prodex/codex sessions"
-        )
+        Some("broker: pid 123 runs different prodex binary; restart active prodex/codex sessions")
     );
     assert_eq!(
         fields.get("Binary mismatch").map(String::as_str),
         Some("installed=false broker=true")
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_prefers_session_replayable_blocked_fallback_diagnosis() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary
+        .marker_counts
+        .insert("previous_response_fresh_fallback_blocked", 1);
+    summary.marker_last_fields.insert(
+        "previous_response_fresh_fallback_blocked",
+        BTreeMap::from([
+            (
+                "reason".to_string(),
+                "previous_response_not_found".to_string(),
+            ),
+            (
+                "request_shape".to_string(),
+                "session_replayable".to_string(),
+            ),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent session-replayable previous_response_id fallback was blocked before commit. Latest reason: previous_response_not_found."
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_surfaces_compact_exit_breakdown() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary.marker_counts.insert("compact_final_failure", 1);
+    summary.marker_last_fields.insert(
+        "compact_final_failure",
+        BTreeMap::from([
+            ("exit".to_string(), "candidate_exhausted".to_string()),
+            ("reason".to_string(), "quota".to_string()),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent compact final failure exited via candidate_exhausted with reason quota."
     );
 }
 
@@ -499,14 +690,12 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
         "doctor should flag mismatched live runtime broker identity"
     );
     assert!(
-        summary
-            .runtime_broker_identities
-            .iter()
-            .any(|line| line.contains("broker_key=doctor-mismatch")
-                && line.contains("status=binary_mismatch")
-                && line.contains("mismatch=version_mismatch")
-                && line.contains("version=0.26.0")
-                && line.contains("source=health")),
+        summary.runtime_broker_identities.iter().any(|line| line
+            .contains("broker_key=doctor-mismatch")
+            && line.contains("status=binary_mismatch")
+            && line.contains("mismatch=version_mismatch")
+            && line.contains("version=0.26.0")
+            && line.contains("source=health")),
         "doctor should surface the mismatched broker identity: {:?}",
         summary.runtime_broker_identities
     );
@@ -864,4 +1053,3 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
             .any(|line| line.contains("main/responses"))
     );
 }
-

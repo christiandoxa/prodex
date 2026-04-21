@@ -147,6 +147,8 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "runtime_proxy_queue_wait_started",
                 "runtime_proxy_queue_wait_exhausted",
                 "profile_inflight_saturated",
+                "compact_precommit_budget_exhausted",
+                "compact_candidate_exhausted",
             ],
         ),
         (
@@ -157,6 +159,7 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "chain_retried_owner",
                 "chain_dead_upstream_confirmed",
                 "stale_continuation",
+                "previous_response_fresh_fallback_blocked",
                 "compact_fresh_fallback_blocked",
                 "compact_pressure_shed",
             ],
@@ -184,6 +187,9 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "websocket_pre_send_skip",
                 "quota_critical_floor_before_send",
                 "upstream_usage_limit_passthrough",
+                "compact_retryable_failure",
+                "compact_overload_conservative_retry",
+                "compact_quota_unclassified",
             ],
         ),
         (
@@ -268,6 +274,100 @@ pub(crate) fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSum
     summary.top_tool_surface = runtime_doctor_top_facet(summary, "tool_surface");
     summary.top_compat_warning = runtime_doctor_top_facet(summary, "warning");
     summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
+}
+
+fn runtime_doctor_previous_response_fresh_fallback_label(
+    summary: &RuntimeDoctorSummary,
+    marker: &str,
+) -> String {
+    let request_shape = runtime_doctor_marker_last_field(summary, marker, "request_shape")
+        .map(str::to_string)
+        .or_else(|| {
+            summary
+                .facet_counts
+                .get("request_shape")
+                .and_then(|counts| counts.get("session_replayable"))
+                .map(|_| "session_replayable".to_string())
+        });
+    match request_shape.as_deref() {
+        Some("session_replayable") => "session-replayable previous_response_id fallback",
+        Some("replayable_input") => "replayable-input previous_response_id fallback",
+        Some("tool_output_only") => "tool-output-only previous_response_id fallback",
+        Some("continuation_only") => "continuation-only previous_response_id fallback",
+        _ => "previous_response_id fresh fallback",
+    }
+    .to_string()
+}
+
+fn runtime_doctor_compact_exit_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
+    let compact_markers: [(&str, &[&str]); 10] = [
+        (
+            "candidate_exhausted",
+            &[
+                "compact_candidate_exhausted",
+                "compact_exit_candidate_exhausted",
+            ],
+        ),
+        (
+            "committed",
+            &["compact_committed", "compact_exit_committed"],
+        ),
+        (
+            "committed_owner",
+            &["compact_committed_owner", "compact_exit_committed_owner"],
+        ),
+        (
+            "followup_owner",
+            &["compact_followup_owner", "compact_exit_followup_owner"],
+        ),
+        (
+            "lineage_released",
+            &["compact_lineage_released", "compact_exit_lineage_released"],
+        ),
+        (
+            "owner_retry",
+            &[
+                "compact_overload_conservative_retry",
+                "compact_exit_overload_conservative_retry",
+            ],
+        ),
+        (
+            "precommit_budget",
+            &[
+                "compact_precommit_budget_exhausted",
+                "compact_exit_precommit_budget_exhausted",
+            ],
+        ),
+        (
+            "pressure_shed",
+            &["compact_pressure_shed", "compact_exit_pressure_shed"],
+        ),
+        (
+            "quota_misc",
+            &[
+                "compact_quota_unclassified",
+                "compact_exit_quota_unclassified",
+            ],
+        ),
+        (
+            "retryable_failure",
+            &[
+                "compact_retryable_failure",
+                "compact_exit_retryable_failure",
+            ],
+        ),
+    ];
+
+    compact_markers
+        .into_iter()
+        .filter_map(|(label, markers)| {
+            let count = markers
+                .iter()
+                .map(|marker| runtime_doctor_marker_count(summary, marker))
+                .sum::<usize>();
+            (count > 0).then(|| (label.to_string(), count))
+        })
+        .collect()
 }
 
 pub(crate) fn runtime_doctor_top_facet(
@@ -398,10 +498,33 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
                 .clone()
                 .unwrap_or_else(|| "inspect chain_retried_owner markers".to_string())
         )
+    } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback_blocked") > 0 {
+        let marker = "previous_response_fresh_fallback_blocked";
+        let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
+        let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
+            .unwrap_or("inspect previous_response_fresh_fallback_blocked markers");
+        format!("Recent {label} was blocked before commit. Latest reason: {reason}.")
+    } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback") > 0 {
+        let marker = "previous_response_fresh_fallback";
+        let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
+        let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
+            .unwrap_or("inspect previous_response_fresh_fallback markers");
+        format!("Recent {label} succeeded before commit. Latest reason: {reason}.")
     } else if runtime_doctor_marker_count(summary, "previous_response_not_found") > 0 {
         format!(
             "Recent previous_response_id continuity failures were observed: {}.",
             runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
+        )
+    } else if runtime_doctor_marker_count(summary, "compact_final_failure") > 0 {
+        let exit = runtime_doctor_marker_last_field(summary, "compact_final_failure", "exit")
+            .unwrap_or("-");
+        let reason = runtime_doctor_marker_last_field(summary, "compact_final_failure", "reason")
+            .unwrap_or("-");
+        format!("Recent compact final failure exited via {exit} with reason {reason}.")
+    } else if !runtime_doctor_compact_exit_counts(summary).is_empty() {
+        format!(
+            "Recent compact exit paths were logged: {}.",
+            runtime_doctor_count_breakdown(&runtime_doctor_compact_exit_counts(summary))
         )
     } else if summary.compat_warning_count > 0 {
         format!(
