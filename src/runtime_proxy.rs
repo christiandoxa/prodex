@@ -15,6 +15,7 @@ mod lineage;
 mod path;
 mod payload_detection;
 mod prefetch;
+mod previous_response_log;
 mod profile_state;
 mod quota;
 mod response_forwarding;
@@ -39,6 +40,7 @@ pub(super) use self::lineage::*;
 pub(super) use self::path::*;
 pub(super) use self::payload_detection::*;
 pub(super) use self::prefetch::*;
+pub(crate) use self::previous_response_log::*;
 pub(super) use self::profile_state::*;
 pub(super) use self::quota::*;
 pub(crate) use self::response_forwarding::*;
@@ -655,12 +657,15 @@ pub(super) fn proxy_runtime_websocket_text_message(
     let mut request_text = request_text.to_string();
     let request_requires_previous_response_affinity =
         request_metadata.requires_previous_response_affinity;
-    let previous_response_fresh_fallback_shape =
-        request_metadata.previous_response_fresh_fallback_shape;
     let mut previous_response_id = request_metadata.previous_response_id.clone();
     let mut request_turn_state = runtime_request_turn_state(&handshake_request);
     let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
     let request_session_id_header_present = explicit_request_session_id.is_some();
+    let previous_response_fresh_fallback_shape =
+        runtime_previous_response_fresh_fallback_shape_with_session(
+            request_metadata.previous_response_fresh_fallback_shape,
+            request_session_id_header_present,
+        );
     let request_session_id = explicit_request_session_id
         .as_ref()
         .map(|session_id| session_id.as_str().to_string())
@@ -1106,11 +1111,20 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         payload,
                         turn_state,
                     } => {
+                        let log_context = RuntimePreviousResponseLogContext {
+                            request_id,
+                            transport: "websocket",
+                            route: "websocket",
+                            websocket_session: Some(session_id),
+                            via: Some("direct_current_profile_fallback"),
+                        };
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                turn_state
+                            runtime_previous_response_not_found_log_message(
+                                log_context,
+                                &profile_name,
+                                previous_response_retry_index,
+                                turn_state.as_deref(),
                             ),
                         );
                         saw_previous_response_not_found = true;
@@ -1142,8 +1156,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
+                                runtime_previous_response_retry_immediate_log_message(
+                                    log_context,
+                                    &profile_name,
                                     delay.as_millis(),
                                     decision.retry_reason.unwrap_or("-"),
                                 ),
@@ -1171,8 +1186,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         if decision.stale_continuation {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} stale_continuation reason=previous_response_not_found_locked_affinity profile={profile_name} via=direct_current_profile_fallback"
+                                runtime_previous_response_stale_continuation_log_message(
+                                    log_context,
+                                    &profile_name,
                                 ),
                             );
                             runtime_proxy_log_chain_dead_upstream_confirmed(
@@ -1198,36 +1214,26 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "direct_current_profile_fallback"
                         );
                         if decision.fresh_fallback_blocked_without_affinity {
-                            let outcome =
-                                runtime_previous_response_not_found_observability_outcome(
-                                    decision,
-                                    previous_response_fresh_fallback_shape,
-                                )
-                                .unwrap_or("-");
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback_blocked reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name} via=direct_current_profile_fallback",
-                                    runtime_previous_response_fresh_fallback_shape_label(
-                                        previous_response_fresh_fallback_shape
-                                    ),
+                                runtime_previous_response_not_found_fresh_fallback_log_message(
+                                    log_context,
+                                    decision,
+                                    previous_response_fresh_fallback_shape,
+                                    &profile_name,
+                                    true,
                                 ),
                             );
                         }
                         if !has_turn_state_retry && decision.fresh_fallback_allowed {
-                            let outcome =
-                                runtime_previous_response_not_found_observability_outcome(
-                                    decision,
-                                    previous_response_fresh_fallback_shape,
-                                )
-                                .unwrap_or("-");
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name} via=direct_current_profile_fallback",
-                                    runtime_previous_response_fresh_fallback_shape_label(
-                                        previous_response_fresh_fallback_shape
-                                    ),
+                                runtime_previous_response_not_found_fresh_fallback_log_message(
+                                    log_context,
+                                    decision,
+                                    previous_response_fresh_fallback_shape,
+                                    &profile_name,
+                                    false,
                                 ),
                             );
                             let _ = clear_runtime_stale_previous_response_binding(
@@ -1247,8 +1253,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                runtime_previous_response_affinity_released_log_message(
+                                    log_context,
+                                    &profile_name,
                                 ),
                             );
                         }
@@ -1636,11 +1643,20 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         payload,
                         turn_state,
                     } => {
+                        let log_context = RuntimePreviousResponseLogContext {
+                            request_id,
+                            transport: "websocket",
+                            route: "websocket",
+                            websocket_session: Some(session_id),
+                            via: Some("direct_current_profile_fallback"),
+                        };
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                turn_state
+                            runtime_previous_response_not_found_log_message(
+                                log_context,
+                                &profile_name,
+                                previous_response_retry_index,
+                                turn_state.as_deref(),
                             ),
                         );
                         saw_previous_response_not_found = true;
@@ -1672,8 +1688,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
+                                runtime_previous_response_retry_immediate_log_message(
+                                    log_context,
+                                    &profile_name,
                                     delay.as_millis(),
                                     decision.retry_reason.unwrap_or("-"),
                                 ),
@@ -1701,8 +1718,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         if decision.stale_continuation {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} stale_continuation reason=previous_response_not_found_locked_affinity profile={profile_name} via=direct_current_profile_fallback"
+                                runtime_previous_response_stale_continuation_log_message(
+                                    log_context,
+                                    &profile_name,
                                 ),
                             );
                             runtime_proxy_log_chain_dead_upstream_confirmed(
@@ -1747,8 +1765,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                runtime_previous_response_affinity_released_log_message(
+                                    log_context,
+                                    &profile_name,
                                 ),
                             );
                         }
@@ -2365,11 +2384,20 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 payload,
                 turn_state,
             } => {
+                let log_context = RuntimePreviousResponseLogContext {
+                    request_id,
+                    transport: "websocket",
+                    route: "websocket",
+                    websocket_session: Some(session_id),
+                    via: None,
+                };
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "request={request_id} transport=websocket route=websocket websocket_session={session_id} previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
-                        turn_state
+                    runtime_previous_response_not_found_log_message(
+                        log_context,
+                        &profile_name,
+                        previous_response_retry_index,
+                        turn_state.as_deref(),
                     ),
                 );
                 saw_previous_response_not_found = true;
@@ -2400,8 +2428,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} previous_response_retry_immediate profile={profile_name} delay_ms={} reason={}",
+                        runtime_previous_response_retry_immediate_log_message(
+                            log_context,
+                            &profile_name,
                             delay.as_millis(),
                             decision.retry_reason.unwrap_or("-"),
                         ),
@@ -2429,8 +2458,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 if decision.stale_continuation {
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} stale_continuation reason=previous_response_not_found_locked_affinity profile={profile_name}"
+                        runtime_previous_response_stale_continuation_log_message(
+                            log_context,
+                            &profile_name,
                         ),
                     );
                     runtime_proxy_log_chain_dead_upstream_confirmed(
@@ -2456,34 +2486,26 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     "candidate"
                 );
                 if decision.fresh_fallback_blocked_without_affinity {
-                    let outcome = runtime_previous_response_not_found_observability_outcome(
-                        decision,
-                        previous_response_fresh_fallback_shape,
-                    )
-                    .unwrap_or("-");
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} previous_response_fresh_fallback_blocked reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name}",
-                            runtime_previous_response_fresh_fallback_shape_label(
-                                previous_response_fresh_fallback_shape
-                            ),
+                        runtime_previous_response_not_found_fresh_fallback_log_message(
+                            log_context,
+                            decision,
+                            previous_response_fresh_fallback_shape,
+                            &profile_name,
+                            true,
                         ),
                     );
                 }
                 if !has_turn_state_retry && decision.fresh_fallback_allowed {
-                    let outcome = runtime_previous_response_not_found_observability_outcome(
-                        decision,
-                        previous_response_fresh_fallback_shape,
-                    )
-                    .unwrap_or("-");
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name}",
-                            runtime_previous_response_fresh_fallback_shape_label(
-                                previous_response_fresh_fallback_shape
-                            ),
+                        runtime_previous_response_not_found_fresh_fallback_log_message(
+                            log_context,
+                            decision,
+                            previous_response_fresh_fallback_shape,
+                            &profile_name,
+                            false,
                         ),
                     );
                     let _ = clear_runtime_stale_previous_response_binding(
@@ -2503,8 +2525,9 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} previous_response_affinity_released profile={profile_name}"
+                        runtime_previous_response_affinity_released_log_message(
+                            log_context,
+                            &profile_name,
                         ),
                     );
                 }
@@ -3547,11 +3570,20 @@ pub(super) fn proxy_runtime_responses_request(
                         response,
                         turn_state,
                     } => {
+                        let log_context = RuntimePreviousResponseLogContext {
+                            request_id,
+                            transport: "http",
+                            route: "responses",
+                            websocket_session: None,
+                            via: Some("direct_current_profile_fallback"),
+                        };
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                turn_state
+                            runtime_previous_response_not_found_log_message(
+                                log_context,
+                                &profile_name,
+                                previous_response_retry_index,
+                                turn_state.as_deref(),
                             ),
                         );
                         saw_previous_response_not_found = true;
@@ -3583,10 +3615,11 @@ pub(super) fn proxy_runtime_responses_request(
                                 Some((RuntimeUpstreamFailureResponse::Http(response), false));
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
+                                runtime_previous_response_retry_immediate_log_message(
+                                    log_context,
+                                    &profile_name,
                                     delay.as_millis(),
-                                    decision.retry_reason.unwrap_or("-")
+                                    decision.retry_reason.unwrap_or("-"),
                                 ),
                             );
                             if let Some(chain_reason) = decision.chain_retry_reason {
@@ -3610,36 +3643,26 @@ pub(super) fn proxy_runtime_responses_request(
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
                         if decision.fresh_fallback_blocked_without_affinity {
-                            let outcome =
-                                runtime_previous_response_not_found_observability_outcome(
-                                    decision,
-                                    previous_response_fresh_fallback_shape,
-                                )
-                                .unwrap_or("-");
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_fresh_fallback_blocked reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name} via=direct_current_profile_fallback",
-                                    runtime_previous_response_fresh_fallback_shape_label(
-                                        previous_response_fresh_fallback_shape
-                                    ),
+                                runtime_previous_response_not_found_fresh_fallback_log_message(
+                                    log_context,
+                                    decision,
+                                    previous_response_fresh_fallback_shape,
+                                    &profile_name,
+                                    true,
                                 ),
                             );
                         }
                         if !has_turn_state_retry && decision.fresh_fallback_allowed {
-                            let outcome =
-                                runtime_previous_response_not_found_observability_outcome(
-                                    decision,
-                                    previous_response_fresh_fallback_shape,
-                                )
-                                .unwrap_or("-");
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_fresh_fallback reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name} via=direct_current_profile_fallback",
-                                    runtime_previous_response_fresh_fallback_shape_label(
-                                        previous_response_fresh_fallback_shape
-                                    ),
+                                runtime_previous_response_not_found_fresh_fallback_log_message(
+                                    log_context,
+                                    decision,
+                                    previous_response_fresh_fallback_shape,
+                                    &profile_name,
+                                    false,
                                 ),
                             );
                             let _ = clear_runtime_stale_previous_response_binding(
@@ -3659,8 +3682,9 @@ pub(super) fn proxy_runtime_responses_request(
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                runtime_previous_response_affinity_released_log_message(
+                                    log_context,
+                                    &profile_name,
                                 ),
                             );
                         }
@@ -4023,11 +4047,20 @@ pub(super) fn proxy_runtime_responses_request(
                         response,
                         turn_state,
                     } => {
+                        let log_context = RuntimePreviousResponseLogContext {
+                            request_id,
+                            transport: "http",
+                            route: "responses",
+                            websocket_session: None,
+                            via: Some("direct_current_profile_fallback"),
+                        };
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?} via=direct_current_profile_fallback",
-                                turn_state
+                            runtime_previous_response_not_found_log_message(
+                                log_context,
+                                &profile_name,
+                                previous_response_retry_index,
+                                turn_state.as_deref(),
                             ),
                         );
                         saw_previous_response_not_found = true;
@@ -4059,10 +4092,11 @@ pub(super) fn proxy_runtime_responses_request(
                                 Some((RuntimeUpstreamFailureResponse::Http(response), false));
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason={} via=direct_current_profile_fallback",
+                                runtime_previous_response_retry_immediate_log_message(
+                                    log_context,
+                                    &profile_name,
                                     delay.as_millis(),
-                                    decision.retry_reason.unwrap_or("-")
+                                    decision.retry_reason.unwrap_or("-"),
                                 ),
                             );
                             if let Some(chain_reason) = decision.chain_retry_reason {
@@ -4086,36 +4120,26 @@ pub(super) fn proxy_runtime_responses_request(
                         previous_response_retry_candidate = None;
                         previous_response_retry_index = 0;
                         if decision.fresh_fallback_blocked_without_affinity {
-                            let outcome =
-                                runtime_previous_response_not_found_observability_outcome(
-                                    decision,
-                                    previous_response_fresh_fallback_shape,
-                                )
-                                .unwrap_or("-");
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_fresh_fallback_blocked reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name} via=direct_current_profile_fallback",
-                                    runtime_previous_response_fresh_fallback_shape_label(
-                                        previous_response_fresh_fallback_shape
-                                    ),
+                                runtime_previous_response_not_found_fresh_fallback_log_message(
+                                    log_context,
+                                    decision,
+                                    previous_response_fresh_fallback_shape,
+                                    &profile_name,
+                                    true,
                                 ),
                             );
                         }
                         if !has_turn_state_retry && decision.fresh_fallback_allowed {
-                            let outcome =
-                                runtime_previous_response_not_found_observability_outcome(
-                                    decision,
-                                    previous_response_fresh_fallback_shape,
-                                )
-                                .unwrap_or("-");
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_fresh_fallback reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name} via=direct_current_profile_fallback",
-                                    runtime_previous_response_fresh_fallback_shape_label(
-                                        previous_response_fresh_fallback_shape
-                                    ),
+                                runtime_previous_response_not_found_fresh_fallback_log_message(
+                                    log_context,
+                                    decision,
+                                    previous_response_fresh_fallback_shape,
+                                    &profile_name,
+                                    false,
                                 ),
                             );
                             let _ = clear_runtime_stale_previous_response_binding(
@@ -4135,8 +4159,9 @@ pub(super) fn proxy_runtime_responses_request(
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "request={request_id} transport=http previous_response_affinity_released profile={profile_name} via=direct_current_profile_fallback"
+                                runtime_previous_response_affinity_released_log_message(
+                                    log_context,
+                                    &profile_name,
                                 ),
                             );
                         }
@@ -4527,11 +4552,20 @@ pub(super) fn proxy_runtime_responses_request(
                 response,
                 turn_state,
             } => {
+                let log_context = RuntimePreviousResponseLogContext {
+                    request_id,
+                    transport: "http",
+                    route: "responses",
+                    websocket_session: None,
+                    via: None,
+                };
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "request={request_id} transport=http route=responses previous_response_not_found profile={profile_name} retry_index={previous_response_retry_index} replay_turn_state={:?}",
-                        turn_state
+                    runtime_previous_response_not_found_log_message(
+                        log_context,
+                        &profile_name,
+                        previous_response_retry_index,
+                        turn_state.as_deref(),
                     ),
                 );
                 saw_previous_response_not_found = true;
@@ -4561,10 +4595,11 @@ pub(super) fn proxy_runtime_responses_request(
                     last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} transport=http previous_response_retry_immediate profile={profile_name} delay_ms={} reason={}",
+                        runtime_previous_response_retry_immediate_log_message(
+                            log_context,
+                            &profile_name,
                             delay.as_millis(),
-                            decision.retry_reason.unwrap_or("-")
+                            decision.retry_reason.unwrap_or("-"),
                         ),
                     );
                     if let Some(chain_reason) = decision.chain_retry_reason {
@@ -4588,34 +4623,26 @@ pub(super) fn proxy_runtime_responses_request(
                 previous_response_retry_candidate = None;
                 previous_response_retry_index = 0;
                 if decision.fresh_fallback_blocked_without_affinity {
-                    let outcome = runtime_previous_response_not_found_observability_outcome(
-                        decision,
-                        previous_response_fresh_fallback_shape,
-                    )
-                    .unwrap_or("-");
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} transport=http previous_response_fresh_fallback_blocked reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name}",
-                            runtime_previous_response_fresh_fallback_shape_label(
-                                previous_response_fresh_fallback_shape
-                            ),
+                        runtime_previous_response_not_found_fresh_fallback_log_message(
+                            log_context,
+                            decision,
+                            previous_response_fresh_fallback_shape,
+                            &profile_name,
+                            true,
                         ),
                     );
                 }
                 if !has_turn_state_retry && decision.fresh_fallback_allowed {
-                    let outcome = runtime_previous_response_not_found_observability_outcome(
-                        decision,
-                        previous_response_fresh_fallback_shape,
-                    )
-                    .unwrap_or("-");
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} transport=http previous_response_fresh_fallback reason=previous_response_not_found request_shape={} outcome={outcome} profile={profile_name}",
-                            runtime_previous_response_fresh_fallback_shape_label(
-                                previous_response_fresh_fallback_shape
-                            ),
+                        runtime_previous_response_not_found_fresh_fallback_log_message(
+                            log_context,
+                            decision,
+                            previous_response_fresh_fallback_shape,
+                            &profile_name,
+                            false,
                         ),
                     );
                     let _ = clear_runtime_stale_previous_response_binding(
@@ -4635,8 +4662,9 @@ pub(super) fn proxy_runtime_responses_request(
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "request={request_id} transport=http previous_response_affinity_released profile={profile_name}"
+                        runtime_previous_response_affinity_released_log_message(
+                            log_context,
+                            &profile_name,
                         ),
                     );
                 }

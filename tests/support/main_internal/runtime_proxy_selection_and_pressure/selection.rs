@@ -1,11 +1,113 @@
+struct RuntimeResponsesRequestBuilder {
+    previous_response_id: Option<&'static str>,
+    session_id: Option<&'static str>,
+    session_header: Option<&'static str>,
+    input: serde_json::Value,
+}
+
+impl RuntimeResponsesRequestBuilder {
+    fn new(input: serde_json::Value) -> Self {
+        Self {
+            previous_response_id: None,
+            session_id: None,
+            session_header: None,
+            input,
+        }
+    }
+
+    fn previous_response_id(mut self, previous_response_id: &'static str) -> Self {
+        self.previous_response_id = Some(previous_response_id);
+        self
+    }
+
+    fn session_id(mut self, session_id: &'static str) -> Self {
+        self.session_id = Some(session_id);
+        self
+    }
+
+    fn session_header(mut self, session_id: &'static str) -> Self {
+        self.session_header = Some(session_id);
+        self
+    }
+
+    fn build(self) -> RuntimeProxyRequest {
+        let mut body = serde_json::Map::new();
+        if let Some(previous_response_id) = self.previous_response_id {
+            body.insert(
+                "previous_response_id".to_string(),
+                serde_json::json!(previous_response_id),
+            );
+        }
+        if let Some(session_id) = self.session_id {
+            body.insert("session_id".to_string(), serde_json::json!(session_id));
+        }
+        body.insert("input".to_string(), self.input);
+
+        let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+        if let Some(session_id) = self.session_header {
+            headers.push(("session_id".to_string(), session_id.to_string()));
+        }
+
+        RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses".to_string(),
+            headers,
+            body: serde_json::to_vec(&serde_json::Value::Object(body))
+                .expect("request body should serialize"),
+        }
+    }
+}
+
+fn tool_output_only_request() -> RuntimeResponsesRequestBuilder {
+    RuntimeResponsesRequestBuilder::new(serde_json::json!([
+        {
+            "type": "function_call_output",
+            "call_id": "call_123",
+            "output": "ok"
+        }
+    ]))
+}
+
+fn replayable_function_call_transcript_request() -> RuntimeResponsesRequestBuilder {
+    RuntimeResponsesRequestBuilder::new(serde_json::json!([
+        {
+            "type": "function_call",
+            "call_id": "call_123",
+            "name": "shell",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_123",
+            "output": "ok"
+        }
+    ]))
+}
+
+fn replayable_message_request() -> RuntimeResponsesRequestBuilder {
+    RuntimeResponsesRequestBuilder::new(serde_json::json!([
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "retry with full body"
+                }
+            ]
+        }
+    ]))
+}
+
+fn empty_input_request() -> RuntimeResponsesRequestBuilder {
+    RuntimeResponsesRequestBuilder::new(serde_json::json!([]))
+}
+
 #[test]
 fn runtime_request_strips_previous_response_id_from_function_call_output_payloads() {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
-    };
+    let request = tool_output_only_request()
+        .previous_response_id("resp_123")
+        .build();
 
     assert!(
         runtime_request_without_previous_response_id(&request).is_some(),
@@ -19,12 +121,7 @@ fn runtime_request_strips_previous_response_id_from_function_call_output_payload
 
 #[test]
 fn runtime_request_allows_fresh_function_call_output_replay_without_previous_response_id() {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"input":[{"type":"function_call","call_id":"call_123","name":"shell","arguments":"{\"cmd\":\"pwd\"}"},{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
-    };
+    let request = replayable_function_call_transcript_request().build();
 
     assert!(
         !runtime_request_requires_previous_response_affinity(&request),
@@ -34,12 +131,9 @@ fn runtime_request_allows_fresh_function_call_output_replay_without_previous_res
 
 #[test]
 fn runtime_request_previous_response_fresh_fallback_shape_classifies_tool_output_only() {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"previous_response_id":"resp_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
-    };
+    let request = tool_output_only_request()
+        .previous_response_id("resp_123")
+        .build();
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
@@ -56,12 +150,10 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_tool_output
 #[test]
 fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_tool_output_replayable(
 ) {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"previous_response_id":"resp_123","session_id":"sess_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
-    };
+    let request = tool_output_only_request()
+        .previous_response_id("resp_123")
+        .session_id("sess_123")
+        .build();
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
@@ -75,13 +167,29 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_too
 }
 
 #[test]
+fn runtime_request_previous_response_fresh_fallback_shape_uses_explicit_session_header() {
+    let request = tool_output_only_request()
+        .previous_response_id("resp_123")
+        .session_header("sess_123")
+        .build();
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+    );
+    assert!(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        ),
+        "explicit session headers should make tool-output replay recoverable after upstream forgets previous_response_id"
+    );
+}
+
+#[test]
 fn runtime_request_previous_response_fresh_fallback_shape_classifies_replayable_input() {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"previous_response_id":"resp_123","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"retry with full body"}]}]}"#.to_vec(),
-    };
+    let request = replayable_message_request()
+        .previous_response_id("resp_123")
+        .build();
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
@@ -97,12 +205,10 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_replayable_
 #[test]
 fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_replayable_empty_input()
  {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"previous_response_id":"resp_123","session_id":"sess_123","input":[]}"#.to_vec(),
-    };
+    let request = empty_input_request()
+        .previous_response_id("resp_123")
+        .session_id("sess_123")
+        .build();
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
@@ -117,12 +223,9 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_rep
 
 #[test]
 fn runtime_request_previous_response_fresh_fallback_shape_blocks_empty_continuation_payloads() {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"previous_response_id":"resp_123","input":[]}"#.to_vec(),
-    };
+    let request = empty_input_request()
+        .previous_response_id("resp_123")
+        .build();
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),

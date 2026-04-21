@@ -158,6 +158,23 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
     )
 }
 
+pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
+    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    has_session: bool,
+) -> Option<RuntimePreviousResponseFreshFallbackShape> {
+    if !has_session {
+        return shape;
+    }
+
+    match shape {
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+        | Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => {
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        }
+        other => other,
+    }
+}
+
 fn runtime_request_value_previous_response_input_item_is_tool_output(
     item: &serde_json::Value,
 ) -> bool {
@@ -210,9 +227,14 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
 pub(crate) fn runtime_request_previous_response_fresh_fallback_shape(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
-    serde_json::from_slice::<serde_json::Value>(&request.body)
+    let body_shape = serde_json::from_slice::<serde_json::Value>(&request.body)
         .ok()
-        .and_then(|value| runtime_request_value_previous_response_fresh_fallback_shape(&value))
+        .and_then(|value| runtime_request_value_previous_response_fresh_fallback_shape(&value));
+    runtime_previous_response_fresh_fallback_shape_with_session(
+        body_shape,
+        runtime_request_explicit_session_id(request).is_some()
+            || runtime_request_session_id_from_turn_metadata(request).is_some(),
+    )
 }
 
 pub(crate) fn runtime_request_requires_previous_response_affinity(

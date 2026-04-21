@@ -273,6 +273,18 @@ fn runtime_doctor_push_marker_detail_rows(
     summary: &RuntimeDoctorSummary,
     marker: &str,
 ) {
+    if marker == "runtime_proxy_active_limit_reached" {
+        fields.push(
+            "Active next step",
+            diagnosis::runtime_doctor_active_pressure_next_step(summary),
+        );
+    }
+    if marker == "runtime_proxy_lane_limit_reached" {
+        fields.push(
+            "Lane next step",
+            diagnosis::runtime_doctor_lane_pressure_next_step(summary),
+        );
+    }
     if marker == "runtime_proxy_overload_backoff" {
         fields.push(
             "Connect failures",
@@ -318,6 +330,12 @@ fn runtime_doctor_push_marker_detail_rows(
                     .cloned()
                     .unwrap_or_else(|| "-".to_string()),
             );
+        if marker == "previous_response_fresh_fallback_blocked" {
+            fields.push(
+                "Replay next step",
+                diagnosis::runtime_doctor_context_fallback_blocked_next_step(summary),
+            );
+        }
     }
     if marker == "stale_continuation" {
         fields
@@ -408,6 +426,53 @@ fn runtime_doctor_push_marker_detail_rows(
                     .and_then(|fields| fields.get("last_failure"))
                     .cloned()
                     .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Compact next step",
+                diagnosis::runtime_doctor_compact_final_failure_next_step(summary),
+            );
+    }
+    if marker == "profile_health" {
+        fields
+            .push(
+                "Health route",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("route"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Health profile",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("profile"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Health score",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("score"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Health reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Health next step",
+                diagnosis::runtime_doctor_route_health_next_step(summary),
             );
     }
     if marker == "compat_request_surface" {

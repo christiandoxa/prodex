@@ -4,6 +4,17 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+    inputs:
+      baseline_path:
+        description: Baseline path for the watchdog report
+        required: false
+        default: scripts/compat/upstream-baseline.json
+        type: string
+      fail_on_drift:
+        description: Fail the workflow when upstream drift is detected
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -31,26 +42,90 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          report="${RUNNER_TEMP}/upstream-compat-report.json"
-          if node scripts/compat/watch-upstream.mjs --report "${report}"; then
-            {
-              echo "## Upstream compatibility"
-              echo ""
-              node -e "const fs = require('node:fs'); const report = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); console.log('Checked Codex ' + report.current.codex.latestRelease.tag_name + ' and Claude ' + report.current.claude.latestRelease.tag_name + '.');" "${report}"
-            } >> "${GITHUB_STEP_SUMMARY}"
-          else
-            {
-              echo "## Upstream compatibility"
-              echo ""
-              echo "Drift detected. Inspect the report artifact and the job log for exact diffs."
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
+          artifact_dir="${RUNNER_TEMP}/upstream-compat"
+          report="${artifact_dir}/report.json"
+          text_report="${artifact_dir}/watchdog.txt"
+          summary="${artifact_dir}/summary.md"
+          metadata="${artifact_dir}/metadata.json"
+          mkdir -p "${artifact_dir}"
+
+          baseline_path="scripts/compat/upstream-baseline.json"
+          fail_on_drift="true"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ inputs.baseline_path }}" ]; then
+              baseline_path="${{ inputs.baseline_path }}"
+            fi
+            if [ "${{ inputs.fail_on_drift }}" = "false" ]; then
+              fail_on_drift="false"
+            fi
+          fi
+
+          node -e "const fs = require('node:fs'); fs.writeFileSync(process.argv[1], JSON.stringify({ event_name: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF, sha: process.env.GITHUB_SHA, run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT, baseline_path: process.argv[2] }, null, 2) + '\n');" "${metadata}" "${baseline_path}"
+
+          set +e
+          node scripts/compat/watch-upstream.mjs --baseline "${baseline_path}" --report "${report}" > "${text_report}" 2>&1
+          status=$?
+          set -e
+
+          node - "${report}" "${summary}" "${status}" "${baseline_path}" "${fail_on_drift}" <<'EOF'
+          const fs = require("node:fs");
+
+          const [, , reportPath, summaryPath, statusCodeRaw, baselinePath, failOnDrift] = process.argv;
+          const statusCode = Number.parseInt(statusCodeRaw, 10) || 0;
+          const lines = ["## Upstream compatibility", ""];
+          lines.push(`- Event: \`${process.env.GITHUB_EVENT_NAME}\``);
+          lines.push(`- Ref: \`${process.env.GITHUB_REF}\``);
+          lines.push(`- Baseline: \`${baselinePath}\``);
+          lines.push(`- Fail on drift: \`${failOnDrift}\``);
+
+          if (fs.existsSync(reportPath)) {
+            const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+            const codex = report.current?.codex?.latestRelease ?? {};
+            const claude = report.current?.claude?.latestRelease ?? {};
+            const diffs = Array.isArray(report.diffs) ? report.diffs : [];
+
+            lines.push(`- Codex latest release: [${codex.tag_name || "unknown"}](${codex.html_url || "https://github.com/openai/codex/releases/latest"})`);
+            lines.push(`- Claude latest release: [${claude.tag_name || "unknown"}](${claude.html_url || "https://github.com/anthropics/claude-code/releases/latest"})`);
+            lines.push(`- Report generated: \`${report.generated_at || "unknown"}\``);
+            lines.push("");
+
+            if (diffs.length === 0) {
+              lines.push("Status: in sync");
+            } else {
+              lines.push(`Status: drift detected (${diffs.length} change${diffs.length === 1 ? "" : "s"})`);
+              lines.push("");
+              lines.push("### Drift paths");
+              for (const diff of diffs.slice(0, 20)) {
+                lines.push(`- \`${diff.path}\``);
+              }
+              if (diffs.length > 20) {
+                lines.push(`- ... and ${diffs.length - 20} more`);
+              }
+            }
+          } else {
+            lines.push("");
+            lines.push(`Status: watchdog failed before report generation (exit ${statusCode})`);
+          }
+
+          if (statusCode !== 0 && failOnDrift === "false") {
+            lines.push("");
+            lines.push("Manual override: drift does not fail this run. Inspect the uploaded artifact for details.");
+          }
+
+          fs.writeFileSync(summaryPath, `${lines.join("\n")}\n`);
+          EOF
+
+          cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${status}" -ne 0 ] && [ "${fail_on_drift}" = "true" ]; then
+            exit "${status}"
           fi
 
       - name: Upload compatibility report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: upstream-compat-report
-          path: ${{ runner.temp }}/upstream-compat-report.json
-          if-no-files-found: ignore
+          name: upstream-compat-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/upstream-compat
+          if-no-files-found: error
+          retention-days: 14

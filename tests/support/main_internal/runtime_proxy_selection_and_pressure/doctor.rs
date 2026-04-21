@@ -404,14 +404,32 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
             ("transport".to_string(), 3),
         ]),
         marker_counts: BTreeMap::from([
+            ("runtime_proxy_active_limit_reached", 1),
+            ("runtime_proxy_lane_limit_reached", 1),
             ("previous_response_fresh_fallback", 2),
             ("previous_response_fresh_fallback_blocked", 1),
             ("compact_committed", 1),
             ("compact_candidate_exhausted", 2),
             ("compact_retryable_failure", 1),
             ("compact_final_failure", 1),
+            ("profile_health", 1),
         ]),
         marker_last_fields: BTreeMap::from([
+            (
+                "runtime_proxy_active_limit_reached",
+                BTreeMap::from([
+                    ("active".to_string(), "12".to_string()),
+                    ("limit".to_string(), "12".to_string()),
+                ]),
+            ),
+            (
+                "runtime_proxy_lane_limit_reached",
+                BTreeMap::from([
+                    ("lane".to_string(), "compact".to_string()),
+                    ("active".to_string(), "4".to_string()),
+                    ("limit".to_string(), "4".to_string()),
+                ]),
+            ),
             (
                 "previous_response_fresh_fallback",
                 BTreeMap::from([
@@ -435,6 +453,16 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
                     ("exit".to_string(), "candidate_exhausted".to_string()),
                     ("reason".to_string(), "quota".to_string()),
                     ("last_failure".to_string(), "quota".to_string()),
+                    ("profile".to_string(), "main".to_string()),
+                ]),
+            ),
+            (
+                "profile_health",
+                BTreeMap::from([
+                    ("profile".to_string(), "main".to_string()),
+                    ("route".to_string(), "responses".to_string()),
+                    ("score".to_string(), "4".to_string()),
+                    ("reason".to_string(), "stream_read_error".to_string()),
                 ]),
             ),
         ]),
@@ -509,6 +537,18 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         Some("1")
     );
     assert_eq!(
+        fields.get("Active next step").map(String::as_str),
+        Some("Reduce concurrent fresh work or wait for in-flight requests to drain before retrying. Latest load: 12/12.")
+    );
+    assert_eq!(
+        fields.get("Lane next step").map(String::as_str),
+        Some("Inspect repeated lane=compact markers and trim bursty compact traffic if it is starving responses. Latest load: 4/4.")
+    );
+    assert_eq!(
+        fields.get("Replay next step").map(String::as_str),
+        Some("Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: previous_response_not_found.")
+    );
+    assert_eq!(
         fields.get("Compact committed").map(String::as_str),
         Some("1")
     );
@@ -523,6 +563,27 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         Some("candidate_exhausted")
     );
     assert_eq!(fields.get("Compact reason").map(String::as_str), Some("quota"));
+    assert_eq!(
+        fields.get("Compact next step").map(String::as_str),
+        Some("Inspect compact budget and candidate-exhausted markers on profile main, then retry after compact quota refreshes or another profile becomes eligible.")
+    );
+    assert_eq!(
+        fields.get("Health route").map(String::as_str),
+        Some("responses")
+    );
+    assert_eq!(
+        fields.get("Health profile").map(String::as_str),
+        Some("main")
+    );
+    assert_eq!(fields.get("Health score").map(String::as_str), Some("4"));
+    assert_eq!(
+        fields.get("Health reason").map(String::as_str),
+        Some("stream_read_error")
+    );
+    assert_eq!(
+        fields.get("Health next step").map(String::as_str),
+        Some("Inspect recent transport or overload markers for main/responses, especially `stream_read_error`, and wait for that route score to decay before expecting fresh selection to reuse it.")
+    );
     assert_eq!(
         fields.get("Chain dead reasons").map(String::as_str),
         Some("previous_response_not_found_locked_affinity=1")
@@ -590,7 +651,7 @@ fn runtime_doctor_finalize_summary_prefers_session_replayable_blocked_fallback_d
 
     assert_eq!(
         summary.diagnosis,
-        "Recent session-replayable previous_response_id fallback was blocked before commit. Latest reason: previous_response_not_found."
+        "Recent session-replayable previous_response_id fallback was blocked before commit. Latest reason: previous_response_not_found. Next step: Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: previous_response_not_found."
     );
 }
 
@@ -608,6 +669,7 @@ fn runtime_doctor_finalize_summary_surfaces_compact_exit_breakdown() {
         BTreeMap::from([
             ("exit".to_string(), "candidate_exhausted".to_string()),
             ("reason".to_string(), "quota".to_string()),
+            ("profile".to_string(), "main".to_string()),
         ]),
     );
 
@@ -615,7 +677,89 @@ fn runtime_doctor_finalize_summary_surfaces_compact_exit_breakdown() {
 
     assert_eq!(
         summary.diagnosis,
-        "Recent compact final failure exited via candidate_exhausted with reason quota."
+        "Recent compact final failure exited via candidate_exhausted with reason quota. Next step: Inspect compact budget and candidate-exhausted markers on profile main, then retry after compact quota refreshes or another profile becomes eligible."
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_adds_lane_pressure_guidance() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary
+        .marker_counts
+        .insert("runtime_proxy_lane_limit_reached", 1);
+    summary.marker_last_fields.insert(
+        "runtime_proxy_lane_limit_reached",
+        BTreeMap::from([
+            ("lane".to_string(), "compact".to_string()),
+            ("active".to_string(), "4".to_string()),
+            ("limit".to_string(), "4".to_string()),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent per-lane admission limit was triggered on compact. Next step: Inspect repeated lane=compact markers and trim bursty compact traffic if it is starving responses. Latest load: 4/4."
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_adds_active_pressure_guidance() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary
+        .marker_counts
+        .insert("runtime_proxy_active_limit_reached", 1);
+    summary.marker_last_fields.insert(
+        "runtime_proxy_active_limit_reached",
+        BTreeMap::from([
+            ("active".to_string(), "12".to_string()),
+            ("limit".to_string(), "12".to_string()),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent global active-request admission limit was triggered. Next step: Reduce concurrent fresh work or wait for in-flight requests to drain before retrying. Latest load: 12/12."
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_adds_route_health_guidance() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary.marker_counts.insert("profile_health", 1);
+    summary.marker_last_fields.insert(
+        "profile_health",
+        BTreeMap::from([
+            ("profile".to_string(), "main".to_string()),
+            ("route".to_string(), "responses".to_string()),
+            ("score".to_string(), "4".to_string()),
+            ("reason".to_string(), "stream_read_error".to_string()),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent route-specific health penalty is steering fresh selection away from main/responses (score 4, reason stream_read_error). Next step: Inspect recent transport or overload markers for main/responses, especially `stream_read_error`, and wait for that route score to decay before expecting fresh selection to reuse it."
     );
 }
 

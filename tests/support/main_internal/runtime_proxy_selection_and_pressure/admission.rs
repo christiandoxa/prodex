@@ -873,6 +873,98 @@ fn previous_response_affinity_test_shared(
     }
 }
 
+fn single_profile_test_profiles(temp_dir: &TestDir) -> BTreeMap<String, ProfileEntry> {
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    BTreeMap::from([(
+        "main".to_string(),
+        ProfileEntry {
+            codex_home: profile_home,
+            managed: true,
+            email: Some("main@example.com".to_string()),
+            provider: ProfileProvider::Openai,
+        },
+    )])
+}
+
+fn insert_continuation_binding(
+    store: &mut RuntimeContinuationStore,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    bound_at: i64,
+) {
+    let binding = ResponseProfileBinding {
+        profile_name: "main".to_string(),
+        bound_at,
+    };
+    match kind {
+        RuntimeContinuationBindingKind::Response => {
+            store
+                .response_profile_bindings
+                .insert(key.to_string(), binding);
+        }
+        RuntimeContinuationBindingKind::TurnState => {
+            store.turn_state_bindings.insert(key.to_string(), binding);
+        }
+        RuntimeContinuationBindingKind::SessionId => {
+            store
+                .session_profile_bindings
+                .insert(key.to_string(), binding.clone());
+            store.session_id_bindings.insert(key.to_string(), binding);
+        }
+    }
+}
+
+fn insert_dead_continuation_status(
+    store: &mut RuntimeContinuationStore,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    dead_at: i64,
+) {
+    let status = dead_continuation_status(dead_at);
+    match kind {
+        RuntimeContinuationBindingKind::Response => {
+            store.statuses.response.insert(key.to_string(), status);
+        }
+        RuntimeContinuationBindingKind::TurnState => {
+            store.statuses.turn_state.insert(key.to_string(), status);
+        }
+        RuntimeContinuationBindingKind::SessionId => {
+            store.statuses.session_id.insert(key.to_string(), status);
+        }
+    }
+}
+
+fn continuation_binding_present(
+    store: &RuntimeContinuationStore,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+) -> bool {
+    match kind {
+        RuntimeContinuationBindingKind::Response => {
+            store.response_profile_bindings.contains_key(key)
+        }
+        RuntimeContinuationBindingKind::TurnState => store.turn_state_bindings.contains_key(key),
+        RuntimeContinuationBindingKind::SessionId => {
+            store.session_profile_bindings.contains_key(key)
+                && store.session_id_bindings.contains_key(key)
+        }
+    }
+}
+
+fn continuation_dead_status_present(
+    store: &RuntimeContinuationStore,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+) -> bool {
+    let status = match kind {
+        RuntimeContinuationBindingKind::Response => store.statuses.response.get(key),
+        RuntimeContinuationBindingKind::TurnState => store.statuses.turn_state.get(key),
+        RuntimeContinuationBindingKind::SessionId => store.statuses.session_id.get(key),
+    };
+    status.is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+}
+
 #[test]
 fn previous_response_affinity_release_requires_repeated_not_found() {
     let temp_dir = TestDir::new();
@@ -1078,6 +1170,204 @@ fn previous_response_affinity_ignores_expired_negative_cache_until_threshold_reb
 }
 
 #[test]
+fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expiry() {
+    #[derive(Clone, Copy)]
+    struct BoundaryCase {
+        name: &'static str,
+        seeded_score: Option<u32>,
+        updated_at: i64,
+        expect_release: bool,
+        expect_score: u32,
+        expect_binding_retained: bool,
+    }
+
+    let now = Local::now().timestamp();
+    let cases = [
+        BoundaryCase {
+            name: "empty_cache_first_miss",
+            seeded_score: None,
+            updated_at: now,
+            expect_release: false,
+            expect_score: 1,
+            expect_binding_retained: true,
+        },
+        BoundaryCase {
+            name: "fresh_threshold_minus_one_releases",
+            seeded_score: Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD - 1),
+            updated_at: now,
+            expect_release: true,
+            expect_score: RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD,
+            expect_binding_retained: false,
+        },
+        BoundaryCase {
+            name: "expired_threshold_minus_one_restarts_counter",
+            seeded_score: Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD - 1),
+            updated_at: now - RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS - 1,
+            expect_release: false,
+            expect_score: 1,
+            expect_binding_retained: true,
+        },
+    ];
+
+    for route_kind in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Standard,
+    ] {
+        for case in cases {
+            let temp_dir = TestDir::new();
+            let response_id = format!(
+                "resp-{}-{}",
+                runtime_route_kind_label(route_kind),
+                case.name
+            );
+            let negative_cache = case.seeded_score.map(|score| {
+                (
+                    runtime_previous_response_negative_cache_key(
+                        &response_id,
+                        "main",
+                        route_kind,
+                    ),
+                    RuntimeProfileHealth {
+                        score,
+                        updated_at: case.updated_at,
+                    },
+                )
+            });
+            let shared = previous_response_affinity_test_shared(
+                &temp_dir,
+                &response_id,
+                now,
+                negative_cache.into_iter().collect(),
+            );
+
+            assert_eq!(
+                release_runtime_previous_response_affinity(
+                    &shared,
+                    "main",
+                    Some(&response_id),
+                    None,
+                    None,
+                    route_kind,
+                )
+                .expect("boundary release should succeed"),
+                case.expect_release,
+                "route={} case={}",
+                runtime_route_kind_label(route_kind),
+                case.name
+            );
+
+            let runtime = shared.runtime.lock().expect("runtime lock");
+            assert_eq!(
+                runtime
+                    .state
+                    .response_profile_bindings
+                    .contains_key(&response_id),
+                case.expect_binding_retained,
+                "route={} case={}",
+                runtime_route_kind_label(route_kind),
+                case.name
+            );
+            assert_eq!(
+                runtime
+                    .profile_health
+                    .get(&runtime_previous_response_negative_cache_key(
+                        &response_id,
+                        "main",
+                        route_kind,
+                    ))
+                    .map(|health| health.score),
+                Some(case.expect_score),
+                "route={} case={}",
+                runtime_route_kind_label(route_kind),
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn previous_response_negative_cache_keys_stay_route_scoped() {
+    let now = Local::now().timestamp();
+    for seeded_route in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Standard,
+    ] {
+        for release_route in [
+            RuntimeRouteKind::Responses,
+            RuntimeRouteKind::Websocket,
+            RuntimeRouteKind::Compact,
+            RuntimeRouteKind::Standard,
+        ] {
+            if seeded_route == release_route {
+                continue;
+            }
+
+            let temp_dir = TestDir::new();
+            let response_id = format!(
+                "resp-{}-from-{}",
+                runtime_route_kind_label(release_route),
+                runtime_route_kind_label(seeded_route)
+            );
+            let seeded_key =
+                runtime_previous_response_negative_cache_key(&response_id, "main", seeded_route);
+            let release_key =
+                runtime_previous_response_negative_cache_key(&response_id, "main", release_route);
+            let shared = previous_response_affinity_test_shared(
+                &temp_dir,
+                &response_id,
+                now,
+                BTreeMap::from([(
+                    seeded_key.clone(),
+                    RuntimeProfileHealth {
+                        score: RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD,
+                        updated_at: now,
+                    },
+                )]),
+            );
+
+            assert!(
+                !release_runtime_previous_response_affinity(
+                    &shared,
+                    "main",
+                    Some(&response_id),
+                    None,
+                    None,
+                    release_route,
+                )
+                .expect("route-scoped release should succeed"),
+                "release route should ignore negative cache from a different route"
+            );
+
+            let runtime = shared.runtime.lock().expect("runtime lock");
+            assert!(
+                runtime
+                    .state
+                    .response_profile_bindings
+                    .contains_key(&response_id),
+                "route-scoped cache should not release affinity"
+            );
+            assert_eq!(
+                runtime.profile_health.get(&seeded_key).map(|health| health.score),
+                Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD),
+                "seeded route score should stay untouched"
+            );
+            assert_eq!(
+                runtime
+                    .profile_health
+                    .get(&release_key)
+                    .map(|health| health.score),
+                Some(1),
+                "release route should build its own counter from scratch"
+            );
+        }
+    }
+}
+
+#[test]
 fn runtime_continuation_status_pruning_uses_evidence_over_age() {
     let temp_dir = TestDir::new();
     let profile_home = temp_dir.path.join("homes/main");
@@ -1233,6 +1523,125 @@ fn runtime_dead_continuation_tombstone_blocks_stale_binding_resurrection() {
             .map(|status| status.state),
         Some(RuntimeContinuationBindingLifecycle::Dead)
     );
+}
+
+#[test]
+fn runtime_continuation_tombstone_merge_boundaries_cover_all_binding_kinds() {
+    #[derive(Clone, Copy)]
+    struct TombstoneCase {
+        name: &'static str,
+        existing_binding_at: Option<i64>,
+        incoming_binding_at: Option<i64>,
+        existing_dead_at: Option<i64>,
+        incoming_dead_at: Option<i64>,
+        expect_binding: bool,
+        expect_dead: bool,
+    }
+
+    let now = Local::now().timestamp();
+    let cases = [
+        TombstoneCase {
+            name: "existing_dead_prunes_older_incoming_binding",
+            existing_binding_at: None,
+            incoming_binding_at: Some(now - 1),
+            existing_dead_at: Some(now),
+            incoming_dead_at: None,
+            expect_binding: false,
+            expect_dead: true,
+        },
+        TombstoneCase {
+            name: "existing_dead_prunes_same_second_incoming_binding",
+            existing_binding_at: None,
+            incoming_binding_at: Some(now),
+            existing_dead_at: Some(now),
+            incoming_dead_at: None,
+            expect_binding: false,
+            expect_dead: true,
+        },
+        TombstoneCase {
+            name: "newer_incoming_binding_shadows_existing_dead",
+            existing_binding_at: None,
+            incoming_binding_at: Some(now + 1),
+            existing_dead_at: Some(now),
+            incoming_dead_at: None,
+            expect_binding: true,
+            expect_dead: false,
+        },
+        TombstoneCase {
+            name: "incoming_dead_prunes_existing_binding",
+            existing_binding_at: Some(now),
+            incoming_binding_at: None,
+            existing_dead_at: None,
+            incoming_dead_at: Some(now + 1),
+            expect_binding: false,
+            expect_dead: true,
+        },
+        TombstoneCase {
+            name: "incoming_same_second_dead_prunes_existing_binding",
+            existing_binding_at: Some(now),
+            incoming_binding_at: None,
+            existing_dead_at: None,
+            incoming_dead_at: Some(now),
+            expect_binding: false,
+            expect_dead: true,
+        },
+        TombstoneCase {
+            name: "newer_existing_binding_shadows_incoming_dead",
+            existing_binding_at: Some(now + 1),
+            incoming_binding_at: None,
+            existing_dead_at: None,
+            incoming_dead_at: Some(now),
+            expect_binding: true,
+            expect_dead: false,
+        },
+    ];
+
+    for kind in [
+        RuntimeContinuationBindingKind::Response,
+        RuntimeContinuationBindingKind::TurnState,
+        RuntimeContinuationBindingKind::SessionId,
+    ] {
+        let key = match kind {
+            RuntimeContinuationBindingKind::Response => "resp-main",
+            RuntimeContinuationBindingKind::TurnState => "turn-main",
+            RuntimeContinuationBindingKind::SessionId => "sess-main",
+        };
+
+        for case in cases {
+            let temp_dir = TestDir::new();
+            let profiles = single_profile_test_profiles(&temp_dir);
+            let mut existing = RuntimeContinuationStore::default();
+            let mut incoming = RuntimeContinuationStore::default();
+
+            if let Some(bound_at) = case.existing_binding_at {
+                insert_continuation_binding(&mut existing, kind, key, bound_at);
+            }
+            if let Some(bound_at) = case.incoming_binding_at {
+                insert_continuation_binding(&mut incoming, kind, key, bound_at);
+            }
+            if let Some(dead_at) = case.existing_dead_at {
+                insert_dead_continuation_status(&mut existing, kind, key, dead_at);
+            }
+            if let Some(dead_at) = case.incoming_dead_at {
+                insert_dead_continuation_status(&mut incoming, kind, key, dead_at);
+            }
+
+            let merged = merge_runtime_continuation_store(&existing, &incoming, &profiles);
+
+            assert_eq!(
+                continuation_binding_present(&merged, kind, key),
+                case.expect_binding,
+                "kind={kind:?} case={}",
+                case.name
+            );
+            assert_eq!(
+                continuation_dead_status_present(&merged, kind, key),
+                case.expect_dead,
+                "kind={kind:?} case={}",
+                case.name
+            );
+        }
+    }
 }
 
 #[test]

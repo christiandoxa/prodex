@@ -3,6 +3,7 @@ include!("runtime_proxy_selection_and_pressure/selection.rs");
 include!("runtime_proxy_selection_and_pressure/rotation.rs");
 include!("runtime_proxy_selection_and_pressure/health.rs");
 include!("runtime_proxy_selection_and_pressure/doctor.rs");
+include!("runtime_proxy_selection_and_pressure/incidents.rs");
 include!("runtime_proxy_selection_and_pressure/persistence.rs");
 include!("runtime_proxy_selection_and_pressure/state.rs");
 include!("runtime_proxy_selection_and_pressure/admission.rs");

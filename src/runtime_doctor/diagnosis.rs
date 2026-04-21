@@ -122,6 +122,109 @@ fn runtime_doctor_marker_last_u64_field(
         .ok()
 }
 
+fn runtime_doctor_marker_scope(
+    summary: &RuntimeDoctorSummary,
+    marker: &str,
+    profile_field: &str,
+    route_field: &str,
+) -> Option<String> {
+    let profile = runtime_doctor_marker_last_field(summary, marker, profile_field);
+    let route = runtime_doctor_marker_last_field(summary, marker, route_field);
+    match (profile, route) {
+        (Some(profile), Some(route)) => Some(format!("{profile}/{route}")),
+        (Some(profile), None) => Some(profile.to_string()),
+        (None, Some(route)) => Some(route.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn runtime_doctor_admission_pressure_load(summary: &RuntimeDoctorSummary, marker: &str) -> String {
+    match (
+        runtime_doctor_marker_last_field(summary, marker, "active"),
+        runtime_doctor_marker_last_field(summary, marker, "limit"),
+    ) {
+        (Some(active), Some(limit)) => format!(" Latest load: {active}/{limit}."),
+        _ => String::new(),
+    }
+}
+
+pub(crate) fn runtime_doctor_context_fallback_blocked_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let reason = runtime_doctor_marker_last_field(
+        summary,
+        "previous_response_fresh_fallback_blocked",
+        "reason",
+    )
+    .unwrap_or("unknown_reason");
+    format!(
+        "Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: {reason}."
+    )
+}
+
+pub(crate) fn runtime_doctor_compact_final_failure_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let exit =
+        runtime_doctor_marker_last_field(summary, "compact_final_failure", "exit").unwrap_or("-");
+    let reason =
+        runtime_doctor_marker_last_field(summary, "compact_final_failure", "reason").unwrap_or("-");
+    let profile = runtime_doctor_marker_last_field(summary, "compact_final_failure", "profile")
+        .map(|profile| format!(" on profile {profile}"))
+        .unwrap_or_default();
+    match (exit, reason) {
+        ("pressure", _) => {
+            "Reduce fresh compact volume or wait for continuation-heavy traffic to drain before retrying compact.".to_string()
+        }
+        (_, "quota") => format!(
+            "Inspect compact budget and candidate-exhausted markers{profile}, then retry after compact quota refreshes or another profile becomes eligible."
+        ),
+        (_, "overload") => format!(
+            "Inspect compact overload and backoff markers{profile}, then retry after the local pressure clears."
+        ),
+        (_, "inflight_saturation") => format!(
+            "Wait for in-flight compact work to drain{profile} before retrying."
+        ),
+        _ => format!(
+            "Inspect compact exit markers around `{exit}`{profile} and retry after the blocking condition clears."
+        ),
+    }
+}
+
+pub(crate) fn runtime_doctor_lane_pressure_next_step(summary: &RuntimeDoctorSummary) -> String {
+    let lane =
+        runtime_doctor_marker_last_field(summary, "runtime_proxy_lane_limit_reached", "lane")
+            .unwrap_or("unknown");
+    let load = runtime_doctor_admission_pressure_load(summary, "runtime_proxy_lane_limit_reached");
+    if lane == "responses" {
+        format!(
+            "Reduce concurrent terminals or bursty side-lane work until the responses lane drains.{load}"
+        )
+    } else {
+        format!(
+            "Inspect repeated lane={lane} markers and trim bursty {lane} traffic if it is starving responses.{load}"
+        )
+    }
+}
+
+pub(crate) fn runtime_doctor_active_pressure_next_step(summary: &RuntimeDoctorSummary) -> String {
+    let load =
+        runtime_doctor_admission_pressure_load(summary, "runtime_proxy_active_limit_reached");
+    format!(
+        "Reduce concurrent fresh work or wait for in-flight requests to drain before retrying.{load}"
+    )
+}
+
+pub(crate) fn runtime_doctor_route_health_next_step(summary: &RuntimeDoctorSummary) -> String {
+    let scope = runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
+        .unwrap_or_else(|| "that route".to_string());
+    let reason = runtime_doctor_marker_last_field(summary, "profile_health", "reason")
+        .unwrap_or("unknown_reason");
+    format!(
+        "Inspect recent transport or overload markers for {scope}, especially `{reason}`, and wait for that route score to decay before expecting fresh selection to reuse it."
+    )
+}
+
 pub(crate) fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -> String {
     if counts.is_empty() {
         return "-".to_string();
@@ -455,9 +558,18 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
     } else if runtime_doctor_marker_count(summary, "runtime_proxy_overload_backoff") > 0 {
         "Recent local proxy overload backoff was triggered.".to_string()
     } else if runtime_doctor_marker_count(summary, "runtime_proxy_lane_limit_reached") > 0 {
-        "Recent per-lane admission limit was triggered.".to_string()
+        let lane =
+            runtime_doctor_marker_last_field(summary, "runtime_proxy_lane_limit_reached", "lane")
+                .unwrap_or("unknown");
+        format!(
+            "Recent per-lane admission limit was triggered on {lane}. Next step: {}",
+            runtime_doctor_lane_pressure_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "runtime_proxy_active_limit_reached") > 0 {
-        "Recent global active-request admission limit was triggered.".to_string()
+        format!(
+            "Recent global active-request admission limit was triggered. Next step: {}",
+            runtime_doctor_active_pressure_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "runtime_proxy_queue_overloaded") > 0 {
         "Recent proxy saturation detected before commit.".to_string()
     } else if runtime_doctor_marker_count(summary, "profile_circuit_open") > 0 {
@@ -468,6 +580,17 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
     } else if runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0 {
         "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_health") > 0 {
+        let scope = runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
+            .unwrap_or_else(|| "unknown route".to_string());
+        let score =
+            runtime_doctor_marker_last_field(summary, "profile_health", "score").unwrap_or("-");
+        let reason = runtime_doctor_marker_last_field(summary, "profile_health", "reason")
+            .unwrap_or("unknown_reason");
+        format!(
+            "Recent route-specific health penalty is steering fresh selection away from {scope} (score {score}, reason {reason}). Next step: {}",
+            runtime_doctor_route_health_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "profile_bad_pairing") > 0 {
         "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
     } else if runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked") > 0 {
@@ -503,7 +626,10 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
         let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
             .unwrap_or("inspect previous_response_fresh_fallback_blocked markers");
-        format!("Recent {label} was blocked before commit. Latest reason: {reason}.")
+        format!(
+            "Recent {label} was blocked before commit. Latest reason: {reason}. Next step: {}",
+            runtime_doctor_context_fallback_blocked_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback") > 0 {
         let marker = "previous_response_fresh_fallback";
         let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
@@ -520,7 +646,10 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
             .unwrap_or("-");
         let reason = runtime_doctor_marker_last_field(summary, "compact_final_failure", "reason")
             .unwrap_or("-");
-        format!("Recent compact final failure exited via {exit} with reason {reason}.")
+        format!(
+            "Recent compact final failure exited via {exit} with reason {reason}. Next step: {}",
+            runtime_doctor_compact_final_failure_next_step(summary)
+        )
     } else if !runtime_doctor_compact_exit_counts(summary).is_empty() {
         format!(
             "Recent compact exit paths were logged: {}.",
