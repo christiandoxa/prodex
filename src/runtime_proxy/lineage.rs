@@ -1121,6 +1121,13 @@ pub(crate) fn clear_runtime_stale_previous_response_binding(
         &mut runtime.state.response_profile_bindings,
         previous_response_id,
     );
+    let now = Local::now().timestamp();
+    let _ = runtime_mark_continuation_status_dead(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::Response,
+        previous_response_id,
+        now,
+    );
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,

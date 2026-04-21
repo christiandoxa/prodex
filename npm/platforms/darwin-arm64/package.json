@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex-darwin-arm64",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "description": "Native prodex binary for aarch64-apple-darwin",
   "license": "MIT",
   "os": [

@@ -842,6 +842,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyUsageLimitMessage,
     HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
+    HttpOnlyQuotaThenToolOutputFreshFallbackError,
     HttpOnlyPlain429,
     Websocket,
     WebsocketOverloaded,
@@ -926,6 +927,12 @@ impl RuntimeProxyBackend {
 
     fn start_http_delayed_quota_after_output_item_added() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyDelayedQuotaAfterOutputItemAdded)
+    }
+
+    fn start_http_quota_then_tool_output_fresh_fallback_error() -> Self {
+        Self::start_with_mode(
+            RuntimeProxyBackendMode::HttpOnlyQuotaThenToolOutputFreshFallbackError,
+        )
     }
 
     fn start_http_plain_429() -> Self {
@@ -1770,6 +1777,53 @@ fn handle_runtime_proxy_backend_request(
                                 | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
                         )
                             .then_some(Duration::from_millis(100)),
+                    )
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyQuotaThenToolOutputFreshFallbackError
+                    )
+                        && previous_response_id.is_none()
+                        && request_body_contains_only_function_call_output(&request_body) =>
+                {
+                    let (call_id, item_label) = body_json
+                        .get("input")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|input| input.first())
+                        .map(|item| {
+                            let call_id = item
+                                .get("call_id")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("call_missing");
+                            let item_label = item
+                                .get("type")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("tool_call_output")
+                                .replace('_', " ");
+                            (call_id.to_string(), item_label)
+                        })
+                        .unwrap_or_else(|| {
+                            ("call_missing".to_string(), "tool call output".to_string())
+                        });
+                    (
+                        "HTTP/1.1 400 Bad Request",
+                        "application/json",
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": format!(
+                                    "No tool call found for {item_label} with call_id {call_id}."
+                                ),
+                                "param": "input",
+                            }
+                        })
+                        .to_string(),
+                        None,
+                        None,
+                        None,
                     )
                 }
                 "second-account" if previous_response_id.is_some() => (
@@ -2901,6 +2955,31 @@ fn request_previous_response_id(request: &str) -> Option<String> {
         .map(|(_, body)| body)
         .unwrap_or_default();
     runtime_request_previous_response_id_from_text(body)
+}
+
+fn request_body_contains_only_function_call_output(request_body: &str) -> bool {
+    let Ok(body) = serde_json::from_str::<serde_json::Value>(request_body) else {
+        return false;
+    };
+    let Some(input) = body.get("input").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    !input.is_empty()
+        && input.iter().all(|item| {
+            let Some(object) = item.as_object() else {
+                return false;
+            };
+            let item_type = object
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let call_id = object
+                .get("call_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            call_id.is_some() && item_type.ends_with("_call_output")
+        })
 }
 
 fn runtime_proxy_usage_body(email: &str) -> String {
@@ -4466,6 +4545,118 @@ fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without
     assert!(
         !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         "session-replayable recovery should avoid stale continuation failure: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-main",
+                "input": [{
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_custom_123",
+                    "output": "ok",
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("insufficient_quota"),
+        "quota failure should pass through instead of degrading into a fresh tool-output retry: {body}"
+    );
+    assert!(
+        !body.contains("No tool call found"),
+        "non-replayable tool output should never be retried as a fresh request: {body}"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(
+        responses_bodies.len(),
+        1,
+        "proxy should not send a second fresh retry for tool-output-only payloads: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-main\""),
+        "original upstream request should preserve previous_response affinity: {}",
+        responses_bodies[0]
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| log.contains("quota_blocked_affinity_released") || log.contains("insufficient_quota"),
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        !log.contains("previous_response_fresh_fallback reason=quota_blocked"),
+        "quota-blocked tool-output-only path should not drop previous_response_id: {log}"
     );
 }
 

@@ -997,6 +997,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request_text) =
                             runtime_request_text_without_previous_response_id(&request_text)
                         {
@@ -1084,6 +1085,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request_text) =
                             runtime_request_text_without_previous_response_id(&request_text)
                         {
@@ -1339,6 +1341,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request_text) =
                             runtime_request_text_without_previous_response_id(&request_text)
                         {
@@ -1550,6 +1553,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request_text) =
                             runtime_request_text_without_previous_response_id(&request_text)
                         {
@@ -1851,6 +1855,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request_text) =
                             runtime_request_text_without_previous_response_id(&request_text)
                         {
@@ -2010,6 +2015,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     previous_response_id.as_deref(),
                     trusted_previous_response_affinity,
                     previous_response_fresh_fallback_used,
+                    previous_response_fresh_fallback_shape,
                 ) && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
                 {
@@ -2095,6 +2101,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     previous_response_id.as_deref(),
                     trusted_previous_response_affinity,
                     previous_response_fresh_fallback_used,
+                    previous_response_fresh_fallback_shape,
                 ) && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
                 {
@@ -2180,6 +2187,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     previous_response_id.as_deref(),
                     trusted_previous_response_affinity,
                     previous_response_fresh_fallback_used,
+                    previous_response_fresh_fallback_shape,
                 ) && let Some(fresh_request_text) =
                     runtime_request_text_without_previous_response_id(&request_text)
                 {
@@ -3536,6 +3544,7 @@ pub(super) fn proxy_runtime_responses_request(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request) =
                             runtime_request_without_previous_response_affinity(&request)
                         {
@@ -3759,6 +3768,7 @@ pub(super) fn proxy_runtime_responses_request(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request) =
                             runtime_request_without_previous_response_affinity(&request)
                         {
@@ -4013,6 +4023,7 @@ pub(super) fn proxy_runtime_responses_request(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request) =
                             runtime_request_without_previous_response_affinity(&request)
                         {
@@ -4236,6 +4247,7 @@ pub(super) fn proxy_runtime_responses_request(
                             previous_response_id.as_deref(),
                             trusted_previous_response_affinity,
                             previous_response_fresh_fallback_used,
+                            previous_response_fresh_fallback_shape,
                         ) && let Some(fresh_request) =
                             runtime_request_without_previous_response_affinity(&request)
                         {
@@ -4440,6 +4452,7 @@ pub(super) fn proxy_runtime_responses_request(
                     previous_response_id.as_deref(),
                     trusted_previous_response_affinity,
                     previous_response_fresh_fallback_used,
+                    previous_response_fresh_fallback_shape,
                 ) && let Some(fresh_request) =
                     runtime_request_without_previous_response_affinity(&request)
                 {
@@ -4528,6 +4541,7 @@ pub(super) fn proxy_runtime_responses_request(
                     previous_response_id.as_deref(),
                     trusted_previous_response_affinity,
                     previous_response_fresh_fallback_used,
+                    previous_response_fresh_fallback_shape,
                 ) && let Some(fresh_request) =
                     runtime_request_without_previous_response_affinity(&request)
                 {

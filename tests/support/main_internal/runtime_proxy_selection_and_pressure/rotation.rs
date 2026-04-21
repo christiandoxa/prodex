@@ -1558,6 +1558,89 @@ fn previous_response_release_preserves_session_and_compact_session_lineage_for_c
 }
 
 #[test]
+fn clear_runtime_stale_previous_response_binding_marks_dead_tombstone() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+
+    remember_runtime_response_ids_with_turn_state(
+        &shared,
+        "main",
+        &[String::from("resp-main")],
+        Some("turn-main"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("response affinity should be recorded");
+    wait_for_runtime_background_queues_idle();
+
+    assert!(
+        clear_runtime_stale_previous_response_binding(&shared, "main", Some("resp-main"))
+            .expect("stale clear should succeed")
+    );
+    wait_for_runtime_background_queues_idle();
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        !runtime
+            .state
+            .response_profile_bindings
+            .contains_key("resp-main"),
+        "cleared stale binding should be removed from live affinity"
+    );
+    assert_eq!(
+        runtime
+            .continuation_statuses
+            .response
+            .get("resp-main")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
 fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_compatible() {
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");

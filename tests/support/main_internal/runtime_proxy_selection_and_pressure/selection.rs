@@ -374,6 +374,35 @@ fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
 }
 
 #[test]
+fn quota_blocked_previous_response_fresh_fallback_blocks_tool_output_only() {
+    assert!(
+        !runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+            Some("resp_123"),
+            true,
+            false,
+            Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly),
+        ),
+        "tool-output-only requests still need chain-scoped call context"
+    );
+}
+
+#[test]
+fn quota_blocked_previous_response_fresh_fallback_allows_session_replayable_requests() {
+    assert!(runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+        Some("resp_123"),
+        true,
+        false,
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+    ));
+    assert!(runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+        Some("resp_123"),
+        true,
+        false,
+        Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput),
+    ));
+}
+
+#[test]
 fn runtime_quota_summary_distinguishes_window_health() {
     let summary = runtime_quota_summary_for_route(
         &usage_with_main_windows(4, 18_000, 12, 604_800),

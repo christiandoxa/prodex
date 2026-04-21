@@ -168,8 +168,8 @@ pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
             .pinned_profile
             .is_some_and(|profile_name| profile_name == affinity.candidate_name)
     {
-        // Pre-commit quota or overload means the owning response chain is temporarily unavailable,
-        // so a fresh fallback may safely drop previous_response affinity even for *_call_output.
+        // Pre-commit quota or overload means the owning response chain is temporarily unavailable.
+        // A later fresh fallback may still recover, but only if the request shape is replayable.
         return true;
     }
 
@@ -180,10 +180,12 @@ pub(crate) fn runtime_quota_blocked_previous_response_fresh_fallback_allowed(
     previous_response_id: Option<&str>,
     trusted_previous_response_affinity: bool,
     previous_response_fresh_fallback_used: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
     previous_response_id.is_some()
         && trusted_previous_response_affinity
         && !previous_response_fresh_fallback_used
+        && runtime_previous_response_fresh_fallback_shape_allows_recovery(fresh_fallback_shape)
 }
 
 pub(crate) fn runtime_websocket_previous_response_reuse_is_nonreplayable(
