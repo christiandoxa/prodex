@@ -962,6 +962,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     .map(|(profile_name, _)| profile_name.as_str()),
                             ),
                             request_requires_previous_response_affinity,
+                            previous_response_fresh_fallback_shape,
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
@@ -1071,6 +1072,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 previous_response_id.as_deref(),
                                 request_turn_state.as_deref(),
                             ),
+                            previous_response_fresh_fallback_shape,
                         ) {
                             runtime_proxy_log(
                                 shared,
@@ -1312,6 +1314,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 previous_response_id.as_deref(),
                                 request_turn_state.as_deref(),
                             ),
+                            previous_response_fresh_fallback_shape,
                         ) {
                             send_runtime_proxy_websocket_error(
                                 local_socket,
@@ -1529,6 +1532,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                     .map(|(profile_name, _)| profile_name.as_str()),
                             ),
                             request_requires_previous_response_affinity,
+                            previous_response_fresh_fallback_shape,
                         ) {
                             forward_runtime_proxy_websocket_error(local_socket, &payload)?;
                             return Ok(());
@@ -1638,6 +1642,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 previous_response_id.as_deref(),
                                 request_turn_state.as_deref(),
                             ),
+                            previous_response_fresh_fallback_shape,
                         ) {
                             runtime_proxy_log(
                                 shared,
@@ -1826,6 +1831,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 previous_response_id.as_deref(),
                                 request_turn_state.as_deref(),
                             ),
+                            previous_response_fresh_fallback_shape,
                         ) {
                             send_runtime_proxy_websocket_error(
                                 local_socket,
@@ -1985,6 +1991,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             .map(|(profile_name, _)| profile_name.as_str()),
                     ),
                     request_requires_previous_response_affinity,
+                    previous_response_fresh_fallback_shape,
                 ) {
                     runtime_proxy_log(
                         shared,
@@ -2098,6 +2105,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         previous_response_id.as_deref(),
                         request_turn_state.as_deref(),
                     ),
+                    previous_response_fresh_fallback_shape,
                 ) {
                     runtime_proxy_log(
                         shared,
@@ -2158,6 +2166,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         previous_response_id.as_deref(),
                         request_turn_state.as_deref(),
                     ),
+                    previous_response_fresh_fallback_shape,
                 ) {
                     send_runtime_proxy_websocket_error(
                         local_socket,
@@ -3525,6 +3534,7 @@ pub(super) fn proxy_runtime_responses_request(
                                     .map(|(profile_name, _)| profile_name.as_str()),
                             ),
                             request_requires_previous_response_affinity,
+                            previous_response_fresh_fallback_shape,
                         ) {
                             return Ok(response);
                         }
@@ -3695,7 +3705,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 previous_response_id.as_deref(),
                             )?;
                             if let Some(fresh_request) =
-                                runtime_request_without_previous_response_id(&request)
+                                runtime_request_without_previous_response_affinity(&request)
                             {
                                 apply_runtime_responses_previous_response_fresh_fallback(
                                     &mut request,
@@ -3754,6 +3764,7 @@ pub(super) fn proxy_runtime_responses_request(
                                     .map(|(profile_name, _)| profile_name.as_str()),
                             ),
                             request_requires_previous_response_affinity,
+                            previous_response_fresh_fallback_shape,
                         ) {
                             return Ok(RuntimeResponsesReply::Buffered(
                                 build_runtime_proxy_json_error_parts(
@@ -4008,6 +4019,7 @@ pub(super) fn proxy_runtime_responses_request(
                                     .map(|(profile_name, _)| profile_name.as_str()),
                             ),
                             request_requires_previous_response_affinity,
+                            previous_response_fresh_fallback_shape,
                         ) {
                             return Ok(response);
                         }
@@ -4178,7 +4190,7 @@ pub(super) fn proxy_runtime_responses_request(
                                 previous_response_id.as_deref(),
                             )?;
                             if let Some(fresh_request) =
-                                runtime_request_without_previous_response_id(&request)
+                                runtime_request_without_previous_response_affinity(&request)
                             {
                                 apply_runtime_responses_previous_response_fresh_fallback(
                                     &mut request,
@@ -4237,6 +4249,7 @@ pub(super) fn proxy_runtime_responses_request(
                                     .map(|(profile_name, _)| profile_name.as_str()),
                             ),
                             request_requires_previous_response_affinity,
+                            previous_response_fresh_fallback_shape,
                         ) {
                             return Ok(RuntimeResponsesReply::Buffered(
                                 build_runtime_proxy_json_error_parts(
@@ -4435,6 +4448,7 @@ pub(super) fn proxy_runtime_responses_request(
                             .map(|(profile_name, _)| profile_name.as_str()),
                     ),
                     request_requires_previous_response_affinity,
+                    previous_response_fresh_fallback_shape,
                 ) {
                     runtime_proxy_log(
                         shared,
@@ -4524,6 +4538,7 @@ pub(super) fn proxy_runtime_responses_request(
                             .map(|(profile_name, _)| profile_name.as_str()),
                     ),
                     request_requires_previous_response_affinity,
+                    previous_response_fresh_fallback_shape,
                 ) {
                     return Ok(RuntimeResponsesReply::Buffered(
                         build_runtime_proxy_json_error_parts(
@@ -4688,7 +4703,7 @@ pub(super) fn proxy_runtime_responses_request(
                         previous_response_id.as_deref(),
                     )?;
                     if let Some(fresh_request) =
-                        runtime_request_without_previous_response_id(&request)
+                        runtime_request_without_previous_response_affinity(&request)
                     {
                         apply_runtime_responses_previous_response_fresh_fallback(
                             &mut request,

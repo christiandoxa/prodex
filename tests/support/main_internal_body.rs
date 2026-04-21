@@ -1785,7 +1785,8 @@ fn handle_runtime_proxy_backend_request(
                         RuntimeProxyBackendMode::HttpOnlyQuotaThenToolOutputFreshFallbackError
                     )
                         && previous_response_id.is_none()
-                        && request_body_contains_only_function_call_output(&request_body) =>
+                        && request_body_contains_only_function_call_output(&request_body)
+                        && !request_body_contains_session_id(&request_body) =>
                 {
                     let (call_id, item_label) = body_json
                         .get("input")
@@ -4744,6 +4745,260 @@ fn runtime_proxy_websocket_tool_output_with_session_recovers_via_fresh_fallback(
     assert!(
         !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         "session-scoped tool outputs should avoid stale continuation failure: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_session_replayable_previous_response_strips_turn_state_on_fresh_fallback() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-missing".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("x-codex-turn-state", "turn-stale")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-missing",
+                "session_id": "sess-replayable",
+                "input": [],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("\"id\":\"resp-second\""),
+        "fresh fallback should recover on the owning session profile: {body}"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(
+        responses_bodies.len(),
+        2,
+        "backend should observe original continuation plus fresh fallback: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-missing\""),
+        "first request should preserve previous_response_id: {}",
+        responses_bodies[0]
+    );
+    assert!(
+        !responses_bodies[1].contains("\"previous_response_id\":\"resp-missing\""),
+        "fresh fallback must clear previous_response_id: {}",
+        responses_bodies[1]
+    );
+    assert!(
+        responses_bodies[1].contains("\"session_id\":\"sess-replayable\""),
+        "fresh fallback must preserve session_id: {}",
+        responses_bodies[1]
+    );
+
+    let responses_headers = backend.responses_headers();
+    assert_eq!(
+        responses_headers.len(),
+        2,
+        "backend should record headers for both attempts: {responses_headers:?}"
+    );
+    assert_eq!(
+        responses_headers[0]
+            .get("x-codex-turn-state")
+            .map(String::as_str),
+        Some("turn-stale")
+    );
+    assert!(
+        !responses_headers[1].contains_key("x-codex-turn-state"),
+        "fresh fallback must strip stale x-codex-turn-state: {:?}",
+        responses_headers[1]
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| {
+            log.contains("previous_response_fresh_fallback")
+                && log.contains("request_shape=session_replayable")
+        },
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log.contains("previous_response_fresh_fallback")
+            && log.contains("request_shape=session_replayable"),
+        "fresh fallback should be logged: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_tool_output_with_session_recovers_via_fresh_fallback() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-main",
+                "session_id": "sess-replayable",
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_tk0AjVbCh1EZCS0XTVva002N",
+                    "output": "ok",
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        !body.contains("No tool call found"),
+        "session-scoped tool output should recover instead of failing fresh: {body}"
+    );
+    assert!(
+        body.contains("\"type\":\"response.created\"") || body.contains("\"id\":\"resp-second\""),
+        "fresh fallback should reach the second profile successfully: {body}"
+    );
+
+    let responses_accounts = backend.responses_accounts();
+    assert_eq!(
+        responses_accounts.first().map(String::as_str),
+        Some("main-account"),
+        "first attempt should stay on the owning profile: {responses_accounts:?}"
+    );
+    assert!(
+        responses_accounts.iter().any(|account| account == "second-account"),
+        "fresh fallback should retry on another profile: {responses_accounts:?}"
+    );
+    assert_eq!(
+        responses_accounts.last().map(String::as_str),
+        Some("second-account"),
+        "recovered request should settle on the fallback profile: {responses_accounts:?}"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert!(
+        responses_bodies.len() >= 2,
+        "backend should observe original request plus fresh fallback: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-main\""),
+        "first request should preserve previous_response_id: {}",
+        responses_bodies[0]
+    );
+    assert!(
+        !responses_bodies
+            .last()
+            .expect("fresh fallback request should exist")
+            .contains("\"previous_response_id\":\"resp-main\""),
+        "fresh fallback must clear previous_response_id: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies
+            .last()
+            .expect("fresh fallback request should exist")
+            .contains("\"session_id\":\"sess-replayable\""),
+        "fresh fallback must preserve session_id: {responses_bodies:?}"
     );
 }
 

@@ -417,6 +417,40 @@ fn quota_blocked_previous_response_fresh_fallback_allows_session_replayable_requ
 }
 
 #[test]
+fn quota_blocked_affinity_release_blocks_nonreplayable_tool_outputs() {
+    assert!(!runtime_quota_blocked_affinity_is_releasable(
+        RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Responses,
+            "main",
+            None,
+            Some("main"),
+            None,
+            None,
+            true,
+        ),
+        true,
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly),
+    ));
+}
+
+#[test]
+fn quota_blocked_affinity_release_allows_session_replayable_tool_outputs() {
+    assert!(runtime_quota_blocked_affinity_is_releasable(
+        RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Responses,
+            "main",
+            None,
+            Some("main"),
+            None,
+            None,
+            true,
+        ),
+        true,
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+    ));
+}
+
+#[test]
 fn runtime_quota_summary_distinguishes_window_health() {
     let summary = runtime_quota_summary_for_route(
         &usage_with_main_windows(4, 18_000, 12, 604_800),

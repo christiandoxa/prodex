@@ -141,10 +141,13 @@ pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffi
 pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
     affinity: RuntimeCandidateAffinity<'_>,
     request_requires_previous_response_affinity: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    if request_requires_previous_response_affinity {
+    if request_requires_previous_response_affinity
+        && !runtime_previous_response_fresh_fallback_shape_allows_recovery(fresh_fallback_shape)
+    {
         // Some continuations cannot be replayed safely on another account/session. Tool outputs
-        // carry chain-scoped call ids, and websocket previous_response continuations without turn
+        // without a replayable session and websocket previous_response continuations without turn
         // state would silently degrade into fresh requests. These requests must fail in place.
         return false;
     }
