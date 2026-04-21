@@ -88,6 +88,14 @@ pub(crate) fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                         .or_insert(0) += 1;
                 }
             }
+            if marker == "previous_response_fresh_fallback_blocked"
+                && let Some(request_shape) = fields.get("request_shape").cloned()
+            {
+                *summary
+                    .previous_response_fresh_fallback_blocked_by_request_shape
+                    .entry(request_shape)
+                    .or_insert(0) += 1;
+            }
             for facet in RUNTIME_DOCTOR_FACETS {
                 if let Some(value) = fields.get(*facet).cloned() {
                     *summary

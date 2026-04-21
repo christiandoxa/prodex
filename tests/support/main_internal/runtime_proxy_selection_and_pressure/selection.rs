@@ -116,6 +116,248 @@ fn empty_input_request() -> RuntimeResponsesRequestBuilder {
     RuntimeResponsesRequestBuilder::new(serde_json::json!([]))
 }
 
+fn mixed_tool_and_message_request() -> RuntimeResponsesRequestBuilder {
+    RuntimeResponsesRequestBuilder::new(serde_json::json!([
+        {
+            "type": "function_call_output",
+            "call_id": "call_123",
+            "output": "ok"
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "continue from the tool result"
+                }
+            ]
+        }
+    ]))
+}
+
+#[derive(Clone, Copy)]
+enum PreviousResponseFreshFallbackRequestShape {
+    ToolOutputOnly,
+    MessageFollowup,
+    EmptyInput,
+    MixedToolAndMessage,
+}
+
+impl PreviousResponseFreshFallbackRequestShape {
+    const ALL: [Self; 4] = [
+        Self::ToolOutputOnly,
+        Self::MessageFollowup,
+        Self::EmptyInput,
+        Self::MixedToolAndMessage,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::ToolOutputOnly => "tool_output_only",
+            Self::MessageFollowup => "message_followup",
+            Self::EmptyInput => "empty_input",
+            Self::MixedToolAndMessage => "mixed_tool_and_message",
+        }
+    }
+
+    fn request(self) -> RuntimeResponsesRequestBuilder {
+        match self {
+            Self::ToolOutputOnly => tool_output_only_request(),
+            Self::MessageFollowup => message_followup_request(),
+            Self::EmptyInput => empty_input_request(),
+            Self::MixedToolAndMessage => mixed_tool_and_message_request(),
+        }
+    }
+
+    fn input(self) -> serde_json::Value {
+        let request = self.request().build();
+        serde_json::from_slice::<serde_json::Value>(&request.body)
+            .expect("request should decode")
+            .get("input")
+            .expect("request should include input")
+            .clone()
+    }
+
+    fn expected_shape_label(self, has_session: bool) -> &'static str {
+        match (self, has_session) {
+            (Self::ToolOutputOnly, _) => "tool_output_only",
+            (Self::EmptyInput, false) => "empty_input",
+            (Self::EmptyInput, true) => "session_replayable",
+            (Self::MessageFollowup | Self::MixedToolAndMessage, _) => "continuation_only",
+        }
+    }
+
+    fn can_drop_previous_response_id(self, has_session: bool) -> bool {
+        has_session && matches!(self, Self::EmptyInput)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RuntimeRequestSessionPlacement {
+    None,
+    Body,
+    Header,
+    TurnMetadata,
+}
+
+impl RuntimeRequestSessionPlacement {
+    const ALL: [Self; 4] = [Self::None, Self::Body, Self::Header, Self::TurnMetadata];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Body => "body_session_id",
+            Self::Header => "header_session_id",
+            Self::TurnMetadata => "turn_metadata_session_id",
+        }
+    }
+
+    fn has_session(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    fn apply(self, builder: RuntimeResponsesRequestBuilder) -> RuntimeResponsesRequestBuilder {
+        match self {
+            Self::None => builder,
+            Self::Body => builder.session_id("sess_123"),
+            Self::Header => builder.session_header("sess_123"),
+            Self::TurnMetadata => builder.turn_metadata_session("sess_123"),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum WebsocketSessionPlacement {
+    None,
+    ClientMetadata,
+    SessionHeaderPromotion,
+}
+
+impl WebsocketSessionPlacement {
+    const ALL: [Self; 3] = [
+        Self::None,
+        Self::ClientMetadata,
+        Self::SessionHeaderPromotion,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ClientMetadata => "client_metadata_session_id",
+            Self::SessionHeaderPromotion => "session_header_promotion",
+        }
+    }
+
+    fn has_session(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    fn uses_client_metadata(self) -> bool {
+        matches!(self, Self::ClientMetadata)
+    }
+
+    fn promotes_header(self) -> bool {
+        matches!(self, Self::SessionHeaderPromotion)
+    }
+}
+
+fn websocket_previous_response_fresh_fallback_request_text(
+    shape: PreviousResponseFreshFallbackRequestShape,
+    has_client_metadata_session: bool,
+) -> String {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "previous_response_id".to_string(),
+        serde_json::json!("resp_123"),
+    );
+    body.insert("input".to_string(), shape.input());
+    if has_client_metadata_session {
+        body.insert(
+            "client_metadata".to_string(),
+            serde_json::json!({ "session_id": "sess_123" }),
+        );
+    }
+    serde_json::Value::Object(body).to_string()
+}
+
+#[test]
+fn runtime_request_previous_response_fresh_fallback_shape_matrix_allows_only_safe_drops() {
+    for shape in PreviousResponseFreshFallbackRequestShape::ALL {
+        for session in RuntimeRequestSessionPlacement::ALL {
+            let request = session
+                .apply(shape.request().previous_response_id("resp_123"))
+                .build();
+            let actual = runtime_request_previous_response_fresh_fallback_shape(&request);
+            let actual_label = runtime_previous_response_fresh_fallback_shape_label(actual);
+            let expected_label = shape.expected_shape_label(session.has_session());
+
+            assert_eq!(
+                actual_label,
+                expected_label,
+                "shape={} session={}",
+                shape.label(),
+                session.label()
+            );
+            assert_eq!(
+                runtime_previous_response_fresh_fallback_shape_allows_recovery(actual),
+                shape.can_drop_previous_response_id(session.has_session()),
+                "drop previous_response_id safety mismatch for shape={} session={}",
+                shape.label(),
+                session.label()
+            );
+        }
+    }
+}
+
+#[test]
+fn websocket_previous_response_fresh_fallback_shape_matrix_promotes_only_safe_session_shapes() {
+    for shape in PreviousResponseFreshFallbackRequestShape::ALL {
+        for session in WebsocketSessionPlacement::ALL {
+            let request_text = websocket_previous_response_fresh_fallback_request_text(
+                shape,
+                session.uses_client_metadata(),
+            );
+            let metadata = parse_runtime_websocket_request_metadata(&request_text);
+            let actual = runtime_previous_response_fresh_fallback_shape_with_session(
+                metadata.previous_response_fresh_fallback_shape,
+                session.promotes_header(),
+            );
+            let actual_label = runtime_previous_response_fresh_fallback_shape_label(actual);
+            let expected_label = shape.expected_shape_label(session.has_session());
+
+            assert_eq!(
+                metadata.previous_response_id.as_deref(),
+                Some("resp_123"),
+                "shape={} session={}",
+                shape.label(),
+                session.label()
+            );
+            assert_eq!(
+                metadata.session_id.as_deref(),
+                session.uses_client_metadata().then_some("sess_123"),
+                "shape={} session={}",
+                shape.label(),
+                session.label()
+            );
+            assert_eq!(
+                actual_label,
+                expected_label,
+                "shape={} session={}",
+                shape.label(),
+                session.label()
+            );
+            assert_eq!(
+                runtime_previous_response_fresh_fallback_shape_allows_recovery(actual),
+                shape.can_drop_previous_response_id(session.has_session()),
+                "websocket drop previous_response_id safety mismatch for shape={} session={}",
+                shape.label(),
+                session.label()
+            );
+        }
+    }
+}
+
 #[test]
 fn runtime_request_strips_previous_response_id_from_function_call_output_payloads() {
     let request = tool_output_only_request()
@@ -161,8 +403,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_tool_output
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_promotes_session_tool_output_to_replayable(
-) {
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_session_tool_output_replay() {
     let request = tool_output_only_request()
         .previous_response_id("resp_123")
         .session_id("sess_123")
@@ -170,18 +411,18 @@ fn runtime_request_previous_response_fresh_fallback_shape_promotes_session_tool_
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
     );
     assert!(
-        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
         ),
-        "session-scoped tool outputs should be recoverable after previous_response loss"
+        "session-scoped tool outputs still need previous_response tool-call context"
     );
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_session_tool_output_to_replayable(
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_header_session_tool_output_replay(
 ) {
     let request = tool_output_only_request()
         .previous_response_id("resp_123")
@@ -190,13 +431,13 @@ fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_sessio
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
     );
     assert!(
-        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
         ),
-        "explicit session headers should permit fresh tool-output recovery after previous_response loss"
+        "explicit session headers must not fresh-replay bare tool outputs"
     );
 }
 
@@ -208,7 +449,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_message_followu
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -228,7 +469,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_header_session_
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -248,7 +489,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_turn_metadata_s
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -268,7 +509,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_rep
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
     );
     assert!(
         runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -285,7 +526,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_empty_continuat
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInput)
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -303,7 +544,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_sessio
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
     );
     assert!(runtime_previous_response_fresh_fallback_shape_allows_recovery(
         runtime_request_previous_response_fresh_fallback_shape(&request)
@@ -321,7 +562,7 @@ fn websocket_previous_response_not_found_decision_prefers_locked_retry_before_st
             trusted_previous_response_affinity: false,
             request_turn_state: None,
             previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
             retry_index: 0,
         },
     );
@@ -388,7 +629,7 @@ fn websocket_previous_response_not_found_decision_marks_nonreplayable_continuati
             trusted_previous_response_affinity: false,
             request_turn_state: None,
             previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
             retry_index: 0,
         },
     );
@@ -400,7 +641,7 @@ fn websocket_previous_response_not_found_decision_marks_nonreplayable_continuati
     assert_eq!(
         runtime_previous_response_not_found_observability_outcome(
             decision,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
         ),
         Some("blocked_nonreplayable_without_affinity")
     );
@@ -417,7 +658,7 @@ fn responses_previous_response_not_found_decision_keeps_turn_state_retry_shared(
             trusted_previous_response_affinity: true,
             request_turn_state: Some("turn_state"),
             previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
             retry_index: 1,
         },
     );
@@ -447,13 +688,13 @@ fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     assert!(metadata.requires_previous_response_affinity);
     assert_eq!(
         metadata.previous_response_fresh_fallback_shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
     );
     assert!(
-        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             metadata.previous_response_fresh_fallback_shape
         ),
-        "websocket metadata should allow session replay recovery for tool outputs"
+        "websocket metadata should keep tool outputs chained to prior tool-call context"
     );
 }
 
@@ -468,7 +709,7 @@ fn parse_runtime_websocket_request_metadata_blocks_message_followup_replay() {
     assert!(!metadata.requires_previous_response_affinity);
     assert_eq!(
         metadata.previous_response_fresh_fallback_shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -491,7 +732,7 @@ fn websocket_session_header_does_not_make_message_followup_replayable() {
 
     assert_eq!(
         shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(shape),
@@ -518,13 +759,13 @@ fn quota_blocked_previous_response_fresh_fallback_allows_only_session_replayable
         Some("resp_123"),
         true,
         false,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
     ));
     assert!(!runtime_quota_blocked_previous_response_fresh_fallback_allowed(
         Some("resp_123"),
         true,
         false,
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
     ));
 }
 
@@ -546,7 +787,24 @@ fn quota_blocked_affinity_release_blocks_nonreplayable_tool_outputs() {
 }
 
 #[test]
-fn quota_blocked_affinity_release_allows_session_replayable_tool_outputs() {
+fn quota_blocked_affinity_release_blocks_nonreplayable_message_followups() {
+    assert!(!runtime_quota_blocked_affinity_is_releasable(
+        RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Responses,
+            "main",
+            None,
+            Some("main"),
+            None,
+            None,
+            true,
+        ),
+        false,
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
+    ));
+}
+
+#[test]
+fn quota_blocked_affinity_release_allows_session_replayable_empty_inputs() {
     assert!(runtime_quota_blocked_affinity_is_releasable(
         RuntimeCandidateAffinity::new(
             RuntimeRouteKind::Responses,
@@ -558,7 +816,7 @@ fn quota_blocked_affinity_release_allows_session_replayable_tool_outputs() {
             true,
         ),
         true,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
     ));
 }
 

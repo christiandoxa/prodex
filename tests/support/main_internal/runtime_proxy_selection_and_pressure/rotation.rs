@@ -2308,7 +2308,7 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
             Some("resp-second"),
             false,
             true,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
         ),
         "locked-affinity websocket continuations without replayable turn state must fail locally"
     );
@@ -2317,7 +2317,7 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
             Some("resp-second"),
             true,
             true,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
         ),
         "available replay turn state should keep previous_response retries alive"
     );
@@ -2326,7 +2326,7 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
             Some("resp-second"),
             false,
             false,
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
         ),
         "fresh fallback remains available only for session-replayable websocket requests"
     );
@@ -2335,7 +2335,7 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
             Some("resp-second"),
             false,
             false,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
         ),
         "continuation-only websocket requests without turn state must fail locally instead of surfacing raw upstream 400s"
     );
@@ -2353,7 +2353,7 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
             None,
             false,
             true,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
+            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
         ),
         "requests without previous_response_id should not be classified as stale continuations"
     );
@@ -2372,6 +2372,9 @@ fn websocket_reuse_watchdog_fresh_fallback_stays_blocked_for_locked_affinity() {
                 request_requires_previous_response_affinity: true,
                 trusted_previous_response_affinity: false,
                 request_turn_state: None,
+                fresh_fallback_shape: Some(
+                    RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
+                ),
             },
         ),
         "watchdog fallback should stay blocked for non-replayable locked-affinity continuations"

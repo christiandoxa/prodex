@@ -15,6 +15,7 @@ pub(crate) struct RuntimeDoctorSummary {
     pub(crate) facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
     pub(crate) previous_response_not_found_by_route: BTreeMap<String, usize>,
     pub(crate) previous_response_not_found_by_transport: BTreeMap<String, usize>,
+    pub(crate) previous_response_fresh_fallback_blocked_by_request_shape: BTreeMap<String, usize>,
     pub(crate) chain_retried_owner_by_reason: BTreeMap<String, usize>,
     pub(crate) chain_dead_upstream_confirmed_by_reason: BTreeMap<String, usize>,
     pub(crate) stale_continuation_by_reason: BTreeMap<String, usize>,

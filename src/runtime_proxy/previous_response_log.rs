@@ -196,7 +196,7 @@ mod tests {
                     fresh_fallback_blocked_without_affinity: true,
                 },
                 Some(
-                    crate::runtime_proxy::RuntimePreviousResponseFreshFallbackShape::ContinuationOnly
+                    crate::runtime_proxy::RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation
                 ),
                 "beta",
                 true,

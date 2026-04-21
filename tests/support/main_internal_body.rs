@@ -4725,7 +4725,7 @@ fn runtime_proxy_websocket_session_replayable_previous_response_recovers_without
 }
 
 #[test]
-fn runtime_proxy_websocket_tool_output_with_session_recovers_via_fresh_fallback() {
+fn runtime_proxy_websocket_tool_output_with_session_does_not_fresh_fallback() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -4792,75 +4792,75 @@ fn runtime_proxy_websocket_tool_output_with_session_recovers_via_fresh_fallback(
         ))
         .expect("websocket request should send");
 
-    let mut response_messages = Vec::new();
-    while response_messages.len() < 2 {
+    let response_message = loop {
         match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => response_messages.push(text.to_string()),
+            WsMessage::Text(text) => break text.to_string(),
             WsMessage::Ping(payload) => socket
                 .send(WsMessage::Pong(payload))
                 .expect("websocket pong should send"),
             WsMessage::Pong(_) | WsMessage::Frame(_) => {}
             other => panic!("unexpected websocket response: {other:?}"),
         }
-    }
+    };
     let _ = socket.close(None);
 
     assert!(
-        response_messages
-            .iter()
-            .any(|message| message.contains("\"type\":\"response.created\"")),
-        "tool-output recovery should emit response.created: {response_messages:?}"
+        response_message.contains("\"code\":\"stale_continuation\""),
+        "tool-output continuation should fail as stale instead of replaying fresh: {response_message}"
     );
     assert!(
-        response_messages
-            .iter()
-            .any(|message| message.contains("\"type\":\"response.completed\"")),
-        "tool-output recovery should emit response.completed: {response_messages:?}"
+        !response_message.contains("No tool call found"),
+        "proxy should not surface the fresh tool-output context error: {response_message}"
     );
 
     let websocket_requests = backend.websocket_requests();
-    assert_eq!(
-        websocket_requests.len(),
-        2,
-        "backend should observe the original continuation plus fresh fallback"
+    assert!(
+        !websocket_requests.is_empty(),
+        "backend should observe at least the original continuation"
     );
     assert!(
-        websocket_requests[0].contains("\"previous_response_id\":\"resp-second\""),
-        "first websocket attempt should preserve previous_response_id: {websocket_requests:?}"
+        websocket_requests
+            .iter()
+            .all(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "websocket retries must preserve previous_response_id: {websocket_requests:?}"
     );
     assert!(
-        !websocket_requests[1].contains("\"previous_response_id\":\"resp-second\""),
-        "fresh websocket fallback must clear previous_response_id: {websocket_requests:?}"
+        websocket_requests
+            .iter()
+            .all(|request| request.contains("\"session_id\":\"sess-replayable\"")),
+        "websocket retries must preserve session_id: {websocket_requests:?}"
     );
     assert!(
-        websocket_requests[1].contains("\"session_id\":\"sess-replayable\""),
-        "fresh websocket fallback must preserve session_id: {websocket_requests:?}"
+        websocket_requests
+            .iter()
+            .all(|request| request.contains("\"call_id\":\"call_h7GvfUPAvb95drykPBrTw65i\"")),
+        "websocket retries must preserve the original tool output: {websocket_requests:?}"
     );
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| {
-            log.contains("previous_response_fresh_fallback")
-                && log.contains("request_shape=session_replayable")
-        },
+        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         2_000,
         5_000,
         20,
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        log.contains("previous_response_fresh_fallback")
-            && log.contains("request_shape=session_replayable"),
-        "runtime log should show the websocket fresh fallback recovery path: {log}"
+        log.contains("previous_response_not_found"),
+        "runtime log should classify the broken continuation before surfacing stale: {log}"
     );
     assert!(
-        !log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
-        "session-scoped tool outputs should avoid stale continuation failure: {log}"
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "tool outputs must stay chained instead of becoming fresh requests: {log}"
+    );
+    assert!(
+        !log.contains("previous_response_fresh_fallback reason=websocket_missing_turn_state_tool_result"),
+        "tool-output-only requests must not use proactive fresh replay: {log}"
     );
 }
 
 #[test]
-fn runtime_proxy_websocket_tool_output_with_session_uses_proactive_session_replay() {
+fn runtime_proxy_websocket_tool_output_with_session_blocks_proactive_session_replay() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -4927,72 +4927,60 @@ fn runtime_proxy_websocket_tool_output_with_session_uses_proactive_session_repla
         ))
         .expect("websocket request should send");
 
-    let mut response_messages = Vec::new();
-    while response_messages.len() < 2 {
+    let response_message = loop {
         match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => response_messages.push(text.to_string()),
+            WsMessage::Text(text) => break text.to_string(),
             WsMessage::Ping(payload) => socket
                 .send(WsMessage::Pong(payload))
                 .expect("websocket pong should send"),
             WsMessage::Pong(_) | WsMessage::Frame(_) => {}
             other => panic!("unexpected websocket response: {other:?}"),
         }
-    }
+    };
     let _ = socket.close(None);
 
     assert!(
-        response_messages
-            .iter()
-            .any(|message| message.contains("\"type\":\"response.created\"")),
-        "tool-output replay should emit response.created: {response_messages:?}"
+        response_message.contains("\"code\":\"stale_continuation\""),
+        "tool-context failures should surface as stale continuation, not fresh replay: {response_message}"
     );
     assert!(
-        response_messages
-            .iter()
-            .any(|message| message.contains("\"type\":\"response.completed\"")),
-        "tool-output replay should emit response.completed: {response_messages:?}"
-    );
-    assert!(
-        response_messages
-            .iter()
-            .all(|message| !message.contains("No tool call found")),
-        "proactive replay should hide tool-context regression: {response_messages:?}"
+        !response_message.contains("No tool call found"),
+        "proxy should translate upstream tool-context loss before it reaches Codex: {response_message}"
     );
 
     let websocket_requests = backend.websocket_requests();
-    assert_eq!(
-        websocket_requests.len(),
-        1,
-        "proactive session replay should avoid sending the risky previous_response form"
-    );
-    let upstream_request: serde_json::Value = serde_json::from_str(&websocket_requests[0])
-        .expect("upstream websocket request should parse");
     assert!(
-        upstream_request.get("previous_response_id").is_none(),
-        "upstream request should drop previous_response_id before send: {upstream_request}"
+        !websocket_requests.is_empty(),
+        "backend should observe the guarded continuation"
     );
-    assert_eq!(
-        upstream_request
-            .get("session_id")
-            .and_then(serde_json::Value::as_str),
-        Some("sess-replayable")
+    assert!(
+        websocket_requests
+            .iter()
+            .all(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
+        "proactive replay must not drop previous_response_id: {websocket_requests:?}"
+    );
+    assert!(
+        websocket_requests
+            .iter()
+            .all(|request| request.contains("\"session_id\":\"sess-replayable\"")),
+        "guarded attempts must preserve session_id: {websocket_requests:?}"
     );
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| {
-            log.contains("previous_response_fresh_fallback")
-                && log.contains("reason=websocket_missing_turn_state_tool_result")
-        },
+        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         2_000,
         5_000,
         20,
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        log.contains("previous_response_fresh_fallback")
-            && log.contains("reason=websocket_missing_turn_state_tool_result"),
-        "runtime log should show proactive session replay guard: {log}"
+        !log.contains("previous_response_fresh_fallback reason=websocket_missing_turn_state_tool_result"),
+        "runtime log must not show proactive fresh replay for tool outputs: {log}"
+    );
+    assert!(
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "runtime log should show the guarded stale-continuation path: {log}"
     );
 }
 
@@ -5316,7 +5304,263 @@ fn runtime_proxy_http_message_followup_with_session_header_does_not_fresh_fallba
 }
 
 #[test]
-fn runtime_proxy_http_tool_output_with_session_recovers_via_fresh_fallback() {
+fn runtime_proxy_http_message_followup_with_turn_metadata_session_does_not_fresh_fallback() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-missing".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let turn_metadata = serde_json::json!({
+        "session_id": "sess-replayable"
+    })
+    .to_string();
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("x-codex-turn-metadata", turn_metadata.clone())
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-missing",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "continue the same conversation",
+                    }],
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(
+        response.status().as_u16(),
+        400,
+        "turn metadata session_id must not make a message follow-up replayable"
+    );
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("previous_response_not_found"),
+        "client should see previous_response continuity failure: {body}"
+    );
+    assert!(
+        !body.contains("\"id\":\"resp-second\""),
+        "proxy must not replace lost context with a fresh response: {body}"
+    );
+
+    let responses_accounts = backend.responses_accounts();
+    assert_eq!(
+        responses_accounts,
+        vec!["second-account".to_string()],
+        "metadata session follow-up should stay on owning profile without fallback"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(
+        responses_bodies.len(),
+        1,
+        "proxy should not send a fresh retry for metadata session message follow-ups: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-missing\""),
+        "upstream request must preserve previous_response chain: {}",
+        responses_bodies[0]
+    );
+
+    let responses_headers = backend.responses_headers();
+    assert_eq!(
+        responses_headers.len(),
+        1,
+        "backend should record the single upstream attempt: {responses_headers:?}"
+    );
+    assert_eq!(
+        responses_headers[0]
+            .get("x-codex-turn-metadata")
+            .map(String::as_str),
+        Some(turn_metadata.as_str()),
+        "turn metadata should be preserved on the upstream continuation"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-main",
+                "session_id": "sess-replayable",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "continue after quota pressure",
+                    }],
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    let status = response.status().as_u16();
+    let body = response.text().expect("responses body should decode");
+    assert_eq!(
+        status,
+        200,
+        "quota SSE response should pass through from the owning profile: {body}"
+    );
+    assert!(
+        body.contains("insufficient_quota"),
+        "quota failure should pass through instead of becoming a fresh response: {body}"
+    );
+    assert!(
+        !body.contains("\"id\":\"resp-second\""),
+        "proxy must not replace quota-blocked message context with a fresh response: {body}"
+    );
+
+    let responses_accounts = backend.responses_accounts();
+    assert_eq!(
+        responses_accounts,
+        vec!["main-account".to_string()],
+        "quota-blocked message follow-up should not rotate off previous_response owner"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(
+        responses_bodies.len(),
+        1,
+        "proxy should not send a fresh retry for quota-blocked message follow-ups: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-main\""),
+        "upstream request must preserve previous_response_id under quota pressure: {}",
+        responses_bodies[0]
+    );
+    assert!(
+        responses_bodies[0].contains("\"session_id\":\"sess-replayable\""),
+        "upstream request must preserve session_id under quota pressure: {}",
+        responses_bodies[0]
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| log.contains("upstream_usage_limit_passthrough") || log.contains("quota_blocked"),
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        !log.contains("previous_response_fresh_fallback reason=quota_blocked"),
+        "quota-blocked message follow-up must not drop previous_response_id: {log}"
+    );
+    assert!(
+        !log.contains("quota_blocked_affinity_released"),
+        "quota-blocked message follow-up must keep previous_response affinity: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
     let main_home = temp_dir.path.join("homes/main");
@@ -5394,34 +5638,26 @@ fn runtime_proxy_http_tool_output_with_session_recovers_via_fresh_fallback() {
     assert_eq!(response.status().as_u16(), 200);
     let body = response.text().expect("responses body should decode");
     assert!(
-        !body.contains("No tool call found"),
-        "session-scoped tool output should recover instead of failing fresh: {body}"
+        body.contains("insufficient_quota"),
+        "quota failure should pass through instead of degrading into fresh tool-output retry: {body}"
     );
     assert!(
-        body.contains("\"type\":\"response.created\"") || body.contains("\"id\":\"resp-second\""),
-        "fresh fallback should reach the second profile successfully: {body}"
+        !body.contains("No tool call found"),
+        "proxy should not create a fresh tool-output request that loses call context: {body}"
     );
 
     let responses_accounts = backend.responses_accounts();
     assert_eq!(
-        responses_accounts.first().map(String::as_str),
-        Some("main-account"),
-        "first attempt should stay on the owning profile: {responses_accounts:?}"
-    );
-    assert!(
-        responses_accounts.iter().any(|account| account == "second-account"),
-        "fresh fallback should retry on another profile: {responses_accounts:?}"
-    );
-    assert_eq!(
-        responses_accounts.last().map(String::as_str),
-        Some("second-account"),
-        "recovered request should settle on the fallback profile: {responses_accounts:?}"
+        responses_accounts,
+        vec!["main-account".to_string()],
+        "tool-output continuations must not rotate away from the owning profile: {responses_accounts:?}"
     );
 
     let responses_bodies = backend.responses_bodies();
-    assert!(
-        responses_bodies.len() >= 2,
-        "backend should observe original request plus fresh fallback: {responses_bodies:?}"
+    assert_eq!(
+        responses_bodies.len(),
+        1,
+        "backend should observe only the original continuation: {responses_bodies:?}"
     );
     assert!(
         responses_bodies[0].contains("\"previous_response_id\":\"resp-main\""),
@@ -5429,23 +5665,28 @@ fn runtime_proxy_http_tool_output_with_session_recovers_via_fresh_fallback() {
         responses_bodies[0]
     );
     assert!(
-        !responses_bodies
-            .last()
-            .expect("fresh fallback request should exist")
-            .contains("\"previous_response_id\":\"resp-main\""),
-        "fresh fallback must clear previous_response_id: {responses_bodies:?}"
+        responses_bodies[0].contains("\"session_id\":\"sess-replayable\""),
+        "original request should preserve session_id: {}",
+        responses_bodies[0]
     );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| log.contains("upstream_usage_limit_passthrough") || log.contains("quota_blocked"),
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        responses_bodies
-            .last()
-            .expect("fresh fallback request should exist")
-            .contains("\"session_id\":\"sess-replayable\""),
-        "fresh fallback must preserve session_id: {responses_bodies:?}"
+        !log.contains("previous_response_fresh_fallback reason=quota_blocked"),
+        "quota-blocked tool-output path must not drop previous_response_id: {log}"
     );
 }
 
 #[test]
-fn runtime_proxy_http_tool_output_with_session_recovers_from_tool_context_missing() {
+fn runtime_proxy_http_tool_output_with_session_passes_through_tool_context_missing_without_fresh_retry()
+{
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_previous_response_tool_context_missing();
     let second_home = temp_dir.path.join("homes/second");
@@ -5507,22 +5748,18 @@ fn runtime_proxy_http_tool_output_with_session_recovers_from_tool_context_missin
         .send()
         .expect("responses request should succeed");
 
-    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.status().as_u16(), 400);
     let body = response.text().expect("responses body should decode");
     assert!(
-        !body.contains("No tool call found"),
-        "tool-context regression should recover before reaching client: {body}"
-    );
-    assert!(
-        body.contains("\"type\":\"response.created\"") || body.contains("\"id\":\"resp-second\""),
-        "session replay should recover on the same profile: {body}"
+        body.contains("No tool call found"),
+        "HTTP should pass through the upstream tool-context error when the original continuation failed: {body}"
     );
 
     let responses_bodies = backend.responses_bodies();
     assert_eq!(
         responses_bodies.len(),
-        2,
-        "backend should observe failing continuation plus recovered session replay"
+        1,
+        "backend should not observe a second fresh tool-output replay"
     );
     assert!(
         responses_bodies[0].contains("\"previous_response_id\":\"resp-second\""),
@@ -5530,32 +5767,26 @@ fn runtime_proxy_http_tool_output_with_session_recovers_from_tool_context_missin
         responses_bodies[0]
     );
     assert!(
-        !responses_bodies[1].contains("\"previous_response_id\":\"resp-second\""),
-        "replayed request must clear previous_response_id: {}",
-        responses_bodies[1]
-    );
-    assert!(
-        responses_bodies[1].contains("\"session_id\":\"sess-replayable\""),
-        "replayed request must preserve session_id: {}",
-        responses_bodies[1]
+        responses_bodies[0].contains("\"session_id\":\"sess-replayable\""),
+        "original request should preserve session_id: {}",
+        responses_bodies[0]
     );
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| {
-            log.contains("previous_response_fresh_fallback")
-                && log.contains("reason=previous_response_not_found")
-                && log.contains("request_shape=session_replayable")
-        },
+        |log| log.contains("previous_response_not_found"),
         2_000,
         5_000,
         20,
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        log.contains("previous_response_fresh_fallback")
-            && log.contains("request_shape=session_replayable"),
-        "runtime log should show recovered tool-context continuity failure: {log}"
+        log.contains("previous_response_not_found"),
+        "runtime log should classify upstream tool-context loss as a continuation miss: {log}"
+    );
+    assert!(
+        !log.contains("previous_response_fresh_fallback reason=previous_response_not_found"),
+        "tool-output-only context misses must not trigger fresh replay: {log}"
     );
 }
 

@@ -833,31 +833,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
             }
         };
     }
-    if previous_response_id.is_some()
-        && request_turn_state.is_none()
-        && request_session_id.is_some()
-        && !is_runtime_realtime_websocket_path(&handshake_request.path_and_query)
-        && request_requires_previous_response_affinity
-        && matches!(
-            previous_response_fresh_fallback_shape,
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
-        )
-        && let Some(fresh_request_text) =
-            runtime_request_text_without_previous_response_id(&request_text)
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=websocket_missing_turn_state_tool_result request_shape=session_replayable outcome=session_replayable_recovery via=proactive_session_replay"
-            ),
-        );
-        apply_runtime_websocket_previous_response_fresh_fallback(
-            fresh_request_text,
-            runtime_websocket_fresh_fallback_target!(),
-            runtime_previous_response_fresh_fallback_state!(),
-        );
-        recompute_route_affinity!("previous_response_fresh_fallback")?;
-    }
     loop {
         let pressure_mode =
             runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Websocket);
@@ -2287,6 +2262,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             request_requires_previous_response_affinity,
                             trusted_previous_response_affinity,
                             request_turn_state: request_turn_state.as_deref(),
+                            fresh_fallback_shape: previous_response_fresh_fallback_shape,
                         },
                     );
                 runtime_proxy_log(

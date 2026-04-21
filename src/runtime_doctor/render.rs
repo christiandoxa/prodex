@@ -331,10 +331,17 @@ fn runtime_doctor_push_marker_detail_rows(
                     .unwrap_or_else(|| "-".to_string()),
             );
         if marker == "previous_response_fresh_fallback_blocked" {
-            fields.push(
-                "Replay next step",
-                diagnosis::runtime_doctor_context_fallback_blocked_next_step(summary),
-            );
+            fields
+                .push(
+                    "Replay blocked shapes",
+                    diagnosis::runtime_doctor_count_breakdown(
+                        &summary.previous_response_fresh_fallback_blocked_by_request_shape,
+                    ),
+                )
+                .push(
+                    "Replay next step",
+                    diagnosis::runtime_doctor_context_fallback_blocked_next_step(summary),
+                );
         }
     }
     if marker == "stale_continuation" {

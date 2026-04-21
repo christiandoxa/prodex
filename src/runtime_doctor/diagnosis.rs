@@ -157,6 +157,11 @@ pub(crate) fn runtime_doctor_context_fallback_blocked_next_step(
         "reason",
     )
     .unwrap_or("unknown_reason");
+    if runtime_doctor_has_continuation_only_fallback_block(summary) {
+        return format!(
+            "Inspect `previous_response_not_found`, affinity bindings, and owning-profile chain markers before retrying; this was a context-preserving non-replayable follow-up, not a fresh fallback failure. Start a fresh turn only if context continuity can be abandoned. Latest block: {reason}."
+        );
+    }
     format!(
         "Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: {reason}."
     )
@@ -383,15 +388,21 @@ fn runtime_doctor_previous_response_fresh_fallback_label(
     summary: &RuntimeDoctorSummary,
     marker: &str,
 ) -> String {
-    let request_shape = runtime_doctor_marker_last_field(summary, marker, "request_shape")
-        .map(str::to_string)
-        .or_else(|| {
-            summary
-                .facet_counts
-                .get("request_shape")
-                .and_then(|counts| counts.get("session_replayable"))
-                .map(|_| "session_replayable".to_string())
-        });
+    let request_shape = if marker == "previous_response_fresh_fallback_blocked"
+        && runtime_doctor_has_continuation_only_fallback_block(summary)
+    {
+        Some("continuation_only".to_string())
+    } else {
+        runtime_doctor_marker_last_field(summary, marker, "request_shape")
+            .map(str::to_string)
+            .or_else(|| {
+                summary
+                    .facet_counts
+                    .get("request_shape")
+                    .and_then(|counts| counts.get("session_replayable"))
+                    .map(|_| "session_replayable".to_string())
+            })
+    };
     match request_shape.as_deref() {
         Some("session_replayable") => "session-replayable previous_response_id fallback",
         Some("replayable_input") => "replayable-input previous_response_id fallback",
@@ -400,6 +411,37 @@ fn runtime_doctor_previous_response_fresh_fallback_label(
         _ => "previous_response_id fresh fallback",
     }
     .to_string()
+}
+
+fn runtime_doctor_previous_response_fresh_fallback_blocked_shape_count(
+    summary: &RuntimeDoctorSummary,
+    request_shape: &str,
+) -> usize {
+    let counted = summary
+        .previous_response_fresh_fallback_blocked_by_request_shape
+        .get(request_shape)
+        .copied()
+        .unwrap_or(0);
+    if counted > 0 {
+        return counted;
+    }
+    if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback_blocked") > 0
+        && runtime_doctor_marker_last_field(
+            summary,
+            "previous_response_fresh_fallback_blocked",
+            "request_shape",
+        ) == Some(request_shape)
+    {
+        return 1;
+    }
+    0
+}
+
+fn runtime_doctor_has_continuation_only_fallback_block(summary: &RuntimeDoctorSummary) -> bool {
+    runtime_doctor_previous_response_fresh_fallback_blocked_shape_count(
+        summary,
+        "continuation_only",
+    ) > 0
 }
 
 fn runtime_doctor_compact_exit_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
@@ -626,10 +668,17 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
         let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
             .unwrap_or("inspect previous_response_fresh_fallback_blocked markers");
-        format!(
-            "Recent {label} was blocked before commit. Latest reason: {reason}. Next step: {}",
-            runtime_doctor_context_fallback_blocked_next_step(summary)
-        )
+        if runtime_doctor_has_continuation_only_fallback_block(summary) {
+            format!(
+                "Recent context-preserving non-replayable follow-up was blocked from fresh fallback before commit. This preserves continuity and should not be treated as a fresh fallback failure. Latest reason: {reason}. Next step: {}",
+                runtime_doctor_context_fallback_blocked_next_step(summary)
+            )
+        } else {
+            format!(
+                "Recent {label} was blocked before commit. Latest reason: {reason}. Next step: {}",
+                runtime_doctor_context_fallback_blocked_next_step(summary)
+            )
+        }
     } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback") > 0 {
         let marker = "previous_response_fresh_fallback";
         let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);

@@ -656,6 +656,101 @@ fn runtime_doctor_finalize_summary_prefers_session_replayable_blocked_fallback_d
 }
 
 #[test]
+fn runtime_doctor_finalize_summary_explains_continuation_only_blocked_fallback() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary
+        .marker_counts
+        .insert("previous_response_fresh_fallback_blocked", 1);
+    summary
+        .previous_response_fresh_fallback_blocked_by_request_shape
+        .insert("continuation_only".to_string(), 1);
+    summary.marker_last_fields.insert(
+        "previous_response_fresh_fallback_blocked",
+        BTreeMap::from([
+            (
+                "reason".to_string(),
+                "previous_response_not_found".to_string(),
+            ),
+            (
+                "request_shape".to_string(),
+                "continuation_only".to_string(),
+            ),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent context-preserving non-replayable follow-up was blocked from fresh fallback before commit. This preserves continuity and should not be treated as a fresh fallback failure. Latest reason: previous_response_not_found. Next step: Inspect `previous_response_not_found`, affinity bindings, and owning-profile chain markers before retrying; this was a context-preserving non-replayable follow-up, not a fresh fallback failure. Start a fresh turn only if context continuity can be abandoned. Latest block: previous_response_not_found."
+    );
+}
+
+#[test]
+fn runtime_doctor_log_summary_surfaces_continuation_only_blocked_fallback() {
+    let mut summary = summarize_runtime_log_tail(
+        br#"[2026-04-21 10:00:00.000 +07:00] request=41 transport=http route=responses previous_response_not_found profile=beta response_id=resp-missing retry_index=0
+[2026-04-21 10:00:00.001 +07:00] request=41 transport=http previous_response_fresh_fallback_blocked reason=previous_response_not_found request_shape=continuation_only outcome=blocked_nonreplayable_without_affinity profile=beta
+"#,
+    );
+    summary.pointer_exists = true;
+    summary.log_exists = true;
+    runtime_doctor_finalize_summary(&mut summary);
+
+    let fields = runtime_doctor_fields_for_summary(
+        &summary,
+        std::path::Path::new("/tmp/prodex-runtime-latest.path"),
+    )
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
+
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "previous_response_fresh_fallback_blocked"),
+        1
+    );
+    assert_eq!(
+        summary
+            .previous_response_fresh_fallback_blocked_by_request_shape
+            .get("continuation_only")
+            .copied(),
+        Some(1)
+    );
+    assert!(
+        summary
+            .diagnosis
+            .contains("context-preserving non-replayable follow-up"),
+        "doctor diagnosis should explain continuation-only blocking: {}",
+        summary.diagnosis
+    );
+    assert!(
+        summary
+            .diagnosis
+            .contains("not be treated as a fresh fallback failure"),
+        "doctor diagnosis should avoid misclassifying the guard: {}",
+        summary.diagnosis
+    );
+    assert_eq!(
+        fields.get("Replay shape").map(String::as_str),
+        Some("continuation_only")
+    );
+    assert_eq!(
+        fields.get("Replay blocked shapes").map(String::as_str),
+        Some("continuation_only=1")
+    );
+    assert!(
+        fields
+            .get("Replay next step")
+            .is_some_and(|value| value.contains("affinity bindings")),
+        "doctor fields should point to affinity inspection: {fields:?}"
+    );
+}
+
+#[test]
 fn runtime_doctor_finalize_summary_surfaces_compact_exit_breakdown() {
     let mut summary = RuntimeDoctorSummary {
         pointer_exists: true,

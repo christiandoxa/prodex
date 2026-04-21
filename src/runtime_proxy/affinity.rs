@@ -129,9 +129,9 @@ pub(crate) fn runtime_request_value_requires_previous_response_affinity(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RuntimePreviousResponseFreshFallbackShape {
     ToolOutputOnly,
-    EmptyInput,
-    SessionReplayable,
-    ContinuationOnly,
+    EmptyInputOnly,
+    SessionScopedFreshReplay,
+    ContextDependentContinuation,
 }
 
 pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
@@ -139,9 +139,13 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
 ) -> &'static str {
     match shape {
         Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => "tool_output_only",
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInput) => "empty_input",
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable) => "session_replayable",
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => "continuation_only",
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => "empty_input",
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay) => {
+            "session_replayable"
+        }
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation) => {
+            "continuation_only"
+        }
         None => "none",
     }
 }
@@ -151,7 +155,7 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
 ) -> bool {
     matches!(
         shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
     )
 }
 
@@ -164,10 +168,9 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
     }
 
     match shape {
-        Some(
-            RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly
-            | RuntimePreviousResponseFreshFallbackShape::EmptyInput,
-        ) => Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => {
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
+        }
         other => other,
     }
 }
@@ -208,19 +211,19 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
             .iter()
             .all(runtime_request_value_previous_response_input_item_is_tool_output);
 
-    Some(if tool_output_only && has_session {
-        RuntimePreviousResponseFreshFallbackShape::SessionReplayable
-    } else if tool_output_only {
+    Some(if tool_output_only {
+        // A bare function_call_output still depends on the previous response's tool-call item.
+        // Session metadata alone is not enough; fresh replay would surface "No tool call found".
         RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly
     } else if has_context_dependent_input {
         // Ordinary previous_response follow-ups carry only the incremental user/tool delta for the
         // next turn. Dropping previous_response_id would silently erase the earlier conversation
         // context, so these requests must stay chained even when session metadata is present.
-        RuntimePreviousResponseFreshFallbackShape::ContinuationOnly
+        RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation
     } else if has_session {
-        RuntimePreviousResponseFreshFallbackShape::SessionReplayable
+        RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay
     } else {
-        RuntimePreviousResponseFreshFallbackShape::EmptyInput
+        RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly
     })
 }
 
