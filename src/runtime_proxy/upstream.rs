@@ -106,7 +106,7 @@ pub(super) fn send_runtime_proxy_upstream_request(
     Ok(response)
 }
 
-pub(super) fn send_runtime_proxy_upstream_responses_request(
+pub(crate) fn send_runtime_proxy_upstream_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,

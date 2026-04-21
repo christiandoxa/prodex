@@ -32,18 +32,18 @@ pub(super) fn forward_runtime_proxy_response_with_limit(
     Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
-pub(super) struct RuntimeResponsesSuccessContext<'a> {
-    pub(super) request_id: u64,
-    pub(super) request_previous_response_id: Option<&'a str>,
-    pub(super) request_session_id: Option<&'a str>,
-    pub(super) request_turn_state: Option<&'a str>,
-    pub(super) turn_state_override: Option<&'a str>,
-    pub(super) shared: &'a RuntimeRotationProxyShared,
-    pub(super) profile_name: &'a str,
-    pub(super) inflight_guard: RuntimeProfileInFlightGuard,
+pub(crate) struct RuntimeResponsesSuccessContext<'a> {
+    pub(crate) request_id: u64,
+    pub(crate) request_previous_response_id: Option<&'a str>,
+    pub(crate) request_session_id: Option<&'a str>,
+    pub(crate) request_turn_state: Option<&'a str>,
+    pub(crate) turn_state_override: Option<&'a str>,
+    pub(crate) shared: &'a RuntimeRotationProxyShared,
+    pub(crate) profile_name: &'a str,
+    pub(crate) inflight_guard: RuntimeProfileInFlightGuard,
 }
 
-pub(super) fn prepare_runtime_proxy_responses_success(
+pub(crate) fn prepare_runtime_proxy_responses_success(
     context: RuntimeResponsesSuccessContext<'_>,
     response: reqwest::Response,
 ) -> Result<RuntimeResponsesAttempt> {
