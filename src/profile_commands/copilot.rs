@@ -19,22 +19,28 @@ struct CopilotConfigUser {
     login: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct CopilotUserInfo {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CopilotUserInfo {
     #[serde(default)]
-    login: Option<String>,
+    pub(crate) login: Option<String>,
     #[serde(default)]
-    access_type_sku: Option<String>,
+    pub(crate) access_type_sku: Option<String>,
     #[serde(default)]
-    copilot_plan: Option<String>,
+    pub(crate) copilot_plan: Option<String>,
     #[serde(default)]
-    endpoints: Option<CopilotUserEndpoints>,
+    pub(crate) endpoints: Option<CopilotUserEndpoints>,
+    #[serde(default)]
+    pub(crate) limited_user_quotas: BTreeMap<String, i64>,
+    #[serde(default)]
+    pub(crate) monthly_quotas: BTreeMap<String, i64>,
+    #[serde(default)]
+    pub(crate) limited_user_reset_date: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct CopilotUserEndpoints {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CopilotUserEndpoints {
     #[serde(default)]
-    api: Option<String>,
+    pub(crate) api: Option<String>,
 }
 
 #[derive(Debug)]
@@ -52,7 +58,7 @@ pub(super) fn is_copilot_import_source(path: &Path) -> bool {
         && !path.exists()
 }
 
-pub(super) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<()> {
+pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<()> {
     let context = resolve_copilot_import_context()?;
     let user_info = fetch_copilot_user_info(&context)?;
     let provider = ProfileProvider::Copilot {
@@ -260,33 +266,27 @@ fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str
 }
 
 fn resolve_copilot_import_context() -> Result<CopilotImportContext> {
-    let config_root = discover_copilot_config_root()?;
-    let config_path = config_root.join("config.json");
-    let raw = fs::read_to_string(&config_path)
-        .with_context(|| format!("failed to read {}", config_path.display()))?;
-    let config: CopilotConfigFile = serde_json::from_str(&raw)
-        .with_context(|| format!("failed to parse {}", config_path.display()))?;
+    let config = read_copilot_config()?;
     let user = config
         .last_logged_in_user
-        .or_else(|| config.logged_in_users.into_iter().next())
+        .clone()
+        .or_else(|| config.logged_in_users.first().cloned())
         .context("no logged-in Copilot user found in config.json")?;
-    let account_key = copilot_account_key(&user.host, &user.login);
-
-    let token = config
-        .copilot_tokens
-        .get(&account_key)
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(ToOwned::to_owned)
-        .or_else(|| read_copilot_keychain_token(&account_key).ok().flatten())
-        .context("failed to resolve the stored Copilot token from config or keychain")?;
+    let token = resolve_copilot_account_token_from_config(&config, &user.host, &user.login)?;
 
     Ok(CopilotImportContext {
         host: user.host,
         login: user.login,
         token,
     })
+}
+
+fn read_copilot_config() -> Result<CopilotConfigFile> {
+    let config_root = discover_copilot_config_root()?;
+    let config_path = config_root.join("config.json");
+    let raw = fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    serde_json::from_str(&raw).with_context(|| format!("failed to parse {}", config_path.display()))
 }
 
 fn discover_copilot_config_root() -> Result<PathBuf> {
@@ -427,19 +427,71 @@ fn copilot_account_key(host: &str, login: &str) -> String {
     format!("{}:{}", host.trim(), login.trim())
 }
 
+fn resolve_copilot_account_token_from_config(
+    config: &CopilotConfigFile,
+    host: &str,
+    login: &str,
+) -> Result<String> {
+    let account_key = copilot_account_key(host, login);
+    config
+        .copilot_tokens
+        .get(&account_key)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| read_copilot_keychain_token(&account_key).ok().flatten())
+        .context(format!(
+            "failed to resolve the stored Copilot token for {} from config or keychain",
+            account_key
+        ))
+}
+
+fn resolve_copilot_account_token(host: &str, login: &str) -> Result<String> {
+    let config = read_copilot_config()?;
+    resolve_copilot_account_token_from_config(&config, host, login)
+}
+
 fn fetch_copilot_user_info(context: &CopilotImportContext) -> Result<CopilotUserInfo> {
+    fetch_copilot_user_info_with_token(&context.host, &context.token)
+}
+
+pub(crate) fn fetch_copilot_user_info_for_account(
+    host: &str,
+    login: &str,
+) -> Result<CopilotUserInfo> {
+    let token = resolve_copilot_account_token(host, login)?;
+    fetch_copilot_user_info_with_token(host, &token)
+}
+
+pub(crate) fn fetch_copilot_user_info_json_for_account(
+    host: &str,
+    login: &str,
+) -> Result<serde_json::Value> {
+    let token = resolve_copilot_account_token(host, login)?;
+    fetch_copilot_user_info_json_with_token(host, &token)
+}
+
+fn fetch_copilot_user_info_with_token(host: &str, token: &str) -> Result<CopilotUserInfo> {
+    let value = fetch_copilot_user_info_json_with_token(host, token)?;
+    serde_json::from_value(value).with_context(|| {
+        format!(
+            "failed to parse {}/copilot_internal/user",
+            host.trim_end_matches('/')
+        )
+    })
+}
+
+fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<serde_json::Value> {
     let client = Client::builder()
         .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
         .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
         .build()
-        .context("failed to build Copilot import HTTP client")?;
-    let user_url = format!(
-        "{}/copilot_internal/user",
-        copilot_user_api_origin(&context.host)?
-    );
+        .context("failed to build Copilot account HTTP client")?;
+    let user_url = format!("{}/copilot_internal/user", copilot_user_api_origin(host)?);
     let response = client
         .get(&user_url)
-        .header("Authorization", format!("Bearer {}", context.token))
+        .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/json")
         .header(
             "User-Agent",
@@ -455,13 +507,13 @@ fn fetch_copilot_user_info(context: &CopilotImportContext) -> Result<CopilotUser
         let body_text = format_response_body(&body);
         if body_text.is_empty() {
             bail!(
-                "Copilot import failed (HTTP {}) at {}",
+                "Copilot account query failed (HTTP {}) at {}",
                 status.as_u16(),
                 user_url
             );
         }
         bail!(
-            "Copilot import failed (HTTP {}) at {}: {}",
+            "Copilot account query failed (HTTP {}) at {}: {}",
             status.as_u16(),
             user_url,
             body_text

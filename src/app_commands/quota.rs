@@ -31,17 +31,11 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         .profiles
         .get(&profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if !profile.provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. `prodex quota` currently supports OpenAI/Codex profiles only.",
-            profile_name,
-            profile.provider.display_name()
-        );
-    }
     let codex_home = profile.codex_home.clone();
 
     if args.raw {
-        let usage = fetch_usage_json(&codex_home, args.base_url.as_deref())?;
+        let usage =
+            fetch_profile_quota_json(&profile.provider, &codex_home, args.base_url.as_deref())?;
         println!(
             "{}",
             serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?
@@ -50,10 +44,15 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     }
 
     if quota_watch_enabled(&args) {
-        return watch_quota(&profile_name, &codex_home, args.base_url.as_deref());
+        return watch_quota(
+            &profile_name,
+            &profile.provider,
+            &codex_home,
+            args.base_url.as_deref(),
+        );
     }
 
-    let usage = fetch_usage(&codex_home, args.base_url.as_deref())?;
-    println!("{}", render_profile_quota(&profile_name, &usage));
+    let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
+    println!("{}", render_profile_quota_snapshot(&profile_name, &quota));
     Ok(())
 }

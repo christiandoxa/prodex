@@ -13,7 +13,10 @@ mod login;
 mod manage;
 mod remove;
 
-use self::copilot::handle_import_copilot_profile;
+pub(crate) use self::copilot::{
+    CopilotUserInfo, fetch_copilot_user_info_for_account, fetch_copilot_user_info_json_for_account,
+    handle_import_copilot_profile,
+};
 #[cfg(test)]
 use self::import_export::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, build_profile_export_payload,

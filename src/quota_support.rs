@@ -41,12 +41,18 @@ pub(crate) struct UsageAuthSyncOutcome {
     pub(crate) auth_changed: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum ProviderQuotaSnapshot {
+    OpenAi(UsageResponse),
+    Copilot(CopilotUserInfo),
+}
+
 #[derive(Debug)]
 pub(crate) struct QuotaReport {
     pub(crate) name: String,
     pub(crate) active: bool,
     pub(crate) auth: AuthSummary,
-    pub(crate) result: std::result::Result<UsageResponse, String>,
+    pub(crate) result: std::result::Result<ProviderQuotaSnapshot, String>,
     pub(crate) fetched_at: i64,
 }
 
@@ -82,7 +88,7 @@ pub(crate) struct ProfileSummaryReport {
 #[derive(Debug)]
 pub(crate) struct DoctorProfileReport {
     pub(crate) summary: ProfileSummaryReport,
-    pub(crate) quota: Option<std::result::Result<UsageResponse, String>>,
+    pub(crate) quota: Option<std::result::Result<ProviderQuotaSnapshot, String>>,
 }
 
 pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
@@ -100,14 +106,8 @@ pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) ->
 
     map_parallel(jobs, |job| {
         let auth = job.provider.auth_summary(&job.codex_home);
-        let result = if auth.quota_compatible {
-            fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
-        } else {
-            Err(format!(
-                "{} profiles do not expose ChatGPT quota",
-                job.provider.display_name()
-            ))
-        };
+        let result = fetch_profile_quota(&job.provider, &job.codex_home, base_url.as_deref())
+            .map_err(|err| err.to_string());
         QuotaReport {
             name: job.name,
             active: job.active,
@@ -150,18 +150,40 @@ pub(crate) fn collect_doctor_profile_reports(
     map_parallel(collect_profile_summaries(state), |summary| {
         DoctorProfileReport {
             quota: include_quota.then(|| {
-                if summary.auth.quota_compatible {
-                    fetch_usage(&summary.codex_home, None).map_err(|err| err.to_string())
-                } else {
-                    Err(format!(
-                        "{} profiles do not expose ChatGPT quota",
-                        summary.provider.display_name()
-                    ))
-                }
+                fetch_profile_quota(&summary.provider, &summary.codex_home, None)
+                    .map_err(|err| err.to_string())
             }),
             summary,
         }
     })
+}
+
+pub(crate) fn fetch_profile_quota(
+    provider: &ProfileProvider,
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> Result<ProviderQuotaSnapshot> {
+    match provider {
+        ProfileProvider::Openai => Ok(ProviderQuotaSnapshot::OpenAi(fetch_usage(
+            codex_home, base_url,
+        )?)),
+        ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
+            fetch_copilot_user_info_for_account(host, login)?,
+        )),
+    }
+}
+
+pub(crate) fn fetch_profile_quota_json(
+    provider: &ProfileProvider,
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> Result<serde_json::Value> {
+    match provider {
+        ProfileProvider::Openai => fetch_usage_json(codex_home, base_url),
+        ProfileProvider::Copilot { host, login, .. } => {
+            fetch_copilot_user_info_json_for_account(host, login)
+        }
+    }
 }
 
 pub(crate) fn fetch_usage(codex_home: &Path, base_url: Option<&str>) -> Result<UsageResponse> {

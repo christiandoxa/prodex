@@ -764,7 +764,9 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                0, 3_600, 80, 86_400,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -774,7 +776,9 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 7_200, 95, 172_800,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -794,7 +798,9 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 1_800, 95, 259_200,
+            ))),
             fetched_at: 1_700_000_000,
         },
     ];
@@ -1003,7 +1009,9 @@ fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
     let output = render_profile_quota_watch_output(
         "main",
         "2026-03-22 10:00:00 WIB",
-        Ok(usage_with_main_windows(63, 18_000, 12, 604_800)),
+        Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+            63, 18_000, 12, 604_800,
+        ))),
     );
 
     assert!(output.contains("Quota main"));
@@ -1043,7 +1051,7 @@ fn quota_reports_include_pool_summary_lines() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(alpha.clone()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(alpha.clone())),
             fetched_at: 1_700_000_100,
         },
         QuotaReport {
@@ -1053,7 +1061,7 @@ fn quota_reports_include_pool_summary_lines() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(beta.clone()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(beta.clone())),
             fetched_at: last_update,
         },
         QuotaReport {
@@ -1089,6 +1097,61 @@ fn quota_reports_include_pool_summary_lines() {
 }
 
 #[test]
+fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
+    let reports = vec![
+        QuotaReport {
+            name: "main".to_string(),
+            active: true,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 7_200, 95, 172_800,
+            ))),
+            fetched_at: 1_700_000_100,
+        },
+        QuotaReport {
+            name: "copilot-main".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "copilot".to_string(),
+                quota_compatible: false,
+            },
+            result: Ok(ProviderQuotaSnapshot::Copilot(CopilotUserInfo {
+                login: Some("copilot-user".to_string()),
+                access_type_sku: Some("free_limited_copilot".to_string()),
+                copilot_plan: Some("individual".to_string()),
+                endpoints: None,
+                limited_user_quotas: BTreeMap::from([
+                    ("chat".to_string(), 450),
+                    ("completions".to_string(), 4_000),
+                ]),
+                monthly_quotas: BTreeMap::from([
+                    ("chat".to_string(), 500),
+                    ("completions".to_string(), 4_000),
+                ]),
+                limited_user_reset_date: Some("2026-05-09".to_string()),
+            })),
+            fetched_at: 1_700_000_101,
+        },
+    ];
+
+    let output = render_quota_reports_with_layout(&reports, true, None, 160);
+
+    assert!(output.contains("Available:"));
+    assert!(output.contains("2/2 profile"));
+    assert!(output.contains("copilot-main"));
+    assert!(output.contains("copilot-user"));
+    assert!(output.contains("individual"));
+    assert!(output.contains("chat 450/500 left"));
+    assert!(output.contains("comp 4000/4000 left"));
+    assert!(output.contains("status: Ready"));
+    assert!(output.contains("resets: monthly 2026-05-09"));
+    assert!(!output.contains("GitHub Copilot profiles do not expose ChatGPT quota"));
+}
+
+#[test]
 fn quota_reports_respect_line_budget_while_preserving_sort_order() {
     let reports = vec![
         QuotaReport {
@@ -1098,7 +1161,9 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                0, 3_600, 80, 86_400,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -1108,7 +1173,9 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 7_200, 95, 172_800,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -1128,7 +1195,9 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 1_800, 95, 259_200,
+            ))),
             fetched_at: 1_700_000_000,
         },
     ];
@@ -1152,7 +1221,9 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                0, 3_600, 80, 86_400,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -1162,7 +1233,9 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 7_200, 95, 172_800)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 7_200, 95, 172_800,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -1182,7 +1255,9 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 1_800, 95, 259_200,
+            ))),
             fetched_at: 1_700_000_000,
         },
     ];
@@ -1214,7 +1289,9 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(90, 1_800, 95, 259_200)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                90, 1_800, 95, 259_200,
+            ))),
             fetched_at: 1_700_000_000,
         },
         QuotaReport {
@@ -1224,7 +1301,9 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
-            result: Ok(usage_with_main_windows(0, 3_600, 80, 86_400)),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
+                0, 3_600, 80, 86_400,
+            ))),
             fetched_at: 1_700_000_000,
         },
     ];

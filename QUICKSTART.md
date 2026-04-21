@@ -122,7 +122,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether the bundle should use optional password protection.
 
-`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow, but `prodex run`, `prodex login`, `prodex logout`, and `prodex quota` still target OpenAI/Codex profiles only.
+`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. `prodex run`, `prodex login`, and `prodex logout` still target OpenAI/Codex profiles only, while `prodex quota` can also inspect Copilot provider quota data through the Copilot CLI account API.
 
 ## 3. Run Codex CLI with `prodex`
 

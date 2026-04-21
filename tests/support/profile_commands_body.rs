@@ -372,6 +372,58 @@ fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
 }
 
 #[test]
+fn copilot_quota_lookup_reads_provider_quota_for_the_selected_account() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let copilot_home = sandbox_dir.path.join("home/.copilot");
+    fs::create_dir_all(&copilot_home).expect("copilot home should be created");
+
+    let server = ProfileCommandsOneShotHttpServer::start_json(serde_json::json!({
+        "login": "copilot-user",
+        "access_type_sku": "free_limited_copilot",
+        "copilot_plan": "individual",
+        "limited_user_quotas": {
+            "chat": 450,
+            "completions": 4000
+        },
+        "monthly_quotas": {
+            "chat": 500,
+            "completions": 4000
+        },
+        "limited_user_reset_date": "2026-05-09",
+        "endpoints": {
+            "api": "https://api.individual.githubcopilot.com"
+        }
+    }));
+    let host = server.base_url.clone();
+    let account_key = format!("{host}:copilot-user");
+    fs::write(
+        copilot_home.join("config.json"),
+        serde_json::json!({
+            "lastLoggedInUser": {
+                "host": host,
+                "login": "copilot-user"
+            },
+            "copilotTokens": {
+                account_key: "copilot-token"
+            }
+        })
+        .to_string(),
+    )
+    .expect("copilot config should be written");
+
+    let info = fetch_copilot_user_info_for_account(&server.base_url, "copilot-user")
+        .expect("copilot quota lookup should succeed");
+
+    assert_eq!(info.login.as_deref(), Some("copilot-user"));
+    assert_eq!(info.copilot_plan.as_deref(), Some("individual"));
+    assert_eq!(info.access_type_sku.as_deref(), Some("free_limited_copilot"));
+    assert_eq!(info.limited_user_quotas.get("chat").copied(), Some(450));
+    assert_eq!(info.monthly_quotas.get("chat").copied(), Some(500));
+    assert_eq!(info.limited_user_reset_date.as_deref(), Some("2026-05-09"));
+}
+
+#[test]
 fn profile_export_round_trip_preserves_copilot_provider_metadata() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);

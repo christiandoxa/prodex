@@ -102,10 +102,10 @@ pub(crate) fn quota_watch_enabled(args: &QuotaArgs) -> bool {
 pub(crate) fn render_profile_quota_watch_output(
     profile_name: &str,
     _updated: &str,
-    usage_result: std::result::Result<UsageResponse, String>,
+    quota_result: std::result::Result<ProviderQuotaSnapshot, String>,
 ) -> String {
-    match usage_result {
-        Ok(usage) => render_profile_quota(profile_name, &usage),
+    match quota_result {
+        Ok(quota) => render_profile_quota_snapshot(profile_name, &quota),
         Err(err) => render_quota_watch_error_panel(&format!("Quota {profile_name}"), &err),
     }
 }
@@ -198,6 +198,7 @@ fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
 
 pub(crate) fn watch_quota(
     profile_name: &str,
+    provider: &ProfileProvider,
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<()> {
@@ -205,7 +206,7 @@ pub(crate) fn watch_quota(
         let output = render_profile_quota_watch_output(
             profile_name,
             &quota_watch_updated_at(),
-            fetch_usage(codex_home, base_url).map_err(|err| err.to_string()),
+            fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
         );
         redraw_quota_watch(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));

@@ -142,7 +142,7 @@ fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
 
 fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
     match &report.result {
-        Ok(usage) => {
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
             let blocked = collect_blocked_limits(usage, false);
             let status = if blocked.is_empty() {
                 "Ready".to_string()
@@ -157,6 +157,21 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
                 resets: Some(format!("resets: {}", format_main_reset_summary(usage))),
             }
         }
+        Ok(ProviderQuotaSnapshot::Copilot(info)) => QuotaReportViewData {
+            email: display_optional(info.login.as_deref()).to_string(),
+            plan: display_optional(
+                info.copilot_plan
+                    .as_deref()
+                    .or(info.access_type_sku.as_deref()),
+            )
+            .to_string(),
+            main: format_copilot_main_quota(info),
+            status: format_copilot_quota_status(info),
+            resets: Some(format_copilot_reset_summary(info).map_or_else(
+                || "resets: unavailable".to_string(),
+                |value| format!("resets: {value}"),
+            )),
+        },
         Err(err) => QuotaReportViewData {
             email: "-".to_string(),
             plan: "-".to_string(),
@@ -363,18 +378,17 @@ fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPoolAggregate {
                 .last_updated_at
                 .map_or(report.fetched_at, |current| current.max(report.fetched_at)),
         );
-        if !report.auth.quota_compatible {
+        let Ok(snapshot) = &report.result else {
             continue;
-        }
-
-        let Ok(usage) = &report.result else {
+        };
+        aggregate.available_profiles += 1;
+        let ProviderQuotaSnapshot::OpenAi(usage) = snapshot else {
             continue;
         };
         let Some((five_hour, weekly)) = info_main_window_snapshots(usage) else {
             continue;
         };
 
-        aggregate.available_profiles += 1;
         aggregate.profiles_with_data += 1;
         aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
         aggregate.weekly_pool_remaining += weekly.remaining_percent;
@@ -471,14 +485,23 @@ fn quota_report_sort_key(report: &QuotaReport) -> (usize, i64) {
 
 fn quota_report_status_rank(report: &QuotaReport) -> usize {
     match &report.result {
-        Ok(usage) if collect_blocked_limits(usage, false).is_empty() => 0,
-        Ok(_) => 1,
+        Ok(ProviderQuotaSnapshot::OpenAi(usage))
+            if collect_blocked_limits(usage, false).is_empty() =>
+        {
+            0
+        }
+        Ok(ProviderQuotaSnapshot::OpenAi(_)) => 1,
+        Ok(ProviderQuotaSnapshot::Copilot(info)) if copilot_quota_is_ready(info) => 0,
+        Ok(ProviderQuotaSnapshot::Copilot(_)) => 1,
         Err(_) => 2,
     }
 }
 
 fn quota_report_earliest_main_reset_epoch(report: &QuotaReport) -> Option<i64> {
-    earliest_required_main_reset_epoch(report.result.as_ref().ok()?)
+    match report.result.as_ref().ok()? {
+        ProviderQuotaSnapshot::OpenAi(usage) => earliest_required_main_reset_epoch(usage),
+        ProviderQuotaSnapshot::Copilot(info) => copilot_reset_epoch(info),
+    }
 }
 
 fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
@@ -775,6 +798,87 @@ fn display_optional(value: Option<&str>) -> &str {
     value.unwrap_or("-")
 }
 
+fn copilot_quota_feature_labels() -> [(&'static str, &'static str); 2] {
+    [("chat", "chat"), ("completions", "comp")]
+}
+
+fn copilot_remaining_quota(info: &CopilotUserInfo, feature: &str) -> Option<i64> {
+    info.limited_user_quotas
+        .get(feature)
+        .copied()
+        .or_else(|| info.monthly_quotas.get(feature).copied())
+}
+
+fn copilot_total_quota(info: &CopilotUserInfo, feature: &str) -> Option<i64> {
+    info.monthly_quotas.get(feature).copied()
+}
+
+fn copilot_blocked_features(info: &CopilotUserInfo) -> Vec<String> {
+    [("chat", "chat"), ("completions", "completions")]
+        .into_iter()
+        .filter_map(|(feature, label)| {
+            (copilot_remaining_quota(info, feature).unwrap_or(1) <= 0).then_some(label.to_string())
+        })
+        .collect()
+}
+
+fn copilot_quota_is_ready(info: &CopilotUserInfo) -> bool {
+    copilot_blocked_features(info).is_empty()
+}
+
+pub(crate) fn format_copilot_quota_status(info: &CopilotUserInfo) -> String {
+    let blocked = copilot_blocked_features(info);
+    if blocked.is_empty() {
+        "Ready".to_string()
+    } else {
+        format!(
+            "Blocked ({})",
+            blocked
+                .into_iter()
+                .map(|feature| format!("{feature} exhausted"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+pub(crate) fn format_copilot_main_quota(info: &CopilotUserInfo) -> String {
+    let parts = copilot_quota_feature_labels()
+        .into_iter()
+        .filter_map(|(feature, label)| {
+            let remaining = copilot_remaining_quota(info, feature)?;
+            Some(match copilot_total_quota(info, feature) {
+                Some(total) => format!("{label} {remaining}/{total} left"),
+                None => format!("{label} {remaining} left"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join(" | ")
+    }
+}
+
+fn copilot_reset_epoch(info: &CopilotUserInfo) -> Option<i64> {
+    let date =
+        chrono::NaiveDate::parse_from_str(info.limited_user_reset_date.as_deref()?, "%Y-%m-%d")
+            .ok()?;
+    let datetime = date.and_hms_opt(0, 0, 0)?;
+    Local
+        .from_local_datetime(&datetime)
+        .earliest()
+        .map(|value| value.timestamp())
+}
+
+pub(crate) fn format_copilot_reset_summary(info: &CopilotUserInfo) -> Option<String> {
+    Some(format!(
+        "monthly {}",
+        info.limited_user_reset_date.as_deref()?.trim()
+    ))
+}
+
 pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
     let blocked = collect_blocked_limits(usage, false);
     let status = if blocked.is_empty() {
@@ -794,6 +898,41 @@ pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) ->
     }
 
     panel.extend(format_additional_limits(usage));
+    panel.render()
+}
+
+pub(crate) fn render_profile_quota_snapshot(
+    profile_name: &str,
+    snapshot: &ProviderQuotaSnapshot,
+) -> String {
+    match snapshot {
+        ProviderQuotaSnapshot::OpenAi(usage) => render_profile_quota(profile_name, usage),
+        ProviderQuotaSnapshot::Copilot(info) => render_profile_copilot_quota(profile_name, info),
+    }
+}
+
+fn render_profile_copilot_quota(profile_name: &str, info: &CopilotUserInfo) -> String {
+    let mut panel = PanelBuilder::new(format!("Quota {profile_name}"));
+    panel.push("Profile", profile_name);
+    panel.push("Account", display_optional(info.login.as_deref()));
+    panel.push(
+        "Plan",
+        display_optional(
+            info.copilot_plan
+                .as_deref()
+                .or(info.access_type_sku.as_deref()),
+        ),
+    );
+    if let Some(access_type) = info.access_type_sku.as_deref()
+        && info.copilot_plan.as_deref() != Some(access_type)
+    {
+        panel.push("Access", access_type);
+    }
+    panel.push("Status", format_copilot_quota_status(info));
+    panel.push("Main", format_copilot_main_quota(info));
+    if let Some(reset) = format_copilot_reset_summary(info) {
+        panel.push("Reset", reset);
+    }
     panel.render()
 }
 

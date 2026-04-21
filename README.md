@@ -147,7 +147,7 @@ A note on Copilot import:
 
 `prodex profile import copilot` does **not** move the Copilot token into Prodex-managed storage. The token stays where Copilot already keeps it. Prodex only records the provider identity and API endpoint in its own metadata.
 
-The imported profile shows up in the pool and export/import flows, but `prodex run`, `prodex login`, `prodex logout`, and `prodex quota` still only work with OpenAI/Codex profiles right now.
+The imported profile shows up in the pool and export/import flows. `prodex run`, `prodex login`, and `prodex logout` still target OpenAI/Codex profiles only, while `prodex quota` can also inspect Copilot provider quota data through the Copilot CLI account API.
 
 ### Codex
 

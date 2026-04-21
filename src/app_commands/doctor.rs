@@ -147,7 +147,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 
         if let Some(quota) = report.quota {
             match quota {
-                Ok(usage) => {
+                Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
                     let blocked = collect_blocked_limits(&usage, false);
                     fields.push((
                         "Quota".to_string(),
@@ -158,6 +158,13 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                         },
                     ));
                     fields.push(("Main".to_string(), format_main_windows(&usage)));
+                }
+                Ok(ProviderQuotaSnapshot::Copilot(info)) => {
+                    fields.push(("Quota".to_string(), format_copilot_quota_status(&info)));
+                    fields.push(("Main".to_string(), format_copilot_main_quota(&info)));
+                    if let Some(reset) = format_copilot_reset_summary(&info) {
+                        fields.push(("Reset".to_string(), reset));
+                    }
                 }
                 Err(err) => {
                     fields.push((
