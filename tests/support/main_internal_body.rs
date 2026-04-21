@@ -843,6 +843,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
     HttpOnlyQuotaThenToolOutputFreshFallbackError,
+    HttpOnlyPreviousResponseToolContextMissing,
     HttpOnlyPlain429,
     Websocket,
     WebsocketOverloaded,
@@ -853,6 +854,7 @@ enum RuntimeProxyBackendMode {
     WebsocketReuseOwnedPreviousResponseSilentHang,
     WebsocketReusePreviousResponseNeedsTurnState,
     WebsocketPreviousResponseMissingWithoutTurnState,
+    WebsocketOwnedToolOutputNeedsSessionReplay,
     WebsocketCloseMidTurn,
     WebsocketPreviousResponseNeedsTurnState,
     WebsocketStaleReuseNeedsTurnState,
@@ -935,6 +937,10 @@ impl RuntimeProxyBackend {
         )
     }
 
+    fn start_http_previous_response_tool_context_missing() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseToolContextMissing)
+    }
+
     fn start_http_plain_429() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPlain429)
     }
@@ -977,6 +983,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(
             RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState,
         )
+    }
+
+    fn start_websocket_owned_tool_output_needs_session_replay() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay)
     }
 
     fn start_websocket_close_mid_turn() -> Self {
@@ -1043,6 +1053,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketReuseOwnedPreviousResponseSilentHang
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
+                                | RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
@@ -1710,6 +1721,54 @@ fn handle_runtime_proxy_backend_request(
                             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mcp_1\",\"usage\":{\"input_tokens\":14,\"output_tokens\":8},\"output\":[{\"type\":\"mcp_call\",\"id\":\"mcp_1\",\"name\":\"list_files\",\"server_label\":\"local_fs\",\"arguments\":\"{\\\"path\\\":\\\"/workspace\\\"}\",\"output\":\"README.md\\nsrc/main.rs\"}]}}\r\n",
                             "\r\n"
                         )
+                        .to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyPreviousResponseToolContextMissing
+                    )
+                        && previous_response_id.is_some()
+                        && request_body_contains_only_function_call_output(&request_body)
+                        && request_body_contains_session_id(&request_body) =>
+                {
+                    let (call_id, item_label) = body_json
+                        .get("input")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|input| input.first())
+                        .map(|item| {
+                            let call_id = item
+                                .get("call_id")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("call_missing");
+                            let item_label = item
+                                .get("type")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("tool_call_output")
+                                .replace('_', " ");
+                            (call_id.to_string(), item_label)
+                        })
+                        .unwrap_or_else(|| {
+                            ("call_missing".to_string(), "tool call output".to_string())
+                        });
+                    (
+                        "HTTP/1.1 400 Bad Request",
+                        "application/json",
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": format!(
+                                    "No tool call found for {item_label} with call_id {call_id}."
+                                ),
+                                "param": "input",
+                            }
+                        })
                         .to_string(),
                         None,
                         None,
@@ -2574,6 +2633,58 @@ fn handle_runtime_proxy_backend_websocket(
                         .into(),
                     ))
                     .expect("previous_response_not_found should be sent");
+            }
+            "second-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay
+                ) && runtime_proxy_backend_is_owned_continuation(
+                    "second-account",
+                    previous_response_id.as_deref(),
+                ) && request_body_contains_only_function_call_output(&request)
+                    && request_body_contains_session_id(&request)
+                    && effective_turn_state.is_none() =>
+            {
+                let (call_id, item_label) = serde_json::from_str::<serde_json::Value>(&request)
+                    .ok()
+                    .and_then(|body_json| {
+                        body_json
+                            .get("input")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|input| input.first())
+                            .map(|item| {
+                                let call_id = item
+                                    .get("call_id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("call_missing");
+                                let item_label = item
+                                    .get("type")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("tool_call_output")
+                                    .replace('_', " ");
+                                (call_id.to_string(), item_label)
+                            })
+                    })
+                    .unwrap_or_else(|| {
+                        ("call_missing".to_string(), "tool call output".to_string())
+                    });
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": format!(
+                                    "No tool call found for {item_label} with call_id {call_id}."
+                                ),
+                                "param": "input",
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("tool context regression should be sent");
             }
             "second-account"
                 if runtime_proxy_backend_is_owned_continuation(
@@ -4749,6 +4860,143 @@ fn runtime_proxy_websocket_tool_output_with_session_recovers_via_fresh_fallback(
 }
 
 #[test]
+fn runtime_proxy_websocket_tool_output_with_session_uses_proactive_session_replay() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket_owned_tool_output_needs_session_replay();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/prodex/responses",
+        proxy.listen_addr
+    ))
+    .expect("websocket client should connect");
+    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "previous_response_id": "resp-second",
+                "session_id": "sess-replayable",
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_J7U3Kdc539EyfWU4nZj9LCWQZ",
+                    "output": "ok"
+                }],
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("websocket request should send");
+
+    let mut response_messages = Vec::new();
+    while response_messages.len() < 2 {
+        match socket.read().expect("websocket response should read") {
+            WsMessage::Text(text) => response_messages.push(text.to_string()),
+            WsMessage::Ping(payload) => socket
+                .send(WsMessage::Pong(payload))
+                .expect("websocket pong should send"),
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket response: {other:?}"),
+        }
+    }
+    let _ = socket.close(None);
+
+    assert!(
+        response_messages
+            .iter()
+            .any(|message| message.contains("\"type\":\"response.created\"")),
+        "tool-output replay should emit response.created: {response_messages:?}"
+    );
+    assert!(
+        response_messages
+            .iter()
+            .any(|message| message.contains("\"type\":\"response.completed\"")),
+        "tool-output replay should emit response.completed: {response_messages:?}"
+    );
+    assert!(
+        response_messages
+            .iter()
+            .all(|message| !message.contains("No tool call found")),
+        "proactive replay should hide tool-context regression: {response_messages:?}"
+    );
+
+    let websocket_requests = backend.websocket_requests();
+    assert_eq!(
+        websocket_requests.len(),
+        1,
+        "proactive session replay should avoid sending the risky previous_response form"
+    );
+    let upstream_request: serde_json::Value = serde_json::from_str(&websocket_requests[0])
+        .expect("upstream websocket request should parse");
+    assert!(
+        upstream_request.get("previous_response_id").is_none(),
+        "upstream request should drop previous_response_id before send: {upstream_request}"
+    );
+    assert_eq!(
+        upstream_request
+            .get("session_id")
+            .and_then(serde_json::Value::as_str),
+        Some("sess-replayable")
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| {
+            log.contains("previous_response_fresh_fallback")
+                && log.contains("reason=websocket_missing_turn_state_tool_result")
+        },
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log.contains("previous_response_fresh_fallback")
+            && log.contains("reason=websocket_missing_turn_state_tool_result"),
+        "runtime log should show proactive session replay guard: {log}"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_session_replayable_previous_response_strips_turn_state_on_fresh_fallback() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
@@ -4999,6 +5247,121 @@ fn runtime_proxy_http_tool_output_with_session_recovers_via_fresh_fallback() {
             .expect("fresh fallback request should exist")
             .contains("\"session_id\":\"sess-replayable\""),
         "fresh fallback must preserve session_id: {responses_bodies:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_tool_output_with_session_recovers_from_tool_context_missing() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_previous_response_tool_context_missing();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-second",
+                "session_id": "sess-replayable",
+                "input": [{
+                    "type": "function_call_output",
+                    "call_id": "call_J7U3Kdc539EyfWU4nZj9LCWQZ",
+                    "output": "ok",
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        !body.contains("No tool call found"),
+        "tool-context regression should recover before reaching client: {body}"
+    );
+    assert!(
+        body.contains("\"type\":\"response.created\"") || body.contains("\"id\":\"resp-second\""),
+        "session replay should recover on the same profile: {body}"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(
+        responses_bodies.len(),
+        2,
+        "backend should observe failing continuation plus recovered session replay"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-second\""),
+        "first request should preserve previous_response_id: {}",
+        responses_bodies[0]
+    );
+    assert!(
+        !responses_bodies[1].contains("\"previous_response_id\":\"resp-second\""),
+        "replayed request must clear previous_response_id: {}",
+        responses_bodies[1]
+    );
+    assert!(
+        responses_bodies[1].contains("\"session_id\":\"sess-replayable\""),
+        "replayed request must preserve session_id: {}",
+        responses_bodies[1]
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| {
+            log.contains("previous_response_fresh_fallback")
+                && log.contains("reason=previous_response_not_found")
+                && log.contains("request_shape=session_replayable")
+        },
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log.contains("previous_response_fresh_fallback")
+            && log.contains("request_shape=session_replayable"),
+        "runtime log should show recovered tool-context continuity failure: {log}"
     );
 }
 

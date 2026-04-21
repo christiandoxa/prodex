@@ -271,19 +271,44 @@ pub(crate) fn extract_runtime_proxy_previous_response_message_from_value(
         .get("response")
         .and_then(|response| response.get("error"));
     for error in [direct_error, response_error].into_iter().flatten() {
-        let code = error.get("code").and_then(serde_json::Value::as_str)?;
-        if code != "previous_response_not_found" {
-            continue;
+        let code = error.get("code").and_then(serde_json::Value::as_str);
+        let message = error
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| error.get("detail").and_then(serde_json::Value::as_str));
+        if code == Some("previous_response_not_found") {
+            return Some(
+                message
+                    .unwrap_or(
+                        "Previous response could not be found on the selected Codex account.",
+                    )
+                    .to_string(),
+            );
         }
-        return Some(
-            error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Previous response could not be found on the selected Codex account.")
-                .to_string(),
-        );
+        // Upstream regressions sometimes surface broken tool-call continuity as
+        // `invalid_request_error: No tool call found ...` instead of
+        // `previous_response_not_found`. Treat that as the same pre-commit
+        // continuity failure so session-replayable requests can recover before
+        // the user sees a spurious tool-context error.
+        if let Some(message) = message
+            && runtime_proxy_tool_context_missing_message(message)
+            && (matches!(
+                error.get("type").and_then(serde_json::Value::as_str),
+                Some("invalid_request_error")
+            ) || matches!(
+                error.get("param").and_then(serde_json::Value::as_str),
+                Some("input")
+            ))
+        {
+            return Some(message.to_string());
+        }
     }
     None
+}
+
+pub(crate) fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("no tool call found") || lower.contains("no function call found")
 }
 
 #[cfg(test)]
