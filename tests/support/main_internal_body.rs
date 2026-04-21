@@ -4699,7 +4699,7 @@ fn runtime_proxy_websocket_tool_output_with_session_stays_owner_locked() {
 
     let websocket_requests = backend.websocket_requests();
     assert!(
-        websocket_requests.len() >= 1,
+        !websocket_requests.is_empty(),
         "backend should observe the owned continuation attempt"
     );
     assert!(
