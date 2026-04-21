@@ -789,7 +789,10 @@ pub(super) fn proxy_runtime_websocket_text_message(
             if !$has_turn_state_retry
                 && previous_response_id.is_some()
                 && request_session_id.is_some()
-                && !request_requires_previous_response_affinity
+                && (matches!(
+                    previous_response_fresh_fallback_shape,
+                    Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+                ) || !request_requires_previous_response_affinity)
                 && !previous_response_fresh_fallback_used
                 && compact_followup_profile.is_none()
                 && (bound_profile.as_deref() == Some($profile_name.as_str())

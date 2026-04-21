@@ -53,6 +53,11 @@ pub(crate) fn runtime_record_previous_response_not_found_retry_state(
 pub(crate) fn runtime_previous_response_not_found_decision(
     input: RuntimePreviousResponseNotFoundDecisionInput<'_>,
 ) -> RuntimePreviousResponseNotFoundDecision {
+    let session_replayable_fallback = matches!(
+        input.fresh_fallback_shape,
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+    ) && input.previous_response_id.is_some()
+        && !input.previous_response_fresh_fallback_used;
     let request_requires_locked_previous_response_affinity = match input.route {
         RuntimePreviousResponseNotFoundRoute::Responses => {
             input.request_requires_previous_response_affinity
@@ -66,10 +71,10 @@ pub(crate) fn runtime_previous_response_not_found_decision(
             )
         }
     };
-    let locked_previous_response_retry =
-        matches!(input.route, RuntimePreviousResponseNotFoundRoute::Websocket)
-            && input.request_requires_previous_response_affinity
-            && !input.has_turn_state_retry;
+    let locked_previous_response_retry = !session_replayable_fallback
+        && matches!(input.route, RuntimePreviousResponseNotFoundRoute::Websocket)
+        && input.request_requires_previous_response_affinity
+        && !input.has_turn_state_retry;
     let retry_delay = (input.has_turn_state_retry || locked_previous_response_retry)
         .then(|| runtime_previous_response_retry_delay(input.retry_index))
         .flatten();
@@ -89,19 +94,21 @@ pub(crate) fn runtime_previous_response_not_found_decision(
         }
         _ => None,
     };
-    let stale_continuation = matches!(input.route, RuntimePreviousResponseNotFoundRoute::Websocket)
+    let stale_continuation = !session_replayable_fallback
+        && matches!(input.route, RuntimePreviousResponseNotFoundRoute::Websocket)
         && runtime_websocket_previous_response_not_found_requires_stale_continuation(
             input.previous_response_id,
             input.has_turn_state_retry,
             request_requires_locked_previous_response_affinity,
             input.fresh_fallback_shape,
         );
-    let fresh_fallback_allowed = runtime_previous_response_not_found_fresh_fallback_allowed(
-        input.previous_response_id,
-        input.previous_response_fresh_fallback_used,
-        request_requires_locked_previous_response_affinity,
-        input.fresh_fallback_shape,
-    );
+    let fresh_fallback_allowed = session_replayable_fallback
+        || runtime_previous_response_not_found_fresh_fallback_allowed(
+            input.previous_response_id,
+            input.previous_response_fresh_fallback_used,
+            request_requires_locked_previous_response_affinity,
+            input.fresh_fallback_shape,
+        );
 
     RuntimePreviousResponseNotFoundDecision {
         retry_delay,

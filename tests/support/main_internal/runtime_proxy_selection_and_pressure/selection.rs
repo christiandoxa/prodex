@@ -54,6 +54,27 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_tool_output
 }
 
 #[test]
+fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_tool_output_replayable(
+) {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp_123","session_id":"sess_123","input":[{"type":"function_call_output","call_id":"call_123","output":"ok"}]}"#.to_vec(),
+    };
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+    );
+    assert!(
+        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        )
+    );
+}
+
+#[test]
 fn runtime_request_previous_response_fresh_fallback_shape_classifies_replayable_input() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -148,6 +169,27 @@ fn websocket_previous_response_not_found_decision_prefers_locked_retry_before_st
 }
 
 #[test]
+fn websocket_previous_response_not_found_decision_prefers_session_fallback_for_tool_output() {
+    let decision = runtime_previous_response_not_found_decision(
+        RuntimePreviousResponseNotFoundDecisionInput {
+            route: RuntimePreviousResponseNotFoundRoute::Websocket,
+            previous_response_id: Some("resp_123"),
+            has_turn_state_retry: false,
+            request_requires_previous_response_affinity: true,
+            trusted_previous_response_affinity: false,
+            request_turn_state: None,
+            previous_response_fresh_fallback_used: false,
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
+            retry_index: 0,
+        },
+    );
+
+    assert_eq!(decision.retry_delay, None);
+    assert!(!decision.stale_continuation);
+    assert!(decision.fresh_fallback_allowed);
+}
+
+#[test]
 fn websocket_previous_response_not_found_decision_marks_nonreplayable_continuation_stale() {
     let decision = runtime_previous_response_not_found_decision(
         RuntimePreviousResponseNotFoundDecisionInput {
@@ -210,7 +252,7 @@ fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
     assert!(metadata.requires_previous_response_affinity);
     assert_eq!(
         metadata.previous_response_fresh_fallback_shape,
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
     );
 }
 
