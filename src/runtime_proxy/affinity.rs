@@ -129,6 +129,7 @@ pub(crate) fn runtime_request_value_requires_previous_response_affinity(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RuntimePreviousResponseFreshFallbackShape {
     ToolOutputOnly,
+    EmptyInput,
     SessionReplayable,
     ContinuationOnly,
 }
@@ -138,6 +139,7 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
 ) -> &'static str {
     match shape {
         Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => "tool_output_only",
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInput) => "empty_input",
         Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable) => "session_replayable",
         Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => "continuation_only",
         None => "none",
@@ -162,12 +164,10 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
     }
 
     match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => {
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
-        }
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly) => {
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
-        }
+        Some(
+            RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly
+            | RuntimePreviousResponseFreshFallbackShape::EmptyInput,
+        ) => Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
         other => other,
     }
 }
@@ -215,13 +215,12 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
     } else if has_context_dependent_input {
         // Ordinary previous_response follow-ups carry only the incremental user/tool delta for the
         // next turn. Dropping previous_response_id would silently erase the earlier conversation
-        // context, so these requests must stay chained unless a stricter session-specific recovery
-        // path is proven safe elsewhere.
+        // context, so these requests must stay chained even when session metadata is present.
         RuntimePreviousResponseFreshFallbackShape::ContinuationOnly
     } else if has_session {
         RuntimePreviousResponseFreshFallbackShape::SessionReplayable
     } else {
-        RuntimePreviousResponseFreshFallbackShape::ContinuationOnly
+        RuntimePreviousResponseFreshFallbackShape::EmptyInput
     })
 }
 

@@ -2,6 +2,7 @@ struct RuntimeResponsesRequestBuilder {
     previous_response_id: Option<&'static str>,
     session_id: Option<&'static str>,
     session_header: Option<&'static str>,
+    turn_metadata_session_id: Option<&'static str>,
     input: serde_json::Value,
 }
 
@@ -11,6 +12,7 @@ impl RuntimeResponsesRequestBuilder {
             previous_response_id: None,
             session_id: None,
             session_header: None,
+            turn_metadata_session_id: None,
             input,
         }
     }
@@ -30,6 +32,11 @@ impl RuntimeResponsesRequestBuilder {
         self
     }
 
+    fn turn_metadata_session(mut self, session_id: &'static str) -> Self {
+        self.turn_metadata_session_id = Some(session_id);
+        self
+    }
+
     fn build(self) -> RuntimeProxyRequest {
         let mut body = serde_json::Map::new();
         if let Some(previous_response_id) = self.previous_response_id {
@@ -46,6 +53,12 @@ impl RuntimeResponsesRequestBuilder {
         let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
         if let Some(session_id) = self.session_header {
             headers.push(("session_id".to_string(), session_id.to_string()));
+        }
+        if let Some(session_id) = self.turn_metadata_session_id {
+            headers.push((
+                "x-codex-turn-metadata".to_string(),
+                serde_json::json!({ "session_id": session_id }).to_string(),
+            ));
         }
 
         RuntimeProxyRequest {
@@ -206,6 +219,46 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_message_followu
 }
 
 #[test]
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_header_session_message_followups()
+{
+    let request = message_followup_request()
+        .previous_response_id("resp_123")
+        .session_header("sess_123")
+        .build();
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+    );
+    assert!(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        ),
+        "session headers must not make incremental message follow-ups replayable"
+    );
+}
+
+#[test]
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_turn_metadata_session_message_followups(
+) {
+    let request = message_followup_request()
+        .previous_response_id("resp_123")
+        .turn_metadata_session("sess_123")
+        .build();
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+    );
+    assert!(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            runtime_request_previous_response_fresh_fallback_shape(&request)
+        ),
+        "turn metadata session ids must not make incremental message follow-ups replayable"
+    );
+}
+
+#[test]
 fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_replayable_empty_input()
  {
     let request = empty_input_request()
@@ -232,13 +285,29 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_empty_continuat
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInput)
     );
     assert!(
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
         )
     );
+}
+
+#[test]
+fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_session_empty_input() {
+    let request = empty_input_request()
+        .previous_response_id("resp_123")
+        .session_header("sess_123")
+        .build();
+
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable)
+    );
+    assert!(runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        runtime_request_previous_response_fresh_fallback_shape(&request)
+    ));
 }
 
 #[test]
@@ -406,6 +475,27 @@ fn parse_runtime_websocket_request_metadata_blocks_message_followup_replay() {
             metadata.previous_response_fresh_fallback_shape
         ),
         "websocket message follow-ups should stay pinned to prior context"
+    );
+}
+
+#[test]
+fn websocket_session_header_does_not_make_message_followup_replayable() {
+    let metadata = parse_runtime_websocket_request_metadata(
+        r#"{"previous_response_id":"resp_123","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}"#,
+    );
+
+    let shape = runtime_previous_response_fresh_fallback_shape_with_session(
+        metadata.previous_response_fresh_fallback_shape,
+        true,
+    );
+
+    assert_eq!(
+        shape,
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+    );
+    assert!(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(shape),
+        "websocket session headers must not make incremental message follow-ups replayable"
     );
 }
 
