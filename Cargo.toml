@@ -1,6 +1,6 @@
 [package]
 name = "prodex"
-version = "0.38.0"
+version = "0.39.0"
 edition = "2024"
 description = "OpenAI profile pooling and safe auto-rotate for Codex CLI and Claude Code"
 license = "MIT"
