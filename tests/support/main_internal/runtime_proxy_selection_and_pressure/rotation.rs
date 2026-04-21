@@ -2326,9 +2326,9 @@ fn websocket_previous_response_not_found_requires_stale_continuation_without_tur
             Some("resp-second"),
             false,
             false,
-            Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput),
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
         ),
-        "fresh fallback remains available when the websocket request can be replayed safely"
+        "fresh fallback remains available only for session-replayable websocket requests"
     );
     assert!(
         runtime_websocket_previous_response_not_found_requires_stale_continuation(

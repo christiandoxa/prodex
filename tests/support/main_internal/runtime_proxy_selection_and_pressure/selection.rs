@@ -84,7 +84,7 @@ fn replayable_function_call_transcript_request() -> RuntimeResponsesRequestBuild
     ]))
 }
 
-fn replayable_message_request() -> RuntimeResponsesRequestBuilder {
+fn message_followup_request() -> RuntimeResponsesRequestBuilder {
     RuntimeResponsesRequestBuilder::new(serde_json::json!([
         {
             "type": "message",
@@ -188,19 +188,20 @@ fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_sessio
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_classifies_replayable_input() {
-    let request = replayable_message_request()
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_message_followups() {
+    let request = message_followup_request()
         .previous_response_id("resp_123")
         .build();
 
     assert_eq!(
         runtime_request_previous_response_fresh_fallback_shape(&request),
-        Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput)
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
     );
     assert!(
-        runtime_previous_response_fresh_fallback_shape_allows_recovery(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
-        )
+        ),
+        "plain message follow-ups still depend on previous_response chain context"
     );
 }
 
@@ -347,7 +348,7 @@ fn responses_previous_response_not_found_decision_keeps_turn_state_retry_shared(
             trusted_previous_response_affinity: true,
             request_turn_state: Some("turn_state"),
             previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput),
+            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
             retry_index: 1,
         },
     );
@@ -388,6 +389,27 @@ fn parse_runtime_websocket_request_metadata_extracts_affinity_fields() {
 }
 
 #[test]
+fn parse_runtime_websocket_request_metadata_blocks_message_followup_replay() {
+    let metadata = parse_runtime_websocket_request_metadata(
+        r#"{"previous_response_id":"resp_123","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}"#,
+    );
+
+    assert_eq!(metadata.previous_response_id.as_deref(), Some("resp_123"));
+    assert_eq!(metadata.session_id.as_deref(), None);
+    assert!(!metadata.requires_previous_response_affinity);
+    assert_eq!(
+        metadata.previous_response_fresh_fallback_shape,
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly)
+    );
+    assert!(
+        !runtime_previous_response_fresh_fallback_shape_allows_recovery(
+            metadata.previous_response_fresh_fallback_shape
+        ),
+        "websocket message follow-ups should stay pinned to prior context"
+    );
+}
+
+#[test]
 fn quota_blocked_previous_response_fresh_fallback_blocks_tool_output_only() {
     assert!(
         !runtime_quota_blocked_previous_response_fresh_fallback_allowed(
@@ -401,18 +423,18 @@ fn quota_blocked_previous_response_fresh_fallback_blocks_tool_output_only() {
 }
 
 #[test]
-fn quota_blocked_previous_response_fresh_fallback_allows_session_replayable_requests() {
+fn quota_blocked_previous_response_fresh_fallback_allows_only_session_replayable_requests() {
     assert!(runtime_quota_blocked_previous_response_fresh_fallback_allowed(
         Some("resp_123"),
         true,
         false,
         Some(RuntimePreviousResponseFreshFallbackShape::SessionReplayable),
     ));
-    assert!(runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+    assert!(!runtime_quota_blocked_previous_response_fresh_fallback_allowed(
         Some("resp_123"),
         true,
         false,
-        Some(RuntimePreviousResponseFreshFallbackShape::ReplayableInput),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContinuationOnly),
     ));
 }
 
