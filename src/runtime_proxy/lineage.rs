@@ -938,41 +938,15 @@ pub(crate) fn runtime_previous_response_turn_state(
         return Ok(None);
     };
 
-    let prefix = format!(
-        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
-        previous_response_id.len()
-    );
     let runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let mut selected = None::<(i64, String)>;
-    for (key, binding) in runtime
-        .state
-        .response_profile_bindings
-        .range(prefix.clone()..)
-    {
-        if !key.starts_with(&prefix) {
-            break;
-        }
-        if bound_profile.is_some_and(|profile_name| binding.profile_name != profile_name) {
-            continue;
-        }
-        let Some((response_id, turn_state)) = runtime_response_turn_state_lineage_parts(key) else {
-            continue;
-        };
-        if response_id != previous_response_id {
-            continue;
-        }
-        let candidate = (binding.bound_at, turn_state.to_string());
-        if selected
-            .as_ref()
-            .is_none_or(|(current_bound_at, _)| *current_bound_at <= candidate.0)
-        {
-            selected = Some(candidate);
-        }
-    }
-    Ok(selected.map(|(_, turn_state)| turn_state))
+    Ok(runtime_previous_response_turn_state_from_bindings(
+        &runtime.state.response_profile_bindings,
+        previous_response_id,
+        bound_profile,
+    ))
 }
 
 pub(crate) fn clear_runtime_response_turn_state_lineage(
@@ -993,6 +967,52 @@ pub(crate) fn clear_runtime_response_turn_state_lineage(
         bindings.remove(&key);
     }
     changed
+}
+
+fn runtime_previous_response_turn_state_from_bindings(
+    bindings: &BTreeMap<String, ResponseProfileBinding>,
+    previous_response_id: &str,
+    bound_profile: Option<&str>,
+) -> Option<String> {
+    let prefix = format!(
+        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
+        previous_response_id.len()
+    );
+    let mut selected = None::<(i64, String)>;
+    for (key, binding) in bindings.range(prefix.clone()..) {
+        if !key.starts_with(&prefix) {
+            break;
+        }
+        if bound_profile.is_some_and(|profile_name| binding.profile_name != profile_name) {
+            continue;
+        }
+        let Some((response_id, turn_state)) = runtime_response_turn_state_lineage_parts(key) else {
+            continue;
+        };
+        if response_id != previous_response_id {
+            continue;
+        }
+        let candidate = (binding.bound_at, turn_state.to_string());
+        if selected
+            .as_ref()
+            .is_none_or(|(current_bound_at, _)| *current_bound_at <= candidate.0)
+        {
+            selected = Some(candidate);
+        }
+    }
+    selected.map(|(_, turn_state)| turn_state)
+}
+
+fn runtime_turn_state_has_live_response_lineage(
+    bindings: &BTreeMap<String, ResponseProfileBinding>,
+    turn_state: &str,
+    profile_name: &str,
+) -> bool {
+    bindings.iter().any(|(key, binding)| {
+        binding.profile_name == profile_name
+            && runtime_response_turn_state_lineage_parts(key)
+                .is_some_and(|(_, candidate_turn_state)| candidate_turn_state == turn_state)
+    })
 }
 
 pub(crate) fn clear_runtime_dead_response_bindings(
@@ -1017,6 +1037,7 @@ pub(crate) fn clear_runtime_dead_response_bindings(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
     let mut changed = false;
+    let mut dead_turn_states = BTreeSet::new();
     for response_id in &response_ids {
         if runtime
             .state
@@ -1025,6 +1046,13 @@ pub(crate) fn clear_runtime_dead_response_bindings(
             .is_some_and(|binding| binding.profile_name != profile_name)
         {
             continue;
+        }
+        if let Some(turn_state) = runtime_previous_response_turn_state_from_bindings(
+            &runtime.state.response_profile_bindings,
+            response_id,
+            Some(profile_name),
+        ) {
+            dead_turn_states.insert(turn_state);
         }
         changed = runtime
             .state
@@ -1042,6 +1070,30 @@ pub(crate) fn clear_runtime_dead_response_bindings(
             response_id,
             now,
         ) || changed;
+    }
+    for turn_state in dead_turn_states {
+        if runtime
+            .turn_state_bindings
+            .get(turn_state.as_str())
+            .is_some_and(|binding| binding.profile_name == profile_name)
+            && !runtime_turn_state_has_live_response_lineage(
+                &runtime.state.response_profile_bindings,
+                turn_state.as_str(),
+                profile_name,
+            )
+        {
+            changed = runtime
+                .turn_state_bindings
+                .remove(turn_state.as_str())
+                .is_some()
+                || changed;
+            changed = runtime_mark_continuation_status_dead(
+                &mut runtime.continuation_statuses,
+                RuntimeContinuationBindingKind::TurnState,
+                turn_state.as_str(),
+                now,
+            ) || changed;
+        }
     }
 
     if changed {
@@ -1158,6 +1210,7 @@ pub(crate) fn remember_runtime_successful_previous_response_owner(
     Ok(())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn clear_runtime_stale_previous_response_binding(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,

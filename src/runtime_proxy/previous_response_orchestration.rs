@@ -4,7 +4,6 @@ use super::*;
 pub(crate) enum RuntimePreviousResponseNotFoundAction {
     RetryOwner,
     StaleContinuation,
-    FreshFallback,
     Rotate,
 }
 
@@ -12,8 +11,6 @@ pub(crate) enum RuntimePreviousResponseNotFoundAction {
 pub(crate) struct RuntimePreviousResponseNotFoundPolicy {
     pub(crate) reset_previous_response_retry_index_on_rotate: bool,
     pub(crate) log_fresh_fallback_blocked: bool,
-    pub(crate) allow_fresh_fallback: bool,
-    pub(crate) clear_stale_without_locked_affinity: bool,
     pub(crate) fail_stale_continuation: bool,
     pub(crate) clear_trusted_affinity_on_rotate: bool,
 }
@@ -26,22 +23,6 @@ impl RuntimePreviousResponseNotFoundPolicy {
         Self {
             reset_previous_response_retry_index_on_rotate,
             log_fresh_fallback_blocked: true,
-            allow_fresh_fallback: true,
-            clear_stale_without_locked_affinity: false,
-            fail_stale_continuation: true,
-            clear_trusted_affinity_on_rotate,
-        }
-    }
-
-    pub(crate) fn websocket_clear_stale_without_locked_affinity(
-        reset_previous_response_retry_index_on_rotate: bool,
-        clear_trusted_affinity_on_rotate: bool,
-    ) -> Self {
-        Self {
-            reset_previous_response_retry_index_on_rotate,
-            log_fresh_fallback_blocked: false,
-            allow_fresh_fallback: false,
-            clear_stale_without_locked_affinity: true,
             fail_stale_continuation: true,
             clear_trusted_affinity_on_rotate,
         }
@@ -51,8 +32,6 @@ impl RuntimePreviousResponseNotFoundPolicy {
         Self {
             reset_previous_response_retry_index_on_rotate: false,
             log_fresh_fallback_blocked: true,
-            allow_fresh_fallback: false,
-            clear_stale_without_locked_affinity: false,
             fail_stale_continuation: false,
             clear_trusted_affinity_on_rotate,
         }
@@ -73,7 +52,6 @@ pub(crate) struct RuntimePreviousResponseNotFoundContext<'a> {
     pub(crate) trusted_previous_response_affinity: bool,
     pub(crate) previous_response_fresh_fallback_used: bool,
     pub(crate) fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-    pub(crate) fresh_fallback_available: bool,
     pub(crate) policy: RuntimePreviousResponseNotFoundPolicy,
 }
 
@@ -110,7 +88,6 @@ pub(crate) fn handle_runtime_previous_response_not_found(
         trusted_previous_response_affinity,
         previous_response_fresh_fallback_used,
         fresh_fallback_shape,
-        fresh_fallback_available,
         policy,
     } = context;
     let RuntimePreviousResponseNotFoundState {
@@ -227,38 +204,6 @@ pub(crate) fn handle_runtime_previous_response_not_found(
                 true,
             ),
         );
-    }
-
-    if policy.allow_fresh_fallback && !has_turn_state_retry && decision.fresh_fallback_allowed {
-        runtime_proxy_log(
-            shared,
-            runtime_previous_response_not_found_fresh_fallback_log_message(
-                log_context,
-                decision,
-                fresh_fallback_shape,
-                profile_name,
-                false,
-            ),
-        );
-        let _ = clear_runtime_stale_previous_response_binding(
-            shared,
-            profile_name,
-            previous_response_id,
-        )?;
-        if fresh_fallback_available {
-            return Ok(RuntimePreviousResponseNotFoundAction::FreshFallback);
-        }
-    }
-
-    if policy.clear_stale_without_locked_affinity
-        && !has_turn_state_retry
-        && !decision.request_requires_locked_previous_response_affinity
-    {
-        let _ = clear_runtime_stale_previous_response_binding(
-            shared,
-            profile_name,
-            previous_response_id,
-        )?;
     }
 
     let released_affinity = release_runtime_previous_response_affinity(

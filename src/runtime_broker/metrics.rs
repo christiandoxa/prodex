@@ -1,4 +1,5 @@
 use super::*;
+use std::io::{Read, Seek, SeekFrom};
 
 pub(crate) fn runtime_broker_continuation_metrics(
     statuses: &RuntimeContinuationStatuses,
@@ -136,6 +137,10 @@ struct RuntimeBrokerContinuityFailureReasonCache {
     entries: BTreeMap<PathBuf, RuntimeBrokerContinuityFailureReasonCacheEntry>,
     next_touch: u64,
     #[cfg(test)]
+    full_rebuilds: u64,
+    #[cfg(test)]
+    incremental_updates: u64,
+    #[cfg(test)]
     hits: u64,
     #[cfg(test)]
     misses: u64,
@@ -206,6 +211,8 @@ impl RuntimeBrokerContinuityFailureReasonCache {
     fn clear(&mut self) {
         self.entries.clear();
         self.next_touch = 0;
+        self.full_rebuilds = 0;
+        self.incremental_updates = 0;
         self.hits = 0;
         self.misses = 0;
     }
@@ -231,16 +238,48 @@ fn runtime_broker_continuity_failure_reason_cache_fingerprint(
     })
 }
 
-fn runtime_broker_continuity_failure_reason_metrics_from_log(
-    log_path: &Path,
-) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
-    let log = fs::read(log_path).ok()?;
+fn runtime_broker_continuity_failure_reason_metrics_from_bytes(
+    log: &[u8],
+) -> RuntimeBrokerContinuityFailureReasonMetrics {
     let summary = summarize_runtime_log_tail(&log);
-    Some(RuntimeBrokerContinuityFailureReasonMetrics {
+    RuntimeBrokerContinuityFailureReasonMetrics {
         chain_retried_owner: summary.chain_retried_owner_by_reason,
         chain_dead_upstream_confirmed: summary.chain_dead_upstream_confirmed_by_reason,
         stale_continuation: summary.stale_continuation_by_reason,
-    })
+    }
+}
+
+fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
+    log_path: &Path,
+    start: u64,
+) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
+    let mut log = fs::File::open(log_path).ok()?;
+    if start > 0 {
+        log.seek(SeekFrom::Start(start)).ok()?;
+    }
+    let mut buffer = Vec::new();
+    log.read_to_end(&mut buffer).ok()?;
+    Some(runtime_broker_continuity_failure_reason_metrics_from_bytes(
+        &buffer,
+    ))
+}
+
+fn runtime_broker_merge_continuity_failure_reason_metrics(
+    metrics: &mut RuntimeBrokerContinuityFailureReasonMetrics,
+    delta: RuntimeBrokerContinuityFailureReasonMetrics,
+) {
+    for (reason, count) in delta.chain_retried_owner {
+        *metrics.chain_retried_owner.entry(reason).or_insert(0) += count;
+    }
+    for (reason, count) in delta.chain_dead_upstream_confirmed {
+        *metrics
+            .chain_dead_upstream_confirmed
+            .entry(reason)
+            .or_insert(0) += count;
+    }
+    for (reason, count) in delta.stale_continuation {
+        *metrics.stale_continuation.entry(reason).or_insert(0) += count;
+    }
 }
 
 fn runtime_broker_continuity_failure_reason_metrics(
@@ -255,16 +294,43 @@ fn runtime_broker_continuity_failure_reason_metrics(
     };
     let fingerprint = runtime_broker_continuity_failure_reason_cache_fingerprint(&metadata);
 
-    if let Some(fingerprint) = fingerprint.as_ref()
-        && let Some(metrics) = runtime_broker_continuity_failure_reason_cache()
+    let append_base = if let Some(fingerprint) = fingerprint.as_ref() {
+        let mut cache = runtime_broker_continuity_failure_reason_cache()
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(log_path, fingerprint)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(metrics) = cache.get(log_path, fingerprint) {
+            return metrics;
+        }
+        cache.entries.get(log_path).cloned().filter(|entry| {
+            entry.fingerprint.len < fingerprint.len
+                && entry.fingerprint.modified_at <= fingerprint.modified_at
+        })
+    } else {
+        None
+    };
+
+    if let (Some(fingerprint), Some(base)) = (fingerprint.as_ref(), append_base)
+        && let Some(delta) = runtime_broker_continuity_failure_reason_metrics_from_log_range(
+            log_path,
+            base.fingerprint.len,
+        )
     {
+        let mut metrics = base.metrics.clone();
+        runtime_broker_merge_continuity_failure_reason_metrics(&mut metrics, delta);
+        let mut cache = runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.store(log_path, fingerprint.clone(), metrics.clone());
+        #[cfg(test)]
+        {
+            cache.incremental_updates += 1;
+        }
         return metrics;
     }
 
-    let Some(metrics) = runtime_broker_continuity_failure_reason_metrics_from_log(log_path) else {
+    let Some(metrics) =
+        runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0)
+    else {
         runtime_broker_continuity_failure_reason_cache()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -273,10 +339,14 @@ fn runtime_broker_continuity_failure_reason_metrics(
     };
 
     if let Some(fingerprint) = fingerprint {
-        runtime_broker_continuity_failure_reason_cache()
+        let mut cache = runtime_broker_continuity_failure_reason_cache()
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .store(log_path, fingerprint, metrics.clone());
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.store(log_path, fingerprint, metrics.clone());
+        #[cfg(test)]
+        {
+            cache.full_rebuilds += 1;
+        }
     }
     metrics
 }
@@ -564,6 +634,8 @@ mod tests {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct RuntimeBrokerContinuityFailureReasonCacheStats {
+        full_rebuilds: u64,
+        incremental_updates: u64,
         hits: u64,
         misses: u64,
         entries: usize,
@@ -590,6 +662,8 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         RuntimeBrokerContinuityFailureReasonCacheStats {
+            full_rebuilds: cache.full_rebuilds,
+            incremental_updates: cache.incremental_updates,
             hits: cache.hits,
             misses: cache.misses,
             entries: cache.entries.len(),
@@ -648,6 +722,8 @@ mod tests {
         assert_eq!(
             runtime_broker_continuity_failure_reason_cache_stats(),
             RuntimeBrokerContinuityFailureReasonCacheStats {
+                full_rebuilds: 1,
+                incremental_updates: 0,
                 hits: 0,
                 misses: 1,
                 entries: 1,
@@ -659,6 +735,8 @@ mod tests {
         assert_eq!(
             runtime_broker_continuity_failure_reason_cache_stats(),
             RuntimeBrokerContinuityFailureReasonCacheStats {
+                full_rebuilds: 1,
+                incremental_updates: 0,
                 hits: 1,
                 misses: 1,
                 entries: 1,
@@ -687,6 +765,8 @@ mod tests {
         assert_eq!(
             runtime_broker_continuity_failure_reason_cache_stats(),
             RuntimeBrokerContinuityFailureReasonCacheStats {
+                full_rebuilds: 1,
+                incremental_updates: 0,
                 hits: 0,
                 misses: 1,
                 entries: 1,
@@ -716,6 +796,8 @@ mod tests {
         assert_eq!(
             runtime_broker_continuity_failure_reason_cache_stats(),
             RuntimeBrokerContinuityFailureReasonCacheStats {
+                full_rebuilds: 1,
+                incremental_updates: 1,
                 hits: 0,
                 misses: 2,
                 entries: 1,

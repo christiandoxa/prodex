@@ -32,6 +32,32 @@ where
     }
 }
 
+fn read_runtime_http_stream_until<F>(
+    mut response: reqwest::blocking::Response,
+    predicate: F,
+) -> String
+where
+    F: Fn(&str) -> bool,
+{
+    use std::io::Read as _;
+
+    let mut body = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    loop {
+        match response.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => {
+                body.extend_from_slice(&chunk[..read]);
+                if predicate(&String::from_utf8_lossy(&body)) {
+                    break;
+                }
+            }
+            Err(err) => panic!("HTTP stream body should read: {err}"),
+        }
+    }
+    String::from_utf8_lossy(&body).into_owned()
+}
+
 fn dead_continuation_status(now: i64) -> RuntimeContinuationBindingStatus {
     RuntimeContinuationBindingStatus {
         state: RuntimeContinuationBindingLifecycle::Dead,

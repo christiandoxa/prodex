@@ -238,30 +238,59 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
         );
     }
 
-    Ok(RuntimeResponsesAttempt::Success {
+    let reader = prefetch.into_reader(prelude.clone());
+    let reader = RuntimeSseTapReader::new(
+        reader,
+        shared.clone(),
+        profile_name.to_string(),
+        &prelude,
+        &response_ids,
+        request_previous_response_id,
+        response_turn_state.as_deref(),
+    );
+    let response = RuntimeResponsesAttempt::Success {
         profile_name: profile_name.to_string(),
         response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
             status,
             headers,
-            body: Box::new(RuntimeSseTapReader::new(
-                prefetch.into_reader(prelude.clone()),
-                shared.clone(),
-                profile_name.to_string(),
-                &prelude,
-                &response_ids,
-                request_previous_response_id,
-                response_turn_state.as_deref(),
-            )),
+            body: Box::new(reader),
             request_id,
             profile_name: profile_name.to_string(),
             log_path: shared.log_path.clone(),
             shared: shared.clone(),
             _inflight_guard: Some(inflight_guard),
         }),
-    })
+    };
+    Ok(response)
 }
 
 impl RuntimeSseTapState {
+    fn prime_from_prelude(&mut self, chunk: &[u8]) {
+        for byte in chunk {
+            self.line.push(*byte);
+            if *byte != b'\n' {
+                continue;
+            }
+
+            let trimmed = runtime_sse_trimmed_line_bytes(&self.line);
+            if trimmed.is_empty() {
+                let event = parse_runtime_sse_event(&self.data_lines);
+                if let Some(turn_state) = event.turn_state {
+                    self.turn_state = Some(turn_state);
+                }
+                self.data_lines.clear();
+                self.line.clear();
+                continue;
+            }
+
+            if let Some(payload) = trimmed.strip_prefix(b"data:") {
+                self.data_lines
+                    .push(String::from_utf8_lossy(payload).trim_start().to_owned());
+            }
+            self.line.clear();
+        }
+    }
+
     fn observe(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str, chunk: &[u8]) {
         for byte in chunk {
             self.line.push(*byte);
@@ -269,8 +298,7 @@ impl RuntimeSseTapState {
                 continue;
             }
 
-            let line_text = String::from_utf8_lossy(&self.line);
-            let trimmed = line_text.trim_end_matches(['\r', '\n']);
+            let trimmed = runtime_sse_trimmed_line_bytes(&self.line);
             if trimmed.is_empty() {
                 let event = parse_runtime_sse_event(&self.data_lines);
                 if let Some(turn_state) = event.turn_state {
@@ -290,8 +318,9 @@ impl RuntimeSseTapState {
                 continue;
             }
 
-            if let Some(payload) = trimmed.strip_prefix("data:") {
-                self.data_lines.push(payload.trim_start().to_string());
+            if let Some(payload) = trimmed.strip_prefix(b"data:") {
+                self.data_lines
+                    .push(String::from_utf8_lossy(payload).trim_start().to_owned());
             }
             self.line.clear();
         }
@@ -320,25 +349,37 @@ impl RuntimeSseTapState {
         response_ids: &[String],
         verified_route: RuntimeRouteKind,
     ) {
-        let fresh_ids = response_ids
-            .iter()
-            .filter(|response_id| self.remembered_response_ids.insert((*response_id).clone()))
-            .cloned()
-            .collect::<Vec<_>>();
-        let response_ids_needing_turn_state = self
-            .turn_state
-            .as_deref()
-            .map(|_| {
-                self.remembered_response_ids
-                    .iter()
-                    .filter(|response_id| {
-                        self.response_ids_with_turn_state
-                            .insert((*response_id).clone())
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let turn_state = self.turn_state.as_deref();
+        let mut fresh_ids = Vec::new();
+        for response_id in response_ids {
+            if self.remembered_response_ids.contains(response_id.as_str()) {
+                continue;
+            }
+            let fresh_id = response_id.clone();
+            self.remembered_response_ids.insert(fresh_id.clone());
+            if turn_state.is_some() {
+                self.response_ids_with_turn_state.insert(fresh_id.clone());
+            }
+            fresh_ids.push(fresh_id);
+        }
+
+        let mut response_ids_needing_turn_state = Vec::new();
+        if turn_state.is_some()
+            && self.response_ids_with_turn_state.len() < self.remembered_response_ids.len()
+        {
+            for response_id in &self.remembered_response_ids {
+                if self
+                    .response_ids_with_turn_state
+                    .contains(response_id.as_str())
+                {
+                    continue;
+                }
+                let rebound_id = response_id.clone();
+                self.response_ids_with_turn_state.insert(rebound_id.clone());
+                response_ids_needing_turn_state.push(rebound_id);
+            }
+        }
+
         if fresh_ids.is_empty() && response_ids_needing_turn_state.is_empty() {
             return;
         }
@@ -347,24 +388,18 @@ impl RuntimeSseTapState {
                 shared,
                 profile_name,
                 &fresh_ids,
-                self.turn_state.as_deref(),
+                turn_state,
                 verified_route,
             );
         }
         if !response_ids_needing_turn_state.is_empty() {
-            let rebound_ids = response_ids_needing_turn_state
-                .into_iter()
-                .filter(|response_id| !fresh_ids.contains(response_id))
-                .collect::<Vec<_>>();
-            if !rebound_ids.is_empty() {
-                let _ = remember_runtime_response_ids_with_turn_state(
-                    shared,
-                    profile_name,
-                    &rebound_ids,
-                    self.turn_state.as_deref(),
-                    verified_route,
-                );
-            }
+            let _ = remember_runtime_response_ids_with_turn_state(
+                shared,
+                profile_name,
+                &response_ids_needing_turn_state,
+                turn_state,
+                verified_route,
+            );
         }
     }
 
@@ -384,6 +419,14 @@ impl RuntimeSseTapState {
             "previous_response_not_found_after_commit",
         );
     }
+}
+
+fn runtime_sse_trimmed_line_bytes(line: &[u8]) -> &[u8] {
+    let mut end = line.len();
+    while end > 0 && matches!(line.get(end - 1), Some(b'\r' | b'\n')) {
+        end -= 1;
+    }
+    &line[..end]
 }
 
 pub(crate) struct RuntimeSseTapReader {
@@ -478,7 +521,7 @@ impl RuntimeSseTapReader {
             request_previous_response_id: request_previous_response_id.map(str::to_string),
             ..RuntimeSseTapState::default()
         };
-        state.observe(&shared, &profile_name, prelude);
+        state.prime_from_prelude(prelude);
         Self {
             inner: Box::new(inner),
             shared,

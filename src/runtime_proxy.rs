@@ -786,7 +786,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
         };
     }
     macro_rules! runtime_websocket_previous_response_not_found_context {
-        ($profile_name:expr, $turn_state:expr, $via:expr, $policy:expr, $fresh_available:expr $(,)?) => {
+        ($profile_name:expr, $turn_state:expr, $via:expr, $policy:expr $(,)?) => {
             RuntimePreviousResponseNotFoundContext {
                 shared,
                 log_context: RuntimePreviousResponseLogContext {
@@ -807,7 +807,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                 trusted_previous_response_affinity,
                 previous_response_fresh_fallback_used: false,
                 fresh_fallback_shape: previous_response_fresh_fallback_shape,
-                fresh_fallback_available: $fresh_available,
                 policy: $policy,
             }
         };
@@ -1043,7 +1042,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 turn_state,
                                 Some("direct_current_profile_fallback"),
                                 RuntimePreviousResponseNotFoundPolicy::websocket(true, false),
-                                false,
                             ),
                             runtime_previous_response_not_found_state!(None),
                         )? {
@@ -1060,7 +1058,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 )?;
                                 return Ok(());
                             }
-                            RuntimePreviousResponseNotFoundAction::FreshFallback => continue,
                             RuntimePreviousResponseNotFoundAction::Rotate => {
                                 last_failure = Some((
                                     RuntimeUpstreamFailureResponse::Websocket(payload),
@@ -1373,24 +1370,28 @@ pub(super) fn proxy_runtime_websocket_text_message(
                                 &profile_name,
                                 turn_state,
                                 Some("direct_current_profile_fallback"),
-                                RuntimePreviousResponseNotFoundPolicy::websocket_clear_stale_without_locked_affinity(false, false),
-                                false,
+                                RuntimePreviousResponseNotFoundPolicy::websocket(false, false),
                             ),
                             runtime_previous_response_not_found_state!(None),
                         )? {
                             RuntimePreviousResponseNotFoundAction::RetryOwner => {
-                                last_failure =
-                                    Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+                                last_failure = Some((
+                                    RuntimeUpstreamFailureResponse::Websocket(payload),
+                                    false,
+                                ));
                                 continue;
                             }
                             RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-                                send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
+                                send_runtime_proxy_stale_continuation_websocket_error(
+                                    local_socket,
+                                )?;
                                 return Ok(());
                             }
-                            RuntimePreviousResponseNotFoundAction::FreshFallback => continue,
                             RuntimePreviousResponseNotFoundAction::Rotate => {
-                                last_failure =
-                                    Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+                                last_failure = Some((
+                                    RuntimeUpstreamFailureResponse::Websocket(payload),
+                                    false,
+                                ));
                                 continue;
                             }
                         }
@@ -1882,7 +1883,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         turn_state,
                         None,
                         RuntimePreviousResponseNotFoundPolicy::websocket(false, true),
-                        false,
                     ),
                     runtime_previous_response_not_found_state!(Some(
                         &mut trusted_previous_response_affinity
@@ -1897,7 +1897,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
                         return Ok(());
                     }
-                    RuntimePreviousResponseNotFoundAction::FreshFallback => continue,
                     RuntimePreviousResponseNotFoundAction::Rotate => {
                         last_failure =
                             Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
@@ -2747,7 +2746,6 @@ pub(super) fn proxy_runtime_responses_request(
                 trusted_previous_response_affinity,
                 previous_response_fresh_fallback_used,
                 fresh_fallback_shape: previous_response_fresh_fallback_shape,
-                fresh_fallback_available: false,
                 policy: $policy,
             }
         };
@@ -2939,8 +2937,7 @@ pub(super) fn proxy_runtime_responses_request(
                                     Some((RuntimeUpstreamFailureResponse::Http(response), false));
                                 continue;
                             }
-                            RuntimePreviousResponseNotFoundAction::StaleContinuation
-                            | RuntimePreviousResponseNotFoundAction::FreshFallback => {
+                            RuntimePreviousResponseNotFoundAction::StaleContinuation => {
                                 unreachable!(
                                     "responses previous_response policy cannot return this action"
                                 )
@@ -3228,8 +3225,7 @@ pub(super) fn proxy_runtime_responses_request(
                                     Some((RuntimeUpstreamFailureResponse::Http(response), false));
                                 continue;
                             }
-                            RuntimePreviousResponseNotFoundAction::StaleContinuation
-                            | RuntimePreviousResponseNotFoundAction::FreshFallback => {
+                            RuntimePreviousResponseNotFoundAction::StaleContinuation => {
                                 unreachable!(
                                     "responses previous_response policy cannot return this action"
                                 )
@@ -3554,8 +3550,7 @@ pub(super) fn proxy_runtime_responses_request(
                             Some((RuntimeUpstreamFailureResponse::Http(response), false));
                         continue;
                     }
-                    RuntimePreviousResponseNotFoundAction::StaleContinuation
-                    | RuntimePreviousResponseNotFoundAction::FreshFallback => {
+                    RuntimePreviousResponseNotFoundAction::StaleContinuation => {
                         unreachable!("responses previous_response policy cannot return this action")
                     }
                 }
@@ -3754,7 +3749,7 @@ pub(super) fn attempt_runtime_responses_request(
                 response,
             });
         }
-        return prepare_runtime_proxy_responses_success(
+        let prepared = prepare_runtime_proxy_responses_success(
             RuntimeResponsesSuccessContext {
                 request_id,
                 request_previous_response_id: runtime_request_previous_response_id(request)
@@ -3779,6 +3774,7 @@ pub(super) fn attempt_runtime_responses_request(
                 err,
             );
         });
+        return prepared;
     }
 }
 

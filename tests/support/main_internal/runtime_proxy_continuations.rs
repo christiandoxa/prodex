@@ -252,6 +252,7 @@ fn runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback() 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
     let response = Client::builder()
+        .timeout(ci_timing_upper_bound_ms(1_000, 5_000))
         .build()
         .expect("client")
         .post(format!(
@@ -1035,6 +1036,37 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            turn_state_bindings: BTreeMap::from([(
+                "turn-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                turn_state: BTreeMap::from([(
+                    "turn-second".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 1,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("responses".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save initial continuations");
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
@@ -1120,6 +1152,37 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     state.save(&paths).expect("failed to save initial state");
+    save_runtime_continuations(
+        &paths,
+        &RuntimeContinuationStore {
+            turn_state_bindings: BTreeMap::from([(
+                "turn-second".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "second".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            statuses: RuntimeContinuationStatuses {
+                turn_state: BTreeMap::from([(
+                    "turn-second".to_string(),
+                    RuntimeContinuationBindingStatus {
+                        state: RuntimeContinuationBindingLifecycle::Verified,
+                        confidence: 1,
+                        last_touched_at: Some(now),
+                        last_verified_at: Some(now),
+                        last_verified_route: Some("websocket".to_string()),
+                        last_not_found_at: None,
+                        not_found_streak: 0,
+                        success_count: 1,
+                        failure_count: 0,
+                    },
+                )]),
+                ..RuntimeContinuationStatuses::default()
+            },
+            ..RuntimeContinuationStore::default()
+        },
+    )
+    .expect("failed to save initial continuations");
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
@@ -1149,7 +1212,9 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
         .expect("responses request should succeed");
 
     assert_eq!(response.status().as_u16(), 200);
-    let body = response.text().expect("responses body should decode");
+    let body = read_runtime_http_stream_until(response, |body| {
+        body.contains("previous_response_not_found") || body.contains("\"code\":\"stale_continuation\"")
+    });
     assert!(
         body.contains("previous_response_not_found"),
         "post-commit HTTP continuation error should pass through raw upstream payload: {body}"
@@ -1176,6 +1241,12 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
             && !continuations
                 .response_profile_bindings
                 .contains_key("resp-second-next")
+            && !continuations.turn_state_bindings.contains_key("turn-second")
+            && continuations
+                .statuses
+                .turn_state
+                .get("turn-second")
+                .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
     });
     assert!(
         continuations
@@ -1192,6 +1263,18 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
             .get("resp-second-next")
             .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
         "response id emitted before the committed failure should be cleared back out"
+    );
+    assert!(
+        !continuations.turn_state_bindings.contains_key("turn-second"),
+        "turn_state affinity derived from a dead committed chain should be cleared"
+    );
+    assert!(
+        continuations
+            .statuses
+            .turn_state
+            .get("turn-second")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
+        "dead committed chain should tombstone the related turn_state"
     );
 }
 
@@ -1318,6 +1401,12 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
             && !continuations
                 .response_profile_bindings
                 .contains_key("resp-second-next")
+            && !continuations.turn_state_bindings.contains_key("turn-second")
+            && continuations
+                .statuses
+                .turn_state
+                .get("turn-second")
+                .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
     });
     assert!(
         continuations
@@ -1334,6 +1423,18 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
             .get("resp-second-next")
             .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
         "response id emitted before the committed websocket failure should be cleared back out"
+    );
+    assert!(
+        !continuations.turn_state_bindings.contains_key("turn-second"),
+        "turn_state affinity derived from a dead committed websocket chain should be cleared"
+    );
+    assert!(
+        continuations
+            .statuses
+            .turn_state
+            .get("turn-second")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
+        "dead committed websocket chain should tombstone the related turn_state"
     );
 }
 

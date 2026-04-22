@@ -1536,7 +1536,7 @@ fn handle_runtime_proxy_backend_request(
                             next_response_id,
                             previous_response_id.as_deref().unwrap_or_default(),
                         ),
-                        None,
+                        Some("turn-second".to_string()),
                         None,
                         None,
                     )
@@ -2440,6 +2440,7 @@ fn handle_runtime_proxy_backend_websocket(
             RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
+                | RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit
         ) && req
             .headers()
             .get("ChatGPT-Account-Id")
