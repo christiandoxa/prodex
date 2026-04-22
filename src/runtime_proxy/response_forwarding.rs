@@ -554,6 +554,15 @@ pub(crate) fn write_runtime_streaming_response(
     let mut total_bytes = 0usize;
     let mut chunk_count = 0usize;
     let mut sse_pending = Vec::new();
+    let chunk_context = RuntimeStreamChunkContext {
+        request_id: response.request_id,
+        log_path: response.log_path.clone(),
+        profile_name: response.profile_name.clone(),
+        shared: response.shared.clone(),
+        started_at: &started_at,
+        log_writer_error: &log_writer_error,
+        flush_each_chunk,
+    };
     loop {
         let read = match response.body.read(&mut buffer) {
             Ok(read) => read,
@@ -620,11 +629,8 @@ pub(crate) fn write_runtime_streaming_response(
                     runtime_translate_previous_response_sse_event_bytes(&event).unwrap_or(event);
                 write_runtime_stream_chunk(
                     &mut writer,
-                    &response,
-                    &started_at,
-                    &log_writer_error,
+                    &chunk_context,
                     &translated,
-                    flush_each_chunk,
                     &mut chunk_count,
                     &mut total_bytes,
                 )?;
@@ -633,11 +639,8 @@ pub(crate) fn write_runtime_streaming_response(
         }
         write_runtime_stream_chunk(
             &mut writer,
-            &response,
-            &started_at,
-            &log_writer_error,
+            &chunk_context,
             &buffer[..read],
-            flush_each_chunk,
             &mut chunk_count,
             &mut total_bytes,
         )?;
@@ -647,11 +650,8 @@ pub(crate) fn write_runtime_streaming_response(
             .unwrap_or(sse_pending);
         write_runtime_stream_chunk(
             &mut writer,
-            &response,
-            &started_at,
-            &log_writer_error,
+            &chunk_context,
             &translated,
-            flush_each_chunk,
             &mut chunk_count,
             &mut total_bytes,
         )?;
@@ -683,16 +683,32 @@ pub(crate) fn write_runtime_streaming_response(
     Ok(())
 }
 
+struct RuntimeStreamChunkContext<'a> {
+    request_id: u64,
+    log_path: PathBuf,
+    profile_name: String,
+    shared: RuntimeRotationProxyShared,
+    started_at: &'a Instant,
+    log_writer_error: &'a dyn Fn(&str, usize, usize, &io::Error),
+    flush_each_chunk: bool,
+}
+
 fn write_runtime_stream_chunk(
     writer: &mut Box<dyn Write + Send + 'static>,
-    response: &RuntimeStreamingResponse,
-    started_at: &Instant,
-    log_writer_error: &impl Fn(&str, usize, usize, &io::Error),
+    context: &RuntimeStreamChunkContext<'_>,
     chunk: &[u8],
-    flush_each_chunk: bool,
     chunk_count: &mut usize,
     total_bytes: &mut usize,
 ) -> io::Result<()> {
+    let RuntimeStreamChunkContext {
+        request_id,
+        log_path,
+        profile_name,
+        shared,
+        started_at,
+        log_writer_error,
+        flush_each_chunk,
+    } = context;
     if chunk.is_empty() {
         return Ok(());
     }
@@ -701,18 +717,18 @@ fn write_runtime_stream_chunk(
     *total_bytes += chunk.len();
     if *chunk_count == 1 {
         runtime_proxy_log_to_path(
-            &response.log_path,
+            log_path,
             &format!(
                 "request={} transport=http first_local_chunk profile={} bytes={} elapsed_ms={}",
-                response.request_id,
-                response.profile_name,
+                request_id,
+                profile_name,
                 chunk.len(),
                 started_at.elapsed().as_millis()
             ),
         );
         note_runtime_profile_latency_observation(
-            &response.shared,
-            &response.profile_name,
+            shared,
+            profile_name,
             RuntimeRouteKind::Responses,
             "ttfb",
             started_at.elapsed().as_millis() as u64,
@@ -728,7 +744,7 @@ fn write_runtime_stream_chunk(
     writer.write_all(b"\r\n").inspect_err(|err| {
         log_writer_error("chunk_suffix", *chunk_count, *total_bytes, err);
     })?;
-    if flush_each_chunk || *chunk_count == 1 {
+    if *flush_each_chunk || *chunk_count == 1 {
         writer.flush().inspect_err(|err| {
             log_writer_error("chunk_flush", *chunk_count, *total_bytes, err);
         })?;
