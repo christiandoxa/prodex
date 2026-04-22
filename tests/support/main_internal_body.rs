@@ -4414,6 +4414,9 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     );
     assert!(metrics.active_request_limit > 0);
     assert!(metrics.traffic.responses.limit > 0);
+    assert_eq!(metrics.traffic.responses.admissions_total, 0);
+    assert_eq!(metrics.traffic.responses.global_limit_rejections_total, 0);
+    assert_eq!(metrics.traffic.responses.lane_limit_rejections_total, 0);
     assert_eq!(metrics.local_overload_backoff_remaining_seconds, 0);
     assert_eq!(metrics.continuations.response_bindings, 0);
 }
@@ -4490,6 +4493,123 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("current_profile=\"main\""));
     assert!(body.contains("prodex_version=\""));
     assert!(body.contains("executable_sha256=\""));
+    assert!(body.contains("prodex_runtime_broker_lane_admissions_total"));
+    assert!(body.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
+    assert!(body.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
+}
+
+#[test]
+fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        2,
+    );
+
+    let guard = try_acquire_runtime_proxy_active_request_slot(
+        &shared,
+        "http",
+        "/backend-api/codex/responses",
+    )
+    .expect("responses admission should succeed");
+    drop(guard);
+
+    shared
+        .active_request_count
+        .store(shared.active_request_limit, Ordering::SeqCst);
+    assert!(matches!(
+        try_acquire_runtime_proxy_active_request_slot(
+            &shared,
+            "http",
+            "/backend-api/codex/responses/compact",
+        ),
+        Err(RuntimeProxyAdmissionRejection::GlobalLimit)
+    ));
+    shared.active_request_count.store(0, Ordering::SeqCst);
+
+    shared
+        .lane_admission
+        .responses_active
+        .store(shared.lane_admission.limits.responses, Ordering::SeqCst);
+    assert!(matches!(
+        try_acquire_runtime_proxy_active_request_slot(
+            &shared,
+            "http",
+            "/backend-api/codex/responses",
+        ),
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(
+            RuntimeRouteKind::Responses
+        ))
+    ));
+    shared
+        .lane_admission
+        .responses_active
+        .store(0, Ordering::SeqCst);
+
+    let metrics = runtime_broker_metrics_snapshot(
+        &shared,
+        &RuntimeBrokerMetadata {
+            broker_key: "broker".to_string(),
+            listen_addr: "127.0.0.1:12345".to_string(),
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            instance_token: "instance".to_string(),
+            admin_token: "secret".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
+        },
+    )
+    .expect("broker metrics snapshot should succeed");
+
+    assert_eq!(metrics.traffic.responses.admissions_total, 1);
+    assert_eq!(metrics.traffic.responses.global_limit_rejections_total, 0);
+    assert_eq!(metrics.traffic.responses.lane_limit_rejections_total, 1);
+    assert_eq!(metrics.traffic.compact.admissions_total, 0);
+    assert_eq!(metrics.traffic.compact.global_limit_rejections_total, 1);
+    assert_eq!(metrics.traffic.compact.lane_limit_rejections_total, 0);
 }
 
 #[test]

@@ -106,7 +106,35 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
         runtime_metrics::RuntimeBrokerLaneMetrics {
             active: lane.active as u64,
             limit: lane.limit as u64,
+            admissions_total: lane.admissions_total,
+            global_limit_rejections_total: lane.global_limit_rejections_total,
+            lane_limit_rejections_total: lane.lane_limit_rejections_total,
         }
+    }
+}
+
+fn runtime_broker_live_lane_metrics(
+    shared: &RuntimeRotationProxyShared,
+    lane: RuntimeRouteKind,
+) -> RuntimeBrokerLaneMetrics {
+    RuntimeBrokerLaneMetrics {
+        active: shared
+            .lane_admission
+            .active_counter(lane)
+            .load(Ordering::SeqCst),
+        limit: shared.lane_admission.limit(lane),
+        admissions_total: shared
+            .lane_admission
+            .admissions_total_counter(lane)
+            .load(Ordering::Relaxed),
+        global_limit_rejections_total: shared
+            .lane_admission
+            .global_limit_rejections_total_counter(lane)
+            .load(Ordering::Relaxed),
+        lane_limit_rejections_total: shared
+            .lane_admission
+            .lane_limit_rejections_total_counter(lane)
+            .load(Ordering::Relaxed),
     }
 }
 
@@ -162,28 +190,10 @@ pub(crate) fn runtime_broker_metrics_snapshot(
             .load(Ordering::SeqCst)
             .saturating_sub(now_u64),
         traffic: RuntimeBrokerTrafficMetrics {
-            responses: RuntimeBrokerLaneMetrics {
-                active: shared
-                    .lane_admission
-                    .responses_active
-                    .load(Ordering::SeqCst),
-                limit: shared.lane_admission.limits.responses,
-            },
-            compact: RuntimeBrokerLaneMetrics {
-                active: shared.lane_admission.compact_active.load(Ordering::SeqCst),
-                limit: shared.lane_admission.limits.compact,
-            },
-            websocket: RuntimeBrokerLaneMetrics {
-                active: shared
-                    .lane_admission
-                    .websocket_active
-                    .load(Ordering::SeqCst),
-                limit: shared.lane_admission.limits.websocket,
-            },
-            standard: RuntimeBrokerLaneMetrics {
-                active: shared.lane_admission.standard_active.load(Ordering::SeqCst),
-                limit: shared.lane_admission.limits.standard,
-            },
+            responses: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Responses),
+            compact: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Compact),
+            websocket: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Websocket),
+            standard: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Standard),
         },
         profile_inflight: runtime.profile_inflight.clone(),
         retry_backoffs: runtime

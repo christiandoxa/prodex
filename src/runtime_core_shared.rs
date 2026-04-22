@@ -240,6 +240,18 @@ pub(super) struct RuntimeProxyLaneAdmission {
     pub(super) compact_active: Arc<AtomicUsize>,
     pub(super) websocket_active: Arc<AtomicUsize>,
     pub(super) standard_active: Arc<AtomicUsize>,
+    pub(super) responses_admissions_total: Arc<AtomicU64>,
+    pub(super) compact_admissions_total: Arc<AtomicU64>,
+    pub(super) websocket_admissions_total: Arc<AtomicU64>,
+    pub(super) standard_admissions_total: Arc<AtomicU64>,
+    pub(super) responses_global_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) compact_global_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) websocket_global_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) standard_global_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) responses_lane_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) compact_lane_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) websocket_lane_limit_rejections_total: Arc<AtomicU64>,
+    pub(super) standard_lane_limit_rejections_total: Arc<AtomicU64>,
     pub(super) wait: Arc<(Mutex<()>, Condvar)>,
     pub(super) inflight_release_revision: Arc<AtomicU64>,
     pub(super) limits: RuntimeProxyLaneLimits,
@@ -252,6 +264,18 @@ impl RuntimeProxyLaneAdmission {
             compact_active: Arc::new(AtomicUsize::new(0)),
             websocket_active: Arc::new(AtomicUsize::new(0)),
             standard_active: Arc::new(AtomicUsize::new(0)),
+            responses_admissions_total: Arc::new(AtomicU64::new(0)),
+            compact_admissions_total: Arc::new(AtomicU64::new(0)),
+            websocket_admissions_total: Arc::new(AtomicU64::new(0)),
+            standard_admissions_total: Arc::new(AtomicU64::new(0)),
+            responses_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            compact_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            websocket_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            standard_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            responses_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            compact_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            websocket_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            standard_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
             wait: Arc::new((Mutex::new(()), Condvar::new())),
             inflight_release_revision: Arc::new(AtomicU64::new(0)),
             limits,
@@ -273,6 +297,43 @@ impl RuntimeProxyLaneAdmission {
             RuntimeRouteKind::Compact => self.limits.compact,
             RuntimeRouteKind::Websocket => self.limits.websocket,
             RuntimeRouteKind::Standard => self.limits.standard,
+        }
+    }
+
+    pub(super) fn admissions_total_counter(&self, lane: RuntimeRouteKind) -> Arc<AtomicU64> {
+        match lane {
+            RuntimeRouteKind::Responses => Arc::clone(&self.responses_admissions_total),
+            RuntimeRouteKind::Compact => Arc::clone(&self.compact_admissions_total),
+            RuntimeRouteKind::Websocket => Arc::clone(&self.websocket_admissions_total),
+            RuntimeRouteKind::Standard => Arc::clone(&self.standard_admissions_total),
+        }
+    }
+
+    pub(super) fn global_limit_rejections_total_counter(
+        &self,
+        lane: RuntimeRouteKind,
+    ) -> Arc<AtomicU64> {
+        match lane {
+            RuntimeRouteKind::Responses => {
+                Arc::clone(&self.responses_global_limit_rejections_total)
+            }
+            RuntimeRouteKind::Compact => Arc::clone(&self.compact_global_limit_rejections_total),
+            RuntimeRouteKind::Websocket => {
+                Arc::clone(&self.websocket_global_limit_rejections_total)
+            }
+            RuntimeRouteKind::Standard => Arc::clone(&self.standard_global_limit_rejections_total),
+        }
+    }
+
+    pub(super) fn lane_limit_rejections_total_counter(
+        &self,
+        lane: RuntimeRouteKind,
+    ) -> Arc<AtomicU64> {
+        match lane {
+            RuntimeRouteKind::Responses => Arc::clone(&self.responses_lane_limit_rejections_total),
+            RuntimeRouteKind::Compact => Arc::clone(&self.compact_lane_limit_rejections_total),
+            RuntimeRouteKind::Websocket => Arc::clone(&self.websocket_lane_limit_rejections_total),
+            RuntimeRouteKind::Standard => Arc::clone(&self.standard_lane_limit_rejections_total),
         }
     }
 }

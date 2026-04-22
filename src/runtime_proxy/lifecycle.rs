@@ -176,6 +176,10 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
                     shared.active_request_limit
                 ),
             );
+            shared
+                .lane_admission
+                .global_limit_rejections_total_counter(lane)
+                .fetch_add(1, Ordering::Relaxed);
             return Err(RuntimeProxyAdmissionRejection::GlobalLimit);
         }
         let lane_active = lane_active_count.load(Ordering::SeqCst);
@@ -187,6 +191,10 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
                     runtime_route_kind_label(lane)
                 ),
             );
+            shared
+                .lane_admission
+                .lane_limit_rejections_total_counter(lane)
+                .fetch_add(1, Ordering::Relaxed);
             return Err(RuntimeProxyAdmissionRejection::LaneLimit(lane));
         }
         if shared
@@ -208,6 +216,10 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
                 )
                 .is_ok()
             {
+                shared
+                    .lane_admission
+                    .admissions_total_counter(lane)
+                    .fetch_add(1, Ordering::Relaxed);
                 return Ok(RuntimeProxyActiveRequestGuard {
                     active_request_count: Arc::clone(&shared.active_request_count),
                     lane_active_count,

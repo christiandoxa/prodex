@@ -5,6 +5,9 @@ use std::fmt::Write as _;
 pub struct RuntimeBrokerLaneMetrics {
     pub active: u64,
     pub limit: u64,
+    pub admissions_total: u64,
+    pub global_limit_rejections_total: u64,
+    pub lane_limit_rejections_total: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -194,8 +197,11 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
         ];
         render_lane_family(
             &mut self.out,
-            "prodex_runtime_broker_lane_active_requests",
-            "Current active requests per broker lane.",
+            LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_active_requests",
+                help: "Current active requests per broker lane.",
+                metric_type: "gauge",
+            },
             self.snapshot.broker_key.as_str(),
             self.snapshot.listen_addr.as_str(),
             &lanes,
@@ -203,12 +209,51 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
         );
         render_lane_family(
             &mut self.out,
-            "prodex_runtime_broker_lane_limits",
-            "Configured admission limits per broker lane.",
+            LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_limits",
+                help: "Configured admission limits per broker lane.",
+                metric_type: "gauge",
+            },
             self.snapshot.broker_key.as_str(),
             self.snapshot.listen_addr.as_str(),
             &lanes,
             |lane| lane.limit as f64,
+        );
+        render_lane_family(
+            &mut self.out,
+            LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_admissions_total",
+                help: "Cumulative successful admissions per broker lane.",
+                metric_type: "counter",
+            },
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.admissions_total as f64,
+        );
+        render_lane_family(
+            &mut self.out,
+            LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_global_limit_rejections_total",
+                help: "Cumulative broker-global admission rejections per lane.",
+                metric_type: "counter",
+            },
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.global_limit_rejections_total as f64,
+        );
+        render_lane_family(
+            &mut self.out,
+            LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_lane_limit_rejections_total",
+                help: "Cumulative per-lane admission rejections per lane.",
+                metric_type: "counter",
+            },
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.lane_limit_rejections_total as f64,
         );
     }
 
@@ -252,8 +297,7 @@ pub fn format_runtime_broker_snapshot_summary(snapshot: &RuntimeBrokerSnapshot) 
 
 fn render_lane_family<F>(
     out: &mut String,
-    metric_name: &str,
-    help: &str,
+    descriptor: LaneFamilyDescriptor<'_>,
     broker_key: &str,
     listen_addr: &str,
     lanes: &[(&str, &RuntimeBrokerLaneMetrics)],
@@ -261,12 +305,12 @@ fn render_lane_family<F>(
 ) where
     F: Fn(&RuntimeBrokerLaneMetrics) -> f64,
 {
-    push_help(out, metric_name, help);
-    push_type(out, metric_name, "gauge");
+    push_help(out, descriptor.metric_name, descriptor.help);
+    push_type(out, descriptor.metric_name, descriptor.metric_type);
     for (lane, snapshot) in lanes {
         push_gauge(
             out,
-            metric_name,
+            descriptor.metric_name,
             labels(&[
                 ("broker_key", broker_key),
                 ("listen_addr", listen_addr),
@@ -275,6 +319,13 @@ fn render_lane_family<F>(
             value(snapshot),
         );
     }
+}
+
+#[derive(Clone, Copy)]
+struct LaneFamilyDescriptor<'a> {
+    metric_name: &'a str,
+    help: &'a str,
+    metric_type: &'a str,
 }
 
 fn render_continuation_family(
@@ -430,18 +481,30 @@ mod tests {
                 responses: RuntimeBrokerLaneMetrics {
                     active: 3,
                     limit: 9,
+                    admissions_total: 42,
+                    global_limit_rejections_total: 2,
+                    lane_limit_rejections_total: 5,
                 },
                 compact: RuntimeBrokerLaneMetrics {
                     active: 1,
                     limit: 3,
+                    admissions_total: 12,
+                    global_limit_rejections_total: 1,
+                    lane_limit_rejections_total: 4,
                 },
                 websocket: RuntimeBrokerLaneMetrics {
                     active: 0,
                     limit: 4,
+                    admissions_total: 7,
+                    global_limit_rejections_total: 0,
+                    lane_limit_rejections_total: 1,
                 },
                 standard: RuntimeBrokerLaneMetrics {
                     active: 1,
                     limit: 2,
+                    admissions_total: 9,
+                    global_limit_rejections_total: 3,
+                    lane_limit_rejections_total: 2,
                 },
             },
             profile_inflight,
@@ -468,6 +531,9 @@ mod tests {
         assert!(rendered.contains("# HELP prodex_runtime_broker_info"));
         assert!(rendered.contains("# TYPE prodex_runtime_broker_info gauge"));
         assert!(rendered.contains("prodex_runtime_broker_active_requests"));
+        assert!(rendered.contains("prodex_runtime_broker_lane_admissions_total"));
+        assert!(rendered.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
+        assert!(rendered.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
         assert!(rendered.contains("broker_key=\"broker-123\""));
         assert!(rendered.contains("listen_addr=\"127.0.0.1:8080\""));
         assert!(rendered.contains("current_profile=\"main\""));

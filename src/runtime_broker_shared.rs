@@ -41,6 +41,9 @@ pub(super) struct RuntimeBrokerHealth {
 pub(super) struct RuntimeBrokerLaneMetrics {
     pub(super) active: usize,
     pub(super) limit: usize,
+    pub(super) admissions_total: u64,
+    pub(super) global_limit_rejections_total: u64,
+    pub(super) lane_limit_rejections_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
