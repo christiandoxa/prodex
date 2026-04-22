@@ -89,8 +89,10 @@ pub(crate) fn runtime_previous_response_affinity_is_bound(
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeSelectionProfileEntry {
+    pub(crate) name: String,
     pub(crate) codex_home: PathBuf,
     pub(crate) provider: ProfileProvider,
+    pub(crate) last_run_selected_at: Option<i64>,
 }
 
 impl ProfileSelectionProvider for RuntimeSelectionProfileEntry {
@@ -105,40 +107,208 @@ impl RuntimeSelectionProfileEntry {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RuntimeProfileSelectionSnapshot {
-    pub(crate) profiles: BTreeMap<String, RuntimeSelectionProfileEntry>,
-    pub(crate) last_run_selected_at: BTreeMap<String, i64>,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeProfileSelectionCatalogView<'a> {
+    entries: &'a [RuntimeSelectionProfileEntry],
 }
 
-pub(crate) fn runtime_profile_selection_snapshot(
+impl ProfileSelectionRead for RuntimeProfileSelectionCatalogView<'_> {
+    type Profile = RuntimeSelectionProfileEntry;
+
+    fn profile_names(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    }
+
+    fn profile_entry(&self, name: &str) -> Option<&Self::Profile> {
+        self.entries.iter().find(|entry| entry.name == name)
+    }
+
+    fn last_run_selected_at(&self, name: &str) -> Option<i64> {
+        self.profile_entry(name)
+            .and_then(|entry| entry.last_run_selected_at)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RuntimeProfileSelectionCatalog {
+    pub(crate) entries: Vec<RuntimeSelectionProfileEntry>,
+}
+
+impl RuntimeProfileSelectionCatalog {
+    pub(crate) fn contains(&self, profile_name: &str) -> bool {
+        self.entries.iter().any(|entry| entry.name == profile_name)
+    }
+}
+
+pub(crate) fn runtime_profile_selection_catalog(
     runtime: &RuntimeRotationState,
-) -> RuntimeProfileSelectionSnapshot {
-    RuntimeProfileSelectionSnapshot {
-        profiles: runtime
+) -> RuntimeProfileSelectionCatalog {
+    RuntimeProfileSelectionCatalog {
+        entries: runtime
             .state
             .profiles
             .iter()
-            .map(|(name, profile)| {
-                (
-                    name.clone(),
-                    RuntimeSelectionProfileEntry {
-                        codex_home: profile.codex_home.clone(),
-                        provider: profile.provider.clone(),
-                    },
-                )
+            .map(|(name, profile)| RuntimeSelectionProfileEntry {
+                name: name.clone(),
+                codex_home: profile.codex_home.clone(),
+                provider: profile.provider.clone(),
+                last_run_selected_at: runtime.state.last_run_selected_at.get(name).copied(),
             })
             .collect(),
-        last_run_selected_at: runtime.state.last_run_selected_at.clone(),
     }
 }
 
 pub(crate) fn runtime_profile_selection_view(
-    snapshot: &RuntimeProfileSelectionSnapshot,
-) -> ProfileSelectionView<'_, RuntimeSelectionProfileEntry> {
-    ProfileSelectionView {
-        profiles: &snapshot.profiles,
-        last_run_selected_at: &snapshot.last_run_selected_at,
+    catalog: &RuntimeProfileSelectionCatalog,
+) -> RuntimeProfileSelectionCatalogView<'_> {
+    RuntimeProfileSelectionCatalogView {
+        entries: &catalog.entries,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeRouteSelectionEntry {
+    pub(crate) profile: RuntimeSelectionProfileEntry,
+    pub(crate) cached_auth_summary: Option<AuthSummary>,
+    pub(crate) cached_probe_entry: Option<RuntimeProfileProbeCacheEntry>,
+    pub(crate) cached_usage_snapshot: Option<RuntimeProfileUsageSnapshot>,
+    pub(crate) auth_failure_active: bool,
+    pub(crate) in_selection_backoff: bool,
+    pub(crate) backoff_sort_key: (usize, i64, i64, i64),
+    pub(crate) inflight_count: usize,
+    pub(crate) health_sort_key: u32,
+}
+
+impl RuntimeRouteSelectionEntry {
+    pub(crate) fn supports_codex_runtime(&self) -> bool {
+        self.profile.supports_codex_runtime()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeRouteSelectionCatalogView<'a> {
+    entries: &'a [RuntimeRouteSelectionEntry],
+}
+
+impl ProfileSelectionRead for RuntimeRouteSelectionCatalogView<'_> {
+    type Profile = RuntimeSelectionProfileEntry;
+
+    fn profile_names(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .map(|entry| entry.profile.name.clone())
+            .collect()
+    }
+
+    fn profile_entry(&self, name: &str) -> Option<&Self::Profile> {
+        self.entries
+            .iter()
+            .find(|entry| entry.profile.name == name)
+            .map(|entry| &entry.profile)
+    }
+
+    fn last_run_selected_at(&self, name: &str) -> Option<i64> {
+        self.profile_entry(name)
+            .and_then(|entry| entry.last_run_selected_at)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RuntimeRouteSelectionCatalog {
+    pub(crate) current_profile: String,
+    pub(crate) include_code_review: bool,
+    pub(crate) upstream_base_url: String,
+    pub(crate) entries: Vec<RuntimeRouteSelectionEntry>,
+}
+
+impl RuntimeRouteSelectionCatalog {
+    pub(crate) fn entry(&self, profile_name: &str) -> Option<&RuntimeRouteSelectionEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.profile.name == profile_name)
+    }
+
+    pub(crate) fn persisted_usage_snapshots(
+        &self,
+    ) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
+        self.entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .cached_usage_snapshot
+                    .clone()
+                    .map(|snapshot| (entry.profile.name.clone(), snapshot))
+            })
+            .collect()
+    }
+}
+
+pub(crate) fn runtime_route_selection_view(
+    catalog: &RuntimeRouteSelectionCatalog,
+) -> RuntimeRouteSelectionCatalogView<'_> {
+    RuntimeRouteSelectionCatalogView {
+        entries: &catalog.entries,
+    }
+}
+
+pub(crate) fn runtime_route_selection_catalog(
+    runtime: &RuntimeRotationState,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> RuntimeRouteSelectionCatalog {
+    RuntimeRouteSelectionCatalog {
+        current_profile: runtime.current_profile.clone(),
+        include_code_review: runtime.include_code_review,
+        upstream_base_url: runtime.upstream_base_url.clone(),
+        entries: runtime_profile_selection_catalog(runtime)
+            .entries
+            .into_iter()
+            .map(|profile| RuntimeRouteSelectionEntry {
+                cached_auth_summary: runtime_profile_cached_auth_summary_from_maps_for_selection(
+                    &profile.name,
+                    &runtime.profile_usage_auth,
+                    &runtime.profile_probe_cache,
+                ),
+                cached_probe_entry: runtime.profile_probe_cache.get(&profile.name).cloned(),
+                cached_usage_snapshot: runtime.profile_usage_snapshots.get(&profile.name).cloned(),
+                auth_failure_active: runtime_profile_auth_failure_active_with_auth_cache(
+                    &runtime.profile_health,
+                    &runtime.profile_usage_auth,
+                    &profile.name,
+                    now,
+                ),
+                in_selection_backoff: runtime_profile_name_in_selection_backoff(
+                    &profile.name,
+                    &runtime.profile_retry_backoff_until,
+                    &runtime.profile_transport_backoff_until,
+                    &runtime.profile_route_circuit_open_until,
+                    route_kind,
+                    now,
+                ),
+                backoff_sort_key: runtime_profile_backoff_sort_key(
+                    &profile.name,
+                    &runtime.profile_retry_backoff_until,
+                    &runtime.profile_transport_backoff_until,
+                    &runtime.profile_route_circuit_open_until,
+                    route_kind,
+                    now,
+                ),
+                inflight_count: runtime_profile_inflight_sort_key(
+                    &profile.name,
+                    &runtime.profile_inflight,
+                ),
+                health_sort_key: runtime_profile_health_sort_key(
+                    &profile.name,
+                    &runtime.profile_health,
+                    now,
+                    route_kind,
+                ),
+                profile,
+            })
+            .collect(),
     }
 }
 
@@ -702,20 +872,51 @@ pub(crate) fn next_runtime_previous_response_candidate(
 ) -> Result<Option<String>> {
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
-    let (
-        selection_state,
-        current_profile,
-        previous_response_owner,
-        profile_health,
-        profile_usage_auth,
-        profile_probe_cache,
-    ) = {
+    let now = Local::now().timestamp();
+    struct RuntimePreviousResponseDiscoveryEntry {
+        name: String,
+        codex_home: PathBuf,
+        cached_auth_summary: Option<AuthSummary>,
+        auth_failure_active: bool,
+        negative_cache_active: bool,
+    }
+
+    let (selection_catalog, current_profile, previous_response_owner, discovery_entries) = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let selection_catalog = runtime_profile_selection_catalog(&runtime);
+        let discovery_entries = selection_catalog
+            .entries
+            .iter()
+            .map(|profile| RuntimePreviousResponseDiscoveryEntry {
+                name: profile.name.clone(),
+                codex_home: profile.codex_home.clone(),
+                cached_auth_summary: runtime_profile_cached_auth_summary_from_maps_for_selection(
+                    &profile.name,
+                    &runtime.profile_usage_auth,
+                    &runtime.profile_probe_cache,
+                ),
+                auth_failure_active: runtime_profile_auth_failure_active_with_auth_cache(
+                    &runtime.profile_health,
+                    &runtime.profile_usage_auth,
+                    &profile.name,
+                    now,
+                ),
+                negative_cache_active: previous_response_id.is_some_and(|response_id| {
+                    runtime_previous_response_negative_cache_active(
+                        &runtime.profile_health,
+                        response_id,
+                        &profile.name,
+                        route_kind,
+                        now,
+                    )
+                }),
+            })
+            .collect::<Vec<_>>();
         (
-            runtime_profile_selection_snapshot(&runtime),
+            selection_catalog,
             runtime.current_profile.clone(),
             previous_response_id.and_then(|response_id| {
                 runtime
@@ -724,45 +925,32 @@ pub(crate) fn next_runtime_previous_response_candidate(
                     .get(response_id)
                     .map(|binding| binding.profile_name.clone())
             }),
-            runtime.profile_health.clone(),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_probe_cache.clone(),
+            discovery_entries,
         )
     };
-    let now = Local::now().timestamp();
-    if let (Some(previous_response_id), Some(owner)) =
-        (previous_response_id, previous_response_owner)
+    if let Some(owner) = previous_response_owner.as_deref()
+        && !excluded_profiles.contains(owner)
+        && selection_catalog.contains(owner)
+        && !discovery_entries
+            .iter()
+            .find(|entry| entry.name == owner)
+            .is_some_and(|entry| entry.negative_cache_active)
     {
-        let owner = owner.as_str();
-        if !excluded_profiles.contains(owner)
-            && selection_state.profiles.contains_key(owner)
-            && !runtime_previous_response_negative_cache_active(
-                &profile_health,
-                previous_response_id,
-                owner,
-                route_kind,
-                now,
-            )
-        {
-            return Ok(Some(owner.to_string()));
-        }
+        return Ok(Some(owner.to_string()));
     }
 
     for name in active_profile_selection_order_with_view(
-        runtime_profile_selection_view(&selection_state),
+        runtime_profile_selection_view(&selection_catalog),
         &current_profile,
     ) {
         if excluded_profiles.contains(&name) {
             continue;
         }
+        let Some(entry) = discovery_entries.iter().find(|entry| entry.name == name) else {
+            continue;
+        };
         if let Some(previous_response_id) = previous_response_id
-            && runtime_previous_response_negative_cache_active(
-                &profile_health,
-                previous_response_id,
-                &name,
-                route_kind,
-                now,
-            )
+            && entry.negative_cache_active
         {
             runtime_proxy_log(
                 shared,
@@ -775,26 +963,15 @@ pub(crate) fn next_runtime_previous_response_candidate(
             );
             continue;
         }
-        let Some(profile) = selection_state.profiles.get(&name) else {
-            continue;
-        };
-        if !runtime_profile_auth_summary_for_selection_with_policy(
-            &name,
-            &profile.codex_home,
-            &profile_usage_auth,
-            &profile_probe_cache,
-            allow_disk_auth_fallback,
-        )
-        .is_some_and(|summary| summary.quota_compatible)
+        if !entry
+            .cached_auth_summary
+            .clone()
+            .or_else(|| allow_disk_auth_fallback.then(|| read_auth_summary(&entry.codex_home)))
+            .is_some_and(|summary| summary.quota_compatible)
         {
             continue;
         }
-        if runtime_profile_auth_failure_active_with_auth_cache(
-            &profile_health,
-            &profile_usage_auth,
-            &name,
-            now,
-        ) {
+        if entry.auth_failure_active {
             runtime_proxy_log(
                 shared,
                 format!(

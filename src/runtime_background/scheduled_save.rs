@@ -184,15 +184,55 @@ pub(crate) fn runtime_state_save_snapshot_from_runtime(
     }
 }
 
-pub(crate) fn runtime_state_save_snapshot_from_shared(
+pub(crate) fn runtime_state_save_selected_snapshot_from_runtime(
+    runtime: &RuntimeRotationState,
+    sections: RuntimeStateSaveSections,
+) -> RuntimeStateSaveSelectedSnapshot {
+    let state = match sections.state {
+        RuntimeStateSaveStateSection::None => None,
+        RuntimeStateSaveStateSection::Core => Some(AppState {
+            active_profile: runtime.state.active_profile.clone(),
+            profiles: runtime.state.profiles.clone(),
+            last_run_selected_at: runtime.state.last_run_selected_at.clone(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        }),
+        RuntimeStateSaveStateSection::Full => Some(runtime.state.clone()),
+    };
+    let profiles = state.is_none().then(|| runtime.state.profiles.clone());
+    RuntimeStateSaveSelectedSnapshot {
+        paths: runtime.paths.clone(),
+        state,
+        profiles,
+        continuations: sections
+            .continuations
+            .then(|| runtime_continuation_store_snapshot(runtime)),
+        profile_scores: sections
+            .profile_scores
+            .then(|| runtime.profile_health.clone()),
+        usage_snapshots: sections
+            .usage_snapshots
+            .then(|| runtime.profile_usage_snapshots.clone()),
+        backoffs: sections
+            .backoffs
+            .then(|| runtime_profile_backoffs_snapshot(runtime)),
+    }
+}
+
+pub(crate) fn runtime_state_save_selected_snapshot_from_shared(
     shared: &RuntimeRotationProxyShared,
-) -> Result<RuntimeStateSaveSnapshot> {
+    sections: RuntimeStateSaveSections,
+) -> Result<RuntimeStateSaveSelectedSnapshot> {
     let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    compact_runtime_continuation_state_in_place(&mut runtime);
-    Ok(runtime_state_save_snapshot_from_runtime(&runtime))
+    if sections.continuations {
+        compact_runtime_continuation_state_in_place(&mut runtime);
+    }
+    Ok(runtime_state_save_selected_snapshot_from_runtime(
+        &runtime, sections,
+    ))
 }
 
 pub(crate) fn schedule_runtime_state_save_from_runtime(
@@ -216,10 +256,14 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
     let queued_at = Instant::now();
     let ready_at = queued_at + runtime_state_save_debounce(reason);
+    let sections = runtime_state_save_sections_for_reason(reason);
     let backlog = enqueue_runtime_state_save_job(
         shared,
         runtime.paths.state_file.clone(),
-        RuntimeStateSavePayload::Live(shared.clone()),
+        RuntimeStateSavePayload::Live {
+            shared: shared.clone(),
+            sections,
+        },
         revision,
         reason,
         queued_at,
@@ -536,24 +580,32 @@ pub(crate) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
                 queued_at,
                 ready_at: _,
             } = job;
-            let snapshot = match payload {
-                RuntimeStateSavePayload::Snapshot(snapshot) => Ok(snapshot),
-                RuntimeStateSavePayload::Live(shared) => {
-                    runtime_state_save_snapshot_from_shared(&shared)
+            let result = match payload {
+                RuntimeStateSavePayload::Snapshot(snapshot) => {
+                    save_runtime_state_snapshot_if_latest(
+                        &snapshot.paths,
+                        &snapshot.state,
+                        &snapshot.continuations,
+                        &snapshot.profile_scores,
+                        &snapshot.usage_snapshots,
+                        &snapshot.backoffs,
+                        revision,
+                        &latest_revision,
+                    )
+                }
+                RuntimeStateSavePayload::Live { shared, sections } => {
+                    runtime_state_save_selected_snapshot_from_shared(&shared, sections).and_then(
+                        |snapshot| {
+                            save_runtime_state_selected_snapshot_if_latest(
+                                &snapshot,
+                                revision,
+                                &latest_revision,
+                            )
+                        },
+                    )
                 }
             };
-            match snapshot.and_then(|snapshot| {
-                save_runtime_state_snapshot_if_latest(
-                    &snapshot.paths,
-                    &snapshot.state,
-                    &snapshot.continuations,
-                    &snapshot.profile_scores,
-                    &snapshot.usage_snapshots,
-                    &snapshot.backoffs,
-                    revision,
-                    &latest_revision,
-                )
-            }) {
+            match result {
                 Ok(true) => runtime_proxy_log_to_path(
                     &log_path,
                     &format!(
@@ -713,6 +765,109 @@ pub(crate) fn runtime_state_save_reason_requires_continuation_journal(reason: &s
     ]
     .into_iter()
     .any(|prefix| reason.starts_with(prefix))
+}
+
+pub(crate) fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {
+    if matches!(reason, "startup_audit" | "startup_continuation_migration") {
+        return RuntimeStateSaveSections::full();
+    }
+
+    let touches_continuations = [
+        "response_ids:",
+        "previous_response_owner:",
+        "previous_response_negative_cache:",
+        "previous_response_release:",
+        "previous_response_binding_clear:",
+        "response_touch:",
+        "turn_state:",
+        "turn_state_touch:",
+        "session_id:",
+        "session_touch:",
+        "compact_lineage:",
+        "compact_lineage_release:",
+        "compact_session_touch:",
+        "compact_turn_state_touch:",
+        "dead_response_binding_clear:",
+        "quota_release:",
+        "continuation_stale:",
+    ]
+    .into_iter()
+    .any(|prefix| reason.starts_with(prefix));
+    if touches_continuations {
+        let profile_scores = [
+            "response_ids:",
+            "previous_response_owner:",
+            "previous_response_negative_cache:",
+            "previous_response_release:",
+        ]
+        .into_iter()
+        .any(|prefix| reason.starts_with(prefix));
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: true,
+            profile_scores,
+            usage_snapshots: false,
+            backoffs: false,
+        };
+    }
+
+    if reason.starts_with("profile_commit:") {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("usage_snapshot:") || reason.starts_with("profile_retry_backoff:") {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: false,
+            usage_snapshots: true,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("profile_transport_backoff:")
+        || reason.starts_with("profile_circuit_half_open_probe:")
+        || reason == "startup_backoff_soften"
+    {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: false,
+            usage_snapshots: false,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("profile_health:") || reason.starts_with("profile_circuit_clear:") {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("profile_bad_pairing:")
+        || reason.starts_with("profile_auth_backoff:")
+        || reason.starts_with("profile_auth_backoff_cleared:")
+    {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: false,
+        };
+    }
+
+    RuntimeStateSaveSections::full()
 }
 
 pub(crate) fn runtime_hot_continuation_state_reason(reason: &str) -> bool {

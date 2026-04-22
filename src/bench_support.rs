@@ -30,18 +30,18 @@ fn bench_profile_entry(paths: &AppPaths, name: &str) -> ProfileEntry {
     }
 }
 
-fn bench_ready_usage(now: i64) -> UsageResponse {
+fn bench_usage(now: i64, primary_used_percent: i64, weekly_used_percent: i64) -> UsageResponse {
     UsageResponse {
         email: None,
         plan_type: Some("bench".to_string()),
         rate_limit: Some(WindowPair {
             primary_window: Some(UsageWindow {
-                used_percent: Some(10),
+                used_percent: Some(primary_used_percent),
                 reset_at: Some(now + 5 * 60 * 60),
                 limit_window_seconds: Some(5 * 60 * 60),
             }),
             secondary_window: Some(UsageWindow {
-                used_percent: Some(20),
+                used_percent: Some(weekly_used_percent),
                 reset_at: Some(now + 7 * 24 * 60 * 60),
                 limit_window_seconds: Some(7 * 24 * 60 * 60),
             }),
@@ -49,6 +49,10 @@ fn bench_ready_usage(now: i64) -> UsageResponse {
         code_review_rate_limit: None,
         additional_rate_limits: Vec::new(),
     }
+}
+
+fn bench_ready_usage(now: i64) -> UsageResponse {
+    bench_usage(now, 10, 20)
 }
 
 fn bench_quota_compatible_probe_entry(now: i64) -> RuntimeProfileProbeCacheEntry {
@@ -59,6 +63,21 @@ fn bench_quota_compatible_probe_entry(now: i64) -> RuntimeProfileProbeCacheEntry
             quota_compatible: true,
         },
         result: Err("bench".to_string()),
+    }
+}
+
+fn bench_probe_entry(
+    now: i64,
+    primary_used_percent: i64,
+    weekly_used_percent: i64,
+) -> RuntimeProfileProbeCacheEntry {
+    RuntimeProfileProbeCacheEntry {
+        checked_at: now,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Ok(bench_usage(now, primary_used_percent, weekly_used_percent)),
     }
 }
 
@@ -186,18 +205,40 @@ pub struct RuntimeProxyPreviousResponseBenchCase {
 
 impl RuntimeProxyPreviousResponseBenchCase {
     pub fn new(profile_count: usize) -> Self {
-        let profile_count = profile_count.max(2);
+        let profile_count = profile_count.max(16);
         let paths = bench_paths("previous-response-selection");
         let now = Local::now().timestamp();
         let mut profiles = BTreeMap::new();
         let mut probe_cache = BTreeMap::new();
         let mut last_run_selected_at = BTreeMap::new();
+        let mut profile_health = BTreeMap::new();
+        let previous_response_id = "resp-bench".to_string();
 
         for index in 0..profile_count {
             let name = format!("profile-{index:03}");
             profiles.insert(name.clone(), bench_profile_entry(&paths, &name));
-            probe_cache.insert(name.clone(), bench_ready_probe_entry(now));
-            last_run_selected_at.insert(name, now - index as i64);
+            probe_cache.insert(
+                name.clone(),
+                if index % 7 == 0 {
+                    bench_probe_entry(now, 96, 96)
+                } else {
+                    bench_ready_probe_entry(now)
+                },
+            );
+            last_run_selected_at.insert(name.clone(), now - index as i64);
+            if index < profile_count / 3 {
+                profile_health.insert(
+                    runtime_previous_response_negative_cache_key(
+                        &previous_response_id,
+                        &name,
+                        RuntimeRouteKind::Responses,
+                    ),
+                    RuntimeProfileHealth {
+                        score: 1,
+                        updated_at: now,
+                    },
+                );
+            }
         }
 
         let current_profile = "profile-000".to_string();
@@ -223,13 +264,13 @@ impl RuntimeProxyPreviousResponseBenchCase {
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
             profile_inflight: BTreeMap::new(),
-            profile_health: BTreeMap::new(),
+            profile_health,
         };
 
         Self {
             shared: bench_runtime_shared("previous-response-selection", state, 32),
             excluded_profiles: BTreeSet::new(),
-            previous_response_id: "resp-bench".to_string(),
+            previous_response_id,
         }
     }
 
@@ -245,6 +286,129 @@ impl RuntimeProxyPreviousResponseBenchCase {
 }
 
 #[doc(hidden)]
+pub struct RuntimeProxyMixedPoolSelectionBenchCase {
+    shared: RuntimeRotationProxyShared,
+    excluded_profiles: BTreeSet<String>,
+}
+
+impl RuntimeProxyMixedPoolSelectionBenchCase {
+    pub fn new(profile_count: usize) -> Self {
+        let profile_count = profile_count.max(32);
+        let paths = bench_paths("mixed-pool-selection");
+        let now = Local::now().timestamp();
+        let mut profiles = BTreeMap::new();
+        let mut probe_cache = BTreeMap::new();
+        let mut last_run_selected_at = BTreeMap::new();
+        let mut retry_backoff_until = BTreeMap::new();
+        let mut transport_backoff_until = BTreeMap::new();
+        let mut route_circuit_open_until = BTreeMap::new();
+        let mut profile_inflight = BTreeMap::new();
+        let mut profile_health = BTreeMap::new();
+        let mut excluded_profiles = BTreeSet::new();
+
+        for index in 0..profile_count {
+            let name = format!("profile-{index:03}");
+            profiles.insert(name.clone(), bench_profile_entry(&paths, &name));
+            let (primary_used, weekly_used) = match index % 12 {
+                1 | 2 => (97, 97),
+                3 => (88, 94),
+                _ => (10 + (index % 20) as i64, 20 + (index % 15) as i64),
+            };
+            probe_cache.insert(
+                name.clone(),
+                bench_probe_entry(now, primary_used, weekly_used),
+            );
+            last_run_selected_at.insert(name.clone(), now - index as i64);
+
+            if index < profile_count / 8 {
+                excluded_profiles.insert(name.clone());
+            } else if index < profile_count / 3 {
+                match index % 5 {
+                    0 => {
+                        retry_backoff_until.insert(name.clone(), now + 90);
+                    }
+                    1 => {
+                        transport_backoff_until.insert(
+                            runtime_profile_transport_backoff_key(
+                                &name,
+                                RuntimeRouteKind::Responses,
+                            ),
+                            now + 45,
+                        );
+                    }
+                    2 => {
+                        route_circuit_open_until.insert(
+                            runtime_profile_route_circuit_key(&name, RuntimeRouteKind::Responses),
+                            now + 30,
+                        );
+                    }
+                    3 => {
+                        profile_inflight.insert(name.clone(), usize::MAX / 4);
+                    }
+                    _ => {
+                        profile_health.insert(
+                            runtime_profile_route_health_key(&name, RuntimeRouteKind::Responses),
+                            RuntimeProfileHealth {
+                                score: 3,
+                                updated_at: now,
+                            },
+                        );
+                    }
+                }
+            } else if index % 17 == 0 {
+                profile_inflight.insert(name.clone(), 2);
+            }
+        }
+
+        let current_profile = "profile-000".to_string();
+        let state = RuntimeRotationState {
+            paths,
+            state: AppState {
+                active_profile: Some(current_profile.clone()),
+                profiles,
+                last_run_selected_at,
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile,
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: probe_cache,
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: retry_backoff_until,
+            profile_transport_backoff_until: transport_backoff_until,
+            profile_route_circuit_open_until: route_circuit_open_until,
+            profile_inflight,
+            profile_health,
+        };
+
+        Self {
+            shared: bench_runtime_shared("mixed-pool-selection", state, 64),
+            excluded_profiles,
+        }
+    }
+
+    pub fn select_fresh_response_candidate(&self) -> Option<String> {
+        select_runtime_response_candidate_for_route(
+            &self.shared,
+            &self.excluded_profiles,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+        .expect("benchmark mixed-pool selection should succeed")
+    }
+}
+
+#[doc(hidden)]
 pub struct RuntimeProxySseInspectBenchCase {
     buffer: Vec<u8>,
 }
@@ -254,16 +418,26 @@ impl RuntimeProxySseInspectBenchCase {
         let event_count = event_count.max(1);
         let mut buffer = Vec::new();
         for index in 0..event_count {
-            buffer.extend_from_slice(b": keep-alive\r\n");
+            if index % 8 == 0 {
+                buffer.extend_from_slice(b": keep-alive\r\n");
+            }
+            let event_type = match index % 6 {
+                0 => "response.created",
+                1 => "response.in_progress",
+                2 => "response.output_item.added",
+                3 => "response.content_part.added",
+                4 => "response.output_text.delta",
+                _ => "response.reasoning_summary_text.delta",
+            };
             buffer.extend_from_slice(
                 format!(
-                    "data: {{\"type\":\"response.output_item.added\",\"response_id\":\"resp-{index:03}\"}}\r\n\r\n"
+                    "event: {event_type}\r\ndata: {{\"type\":\"{event_type}\",\"response_id\":\"resp-{index:03}\",\"delta\":\"bench-token-{index:03}\"}}\r\n\r\n"
                 )
                 .as_bytes(),
             );
         }
         buffer.extend_from_slice(
-            b"data: {\"type\":\"response.completed\",\"response_id\":\"resp-tail\",\"turn_state\":\"turn-tail\"}",
+            b"event: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-tail\",\"turn_state\":\"turn-tail\"}}\r\n\r\n",
         );
         Self { buffer }
     }

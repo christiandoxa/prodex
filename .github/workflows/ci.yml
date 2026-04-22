@@ -263,6 +263,23 @@ jobs:
             sleep 5
           done
 
+  runtime-proxy-bench-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Compile and smoke runtime proxy benchmarks
+        run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths -- --test
+
   runtime-stress:
     runs-on: ubuntu-latest
     timeout-minutes: 30

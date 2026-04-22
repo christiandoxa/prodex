@@ -77,6 +77,7 @@ mod shared_types;
 mod terminal_ui;
 mod update_notice;
 
+#[cfg(feature = "bench-support")]
 #[doc(hidden)]
 pub mod bench_support;
 

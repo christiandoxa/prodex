@@ -265,34 +265,46 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
 }
 
 impl RuntimeSseTapState {
-    fn prime_from_prelude(&mut self, chunk: &[u8]) {
-        let mut events = Vec::new();
-        runtime_sse_consume_chunk(&mut self.line, &mut self.data_lines, chunk, |event| {
-            events.push(event);
+    fn consume_chunk_events<F>(&mut self, chunk: &[u8], mut on_event: F)
+    where
+        F: FnMut(&mut Self, RuntimeParsedSseEvent),
+    {
+        let mut line = std::mem::take(&mut self.line);
+        let mut data_lines = std::mem::take(&mut self.data_lines);
+        runtime_sse_consume_chunk(&mut line, &mut data_lines, chunk, |event| {
+            on_event(self, event);
         });
-        for event in events {
-            self.observe_prelude_event(event);
-        }
+        self.line = line;
+        self.data_lines = data_lines;
+    }
+
+    fn finish_pending_events<F>(&mut self, mut on_event: F)
+    where
+        F: FnMut(&mut Self, RuntimeParsedSseEvent),
+    {
+        let mut line = std::mem::take(&mut self.line);
+        let mut data_lines = std::mem::take(&mut self.data_lines);
+        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
+            on_event(self, event);
+        });
+        self.line = line;
+        self.data_lines = data_lines;
+    }
+
+    fn prime_from_prelude(&mut self, chunk: &[u8]) {
+        self.consume_chunk_events(chunk, |state, event| state.observe_prelude_event(event));
     }
 
     fn observe(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str, chunk: &[u8]) {
-        let mut events = Vec::new();
-        runtime_sse_consume_chunk(&mut self.line, &mut self.data_lines, chunk, |event| {
-            events.push(event);
+        self.consume_chunk_events(chunk, |state, event| {
+            state.observe_stream_event(shared, profile_name, event);
         });
-        for event in events {
-            self.observe_stream_event(shared, profile_name, event);
-        }
     }
 
     fn finish(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
-        let mut events = Vec::new();
-        runtime_sse_finish_pending(&mut self.line, &mut self.data_lines, |event| {
-            events.push(event);
+        self.finish_pending_events(|state, event| {
+            state.observe_stream_event(shared, profile_name, event);
         });
-        for event in events {
-            self.observe_stream_event(shared, profile_name, event);
-        }
     }
 
     fn observe_prelude_event(&mut self, event: RuntimeParsedSseEvent) {
@@ -797,6 +809,36 @@ mod tests {
         bytes: Arc<Mutex<Vec<u8>>>,
     }
 
+    struct ChunkedReader {
+        chunks: VecDeque<Vec<u8>>,
+    }
+
+    impl ChunkedReader {
+        fn new(chunks: impl IntoIterator<Item = &'static [u8]>) -> Self {
+            Self {
+                chunks: chunks
+                    .into_iter()
+                    .map(|chunk| chunk.to_vec())
+                    .collect::<VecDeque<_>>(),
+            }
+        }
+    }
+
+    impl Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let Some(mut chunk) = self.chunks.pop_front() else {
+                return Ok(0);
+            };
+            let read = chunk.len().min(buf.len());
+            buf[..read].copy_from_slice(&chunk[..read]);
+            if read < chunk.len() {
+                chunk.drain(..read);
+                self.chunks.push_front(chunk);
+            }
+            Ok(read)
+        }
+    }
+
     impl Write for SharedBufferWriter {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.bytes
@@ -863,6 +905,58 @@ mod tests {
                 standard: 8,
             }),
         }
+    }
+
+    #[test]
+    fn sse_tap_reader_observes_split_events_without_event_buffering() {
+        let _guard = acquire_test_runtime_lock();
+        let log_path = env::temp_dir().join(format!(
+            "prodex-response-forwarding-tap-test-{}.log",
+            std::process::id()
+        ));
+        let shared = test_runtime_streaming_shared(log_path);
+        let chunks: [&'static [u8]; 4] = [
+            b"data: {\"type\":\"response.created\",\"response_id\":\"resp-",
+            b"split\"}\r\n\r\n",
+            b"data: {\"type\":\"response.in_progress\",\"turn_state\":\"ts-",
+            b"split\"}\r\n\r\n",
+        ];
+        let mut reader = RuntimeSseTapReader::new(
+            ChunkedReader::new(chunks),
+            shared.clone(),
+            "test".to_string(),
+            &[],
+            &[],
+            None,
+            None,
+        );
+
+        let mut sink = Vec::new();
+        reader
+            .read_to_end(&mut sink)
+            .expect("tap reader should read");
+
+        let runtime = shared.runtime.lock().expect("runtime state");
+        assert_eq!(
+            runtime
+                .state
+                .response_profile_bindings
+                .get("resp-split")
+                .map(|binding| binding.profile_name.as_str()),
+            Some("test"),
+        );
+        assert_eq!(
+            runtime
+                .state
+                .response_profile_bindings
+                .get(&runtime_response_turn_state_lineage_key(
+                    "resp-split",
+                    "ts-split"
+                ))
+                .map(|binding| binding.profile_name.as_str()),
+            Some("test"),
+        );
+        assert_eq!(sink, chunks.concat());
     }
 
     #[test]

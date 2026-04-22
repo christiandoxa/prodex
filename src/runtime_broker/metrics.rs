@@ -264,6 +264,12 @@ fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
     ))
 }
 
+pub(crate) fn runtime_broker_continuity_failure_reason_metrics_from_log_file(
+    log_path: &Path,
+) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
+    runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0)
+}
+
 fn runtime_broker_merge_continuity_failure_reason_metrics(
     metrics: &mut RuntimeBrokerContinuityFailureReasonMetrics,
     delta: RuntimeBrokerContinuityFailureReasonMetrics,
@@ -279,6 +285,39 @@ fn runtime_broker_merge_continuity_failure_reason_metrics(
     }
     for (reason, count) in delta.stale_continuation {
         *metrics.stale_continuation.entry(reason).or_insert(0) += count;
+    }
+}
+
+fn runtime_broker_subtract_reason_metrics(
+    metrics: BTreeMap<String, usize>,
+    delta: &BTreeMap<String, usize>,
+) -> BTreeMap<String, usize> {
+    metrics
+        .into_iter()
+        .filter_map(|(reason, count)| {
+            let remaining = count.saturating_sub(delta.get(&reason).copied().unwrap_or_default());
+            (remaining > 0).then_some((reason, remaining))
+        })
+        .collect()
+}
+
+fn runtime_broker_subtract_continuity_failure_reason_metrics(
+    metrics: RuntimeBrokerContinuityFailureReasonMetrics,
+    delta: &RuntimeBrokerContinuityFailureReasonMetrics,
+) -> RuntimeBrokerContinuityFailureReasonMetrics {
+    RuntimeBrokerContinuityFailureReasonMetrics {
+        chain_retried_owner: runtime_broker_subtract_reason_metrics(
+            metrics.chain_retried_owner,
+            &delta.chain_retried_owner,
+        ),
+        chain_dead_upstream_confirmed: runtime_broker_subtract_reason_metrics(
+            metrics.chain_dead_upstream_confirmed,
+            &delta.chain_dead_upstream_confirmed,
+        ),
+        stale_continuation: runtime_broker_subtract_reason_metrics(
+            metrics.stale_continuation,
+            &delta.stale_continuation,
+        ),
     }
 }
 
@@ -351,19 +390,22 @@ fn runtime_broker_continuity_failure_reason_metrics(
     metrics
 }
 
-fn runtime_broker_continuity_failure_reason_metrics_available(
-    metrics: &RuntimeBrokerContinuityFailureReasonMetrics,
-) -> bool {
-    !metrics.chain_retried_owner.is_empty()
-        || !metrics.chain_dead_upstream_confirmed.is_empty()
-        || !metrics.stale_continuation.is_empty()
-}
-
 fn runtime_broker_live_continuity_failure_reason_metrics(
     log_path: &Path,
+    parsed_metrics: &RuntimeBrokerContinuityFailureReasonMetrics,
 ) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
-    let metrics = runtime_proxy_continuity_failure_reason_metrics(log_path);
-    runtime_broker_continuity_failure_reason_metrics_available(&metrics).then_some(metrics)
+    let snapshot = runtime_proxy_continuity_failure_reason_metrics_snapshot(log_path)?;
+    let persisted_since_baseline = runtime_broker_subtract_continuity_failure_reason_metrics(
+        parsed_metrics.clone(),
+        &snapshot.baseline_metrics,
+    );
+    let pending_live = runtime_broker_subtract_continuity_failure_reason_metrics(
+        snapshot.live_metrics,
+        &persisted_since_baseline,
+    );
+    let mut merged = parsed_metrics.clone();
+    runtime_broker_merge_continuity_failure_reason_metrics(&mut merged, pending_live);
+    Some(merged)
 }
 
 pub(crate) fn runtime_broker_prometheus_snapshot(
@@ -600,6 +642,8 @@ pub(crate) fn runtime_broker_metrics_snapshot(
                 && runtime_profile_effective_health_score(entry, now) > 0
         })
         .count();
+    let parsed_continuity_failure_reasons =
+        runtime_broker_continuity_failure_reason_metrics(&shared.log_path);
 
     Ok(RuntimeBrokerMetrics {
         health,
@@ -639,8 +683,9 @@ pub(crate) fn runtime_broker_metrics_snapshot(
         ),
         continuity_failure_reasons: runtime_broker_live_continuity_failure_reason_metrics(
             &shared.log_path,
+            &parsed_continuity_failure_reasons,
         )
-        .unwrap_or_else(|| runtime_broker_continuity_failure_reason_metrics(&shared.log_path)),
+        .unwrap_or(parsed_continuity_failure_reasons),
     })
 }
 
@@ -890,9 +935,10 @@ mod tests {
     }
 
     #[test]
-    fn runtime_broker_metrics_snapshot_prefers_live_continuity_failure_counters() {
+    fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_counters() {
         let _guard = acquire_test_runtime_lock();
         clear_runtime_broker_continuity_failure_reason_cache();
+        clear_all_runtime_proxy_continuity_failure_reason_metrics();
         let log_path = temp_log_path("live-counters");
         clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
         fs::write(
@@ -938,10 +984,125 @@ mod tests {
         );
         assert_eq!(
             metrics.continuity_failure_reasons.stale_continuation,
-            BTreeMap::from([("websocket_reuse_watchdog_locked_affinity".to_string(), 1,)])
+            BTreeMap::from([
+                ("previous_response_not_found".to_string(), 1),
+                ("websocket_reuse_watchdog_locked_affinity".to_string(), 1),
+            ])
         );
 
         clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
         fs::remove_file(&log_path).expect("test log should clean up");
+    }
+
+    #[test]
+    fn runtime_broker_metrics_snapshot_counts_pending_live_reasons_once() {
+        let _guard = acquire_test_runtime_lock();
+        clear_runtime_broker_continuity_failure_reason_cache();
+        clear_all_runtime_proxy_continuity_failure_reason_metrics();
+        let log_path = temp_log_path("live-pending-same-reason");
+        clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
+        fs::write(
+            &log_path,
+            "[2026-04-22 10:00:00.000 +00:00] request=8 transport=http route=responses stale_continuation reason=previous_response_not_found profile=main\n",
+        )
+        .expect("test log should write");
+
+        let shared = test_runtime_broker_shared(log_path.clone());
+        runtime_proxy_record_continuity_failure_reason(
+            &shared,
+            "stale_continuation",
+            "previous_response_not_found",
+        );
+
+        let metrics = runtime_broker_metrics_snapshot(
+            &shared,
+            &RuntimeBrokerMetadata {
+                broker_key: "broker".to_string(),
+                listen_addr: "127.0.0.1:12345".to_string(),
+                started_at: Local::now().timestamp(),
+                current_profile: "main".to_string(),
+                include_code_review: false,
+                instance_token: "instance".to_string(),
+                admin_token: "secret".to_string(),
+                prodex_version: None,
+                executable_path: None,
+                executable_sha256: None,
+            },
+        )
+        .expect("broker metrics snapshot should succeed");
+
+        assert_eq!(
+            metrics.continuity_failure_reasons.stale_continuation,
+            BTreeMap::from([("previous_response_not_found".to_string(), 2)])
+        );
+
+        clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
+        fs::remove_file(&log_path).expect("test log should clean up");
+    }
+
+    #[test]
+    fn runtime_proxy_continuity_failure_reason_metrics_snapshot_prunes_missing_log_path() {
+        let _guard = acquire_test_runtime_lock();
+        clear_all_runtime_proxy_continuity_failure_reason_metrics();
+        let log_path = temp_log_path("live-prune-missing");
+        fs::write(&log_path, "").expect("test log should exist");
+        let shared = test_runtime_broker_shared(log_path.clone());
+        runtime_proxy_record_continuity_failure_reason(
+            &shared,
+            "stale_continuation",
+            "previous_response_not_found",
+        );
+        assert!(
+            runtime_proxy_continuity_failure_reason_metrics_snapshot(&log_path).is_some(),
+            "live entry should exist before log removal"
+        );
+
+        fs::remove_file(&log_path).expect("test log should clean up");
+
+        assert!(
+            runtime_proxy_continuity_failure_reason_metrics_snapshot(&log_path).is_none(),
+            "missing log path should evict the live entry"
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_continuity_failure_reason_metrics_store_evicts_old_log_paths() {
+        let _guard = acquire_test_runtime_lock();
+        clear_all_runtime_proxy_continuity_failure_reason_metrics();
+        let mut log_paths = Vec::new();
+
+        for index in 0..20 {
+            let log_path = temp_log_path(&format!("live-store-{index}"));
+            fs::write(&log_path, "").expect("test log should exist");
+            let shared = test_runtime_broker_shared(log_path.clone());
+            runtime_proxy_record_continuity_failure_reason(
+                &shared,
+                "stale_continuation",
+                "previous_response_not_found",
+            );
+            log_paths.push(log_path);
+        }
+
+        assert_eq!(
+            runtime_proxy_continuity_failure_reason_metrics_store_entry_count(),
+            16
+        );
+        assert!(
+            runtime_proxy_continuity_failure_reason_metrics_snapshot(&log_paths[0]).is_none(),
+            "oldest path should be evicted once the store exceeds its cap"
+        );
+        assert!(
+            runtime_proxy_continuity_failure_reason_metrics_snapshot(
+                log_paths.last().expect("live store path"),
+            )
+            .is_some(),
+            "most recent path should stay resident"
+        );
+
+        for log_path in log_paths {
+            clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
+            let _ = fs::remove_file(&log_path);
+        }
+        clear_all_runtime_proxy_continuity_failure_reason_metrics();
     }
 }

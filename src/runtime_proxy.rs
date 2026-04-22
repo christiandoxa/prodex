@@ -207,69 +207,73 @@ pub(super) fn runtime_has_route_eligible_quota_fallback(
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
-    let (
-        selection_state,
-        retry_backoff_until,
-        transport_backoff_until,
-        route_circuit_open_until,
-        profile_inflight,
-        profile_health,
-        profile_usage_auth,
-        profile_probe_cache,
-    ) = {
+    let fallback_profiles = {
         let mut runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        (
-            runtime_profile_selection_snapshot(&runtime),
-            runtime.profile_retry_backoff_until.clone(),
-            runtime.profile_transport_backoff_until.clone(),
-            runtime.profile_route_circuit_open_until.clone(),
-            runtime.profile_inflight.clone(),
-            runtime.profile_health.clone(),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_probe_cache.clone(),
-        )
+        runtime_profile_selection_catalog(&runtime)
+            .entries
+            .into_iter()
+            .filter(|profile| {
+                profile.name != profile_name && !excluded_profiles.contains(&profile.name)
+            })
+            .map(|profile| {
+                let cached_auth_summary =
+                    runtime_profile_cached_auth_summary_from_maps_for_selection(
+                        &profile.name,
+                        &runtime.profile_usage_auth,
+                        &runtime.profile_probe_cache,
+                    );
+                let auth_failure_active = runtime_profile_auth_failure_active_with_auth_cache(
+                    &runtime.profile_health,
+                    &runtime.profile_usage_auth,
+                    &profile.name,
+                    now,
+                );
+                let in_selection_backoff = runtime_profile_name_in_selection_backoff(
+                    &profile.name,
+                    &runtime.profile_retry_backoff_until,
+                    &runtime.profile_transport_backoff_until,
+                    &runtime.profile_route_circuit_open_until,
+                    route_kind,
+                    now,
+                );
+                let inflight_count =
+                    runtime_profile_inflight_sort_key(&profile.name, &runtime.profile_inflight);
+
+                (
+                    profile.name,
+                    profile.codex_home,
+                    cached_auth_summary,
+                    auth_failure_active,
+                    in_selection_backoff,
+                    inflight_count,
+                )
+            })
+            .collect::<Vec<_>>()
     };
-    for (name, profile) in &selection_state.profiles {
-        if name == profile_name || excluded_profiles.contains(name) {
+
+    for (
+        _candidate_name,
+        codex_home,
+        cached_auth_summary,
+        auth_failure_active,
+        in_selection_backoff,
+        inflight_count,
+    ) in fallback_profiles
+    {
+        if auth_failure_active || in_selection_backoff || inflight_count >= inflight_soft_limit {
             continue;
         }
-        if !runtime_profile_auth_summary_for_selection_with_policy(
-            name,
-            &profile.codex_home,
-            &profile_usage_auth,
-            &profile_probe_cache,
-            allow_disk_auth_fallback,
-        )
-        .is_some_and(|summary| summary.quota_compatible)
-        {
-            continue;
+
+        let quota_compatible = cached_auth_summary
+            .or_else(|| allow_disk_auth_fallback.then(|| read_auth_summary(&codex_home)))
+            .is_some_and(|summary| summary.quota_compatible);
+        if quota_compatible {
+            return Ok(true);
         }
-        if runtime_profile_auth_failure_active_with_auth_cache(
-            &profile_health,
-            &profile_usage_auth,
-            name,
-            now,
-        ) {
-            continue;
-        }
-        if runtime_profile_name_in_selection_backoff(
-            name,
-            &retry_backoff_until,
-            &transport_backoff_until,
-            &route_circuit_open_until,
-            route_kind,
-            now,
-        ) {
-            continue;
-        }
-        if runtime_profile_inflight_sort_key(name, &profile_inflight) >= inflight_soft_limit {
-            continue;
-        }
-        return Ok(true);
     }
     Ok(false)
 }
@@ -646,6 +650,7 @@ pub(super) fn runtime_profile_uncached_auth_summary_for_selection() -> AuthSumma
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn runtime_profile_auth_summary_for_selection_with_policy(
     profile_name: &str,
     codex_home: &Path,
@@ -3775,46 +3780,20 @@ pub(super) fn next_runtime_response_candidate_for_route(
         runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let allow_disk_auth_fallback = !sync_probe_pressure_mode;
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
-    let (
-        selection_state,
-        current_profile,
-        include_code_review,
-        upstream_base_url,
-        cached_reports,
-        mut cached_usage_snapshots,
-        profile_usage_auth,
-        mut retry_backoff_until,
-        mut transport_backoff_until,
-        mut route_circuit_open_until,
-        profile_inflight,
-        profile_health,
-    ) = {
+    let mut selection_state = {
         let mut runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        (
-            runtime_profile_selection_snapshot(&runtime),
-            runtime.current_profile.clone(),
-            runtime.include_code_review,
-            runtime.upstream_base_url.clone(),
-            runtime.profile_probe_cache.clone(),
-            runtime.profile_usage_snapshots.clone(),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_retry_backoff_until.clone(),
-            runtime.profile_transport_backoff_until.clone(),
-            runtime.profile_route_circuit_open_until.clone(),
-            runtime.profile_inflight.clone(),
-            runtime.profile_health.clone(),
-        )
+        runtime_route_selection_catalog(&runtime, route_kind, now)
     };
 
     let mut reports = Vec::new();
     let mut cold_start_probe_jobs = Vec::new();
     for (order_index, name) in active_profile_selection_order_with_view(
-        runtime_profile_selection_view(&selection_state),
-        &current_profile,
+        runtime_route_selection_view(&selection_state),
+        &selection_state.current_profile,
     )
     .into_iter()
     .enumerate()
@@ -3822,31 +3801,30 @@ pub(super) fn next_runtime_response_candidate_for_route(
         if excluded_profiles.contains(&name) {
             continue;
         }
-        let Some(profile) = selection_state.profiles.get(&name) else {
+        let Some(entry) = selection_state.entry(&name) else {
             continue;
         };
-        if let Some(entry) = cached_reports.get(&name) {
+        if let Some(probe_entry) = entry.cached_probe_entry.as_ref() {
             reports.push(RunProfileProbeReport {
                 name: name.clone(),
                 order_index,
-                auth: entry.auth.clone(),
-                result: entry.result.clone(),
+                auth: probe_entry.auth.clone(),
+                result: probe_entry.result.clone(),
             });
-            if runtime_profile_probe_cache_freshness(entry, now)
+            if runtime_profile_probe_cache_freshness(probe_entry, now)
                 != RuntimeProbeCacheFreshness::Fresh
-                && profile.supports_codex_runtime()
+                && entry.supports_codex_runtime()
             {
-                schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
+                schedule_runtime_probe_refresh(shared, &name, &entry.profile.codex_home);
             }
         } else {
-            let auth = runtime_profile_auth_summary_for_selection_with_policy(
-                &name,
-                &profile.codex_home,
-                &profile_usage_auth,
-                &cached_reports,
-                allow_disk_auth_fallback,
-            )
-            .unwrap_or_else(runtime_profile_uncached_auth_summary_for_selection);
+            let auth = entry
+                .cached_auth_summary
+                .clone()
+                .or_else(|| {
+                    allow_disk_auth_fallback.then(|| read_auth_summary(&entry.profile.codex_home))
+                })
+                .unwrap_or_else(runtime_profile_uncached_auth_summary_for_selection);
             reports.push(RunProfileProbeReport {
                 name: name.clone(),
                 order_index,
@@ -3856,11 +3834,12 @@ pub(super) fn next_runtime_response_candidate_for_route(
             cold_start_probe_jobs.push(RunProfileProbeJob {
                 name,
                 order_index,
-                provider: profile.provider.clone(),
-                codex_home: profile.codex_home.clone(),
+                provider: entry.profile.provider.clone(),
+                codex_home: entry.profile.codex_home.clone(),
             });
         }
     }
+    let mut cached_usage_snapshots = selection_state.persisted_usage_snapshots();
 
     cold_start_probe_jobs.sort_by_key(|job| {
         let quota_summary = cached_usage_snapshots
@@ -3900,9 +3879,9 @@ pub(super) fn next_runtime_response_candidate_for_route(
     reports.sort_by_key(|report| report.order_index);
     let mut candidates = ready_profile_candidates_with_view(
         &reports,
-        include_code_review,
-        Some(current_profile.as_str()),
-        runtime_profile_selection_view(&selection_state),
+        selection_state.include_code_review,
+        Some(selection_state.current_profile.as_str()),
+        runtime_route_selection_view(&selection_state),
         Some(&cached_usage_snapshots),
     );
 
@@ -3910,26 +3889,11 @@ pub(super) fn next_runtime_response_candidate_for_route(
         .iter()
         .filter(|candidate| !excluded_profiles.contains(&candidate.name))
         .filter(|candidate| {
-            !runtime_profile_name_in_selection_backoff(
-                &candidate.name,
-                &retry_backoff_until,
-                &transport_backoff_until,
-                &route_circuit_open_until,
-                route_kind,
-                now,
-            )
-        })
-        .filter(|candidate| {
-            !runtime_profile_auth_failure_active_with_auth_cache(
-                &profile_health,
-                &profile_usage_auth,
-                &candidate.name,
-                now,
-            )
-        })
-        .filter(|candidate| {
-            runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
-                < inflight_soft_limit
+            selection_state.entry(&candidate.name).is_some_and(|entry| {
+                !entry.in_selection_backoff
+                    && !entry.auth_failure_active
+                    && entry.inflight_count < inflight_soft_limit
+            })
         })
         .map(|candidate| candidate.order_index)
         .min();
@@ -3954,7 +3918,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
     }
 
     if should_sync_probe_cold_start {
-        let base_url = Some(upstream_base_url.clone());
+        let base_url = Some(selection_state.upstream_base_url.clone());
         let sync_jobs = request_probe_jobs
             .iter()
             .filter(|job| {
@@ -3999,16 +3963,15 @@ pub(super) fn next_runtime_response_candidate_for_route(
                 report.result.clone(),
             )?;
         }
-        {
-            let runtime = shared
+        selection_state = {
+            let mut runtime = shared
                 .runtime
                 .lock()
                 .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-            cached_usage_snapshots = runtime.profile_usage_snapshots.clone();
-            retry_backoff_until = runtime.profile_retry_backoff_until.clone();
-            transport_backoff_until = runtime.profile_transport_backoff_until.clone();
-            route_circuit_open_until = runtime.profile_route_circuit_open_until.clone();
-        }
+            prune_runtime_profile_selection_backoff(&mut runtime, now);
+            runtime_route_selection_catalog(&runtime, route_kind, now)
+        };
+        cached_usage_snapshots = selection_state.persisted_usage_snapshots();
 
         for fresh_report in fresh_reports {
             if let Some(existing) = reports
@@ -4021,9 +3984,9 @@ pub(super) fn next_runtime_response_candidate_for_route(
         reports.sort_by_key(|report| report.order_index);
         candidates = ready_profile_candidates_with_view(
             &reports,
-            include_code_review,
-            Some(current_profile.as_str()),
-            runtime_profile_selection_view(&selection_state),
+            selection_state.include_code_review,
+            Some(selection_state.current_profile.as_str()),
+            runtime_route_selection_view(&selection_state),
             Some(&cached_usage_snapshots),
         );
         for job in cold_start_probe_jobs
@@ -4056,36 +4019,32 @@ pub(super) fn next_runtime_response_candidate_for_route(
     let mut ready_candidates = available_candidates
         .iter()
         .filter(|(_, candidate)| {
-            !runtime_profile_name_in_selection_backoff(
-                &candidate.name,
-                &retry_backoff_until,
-                &transport_backoff_until,
-                &route_circuit_open_until,
-                route_kind,
-                now,
-            )
+            selection_state
+                .entry(&candidate.name)
+                .is_some_and(|entry| !entry.in_selection_backoff)
         })
         .collect::<Vec<_>>();
     ready_candidates.sort_by_key(|(index, candidate)| {
+        let entry = selection_state
+            .entry(&candidate.name)
+            .expect("candidate should exist in selection catalog");
         (
             candidate.provider_priority,
             runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
             runtime_quota_source_sort_key(route_kind, candidate.quota_source),
-            runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-            runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+            entry.inflight_count,
+            entry.health_sort_key,
             *index,
             runtime_profile_selection_jitter(shared, &candidate.name, route_kind),
         )
     });
     for (index, candidate) in ready_candidates {
-        let inflight = runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight);
+        let Some(entry) = selection_state.entry(&candidate.name) else {
+            continue;
+        };
+        let inflight = entry.inflight_count;
         let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
-        if runtime_profile_auth_failure_active_with_auth_cache(
-            &profile_health,
-            &profile_usage_auth,
-            &candidate.name,
-            now,
-        ) {
+        if entry.auth_failure_active {
             runtime_proxy_log(
                 shared,
                 format!(
@@ -4093,12 +4052,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
                     runtime_route_kind_label(route_kind),
                     candidate.name,
                     inflight,
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(runtime_quota_summary_for_route(
                         &candidate.usage,
@@ -4121,12 +4075,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
                     candidate.name,
                     reason,
                     inflight,
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary),
                 ),
@@ -4142,12 +4091,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
                     candidate.name,
                     inflight,
                     inflight_soft_limit,
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary),
                 ),
@@ -4166,12 +4110,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
                     runtime_route_kind_label(route_kind),
                     candidate.name,
                     inflight,
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary),
                 ),
@@ -4185,7 +4124,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
                 runtime_route_kind_label(route_kind),
                 candidate.name,
                 inflight,
-                runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+                entry.health_sort_key,
                 index,
                 format_args!(
                     "quota_source={} {}",
@@ -4199,45 +4138,34 @@ pub(super) fn next_runtime_response_candidate_for_route(
 
     let mut fallback_candidates = available_candidates.into_iter().collect::<Vec<_>>();
     fallback_candidates.sort_by_key(|(index, candidate)| {
+        let entry = selection_state
+            .entry(&candidate.name)
+            .expect("candidate should exist in selection catalog");
         (
-            runtime_profile_backoff_sort_key(
-                &candidate.name,
-                &retry_backoff_until,
-                &transport_backoff_until,
-                &route_circuit_open_until,
-                route_kind,
-                now,
-            ),
+            entry.backoff_sort_key,
             candidate.provider_priority,
             runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
             runtime_quota_source_sort_key(route_kind, candidate.quota_source),
-            runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-            runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
+            entry.inflight_count,
+            entry.health_sort_key,
             *index,
             runtime_profile_selection_jitter(shared, &candidate.name, route_kind),
         )
     });
     let mut fallback = None;
     for (index, candidate) in fallback_candidates {
-        if runtime_profile_auth_failure_active_with_auth_cache(
-            &profile_health,
-            &profile_usage_auth,
-            &candidate.name,
-            now,
-        ) {
+        let Some(entry) = selection_state.entry(&candidate.name) else {
+            continue;
+        };
+        if entry.auth_failure_active {
             runtime_proxy_log(
                 shared,
                 format!(
                     "selection_skip_current route={} profile={} reason=auth_failure_backoff inflight={} health={} quota_source={} {}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
-                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.inflight_count,
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(runtime_quota_summary_for_route(
                         &candidate.usage,
@@ -4260,13 +4188,8 @@ pub(super) fn next_runtime_response_candidate_for_route(
                     runtime_route_kind_label(route_kind),
                     candidate.name,
                     reason,
-                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.inflight_count,
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary),
                 ),
@@ -4284,13 +4207,8 @@ pub(super) fn next_runtime_response_candidate_for_route(
                     "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
                     runtime_route_kind_label(route_kind),
                     candidate.name,
-                    runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                    runtime_profile_health_sort_key(
-                        &candidate.name,
-                        &profile_health,
-                        now,
-                        route_kind
-                    ),
+                    entry.inflight_count,
+                    entry.health_sort_key,
                     runtime_quota_source_label(candidate.quota_source),
                     runtime_quota_summary_log_fields(quota_summary),
                 ),
@@ -4303,16 +4221,9 @@ pub(super) fn next_runtime_response_candidate_for_route(
                 "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} quota_source={} {}",
                 runtime_route_kind_label(route_kind),
                 candidate.name,
-                runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight),
-                runtime_profile_health_sort_key(&candidate.name, &profile_health, now, route_kind),
-                runtime_profile_backoff_sort_key(
-                    &candidate.name,
-                    &retry_backoff_until,
-                    &transport_backoff_until,
-                    &route_circuit_open_until,
-                    route_kind,
-                    now,
-                ),
+                entry.inflight_count,
+                entry.health_sort_key,
+                entry.backoff_sort_key,
                 index,
                 runtime_quota_source_label(candidate.quota_source),
                 runtime_quota_summary_log_fields(quota_summary),
@@ -4343,43 +4254,45 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
 ) -> Result<usize> {
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
-    let (state, current_profile, cached_reports, cached_usage_snapshots, profile_usage_auth) = {
+    let now = Local::now().timestamp();
+    let state = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        (
-            runtime_profile_selection_snapshot(&runtime),
-            runtime.current_profile.clone(),
-            runtime.profile_probe_cache.clone(),
-            runtime.profile_usage_snapshots.clone(),
-            runtime.profile_usage_auth.clone(),
-        )
+        runtime_route_selection_catalog(&runtime, route_kind, now)
     };
-    let now = Local::now().timestamp();
 
     Ok(active_profile_selection_order_with_view(
-        runtime_profile_selection_view(&state),
-        &current_profile,
+        runtime_route_selection_view(&state),
+        &state.current_profile,
     )
     .into_iter()
     .filter(|name| !excluded_profiles.contains(name))
     .filter(|name| {
-        state.profiles.get(name).is_some_and(|profile| {
-            runtime_profile_auth_summary_for_selection_with_policy(
-                name,
-                &profile.codex_home,
-                &profile_usage_auth,
-                &cached_reports,
-                allow_disk_auth_fallback,
-            )
-            .is_some_and(|summary| summary.quota_compatible)
+        state.entry(name).is_some_and(|entry| {
+            entry
+                .cached_auth_summary
+                .clone()
+                .or_else(|| {
+                    allow_disk_auth_fallback.then(|| read_auth_summary(&entry.profile.codex_home))
+                })
+                .is_some_and(|summary| summary.quota_compatible)
         })
     })
-    .filter(|name| !cached_reports.contains_key(name))
     .filter(|name| {
-        !cached_usage_snapshots.get(name).is_some_and(|snapshot| {
-            runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
+        state
+            .entry(name)
+            .is_some_and(|entry| entry.cached_probe_entry.is_none())
+    })
+    .filter(|name| {
+        !state.entry(name).is_some_and(|entry| {
+            entry
+                .cached_usage_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
+                })
         })
     })
     .count())
@@ -4394,44 +4307,21 @@ pub(super) fn runtime_waitable_inflight_candidates_for_route(
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
-    let (
-        state,
-        current_profile,
-        include_code_review,
-        cached_reports,
-        cached_usage_snapshots,
-        profile_usage_auth,
-        retry_backoff_until,
-        transport_backoff_until,
-        route_circuit_open_until,
-        profile_inflight,
-        profile_health,
-    ) = {
+    let state = {
         let mut runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        (
-            runtime_profile_selection_snapshot(&runtime),
-            runtime.current_profile.clone(),
-            runtime.include_code_review,
-            runtime.profile_probe_cache.clone(),
-            runtime.profile_usage_snapshots.clone(),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_retry_backoff_until.clone(),
-            runtime.profile_transport_backoff_until.clone(),
-            runtime.profile_route_circuit_open_until.clone(),
-            runtime.profile_inflight.clone(),
-            runtime.profile_health.clone(),
-        )
+        runtime_route_selection_catalog(&runtime, route_kind, now)
     };
+    let cached_usage_snapshots = state.persisted_usage_snapshots();
 
     let mut waitable_profiles = BTreeSet::new();
     let mut reports = Vec::new();
     for (order_index, name) in active_profile_selection_order_with_view(
-        runtime_profile_selection_view(&state),
-        &current_profile,
+        runtime_route_selection_view(&state),
+        &state.current_profile,
     )
     .into_iter()
     .enumerate()
@@ -4442,43 +4332,34 @@ pub(super) fn runtime_waitable_inflight_candidates_for_route(
         if wait_affinity_owner.is_some_and(|owner| owner != name) {
             continue;
         }
-        let Some(entry) = cached_reports.get(&name) else {
+        let Some(entry) = state.entry(&name) else {
+            continue;
+        };
+        let Some(probe_entry) = entry.cached_probe_entry.as_ref() else {
             continue;
         };
         reports.push(RunProfileProbeReport {
             name,
             order_index,
-            auth: entry.auth.clone(),
-            result: entry.result.clone(),
+            auth: probe_entry.auth.clone(),
+            result: probe_entry.result.clone(),
         });
     }
 
     for candidate in ready_profile_candidates_with_view(
         &reports,
-        include_code_review,
-        Some(current_profile.as_str()),
-        runtime_profile_selection_view(&state),
+        state.include_code_review,
+        Some(state.current_profile.as_str()),
+        runtime_route_selection_view(&state),
         Some(&cached_usage_snapshots),
     ) {
         if excluded_profiles.contains(&candidate.name) {
             continue;
         }
-        if runtime_profile_name_in_selection_backoff(
-            &candidate.name,
-            &retry_backoff_until,
-            &transport_backoff_until,
-            &route_circuit_open_until,
-            route_kind,
-            now,
-        ) {
+        let Some(entry) = state.entry(&candidate.name) else {
             continue;
-        }
-        if runtime_profile_auth_failure_active_with_auth_cache(
-            &profile_health,
-            &profile_usage_auth,
-            &candidate.name,
-            now,
-        ) {
+        };
+        if entry.in_selection_backoff || entry.auth_failure_active {
             continue;
         }
         if runtime_quota_precommit_guard_reason(
@@ -4489,9 +4370,7 @@ pub(super) fn runtime_waitable_inflight_candidates_for_route(
         {
             continue;
         }
-        if runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
-            >= inflight_soft_limit
-        {
+        if entry.inflight_count >= inflight_soft_limit {
             waitable_profiles.insert(candidate.name.clone());
         }
     }
@@ -4510,43 +4389,20 @@ pub(super) fn runtime_any_waited_candidate_relieved(
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
-    let (
-        state,
-        current_profile,
-        include_code_review,
-        cached_reports,
-        cached_usage_snapshots,
-        profile_usage_auth,
-        retry_backoff_until,
-        transport_backoff_until,
-        route_circuit_open_until,
-        profile_inflight,
-        profile_health,
-    ) = {
+    let state = {
         let mut runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        (
-            runtime_profile_selection_snapshot(&runtime),
-            runtime.current_profile.clone(),
-            runtime.include_code_review,
-            runtime.profile_probe_cache.clone(),
-            runtime.profile_usage_snapshots.clone(),
-            runtime.profile_usage_auth.clone(),
-            runtime.profile_retry_backoff_until.clone(),
-            runtime.profile_transport_backoff_until.clone(),
-            runtime.profile_route_circuit_open_until.clone(),
-            runtime.profile_inflight.clone(),
-            runtime.profile_health.clone(),
-        )
+        runtime_route_selection_catalog(&runtime, route_kind, now)
     };
+    let cached_usage_snapshots = state.persisted_usage_snapshots();
 
     let mut reports = Vec::new();
     for (order_index, name) in active_profile_selection_order_with_view(
-        runtime_profile_selection_view(&state),
-        &current_profile,
+        runtime_route_selection_view(&state),
+        &state.current_profile,
     )
     .into_iter()
     .enumerate()
@@ -4554,43 +4410,34 @@ pub(super) fn runtime_any_waited_candidate_relieved(
         if !waited_profiles.contains(&name) {
             continue;
         }
-        let Some(entry) = cached_reports.get(&name) else {
+        let Some(entry) = state.entry(&name) else {
+            continue;
+        };
+        let Some(probe_entry) = entry.cached_probe_entry.as_ref() else {
             continue;
         };
         reports.push(RunProfileProbeReport {
             name,
             order_index,
-            auth: entry.auth.clone(),
-            result: entry.result.clone(),
+            auth: probe_entry.auth.clone(),
+            result: probe_entry.result.clone(),
         });
     }
 
     for candidate in ready_profile_candidates_with_view(
         &reports,
-        include_code_review,
-        Some(current_profile.as_str()),
-        runtime_profile_selection_view(&state),
+        state.include_code_review,
+        Some(state.current_profile.as_str()),
+        runtime_route_selection_view(&state),
         Some(&cached_usage_snapshots),
     ) {
         if !waited_profiles.contains(&candidate.name) {
             continue;
         }
-        if runtime_profile_name_in_selection_backoff(
-            &candidate.name,
-            &retry_backoff_until,
-            &transport_backoff_until,
-            &route_circuit_open_until,
-            route_kind,
-            now,
-        ) {
+        let Some(entry) = state.entry(&candidate.name) else {
             continue;
-        }
-        if runtime_profile_auth_failure_active_with_auth_cache(
-            &profile_health,
-            &profile_usage_auth,
-            &candidate.name,
-            now,
-        ) {
+        };
+        if entry.in_selection_backoff || entry.auth_failure_active {
             continue;
         }
         if runtime_quota_precommit_guard_reason(
@@ -4601,9 +4448,7 @@ pub(super) fn runtime_any_waited_candidate_relieved(
         {
             continue;
         }
-        if runtime_profile_inflight_sort_key(&candidate.name, &profile_inflight)
-            < inflight_soft_limit
-        {
+        if entry.inflight_count < inflight_soft_limit {
             return Ok(true);
         }
     }

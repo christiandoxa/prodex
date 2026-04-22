@@ -1342,6 +1342,196 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
 }
 
 #[test]
+fn runtime_state_save_sections_follow_dirty_reason_scope() {
+    assert_eq!(
+        runtime_state_save_sections_for_reason("usage_snapshot:main"),
+        RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: false,
+            usage_snapshots: true,
+            backoffs: true,
+        }
+    );
+    assert_eq!(
+        runtime_state_save_sections_for_reason("response_ids:main"),
+        RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: true,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: false,
+        }
+    );
+    assert_eq!(
+        runtime_state_save_sections_for_reason("profile_commit:second"),
+        RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: true,
+        }
+    );
+    assert_eq!(
+        runtime_state_save_sections_for_reason("startup_audit"),
+        RuntimeStateSaveSections::full()
+    );
+}
+
+#[test]
+fn runtime_state_selected_snapshot_preserves_unselected_sections() {
+    let temp_dir = TestDir::new();
+    let now = Local::now().timestamp();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profiles = BTreeMap::from([
+        (
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/main"),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        ),
+        (
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: temp_dir.path.join("homes/second"),
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        ),
+    ]);
+    let initial_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("main".to_string(), now - 20)]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 20,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now - 20,
+            },
+        )]),
+    };
+    initial_state
+        .save(&paths)
+        .expect("initial state should save");
+    let initial_scores = BTreeMap::from([(
+        runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+        RuntimeProfileHealth {
+            score: 3,
+            updated_at: now - 20,
+        },
+    )]);
+    save_runtime_profile_scores_for_profiles(&paths, &initial_scores, &profiles)
+        .expect("initial scores should save");
+    let initial_usage = BTreeMap::from([(
+        "main".to_string(),
+        ready_runtime_usage_snapshot(now - 20, 80),
+    )]);
+    save_runtime_usage_snapshots_for_profiles(&paths, &initial_usage, &profiles)
+        .expect("initial usage snapshots should save");
+    let initial_backoffs = RuntimeProfileBackoffs {
+        retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
+        transport_backoff_until: BTreeMap::new(),
+        route_circuit_open_until: BTreeMap::new(),
+    };
+    save_runtime_profile_backoffs_for_profiles(&paths, &initial_backoffs, &profiles)
+        .expect("initial backoffs should save");
+
+    let selected_state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([("second".to_string(), now - 10)]),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let selected_usage = BTreeMap::from([(
+        "second".to_string(),
+        ready_runtime_usage_snapshot(now - 10, 55),
+    )]);
+    let selected = RuntimeStateSaveSelectedSnapshot {
+        paths: paths.clone(),
+        state: Some(selected_state),
+        profiles: None,
+        continuations: None,
+        profile_scores: None,
+        usage_snapshots: Some(selected_usage),
+        backoffs: None,
+    };
+    let revision = AtomicU64::new(1);
+    assert!(
+        save_runtime_state_selected_snapshot_if_latest(&selected, 1, &revision)
+            .expect("selected state save should succeed")
+    );
+
+    let loaded = AppState::load(&paths).expect("state should reload");
+    assert_eq!(loaded.active_profile.as_deref(), Some("second"));
+    assert_eq!(
+        loaded.last_run_selected_at.get("main").copied(),
+        Some(now - 20)
+    );
+    assert_eq!(
+        loaded.last_run_selected_at.get("second").copied(),
+        Some(now - 10)
+    );
+    assert!(
+        loaded.response_profile_bindings.contains_key("resp-main"),
+        "core selected state save must not drop existing response affinity"
+    );
+    assert!(
+        loaded.session_profile_bindings.contains_key("sess-main"),
+        "core selected state save must not drop existing session affinity"
+    );
+    let loaded_scores =
+        load_runtime_profile_scores(&paths, &profiles).expect("scores should reload");
+    assert_eq!(loaded_scores.len(), initial_scores.len());
+    assert_eq!(
+        loaded_scores
+            .get(&runtime_profile_route_health_key(
+                "main",
+                RuntimeRouteKind::Responses
+            ))
+            .map(|score| (score.score, score.updated_at)),
+        Some((3, now - 20))
+    );
+    let loaded_backoffs =
+        load_runtime_profile_backoffs(&paths, &profiles).expect("backoffs should reload");
+    assert_eq!(
+        loaded_backoffs.retry_backoff_until,
+        initial_backoffs.retry_backoff_until
+    );
+    assert_eq!(
+        loaded_backoffs.transport_backoff_until,
+        initial_backoffs.transport_backoff_until
+    );
+    assert_eq!(
+        loaded_backoffs.route_circuit_open_until,
+        initial_backoffs.route_circuit_open_until
+    );
+    let loaded_usage =
+        load_runtime_usage_snapshots(&paths, &profiles).expect("usage snapshots should reload");
+    assert!(loaded_usage.contains_key("main"));
+    assert!(loaded_usage.contains_key("second"));
+}
+
+#[test]
 fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -2086,4 +2276,3 @@ fn runtime_continuation_journal_retry_does_not_resurrect_released_response_bindi
         Some(RuntimeContinuationBindingLifecycle::Dead)
     );
 }
-

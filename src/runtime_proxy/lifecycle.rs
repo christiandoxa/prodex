@@ -2,6 +2,7 @@ use super::*;
 
 impl Drop for RuntimeRotationProxy {
     fn drop(&mut self) {
+        clear_runtime_proxy_continuity_failure_reason_metrics(&self.log_path);
         unregister_runtime_proxy_persistence_mode(&self.log_path);
         unregister_runtime_broker_metadata(&self.log_path);
         self.shutdown.store(true, Ordering::SeqCst);

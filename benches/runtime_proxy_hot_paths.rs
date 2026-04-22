@@ -1,7 +1,8 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use prodex::bench_support::{
-    RuntimeProxyLineageCleanupBenchCase, RuntimeProxyPreviousResponseBenchCase,
-    RuntimeProxyQuotaFallbackBenchCase, RuntimeProxySseInspectBenchCase,
+    RuntimeProxyLineageCleanupBenchCase, RuntimeProxyMixedPoolSelectionBenchCase,
+    RuntimeProxyPreviousResponseBenchCase, RuntimeProxyQuotaFallbackBenchCase,
+    RuntimeProxySseInspectBenchCase,
 };
 
 fn runtime_proxy_hot_paths(c: &mut Criterion) {
@@ -15,7 +16,12 @@ fn runtime_proxy_hot_paths(c: &mut Criterion) {
         b.iter(|| black_box(previous_response.next_previous_response_candidate()))
     });
 
-    let sse_inspect = RuntimeProxySseInspectBenchCase::new(64);
+    let mixed_pool_selection = RuntimeProxyMixedPoolSelectionBenchCase::new(96);
+    c.bench_function("runtime_mixed_pool_response_selection", |b| {
+        b.iter(|| black_box(mixed_pool_selection.select_fresh_response_candidate()))
+    });
+
+    let sse_inspect = RuntimeProxySseInspectBenchCase::new(128);
     c.bench_function("runtime_sse_lookahead_inspection", |b| {
         b.iter(|| black_box(sse_inspect.inspect()))
     });

@@ -32,11 +32,53 @@ pub(crate) struct RuntimeStateSaveSnapshot {
     pub(crate) backoffs: RuntimeProfileBackoffs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeStateSaveStateSection {
+    None,
+    Core,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeStateSaveSections {
+    pub(crate) state: RuntimeStateSaveStateSection,
+    pub(crate) continuations: bool,
+    pub(crate) profile_scores: bool,
+    pub(crate) usage_snapshots: bool,
+    pub(crate) backoffs: bool,
+}
+
+impl RuntimeStateSaveSections {
+    pub(crate) fn full() -> Self {
+        Self {
+            state: RuntimeStateSaveStateSection::Full,
+            continuations: true,
+            profile_scores: true,
+            usage_snapshots: true,
+            backoffs: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeStateSaveSelectedSnapshot {
+    pub(crate) paths: AppPaths,
+    pub(crate) state: Option<AppState>,
+    pub(crate) profiles: Option<BTreeMap<String, ProfileEntry>>,
+    pub(crate) continuations: Option<RuntimeContinuationStore>,
+    pub(crate) profile_scores: Option<BTreeMap<String, RuntimeProfileHealth>>,
+    pub(crate) usage_snapshots: Option<BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    pub(crate) backoffs: Option<RuntimeProfileBackoffs>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub(crate) enum RuntimeStateSavePayload {
     Snapshot(RuntimeStateSaveSnapshot),
-    Live(RuntimeRotationProxyShared),
+    Live {
+        shared: RuntimeRotationProxyShared,
+        sections: RuntimeStateSaveSections,
+    },
 }
 
 #[derive(Debug)]

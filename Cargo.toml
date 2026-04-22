@@ -7,6 +7,10 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/christiandoxa/prodex"
 
+[features]
+default = []
+bench-support = []
+
 [dependencies]
 aes-gcm-siv = "0.11.1"
 anyhow = "1.0.102"
@@ -33,3 +37,4 @@ criterion = "0.5.1"
 [[bench]]
 name = "runtime_proxy_hot_paths"
 harness = false
+required-features = ["bench-support"]

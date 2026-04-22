@@ -10,6 +10,14 @@ impl ProfileSelectionProvider for ProfileEntry {
     }
 }
 
+pub(crate) trait ProfileSelectionRead: Copy {
+    type Profile: ProfileSelectionProvider;
+
+    fn profile_names(&self) -> Vec<String>;
+    fn profile_entry(&self, name: &str) -> Option<&Self::Profile>;
+    fn last_run_selected_at(&self, name: &str) -> Option<i64>;
+}
+
 pub(crate) struct ProfileSelectionView<'a, P> {
     pub(crate) profiles: &'a BTreeMap<String, P>,
     pub(crate) last_run_selected_at: &'a BTreeMap<String, i64>,
@@ -20,6 +28,22 @@ impl<P> Copy for ProfileSelectionView<'_, P> {}
 impl<P> Clone for ProfileSelectionView<'_, P> {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl<P: ProfileSelectionProvider> ProfileSelectionRead for ProfileSelectionView<'_, P> {
+    type Profile = P;
+
+    fn profile_names(&self) -> Vec<String> {
+        self.profiles.keys().cloned().collect()
+    }
+
+    fn profile_entry(&self, name: &str) -> Option<&Self::Profile> {
+        self.profiles.get(name)
+    }
+
+    fn last_run_selected_at(&self, name: &str) -> Option<i64> {
+        self.last_run_selected_at.get(name).copied()
     }
 }
 
@@ -143,11 +167,11 @@ pub(crate) fn ready_profile_candidates(
     )
 }
 
-pub(crate) fn ready_profile_candidates_with_view<P: ProfileSelectionProvider>(
+pub(crate) fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     reports: &[RunProfileProbeReport],
     include_code_review: bool,
     preferred_profile: Option<&str>,
-    selection: ProfileSelectionView<'_, P>,
+    selection: S,
     persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
 ) -> Vec<ReadyProfileCandidate> {
     let candidates = reports
@@ -182,8 +206,7 @@ pub(crate) fn ready_profile_candidates_with_view<P: ProfileSelectionProvider>(
                 order_index: report.order_index,
                 preferred: preferred_profile == Some(report.name.as_str()),
                 provider_priority: selection
-                    .profiles
-                    .get(&report.name)
+                    .profile_entry(&report.name)
                     .map(ProfileSelectionProvider::runtime_pool_priority)
                     .unwrap_or(usize::MAX),
                 quota_source,
@@ -207,9 +230,9 @@ pub(crate) fn schedule_ready_profile_candidates(
     )
 }
 
-pub(crate) fn schedule_ready_profile_candidates_with_view<P: ProfileSelectionProvider>(
+pub(crate) fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     mut candidates: Vec<ReadyProfileCandidate>,
-    selection: ProfileSelectionView<'_, P>,
+    selection: S,
     preferred_profile: Option<&str>,
 ) -> Vec<ReadyProfileCandidate> {
     if candidates.len() <= 1 {
@@ -298,9 +321,9 @@ pub(crate) fn ready_profile_runtime_sort_key(
     )
 }
 
-pub(crate) fn ready_profile_runtime_sort_key_with_view<P: ProfileSelectionProvider>(
+pub(crate) fn ready_profile_runtime_sort_key_with_view<S: ProfileSelectionRead>(
     candidate: &ReadyProfileCandidate,
-    selection: ProfileSelectionView<'_, P>,
+    selection: S,
     best_provider_priority: usize,
     best_total_pressure: i64,
     now: i64,
@@ -316,9 +339,7 @@ pub(crate) fn ready_profile_runtime_sort_key_with_view<P: ProfileSelectionProvid
         && profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now);
     let last_selected_at = if near_optimal {
         selection
-            .last_run_selected_at
-            .get(&candidate.name)
-            .copied()
+            .last_run_selected_at(&candidate.name)
             .unwrap_or(i64::MIN)
     } else {
         i64::MIN
@@ -405,12 +426,12 @@ pub(crate) fn profile_in_run_selection_cooldown(
     )
 }
 
-pub(crate) fn profile_in_run_selection_cooldown_with_view<P: ProfileSelectionProvider>(
-    selection: ProfileSelectionView<'_, P>,
+pub(crate) fn profile_in_run_selection_cooldown_with_view<S: ProfileSelectionRead>(
+    selection: S,
     profile_name: &str,
     now: i64,
 ) -> bool {
-    let Some(last_selected_at) = selection.last_run_selected_at.get(profile_name).copied() else {
+    let Some(last_selected_at) = selection.last_run_selected_at(profile_name) else {
         return false;
     };
 
@@ -461,8 +482,8 @@ pub(crate) fn active_profile_selection_order(
     )
 }
 
-pub(crate) fn active_profile_selection_order_with_view<P: ProfileSelectionProvider>(
-    selection: ProfileSelectionView<'_, P>,
+pub(crate) fn active_profile_selection_order_with_view<S: ProfileSelectionRead>(
+    selection: S,
     current_profile: &str,
 ) -> Vec<String> {
     provider_aware_profile_order_with_view(
@@ -522,11 +543,11 @@ pub(crate) fn profile_rotation_order(state: &AppState, current_profile: &str) ->
     profile_rotation_order_with_view(app_state_profile_selection_view(state), current_profile)
 }
 
-pub(crate) fn profile_rotation_order_with_view<P: ProfileSelectionProvider>(
-    selection: ProfileSelectionView<'_, P>,
+pub(crate) fn profile_rotation_order_with_view<S: ProfileSelectionRead>(
+    selection: S,
     current_profile: &str,
 ) -> Vec<String> {
-    let names: Vec<String> = selection.profiles.keys().cloned().collect();
+    let names = selection.profile_names();
     let Some(index) = names.iter().position(|name| name == current_profile) else {
         return provider_aware_profile_order_with_view(
             selection,
@@ -552,8 +573,8 @@ where
     provider_aware_profile_order_with_view(app_state_profile_selection_view(state), names)
 }
 
-fn provider_aware_profile_order_with_view<P: ProfileSelectionProvider, I>(
-    selection: ProfileSelectionView<'_, P>,
+fn provider_aware_profile_order_with_view<S: ProfileSelectionRead, I>(
+    selection: S,
     names: I,
 ) -> Vec<String>
 where
@@ -564,8 +585,7 @@ where
         .enumerate()
         .map(|(index, name)| {
             let provider_priority = selection
-                .profiles
-                .get(&name)
+                .profile_entry(&name)
                 .map(ProfileSelectionProvider::runtime_pool_priority)
                 .unwrap_or(usize::MAX);
             (provider_priority, index, name)
@@ -573,4 +593,145 @@ where
         .collect::<Vec<_>>();
     ordered.sort_by_key(|(provider_priority, index, _)| (*provider_priority, *index));
     ordered.into_iter().map(|(_, _, name)| name).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    struct VectorSelectionView<'a> {
+        entries: &'a [VectorSelectionEntry],
+    }
+
+    #[derive(Debug)]
+    struct VectorSelectionEntry {
+        name: &'static str,
+        provider_priority: usize,
+        last_run_selected_at: Option<i64>,
+    }
+
+    impl ProfileSelectionProvider for VectorSelectionEntry {
+        fn runtime_pool_priority(&self) -> usize {
+            self.provider_priority
+        }
+    }
+
+    impl ProfileSelectionRead for VectorSelectionView<'_> {
+        type Profile = VectorSelectionEntry;
+
+        fn profile_names(&self) -> Vec<String> {
+            self.entries
+                .iter()
+                .map(|entry| entry.name.to_string())
+                .collect()
+        }
+
+        fn profile_entry(&self, name: &str) -> Option<&Self::Profile> {
+            self.entries.iter().find(|entry| entry.name == name)
+        }
+
+        fn last_run_selected_at(&self, name: &str) -> Option<i64> {
+            self.profile_entry(name)
+                .and_then(|entry| entry.last_run_selected_at)
+        }
+    }
+
+    fn test_usage(remaining: i64) -> UsageResponse {
+        let now = Local::now().timestamp();
+        let window = |remaining_percent| UsageWindow {
+            used_percent: Some(100 - remaining_percent),
+            reset_at: Some(now + 3_600),
+            limit_window_seconds: Some(3_600),
+        };
+        UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: Some(window(remaining)),
+                secondary_window: Some(window(remaining)),
+            }),
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn profile_rotation_order_supports_custom_selection_view() {
+        let selection = VectorSelectionView {
+            entries: &[
+                VectorSelectionEntry {
+                    name: "bravo",
+                    provider_priority: 0,
+                    last_run_selected_at: None,
+                },
+                VectorSelectionEntry {
+                    name: "alpha",
+                    provider_priority: 1,
+                    last_run_selected_at: None,
+                },
+                VectorSelectionEntry {
+                    name: "charlie",
+                    provider_priority: 0,
+                    last_run_selected_at: None,
+                },
+            ],
+        };
+
+        assert_eq!(
+            active_profile_selection_order_with_view(selection, "bravo"),
+            vec![
+                "bravo".to_string(),
+                "charlie".to_string(),
+                "alpha".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn schedule_ready_profile_candidates_supports_custom_selection_view() {
+        let now = Local::now().timestamp();
+        let selection = VectorSelectionView {
+            entries: &[
+                VectorSelectionEntry {
+                    name: "alpha",
+                    provider_priority: 0,
+                    last_run_selected_at: Some(now),
+                },
+                VectorSelectionEntry {
+                    name: "bravo",
+                    provider_priority: 0,
+                    last_run_selected_at: Some(now - RUN_SELECTION_COOLDOWN_SECONDS - 5),
+                },
+            ],
+        };
+        let candidates = vec![
+            ReadyProfileCandidate {
+                name: "alpha".to_string(),
+                usage: test_usage(80),
+                order_index: 0,
+                preferred: false,
+                provider_priority: 0,
+                quota_source: RuntimeQuotaSource::LiveProbe,
+            },
+            ReadyProfileCandidate {
+                name: "bravo".to_string(),
+                usage: test_usage(80),
+                order_index: 1,
+                preferred: false,
+                provider_priority: 0,
+                quota_source: RuntimeQuotaSource::LiveProbe,
+            },
+        ];
+
+        let scheduled = schedule_ready_profile_candidates_with_view(candidates, selection, None);
+
+        assert_eq!(
+            scheduled
+                .into_iter()
+                .map(|candidate| candidate.name)
+                .collect::<Vec<_>>(),
+            vec!["bravo".to_string(), "alpha".to_string()]
+        );
+    }
 }
