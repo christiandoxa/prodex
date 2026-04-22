@@ -141,22 +141,20 @@ pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
     _shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    // A previous_response_id is the only durable upstream handle for incremental Codex turns.
-    // Session metadata is useful for affinity, but it does not prove the target account can
-    // reconstruct the missing response chain. Dropping previous_response_id here can silently
-    // erase context or detach tool outputs from their tool calls, so all chain continuations stay
-    // non-replayable.
+    // Fail closed: previous_response continuations stay chained; session metadata only steers
+    // affinity, it never authorizes dropping previous_response_id.
     false
 }
 
 pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
     shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-    has_session: bool,
+    has_session_affinity: bool,
 ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
-    if !has_session {
+    if !has_session_affinity {
         return shape;
     }
 
@@ -190,7 +188,7 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
 ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
     runtime_request_previous_response_id_from_value(value)?;
 
-    let has_session = runtime_request_session_id_from_value(value).is_some();
+    let has_session_affinity = runtime_request_session_id_from_value(value).is_some();
     let input = value
         .get("input")
         .and_then(serde_json::Value::as_array)
@@ -213,9 +211,8 @@ pub(crate) fn runtime_request_value_previous_response_fresh_fallback_shape(
         // next turn. Dropping previous_response_id would silently erase the earlier conversation
         // context, so these requests must stay chained even when session metadata is present.
         RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation
-    } else if has_session {
-        // Keep the label for diagnostics, but do not allow recovery. Session metadata alone is
-        // not a replay transcript.
+    } else if has_session_affinity {
+        // Keep the label for diagnostics only. Session metadata is affinity, not replay state.
         RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay
     } else {
         RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly

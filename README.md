@@ -178,6 +178,8 @@ prodex quota --all --once
 prodex doctor --runtime
 ```
 
+If Prodex returns `409 stale_continuation`, the request still carries continuation state, but the original binding is gone or no longer safe to reuse. Prodex refuses to fresh-replay that turn on another profile because continuation affinity is part of the request contract, and replaying it elsewhere can drop tool context or continue the wrong conversation. Start a new prompt or retry from the same live session if it still exists. If the failure looks unexpected, `prodex doctor --runtime` and the latest runtime log can show which continuation binding went stale.
+
 ## More
 
 See [QUICKSTART.md](./QUICKSTART.md) for a longer walkthrough.

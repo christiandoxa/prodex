@@ -282,7 +282,7 @@ fn websocket_previous_response_fresh_fallback_request_text(
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_matrix_allows_only_safe_drops() {
+fn runtime_request_previous_response_fresh_fallback_shape_matrix_stays_fail_closed() {
     for shape in PreviousResponseFreshFallbackRequestShape::ALL {
         for session in RuntimeRequestSessionPlacement::ALL {
             let request = session
@@ -515,8 +515,8 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_turn_metadata_s
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_replayable_empty_input()
- {
+fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_scoped_empty_input()
+{
     let request = empty_input_request()
         .previous_response_id("resp_123")
         .session_id("sess_123")
@@ -530,7 +530,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_rep
         !runtime_previous_response_fresh_fallback_shape_allows_recovery(
             runtime_request_previous_response_fresh_fallback_shape(&request)
         ),
-        "session_id is affinity metadata, not a replayable transcript"
+        "session_id is affinity metadata, not replay state"
     );
 }
 
@@ -552,7 +552,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_empty_continuat
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_promotes_header_session_empty_input() {
+fn runtime_request_previous_response_fresh_fallback_shape_marks_header_session_empty_input() {
     let request = empty_input_request()
         .previous_response_id("resp_123")
         .session_header("sess_123")
@@ -773,7 +773,7 @@ fn quota_blocked_previous_response_fresh_fallback_blocks_tool_output_only() {
 }
 
 #[test]
-fn quota_blocked_previous_response_fresh_fallback_blocks_session_replayable_requests() {
+fn quota_blocked_previous_response_fresh_fallback_blocks_session_scoped_requests() {
     assert!(!runtime_quota_blocked_previous_response_fresh_fallback_allowed(
         Some("resp_123"),
         true,
@@ -823,7 +823,7 @@ fn quota_blocked_affinity_release_blocks_nonreplayable_message_followups() {
 }
 
 #[test]
-fn quota_blocked_affinity_release_blocks_session_replayable_empty_inputs() {
+fn quota_blocked_affinity_release_blocks_session_scoped_empty_inputs() {
     assert!(!runtime_quota_blocked_affinity_is_releasable(
         RuntimeCandidateAffinity::new(
             RuntimeRouteKind::Responses,

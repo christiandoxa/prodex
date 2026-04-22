@@ -207,6 +207,8 @@ prodex doctor --runtime
 prodex doctor --runtime --json
 ```
 
+If you see `409 stale_continuation`, Prodex found continuation state for the request but could not safely replay it as a fresh turn on a different profile. That is deliberate: the missing or stale binding may still belong to a specific profile, session, or tool-output chain, and replaying it elsewhere can break the conversation. Start a new prompt, or return to the same session/profile if the original continuation is still available.
+
 If a runtime session looks stalled, inspect the latest proxy log:
 
 ```bash

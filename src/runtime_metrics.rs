@@ -357,7 +357,7 @@ fn render_continuation_binding_counts_family(
             labels(&[
                 ("broker_key", broker_key),
                 ("listen_addr", listen_addr),
-                ("kind", kind_label),
+                ("binding_kind", kind_label),
             ]),
             value as f64,
         );
@@ -386,7 +386,7 @@ fn render_continuation_lifecycle_family(
             labels(&[
                 ("broker_key", broker_key),
                 ("listen_addr", listen_addr),
-                ("kind", lifecycle),
+                ("lifecycle", lifecycle),
             ]),
             value as f64,
         );
@@ -572,13 +572,19 @@ mod tests {
         assert!(rendered.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
         assert!(rendered.contains("# HELP prodex_runtime_broker_continuation_binding_counts"));
         assert!(rendered.contains(
-            "prodex_runtime_broker_continuation_binding_counts{broker_key=\"broker-123\",kind=\"response\",listen_addr=\"127.0.0.1:8080\"} 7"
+            "prodex_runtime_broker_continuation_binding_counts{binding_kind=\"response\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 7"
         ));
         assert!(rendered.contains(
-            "prodex_runtime_broker_continuation_binding_counts{broker_key=\"broker-123\",kind=\"turn_state\",listen_addr=\"127.0.0.1:8080\"} 2"
+            "prodex_runtime_broker_continuation_binding_counts{binding_kind=\"turn_state\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 2"
         ));
         assert!(rendered.contains(
-            "prodex_runtime_broker_continuation_binding_counts{broker_key=\"broker-123\",kind=\"session_id\",listen_addr=\"127.0.0.1:8080\"} 1"
+            "prodex_runtime_broker_continuation_binding_counts{binding_kind=\"session_id\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 1"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_bindings{broker_key=\"broker-123\",lifecycle=\"warm\",listen_addr=\"127.0.0.1:8080\"} 1"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_bindings{broker_key=\"broker-123\",lifecycle=\"verified\",listen_addr=\"127.0.0.1:8080\"} 3"
         ));
         assert!(rendered.contains("broker_key=\"broker-123\""));
         assert!(rendered.contains("listen_addr=\"127.0.0.1:8080\""));

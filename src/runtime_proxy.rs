@@ -789,50 +789,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
             }
         };
     }
-    macro_rules! apply_session_previous_response_fresh_fallback {
-        ($profile_name:expr, $has_turn_state_retry:expr, $via:expr) => {
-            if !$has_turn_state_retry
-                && previous_response_id.is_some()
-                && request_session_id.is_some()
-                && runtime_previous_response_fresh_fallback_shape_allows_recovery(
-                    previous_response_fresh_fallback_shape,
-                )
-                && !previous_response_fresh_fallback_used
-                && compact_followup_profile.is_none()
-                && (bound_profile.as_deref() == Some($profile_name.as_str())
-                    || pinned_profile.as_deref() == Some($profile_name.as_str()))
-                && (trusted_previous_response_affinity
-                    || websocket_session.profile_name.as_deref() == Some($profile_name.as_str())
-                    || bound_session_profile.as_deref() == Some($profile_name.as_str())
-                    || session_profile.as_deref() == Some($profile_name.as_str()))
-                && let Some(fresh_request_text) =
-                    runtime_request_text_without_previous_response_id(&request_text)
-            {
-                let _ = clear_runtime_stale_previous_response_binding(
-                    shared,
-                    $profile_name,
-                    previous_response_id.as_deref(),
-                )?;
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=session_scoped_not_found request_shape={} outcome=session_replayable_recovery via={}",
-                        runtime_previous_response_fresh_fallback_shape_label(
-                            previous_response_fresh_fallback_shape
-                        ),
-                        $via
-                    ),
-                );
-                apply_runtime_websocket_previous_response_fresh_fallback(
-                    fresh_request_text,
-                    runtime_websocket_fresh_fallback_target!(),
-                    runtime_previous_response_fresh_fallback_state!(),
-                );
-                recompute_route_affinity!("previous_response_fresh_fallback")?;
-                continue;
-            }
-        };
-    }
     loop {
         let pressure_mode =
             runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Websocket);
@@ -1211,11 +1167,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
                             return Ok(());
                         }
-                        apply_session_previous_response_fresh_fallback!(
-                            &profile_name,
-                            has_turn_state_retry,
-                            "direct_current_profile_fallback"
-                        );
                         if decision.fresh_fallback_blocked_without_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -1759,11 +1710,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
                             return Ok(());
                         }
-                        apply_session_previous_response_fresh_fallback!(
-                            &profile_name,
-                            has_turn_state_retry,
-                            "direct_current_profile_fallback"
-                        );
                         if !has_turn_state_retry
                             && !decision.request_requires_locked_previous_response_affinity
                         {
@@ -2251,20 +2197,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         nonreplayable_previous_response_reuse,
                         reuse_terminal_idle,
                     );
-                let previous_response_fresh_fallback_allowed =
-                    runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed(
-                        RuntimeWebsocketReuseWatchdogPreviousResponseFallback {
-                            profile_name: &profile_name,
-                            previous_response_id: previous_response_id.as_deref(),
-                            previous_response_fresh_fallback_used,
-                            bound_profile: bound_profile.as_deref(),
-                            pinned_profile: pinned_profile.as_deref(),
-                            request_requires_previous_response_affinity,
-                            trusted_previous_response_affinity,
-                            request_turn_state: request_turn_state.as_deref(),
-                            fresh_fallback_shape: previous_response_fresh_fallback_shape,
-                        },
-                    );
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -2322,13 +2254,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     return Ok(());
                 }
                 if nonreplayable_previous_response_reuse {
-                    apply_session_previous_response_fresh_fallback!(
-                        &profile_name,
-                        false,
-                        "websocket_reuse_watchdog"
-                    );
-                }
-                if nonreplayable_previous_response_reuse {
                     if !websocket_reuse_fresh_retry_profiles.contains(&profile_name) {
                         websocket_reuse_fresh_retry_profiles.insert(profile_name.clone());
                         runtime_proxy_log(
@@ -2373,24 +2298,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                             "request={request_id} websocket_session={session_id} websocket_reuse_owner_fresh_retry profile={profile_name} event={event}"
                         ),
                     );
-                    continue;
-                }
-                if previous_response_fresh_fallback_allowed
-                    && let Some(fresh_request_text) =
-                        runtime_request_text_without_previous_response_id(&request_text)
-                {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} websocket_session={session_id} previous_response_fresh_fallback reason=websocket_reuse_watchdog"
-                        ),
-                    );
-                    apply_runtime_websocket_previous_response_fresh_fallback(
-                        fresh_request_text,
-                        runtime_websocket_fresh_fallback_target!(),
-                        runtime_previous_response_fresh_fallback_state!(),
-                    );
-                    recompute_route_affinity!("previous_response_fresh_fallback")?;
                     continue;
                 }
                 clear_runtime_response_profile_affinity(
@@ -2508,11 +2415,6 @@ pub(super) fn proxy_runtime_websocket_text_message(
                     send_runtime_proxy_stale_continuation_websocket_error(local_socket)?;
                     return Ok(());
                 }
-                apply_session_previous_response_fresh_fallback!(
-                    &profile_name,
-                    has_turn_state_retry,
-                    "candidate"
-                );
                 if decision.fresh_fallback_blocked_without_affinity {
                     runtime_proxy_log(
                         shared,
