@@ -67,22 +67,6 @@ pub(crate) fn runtime_request_without_previous_response_id(
     None
 }
 
-pub(crate) fn runtime_request_without_turn_state_header(
-    request: &RuntimeProxyRequest,
-) -> RuntimeProxyRequest {
-    RuntimeProxyRequest {
-        method: request.method.clone(),
-        path_and_query: request.path_and_query.clone(),
-        headers: request
-            .headers
-            .iter()
-            .filter(|(name, _)| !name.eq_ignore_ascii_case("x-codex-turn-state"))
-            .cloned()
-            .collect(),
-        body: request.body.clone(),
-    }
-}
-
 pub(crate) fn runtime_request_value_requires_previous_response_affinity(
     value: &serde_json::Value,
 ) -> bool {
@@ -338,71 +322,13 @@ pub(crate) fn runtime_websocket_request_requires_locked_previous_response_affini
         )
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_request_text_without_previous_response_id(
     request_text: &str,
 ) -> Option<String> {
     let _ = request_text;
     // Hard fuse: websocket continuations must also stay chained.
     None
-}
-
-pub(crate) struct RuntimePreviousResponseFreshFallbackState<'a> {
-    pub(crate) previous_response_id: &'a mut Option<String>,
-    pub(crate) request_turn_state: &'a mut Option<String>,
-    pub(crate) previous_response_fresh_fallback_used: &'a mut bool,
-    pub(crate) saw_previous_response_not_found: &'a mut bool,
-    pub(crate) previous_response_retry_candidate: &'a mut Option<String>,
-    pub(crate) previous_response_retry_index: &'a mut usize,
-    pub(crate) candidate_turn_state_retry_profile: &'a mut Option<String>,
-    pub(crate) candidate_turn_state_retry_value: &'a mut Option<String>,
-    pub(crate) trusted_previous_response_affinity: &'a mut bool,
-    pub(crate) bound_profile: &'a mut Option<String>,
-    pub(crate) pinned_profile: &'a mut Option<String>,
-    pub(crate) turn_state_profile: &'a mut Option<String>,
-    pub(crate) session_profile: &'a mut Option<String>,
-    pub(crate) excluded_profiles: &'a mut BTreeSet<String>,
-    pub(crate) last_failure: &'a mut Option<(RuntimeUpstreamFailureResponse, bool)>,
-    pub(crate) selection_started_at: &'a mut Instant,
-    pub(crate) selection_attempts: &'a mut usize,
-}
-
-impl RuntimePreviousResponseFreshFallbackState<'_> {
-    fn reset(&mut self) {
-        *self.previous_response_id = None;
-        *self.request_turn_state = None;
-        *self.previous_response_fresh_fallback_used = true;
-        *self.saw_previous_response_not_found = false;
-        *self.previous_response_retry_candidate = None;
-        *self.previous_response_retry_index = 0;
-        *self.candidate_turn_state_retry_profile = None;
-        *self.candidate_turn_state_retry_value = None;
-        *self.trusted_previous_response_affinity = false;
-        *self.bound_profile = None;
-        *self.pinned_profile = None;
-        *self.turn_state_profile = None;
-        *self.session_profile = None;
-        self.excluded_profiles.clear();
-        *self.last_failure = None;
-        *self.selection_started_at = Instant::now();
-        *self.selection_attempts = 0;
-    }
-}
-
-pub(crate) struct RuntimeWebsocketFreshFallbackTarget<'a> {
-    pub(crate) request_text: &'a mut String,
-    pub(crate) handshake_request: &'a mut RuntimeProxyRequest,
-    pub(crate) websocket_reuse_fresh_retry_profiles: &'a mut BTreeSet<String>,
-}
-
-pub(crate) fn apply_runtime_websocket_previous_response_fresh_fallback(
-    fresh_request_text: String,
-    target: RuntimeWebsocketFreshFallbackTarget<'_>,
-    mut fallback_state: RuntimePreviousResponseFreshFallbackState<'_>,
-) {
-    *target.request_text = fresh_request_text;
-    *target.handshake_request = runtime_request_without_turn_state_header(target.handshake_request);
-    target.websocket_reuse_fresh_retry_profiles.clear();
-    fallback_state.reset();
 }
 
 pub(crate) fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {

@@ -262,6 +262,65 @@ impl WebsocketSessionPlacement {
     }
 }
 
+#[derive(Clone, Copy)]
+enum PreviousResponseNotFoundDecisionFallbackCase {
+    ToolOutputOnly,
+    MessageFollowup,
+    EmptyInputOnly,
+    SessionScopedEmptyInput,
+    MixedToolAndMessage,
+    Unknown,
+}
+
+impl PreviousResponseNotFoundDecisionFallbackCase {
+    const ALL: [Self; 6] = [
+        Self::ToolOutputOnly,
+        Self::MessageFollowup,
+        Self::EmptyInputOnly,
+        Self::SessionScopedEmptyInput,
+        Self::MixedToolAndMessage,
+        Self::Unknown,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::ToolOutputOnly => "tool_output_only",
+            Self::MessageFollowup => "message_followup",
+            Self::EmptyInputOnly => "empty_input",
+            Self::SessionScopedEmptyInput => "session_scoped_empty_input",
+            Self::MixedToolAndMessage => "mixed_tool_and_message",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    fn request_requires_previous_response_affinity(self) -> bool {
+        matches!(self, Self::ToolOutputOnly | Self::MixedToolAndMessage)
+    }
+
+    fn fresh_fallback_shape(self) -> Option<RuntimePreviousResponseFreshFallbackShape> {
+        match self {
+            Self::ToolOutputOnly => Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly),
+            Self::MessageFollowup | Self::MixedToolAndMessage => {
+                Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
+            }
+            Self::EmptyInputOnly => Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly),
+            Self::SessionScopedEmptyInput => {
+                Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
+            }
+            Self::Unknown => None,
+        }
+    }
+}
+
+fn previous_response_not_found_route_label(
+    route: RuntimePreviousResponseNotFoundRoute,
+) -> &'static str {
+    match route {
+        RuntimePreviousResponseNotFoundRoute::Responses => "responses",
+        RuntimePreviousResponseNotFoundRoute::Websocket => "websocket",
+    }
+}
+
 fn websocket_previous_response_fresh_fallback_request_text(
     shape: PreviousResponseFreshFallbackRequestShape,
     has_client_metadata_session: bool,
@@ -571,129 +630,149 @@ fn runtime_request_previous_response_fresh_fallback_shape_marks_header_session_e
 }
 
 #[test]
-fn websocket_previous_response_not_found_decision_prefers_locked_retry_before_stale() {
-    let decision = runtime_previous_response_not_found_decision(
-        RuntimePreviousResponseNotFoundDecisionInput {
-            route: RuntimePreviousResponseNotFoundRoute::Websocket,
-            previous_response_id: Some("resp_123"),
-            has_turn_state_retry: false,
-            request_requires_previous_response_affinity: true,
-            trusted_previous_response_affinity: false,
-            request_turn_state: None,
-            previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
-            retry_index: 0,
-        },
-    );
+fn runtime_previous_response_not_found_decision_matrix_stays_consistent() {
+    for route in [
+        RuntimePreviousResponseNotFoundRoute::Responses,
+        RuntimePreviousResponseNotFoundRoute::Websocket,
+    ] {
+        for has_turn_state_retry in [false, true] {
+            for trusted_previous_response_affinity in [false, true] {
+                for fallback_case in PreviousResponseNotFoundDecisionFallbackCase::ALL {
+                    for retry_index in 0..=RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS.len() {
+                        let request_requires_previous_response_affinity =
+                            fallback_case.request_requires_previous_response_affinity();
+                        let request_turn_state = has_turn_state_retry.then_some("turn_state");
+                        let request_requires_locked_previous_response_affinity = match route {
+                            RuntimePreviousResponseNotFoundRoute::Responses => {
+                                request_requires_previous_response_affinity
+                            }
+                            RuntimePreviousResponseNotFoundRoute::Websocket => {
+                                request_requires_previous_response_affinity
+                                    || (trusted_previous_response_affinity
+                                        && request_turn_state.is_none())
+                            }
+                        };
+                        let locked_previous_response_retry =
+                            matches!(route, RuntimePreviousResponseNotFoundRoute::Websocket)
+                                && request_requires_previous_response_affinity
+                                && !has_turn_state_retry;
+                        let expected_retry_delay = (has_turn_state_retry
+                            || locked_previous_response_retry)
+                            .then(|| {
+                                RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS
+                                    .get(retry_index)
+                                    .copied()
+                                    .map(Duration::from_millis)
+                            })
+                            .flatten();
+                        let expected_retry_reason = if has_turn_state_retry {
+                            Some("non_blocking_retry")
+                        } else if locked_previous_response_retry {
+                            Some("locked_affinity_no_turn_state")
+                        } else {
+                            None
+                        };
+                        let expected_chain_retry_reason = match route {
+                            RuntimePreviousResponseNotFoundRoute::Responses
+                                if has_turn_state_retry =>
+                            {
+                                Some("previous_response_not_found")
+                            }
+                            RuntimePreviousResponseNotFoundRoute::Websocket
+                                if locked_previous_response_retry =>
+                            {
+                                Some("previous_response_not_found_locked_affinity")
+                            }
+                            _ => None,
+                        };
+                        let expected_stale_continuation = !has_turn_state_retry;
+                        let expected_fresh_fallback_blocked_without_affinity =
+                            !has_turn_state_retry
+                                && !request_requires_locked_previous_response_affinity;
+                        let expected_observability = if expected_fresh_fallback_blocked_without_affinity
+                        {
+                            match fallback_case.fresh_fallback_shape() {
+                                Some(
+                                    RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
+                                ) => Some("blocked_nonreplayable_without_affinity"),
+                                _ => Some("blocked_without_affinity"),
+                            }
+                        } else {
+                            None
+                        };
+                        let case_label = format!(
+                            "route={} turn_state={} trusted_affinity={} fallback={} retry_index={}",
+                            previous_response_not_found_route_label(route),
+                            has_turn_state_retry,
+                            trusted_previous_response_affinity,
+                            fallback_case.label(),
+                            retry_index
+                        );
 
-    assert_eq!(
-        decision.retry_delay,
-        Some(Duration::from_millis(
-            RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS[0]
-        ))
-    );
-    assert_eq!(decision.retry_reason, Some("locked_affinity_no_turn_state"));
-    assert_eq!(
-        decision.chain_retry_reason,
-        Some("previous_response_not_found_locked_affinity")
-    );
-    assert!(
-        decision.stale_continuation,
-        "locked affinity remains stale if retries exhaust; caller still gets the immediate retry first"
-    );
-}
+                        let decision = runtime_previous_response_not_found_decision(
+                            RuntimePreviousResponseNotFoundDecisionInput {
+                                route,
+                                previous_response_id: Some("resp_123"),
+                                has_turn_state_retry,
+                                request_requires_previous_response_affinity,
+                                trusted_previous_response_affinity,
+                                request_turn_state,
+                                previous_response_fresh_fallback_used: false,
+                                fresh_fallback_shape: fallback_case.fresh_fallback_shape(),
+                                retry_index,
+                            },
+                        );
 
-#[test]
-fn websocket_previous_response_not_found_decision_keeps_session_tool_output_stale() {
-    let decision = runtime_previous_response_not_found_decision(
-        RuntimePreviousResponseNotFoundDecisionInput {
-            route: RuntimePreviousResponseNotFoundRoute::Websocket,
-            previous_response_id: Some("resp_123"),
-            has_turn_state_retry: false,
-            request_requires_previous_response_affinity: true,
-            trusted_previous_response_affinity: false,
-            request_turn_state: None,
-            previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly),
-            retry_index: 0,
-        },
-    );
-
-    assert_eq!(
-        decision.retry_delay,
-        Some(Duration::from_millis(
-            RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS[0]
-        ))
-    );
-    assert_eq!(decision.retry_reason, Some("locked_affinity_no_turn_state"));
-    assert!(decision.stale_continuation);
-    assert!(!decision.fresh_fallback_allowed);
-    assert_eq!(
-        runtime_previous_response_not_found_observability_outcome(
-            decision,
-            Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly)
-        ),
-        None
-    );
-}
-
-#[test]
-fn websocket_previous_response_not_found_decision_marks_nonreplayable_continuation_stale() {
-    let decision = runtime_previous_response_not_found_decision(
-        RuntimePreviousResponseNotFoundDecisionInput {
-            route: RuntimePreviousResponseNotFoundRoute::Websocket,
-            previous_response_id: Some("resp_123"),
-            has_turn_state_retry: false,
-            request_requires_previous_response_affinity: false,
-            trusted_previous_response_affinity: false,
-            request_turn_state: None,
-            previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
-            retry_index: 0,
-        },
-    );
-
-    assert_eq!(decision.retry_delay, None);
-    assert!(decision.stale_continuation);
-    assert!(!decision.fresh_fallback_allowed);
-    assert!(decision.fresh_fallback_blocked_without_affinity);
-    assert_eq!(
-        runtime_previous_response_not_found_observability_outcome(
-            decision,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
-        ),
-        Some("blocked_nonreplayable_without_affinity")
-    );
-}
-
-#[test]
-fn responses_previous_response_not_found_decision_keeps_turn_state_retry_shared() {
-    let decision = runtime_previous_response_not_found_decision(
-        RuntimePreviousResponseNotFoundDecisionInput {
-            route: RuntimePreviousResponseNotFoundRoute::Responses,
-            previous_response_id: Some("resp_123"),
-            has_turn_state_retry: true,
-            request_requires_previous_response_affinity: false,
-            trusted_previous_response_affinity: true,
-            request_turn_state: Some("turn_state"),
-            previous_response_fresh_fallback_used: false,
-            fresh_fallback_shape: Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
-            retry_index: 1,
-        },
-    );
-
-    assert_eq!(
-        decision.retry_delay,
-        Some(Duration::from_millis(
-            RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS[1]
-        ))
-    );
-    assert_eq!(decision.retry_reason, Some("non_blocking_retry"));
-    assert_eq!(
-        decision.chain_retry_reason,
-        Some("previous_response_not_found")
-    );
-    assert!(!decision.stale_continuation);
+                        assert_eq!(
+                            decision.request_requires_locked_previous_response_affinity,
+                            request_requires_locked_previous_response_affinity,
+                            "{}",
+                            case_label
+                        );
+                        assert_eq!(decision.retry_delay, expected_retry_delay, "{}", case_label);
+                        assert_eq!(
+                            decision.retry_reason,
+                            expected_retry_reason,
+                            "{}",
+                            case_label
+                        );
+                        assert_eq!(
+                            decision.chain_retry_reason,
+                            expected_chain_retry_reason,
+                            "{}",
+                            case_label
+                        );
+                        assert_eq!(
+                            decision.stale_continuation,
+                            expected_stale_continuation,
+                            "{}",
+                            case_label
+                        );
+                        assert!(
+                            !decision.fresh_fallback_allowed,
+                            "{} should stay fail-closed for fresh fallback",
+                            case_label
+                        );
+                        assert_eq!(
+                            decision.fresh_fallback_blocked_without_affinity,
+                            expected_fresh_fallback_blocked_without_affinity,
+                            "{}",
+                            case_label
+                        );
+                        assert_eq!(
+                            runtime_previous_response_not_found_observability_outcome(
+                                decision,
+                                fallback_case.fresh_fallback_shape()
+                            ),
+                            expected_observability,
+                            "{}",
+                            case_label
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

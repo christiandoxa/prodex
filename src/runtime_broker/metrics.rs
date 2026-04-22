@@ -116,20 +116,169 @@ fn add_route_continuity_signal(
     true
 }
 
-fn runtime_broker_continuity_failure_reason_metrics(
+const RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE_LIMIT: usize = 16;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeBrokerContinuityFailureReasonCacheFingerprint {
+    len: u64,
+    modified_at: Duration,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeBrokerContinuityFailureReasonCacheEntry {
+    fingerprint: RuntimeBrokerContinuityFailureReasonCacheFingerprint,
+    metrics: RuntimeBrokerContinuityFailureReasonMetrics,
+    last_used_at: u64,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeBrokerContinuityFailureReasonCache {
+    entries: BTreeMap<PathBuf, RuntimeBrokerContinuityFailureReasonCacheEntry>,
+    next_touch: u64,
+    #[cfg(test)]
+    hits: u64,
+    #[cfg(test)]
+    misses: u64,
+}
+
+impl RuntimeBrokerContinuityFailureReasonCache {
+    fn touch(&mut self) -> u64 {
+        self.next_touch = self.next_touch.wrapping_add(1);
+        self.next_touch
+    }
+
+    fn get(
+        &mut self,
+        log_path: &Path,
+        fingerprint: &RuntimeBrokerContinuityFailureReasonCacheFingerprint,
+    ) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
+        let touched_at = self.touch();
+        let cached = self
+            .entries
+            .get_mut(log_path)
+            .filter(|entry| entry.fingerprint == *fingerprint)
+            .map(|entry| {
+                entry.last_used_at = touched_at;
+                entry.metrics.clone()
+            });
+        #[cfg(test)]
+        if cached.is_some() {
+            self.hits += 1;
+        } else {
+            self.misses += 1;
+        }
+        cached
+    }
+
+    fn store(
+        &mut self,
+        log_path: &Path,
+        fingerprint: RuntimeBrokerContinuityFailureReasonCacheFingerprint,
+        metrics: RuntimeBrokerContinuityFailureReasonMetrics,
+    ) {
+        let touched_at = self.touch();
+        self.entries.insert(
+            log_path.to_path_buf(),
+            RuntimeBrokerContinuityFailureReasonCacheEntry {
+                fingerprint,
+                metrics,
+                last_used_at: touched_at,
+            },
+        );
+        while self.entries.len() > RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE_LIMIT {
+            let Some(oldest_path) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used_at)
+                .map(|(path, _)| path.clone())
+            else {
+                break;
+            };
+            self.entries.remove(&oldest_path);
+        }
+    }
+
+    fn remove(&mut self, log_path: &Path) {
+        self.entries.remove(log_path);
+    }
+
+    #[cfg(test)]
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.next_touch = 0;
+        self.hits = 0;
+        self.misses = 0;
+    }
+}
+
+static RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE: OnceLock<
+    Mutex<RuntimeBrokerContinuityFailureReasonCache>,
+> = OnceLock::new();
+
+fn runtime_broker_continuity_failure_reason_cache()
+-> &'static Mutex<RuntimeBrokerContinuityFailureReasonCache> {
+    RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE
+        .get_or_init(|| Mutex::new(RuntimeBrokerContinuityFailureReasonCache::default()))
+}
+
+fn runtime_broker_continuity_failure_reason_cache_fingerprint(
+    metadata: &fs::Metadata,
+) -> Option<RuntimeBrokerContinuityFailureReasonCacheFingerprint> {
+    let modified_at = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some(RuntimeBrokerContinuityFailureReasonCacheFingerprint {
+        len: metadata.len(),
+        modified_at,
+    })
+}
+
+fn runtime_broker_continuity_failure_reason_metrics_from_log(
     log_path: &Path,
-) -> RuntimeBrokerContinuityFailureReasonMetrics {
-    // Admin metrics scrapes can afford a full-run log scan so Prometheus can
-    // expose cumulative reason counters without adding hot-path bookkeeping.
-    let Ok(log) = fs::read(log_path) else {
-        return RuntimeBrokerContinuityFailureReasonMetrics::default();
-    };
+) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
+    let log = fs::read(log_path).ok()?;
     let summary = summarize_runtime_log_tail(&log);
-    RuntimeBrokerContinuityFailureReasonMetrics {
+    Some(RuntimeBrokerContinuityFailureReasonMetrics {
         chain_retried_owner: summary.chain_retried_owner_by_reason,
         chain_dead_upstream_confirmed: summary.chain_dead_upstream_confirmed_by_reason,
         stale_continuation: summary.stale_continuation_by_reason,
+    })
+}
+
+fn runtime_broker_continuity_failure_reason_metrics(
+    log_path: &Path,
+) -> RuntimeBrokerContinuityFailureReasonMetrics {
+    let Ok(metadata) = fs::metadata(log_path) else {
+        runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(log_path);
+        return RuntimeBrokerContinuityFailureReasonMetrics::default();
+    };
+    let fingerprint = runtime_broker_continuity_failure_reason_cache_fingerprint(&metadata);
+
+    if let Some(fingerprint) = fingerprint.as_ref()
+        && let Some(metrics) = runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(log_path, fingerprint)
+    {
+        return metrics;
     }
+
+    let Some(metrics) = runtime_broker_continuity_failure_reason_metrics_from_log(log_path) else {
+        runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(log_path);
+        return RuntimeBrokerContinuityFailureReasonMetrics::default();
+    };
+
+    if let Some(fingerprint) = fingerprint {
+        runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .store(log_path, fingerprint, metrics.clone());
+    }
+    metrics
 }
 
 pub(crate) fn runtime_broker_prometheus_snapshot(
@@ -413,6 +562,13 @@ pub(crate) fn runtime_broker_metrics_snapshot(
 mod tests {
     use super::*;
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct RuntimeBrokerContinuityFailureReasonCacheStats {
+        hits: u64,
+        misses: u64,
+        entries: usize,
+    }
+
     fn temp_log_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "prodex-runtime-broker-metrics-{name}-{}-{}.log",
@@ -421,8 +577,29 @@ mod tests {
         ))
     }
 
+    fn clear_runtime_broker_continuity_failure_reason_cache() {
+        runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+
+    fn runtime_broker_continuity_failure_reason_cache_stats()
+    -> RuntimeBrokerContinuityFailureReasonCacheStats {
+        let cache = runtime_broker_continuity_failure_reason_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        RuntimeBrokerContinuityFailureReasonCacheStats {
+            hits: cache.hits,
+            misses: cache.misses,
+            entries: cache.entries.len(),
+        }
+    }
+
     #[test]
     fn continuity_failure_reason_metrics_follow_runtime_log_summary() {
+        let _guard = acquire_test_runtime_lock();
+        clear_runtime_broker_continuity_failure_reason_cache();
         let log_path = temp_log_path("reasons");
         fs::write(
             &log_path,
@@ -451,6 +628,98 @@ mod tests {
                 ("previous_response_not_found".to_string(), 1),
                 ("websocket_reuse_watchdog_locked_affinity".to_string(), 1,),
             ])
+        );
+
+        fs::remove_file(&log_path).expect("test log should clean up");
+    }
+
+    #[test]
+    fn continuity_failure_reason_metrics_reuse_cached_summary_for_unchanged_log() {
+        let _guard = acquire_test_runtime_lock();
+        clear_runtime_broker_continuity_failure_reason_cache();
+        let log_path = temp_log_path("cache-hit");
+        fs::write(
+            &log_path,
+            "[2026-04-22 10:00:00.000 +00:00] request=8 transport=http route=responses stale_continuation reason=previous_response_not_found profile=main\n",
+        )
+        .expect("test log should write");
+
+        let first = runtime_broker_continuity_failure_reason_metrics(&log_path);
+        assert_eq!(
+            runtime_broker_continuity_failure_reason_cache_stats(),
+            RuntimeBrokerContinuityFailureReasonCacheStats {
+                hits: 0,
+                misses: 1,
+                entries: 1,
+            }
+        );
+
+        let second = runtime_broker_continuity_failure_reason_metrics(&log_path);
+        assert_eq!(second, first);
+        assert_eq!(
+            runtime_broker_continuity_failure_reason_cache_stats(),
+            RuntimeBrokerContinuityFailureReasonCacheStats {
+                hits: 1,
+                misses: 1,
+                entries: 1,
+            }
+        );
+
+        fs::remove_file(&log_path).expect("test log should clean up");
+    }
+
+    #[test]
+    fn continuity_failure_reason_metrics_invalidate_cache_when_log_changes() {
+        let _guard = acquire_test_runtime_lock();
+        clear_runtime_broker_continuity_failure_reason_cache();
+        let log_path = temp_log_path("cache-invalidate");
+        fs::write(
+            &log_path,
+            "[2026-04-22 10:00:00.000 +00:00] request=5 transport=http route=responses stale_continuation reason=previous_response_not_found profile=main\n",
+        )
+        .expect("test log should write");
+
+        let first = runtime_broker_continuity_failure_reason_metrics(&log_path);
+        assert_eq!(
+            first.stale_continuation,
+            BTreeMap::from([("previous_response_not_found".to_string(), 1)])
+        );
+        assert_eq!(
+            runtime_broker_continuity_failure_reason_cache_stats(),
+            RuntimeBrokerContinuityFailureReasonCacheStats {
+                hits: 0,
+                misses: 1,
+                entries: 1,
+            }
+        );
+
+        let mut log = fs::OpenOptions::new()
+            .append(true)
+            .open(&log_path)
+            .expect("test log should open");
+        writeln!(
+            log,
+            "[2026-04-22 10:00:00.001 +00:00] request=5 transport=websocket route=websocket websocket_session=sess-5 chain_retried_owner profile=main previous_response_id=resp-5 delay_ms=20 reason=previous_response_not_found_locked_affinity via=-"
+        )
+        .expect("test log should append");
+        drop(log);
+
+        let second = runtime_broker_continuity_failure_reason_metrics(&log_path);
+        assert_eq!(
+            second.chain_retried_owner,
+            BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1)])
+        );
+        assert_eq!(
+            second.stale_continuation,
+            BTreeMap::from([("previous_response_not_found".to_string(), 1)])
+        );
+        assert_eq!(
+            runtime_broker_continuity_failure_reason_cache_stats(),
+            RuntimeBrokerContinuityFailureReasonCacheStats {
+                hits: 0,
+                misses: 2,
+                entries: 1,
+            }
         );
 
         fs::remove_file(&log_path).expect("test log should clean up");

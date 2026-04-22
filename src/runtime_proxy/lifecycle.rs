@@ -17,6 +17,7 @@ impl Drop for RuntimeRotationProxy {
                     self.active_request_count.load(Ordering::SeqCst)
                 ),
             );
+            runtime_proxy_flush_logs_for_path(&self.log_path);
             self.worker_threads.clear();
             let _ = self.owner_lock.take();
             return;
@@ -24,6 +25,7 @@ impl Drop for RuntimeRotationProxy {
         while let Some(worker) = self.worker_threads.pop() {
             let _ = worker.join();
         }
+        runtime_proxy_flush_logs_for_path(&self.log_path);
         let _ = self.owner_lock.take();
     }
 }

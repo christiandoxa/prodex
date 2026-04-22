@@ -5,6 +5,212 @@ unsafe extern "C" {
     fn malloc_trim(pad: usize) -> i32;
 }
 
+const RUNTIME_PROXY_LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug)]
+struct RuntimeProxyQueuedLogLine {
+    log_path: PathBuf,
+    line: String,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeProxyAsyncLoggerState {
+    queue: VecDeque<RuntimeProxyQueuedLogLine>,
+    pending_by_path: BTreeMap<PathBuf, usize>,
+}
+
+#[derive(Debug)]
+struct RuntimeProxyAsyncLoggerInner {
+    state: Mutex<RuntimeProxyAsyncLoggerState>,
+    work_available: Condvar,
+    path_drained: Condvar,
+    capacity: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeProxyAsyncLogger {
+    inner: Arc<RuntimeProxyAsyncLoggerInner>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct RuntimeProxyAsyncLoggerTestState {
+    pause_writes: bool,
+}
+
+fn runtime_proxy_log_queue_capacity() -> usize {
+    thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .saturating_mul(256)
+        .clamp(1024, 8192)
+}
+
+fn runtime_proxy_async_logger() -> &'static RuntimeProxyAsyncLogger {
+    static LOGGER: OnceLock<RuntimeProxyAsyncLogger> = OnceLock::new();
+    LOGGER.get_or_init(RuntimeProxyAsyncLogger::new)
+}
+
+#[cfg(test)]
+fn runtime_proxy_async_logger_test_state()
+-> &'static (Mutex<RuntimeProxyAsyncLoggerTestState>, Condvar) {
+    static TEST_STATE: OnceLock<(Mutex<RuntimeProxyAsyncLoggerTestState>, Condvar)> =
+        OnceLock::new();
+    TEST_STATE.get_or_init(|| {
+        (
+            Mutex::new(RuntimeProxyAsyncLoggerTestState::default()),
+            Condvar::new(),
+        )
+    })
+}
+
+impl RuntimeProxyAsyncLogger {
+    fn new() -> Self {
+        let inner = Arc::new(RuntimeProxyAsyncLoggerInner {
+            state: Mutex::new(RuntimeProxyAsyncLoggerState::default()),
+            work_available: Condvar::new(),
+            path_drained: Condvar::new(),
+            capacity: runtime_proxy_log_queue_capacity(),
+        });
+        let worker_inner = Arc::clone(&inner);
+        let _ = thread::Builder::new()
+            .name("prodex-runtime-log".to_string())
+            .spawn(move || runtime_proxy_async_logger_worker_loop(worker_inner));
+        Self { inner }
+    }
+
+    fn try_enqueue(&self, log_path: &Path, line: String) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.queue.len() >= self.inner.capacity {
+            return;
+        }
+        state
+            .pending_by_path
+            .entry(log_path.to_path_buf())
+            .and_modify(|pending| *pending += 1)
+            .or_insert(1);
+        state.queue.push_back(RuntimeProxyQueuedLogLine {
+            log_path: log_path.to_path_buf(),
+            line,
+        });
+        self.inner.work_available.notify_one();
+    }
+
+    fn flush_path(&self, log_path: &Path) {
+        let deadline = Instant::now() + RUNTIME_PROXY_LOG_FLUSH_TIMEOUT;
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while state.pending_by_path.get(log_path).copied().unwrap_or(0) > 0 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return;
+            }
+            let (next_state, _) = self
+                .inner
+                .path_drained
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state = next_state;
+        }
+    }
+
+    #[cfg(test)]
+    fn pending_count_for_path(&self, log_path: &Path) -> usize {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pending_by_path
+            .get(log_path)
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+fn runtime_proxy_async_logger_set_pause_writes(paused: bool) {
+    let (mutex, condvar) = runtime_proxy_async_logger_test_state();
+    let mut state = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.pause_writes = paused;
+    if !paused {
+        condvar.notify_all();
+    }
+}
+
+#[cfg(test)]
+fn runtime_proxy_async_logger_pause_writes() -> bool {
+    runtime_proxy_async_logger_test_state()
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pause_writes
+}
+
+#[cfg(test)]
+fn runtime_proxy_async_logger_wait_for_write_permit() {
+    let (mutex, condvar) = runtime_proxy_async_logger_test_state();
+    let mut state = mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    while state.pause_writes {
+        state = condvar
+            .wait(state)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+}
+
+fn runtime_proxy_async_logger_worker_loop(inner: Arc<RuntimeProxyAsyncLoggerInner>) {
+    loop {
+        let entry = {
+            let mut state = inner
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            loop {
+                if let Some(entry) = state.queue.pop_front() {
+                    break entry;
+                }
+                state = inner
+                    .work_available
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+        };
+
+        #[cfg(test)]
+        runtime_proxy_async_logger_wait_for_write_permit();
+
+        if let Ok(mut file) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&entry.log_path)
+        {
+            let _ = file.write_all(entry.line.as_bytes());
+        }
+
+        let mut state = inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(pending) = state.pending_by_path.get_mut(&entry.log_path) {
+            *pending = pending.saturating_sub(1);
+            if *pending == 0 {
+                state.pending_by_path.remove(&entry.log_path);
+            }
+        }
+        inner.path_drained.notify_all();
+    }
+}
+
 pub(super) fn runtime_proxy_log_dir() -> PathBuf {
     env::var_os("PRODEX_RUNTIME_LOG_DIR")
         .filter(|value| !value.is_empty())
@@ -397,10 +603,10 @@ pub(super) fn runtime_proxy_log_event(message: &str) -> Option<&str> {
         .filter(|token| !token.is_empty())
 }
 
-pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
+fn runtime_proxy_format_log_line(message: &str, format: RuntimeLogFormat) -> String {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
     let sanitized = message.replace(['\r', '\n'], " ");
-    let line = match runtime_proxy_log_format() {
+    match format {
         RuntimeLogFormat::Text => format!("[{timestamp}] {sanitized}\n"),
         RuntimeLogFormat::Json => {
             let mut value = serde_json::Map::new();
@@ -439,15 +645,21 @@ pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
                 Err(_) => format!("[{timestamp}] {sanitized}\n"),
             }
         }
-    };
-    if let Ok(mut file) = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-    {
-        let _ = file.write_all(line.as_bytes());
-        let _ = file.flush();
     }
+}
+
+pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
+    let logger = runtime_proxy_async_logger();
+    let line = runtime_proxy_format_log_line(message, runtime_proxy_log_format());
+    logger.try_enqueue(log_path, line);
+    #[cfg(test)]
+    if !runtime_proxy_async_logger_pause_writes() {
+        logger.flush_path(log_path);
+    }
+}
+
+pub(super) fn runtime_proxy_flush_logs_for_path(log_path: &Path) {
+    runtime_proxy_async_logger().flush_path(log_path);
 }
 
 #[derive(Debug)]
@@ -458,5 +670,124 @@ pub(super) struct JsonFileLock {
 impl Drop for JsonFileLock {
     fn drop(&mut self) {
         let _ = self.file.unlock();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct RuntimeProxyLogTestDir {
+        path: PathBuf,
+    }
+
+    impl RuntimeProxyLogTestDir {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!(
+                "prodex-runtime-log-test-{}-{}",
+                std::process::id(),
+                RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).expect("runtime proxy log test dir should exist");
+            Self { path }
+        }
+
+        fn log_path(&self, name: &str) -> PathBuf {
+            self.path.join(name)
+        }
+    }
+
+    impl Drop for RuntimeProxyLogTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn runtime_proxy_log_to_path_flushes_async_entries() {
+        let _runtime_lock = acquire_test_runtime_lock();
+        let dir = RuntimeProxyLogTestDir::new();
+        let log_path = dir.log_path("async.log");
+
+        runtime_proxy_async_logger_set_pause_writes(true);
+        runtime_proxy_log_to_path(&log_path, "async entry line1\nline2 request=7");
+
+        assert_eq!(
+            runtime_proxy_async_logger().pending_count_for_path(&log_path),
+            1,
+            "queued entry should remain pending while worker writes are paused"
+        );
+        assert!(
+            fs::read_to_string(&log_path).unwrap_or_default().is_empty(),
+            "async logger should not synchronously write to disk on caller path"
+        );
+
+        runtime_proxy_async_logger_set_pause_writes(false);
+        runtime_proxy_flush_logs_for_path(&log_path);
+
+        let log = fs::read_to_string(&log_path).expect("async runtime log should flush to disk");
+        assert!(log.contains("async entry line1 line2 request=7"));
+        assert!(log.ends_with('\n'));
+    }
+
+    #[test]
+    fn runtime_proxy_log_to_path_preserves_valid_json_format() {
+        let _runtime_lock = acquire_test_runtime_lock();
+        let _format = TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_FORMAT", "json");
+        let dir = RuntimeProxyLogTestDir::new();
+        let log_path = dir.log_path("json.log");
+
+        runtime_proxy_log_to_path(
+            &log_path,
+            "selection route=responses profile=main note=\"hello\"\nnext",
+        );
+        runtime_proxy_flush_logs_for_path(&log_path);
+
+        let line = fs::read_to_string(&log_path).expect("json runtime log should be readable");
+        let value = serde_json::from_str::<serde_json::Value>(line.trim_end())
+            .expect("runtime log line should be valid json");
+
+        assert_eq!(
+            value.get("message").and_then(|value| value.as_str()),
+            Some("selection route=responses profile=main note=\"hello\" next")
+        );
+        assert_eq!(
+            value.get("event").and_then(|value| value.as_str()),
+            Some("selection")
+        );
+        assert_eq!(
+            value
+                .pointer("/fields/route")
+                .and_then(|value| value.as_str()),
+            Some("responses")
+        );
+        assert_eq!(
+            value
+                .pointer("/fields/profile")
+                .and_then(|value| value.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            value
+                .pointer("/fields/note")
+                .and_then(|value| value.as_str()),
+            Some("hello")
+        );
+        assert_eq!(
+            value.get("pid").and_then(|value| value.as_u64()),
+            Some(std::process::id().into())
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_format_log_line_sanitizes_text_format() {
+        let line = runtime_proxy_format_log_line(
+            "transport_failure profile=main\nroute=responses",
+            RuntimeLogFormat::Text,
+        );
+
+        assert!(line.contains("transport_failure profile=main route=responses"));
+        assert!(!line.contains('\r'));
+        assert!(line.ends_with('\n'));
     }
 }

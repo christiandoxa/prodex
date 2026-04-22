@@ -252,6 +252,7 @@ pub(crate) fn runtime_previous_response_not_found_fallback_policy(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_quota_blocked_previous_response_fresh_fallback_allowed(
     previous_response_id: Option<&str>,
     trusted_previous_response_affinity: bool,
@@ -346,25 +347,6 @@ pub(crate) fn runtime_websocket_previous_response_not_found_requires_stale_conti
     )
     .stale_continuation
     .requires_stale_continuation()
-}
-
-pub(crate) fn runtime_previous_response_not_found_fresh_fallback_allowed(
-    previous_response_id: Option<&str>,
-    previous_response_fresh_fallback_used: bool,
-    request_requires_locked_previous_response_affinity: bool,
-    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-) -> bool {
-    runtime_previous_response_not_found_fallback_policy(
-        RuntimePreviousResponseNotFoundFallbackRequest {
-            previous_response_id,
-            has_turn_state_retry: false,
-            request_requires_locked_previous_response_affinity,
-            previous_response_fresh_fallback_used,
-            fresh_fallback_shape,
-        },
-    )
-    .fresh_fallback
-    .allows_fresh_fallback()
 }
 
 pub(crate) fn runtime_quota_precommit_floor_percent(route_kind: RuntimeRouteKind) -> i64 {
