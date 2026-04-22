@@ -82,9 +82,13 @@ pub(crate) fn extract_runtime_proxy_overload_message_from_websocket_payload(
 }
 
 pub(crate) fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| extract_runtime_proxy_previous_response_message_from_value(&value))
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
+        && let Some(message) = extract_runtime_proxy_previous_response_message_from_value(&value)
+    {
+        return Some(message);
+    }
+
+    extract_runtime_proxy_previous_response_message_from_text(&String::from_utf8_lossy(body))
 }
 
 pub(crate) fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<String> {
@@ -266,44 +270,85 @@ pub(crate) fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> Strin
 pub(crate) fn extract_runtime_proxy_previous_response_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    let direct_error = value.get("error");
-    let response_error = value
-        .get("response")
-        .and_then(|response| response.get("error"));
-    for error in [direct_error, response_error].into_iter().flatten() {
-        let code = error.get("code").and_then(serde_json::Value::as_str);
-        let message = error
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| error.get("detail").and_then(serde_json::Value::as_str));
-        if code == Some("previous_response_not_found") {
-            return Some(
-                message
-                    .unwrap_or(
-                        "Previous response could not be found on the selected Codex account.",
-                    )
-                    .to_string(),
-            );
-        }
-        // Upstream regressions sometimes surface broken tool-call continuity as
-        // `invalid_request_error: No tool call found ...` instead of
-        // `previous_response_not_found`. Treat that as the same pre-commit
-        // continuity failure so session-replayable requests can recover before
-        // the user sees a spurious tool-context error.
-        if let Some(message) = message
-            && runtime_proxy_tool_context_missing_message(message)
-            && (matches!(
-                error.get("type").and_then(serde_json::Value::as_str),
-                Some("invalid_request_error")
-            ) || matches!(
-                error.get("param").and_then(serde_json::Value::as_str),
-                Some("input")
-            ))
-        {
-            return Some(message.to_string());
-        }
+    if let Some(message) = extract_runtime_proxy_previous_response_message_candidate(value) {
+        return Some(message);
     }
-    None
+
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(extract_runtime_proxy_previous_response_message_from_value),
+        serde_json::Value::Object(map) => map
+            .values()
+            .find_map(extract_runtime_proxy_previous_response_message_from_value),
+        _ => None,
+    }
+}
+
+fn extract_runtime_proxy_previous_response_message_candidate(
+    value: &serde_json::Value,
+) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            let message = map
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
+                .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
+            let code = map.get("code").and_then(serde_json::Value::as_str);
+            let error_type = map.get("type").and_then(serde_json::Value::as_str);
+            let param = map.get("param").and_then(serde_json::Value::as_str);
+
+            if code == Some("previous_response_not_found")
+                || message.is_some_and(runtime_proxy_previous_response_missing_message)
+            {
+                return Some(
+                    message
+                        .unwrap_or(
+                            "Previous response could not be found on the selected Codex account.",
+                        )
+                        .to_string(),
+                );
+            }
+
+            // Upstream regressions sometimes surface broken tool-call continuity as
+            // `invalid_request_error: No tool call found ...` instead of
+            // `previous_response_not_found`. Treat that as the same pre-commit
+            // continuity failure so session-replayable requests can recover before
+            // the user sees a spurious tool-context error.
+            if let Some(message) = message
+                && runtime_proxy_tool_context_missing_message(message)
+                && (matches!(error_type, Some("invalid_request_error"))
+                    || matches!(param, Some("input")))
+            {
+                return Some(message.to_string());
+            }
+
+            None
+        }
+        _ => None,
+    }
+}
+
+fn extract_runtime_proxy_previous_response_message_from_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if runtime_proxy_previous_response_missing_message(trimmed)
+        || runtime_proxy_tool_context_missing_message(trimmed)
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+fn runtime_proxy_previous_response_missing_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("previous_response_not_found")
+        || (lower.contains("previous response") && lower.contains("not found"))
 }
 
 pub(crate) fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
@@ -459,5 +504,60 @@ fn extract_runtime_turn_state_header_value(value: &serde_json::Value) -> Option<
             .iter()
             .find_map(extract_runtime_turn_state_header_value),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn previous_response_message_detects_top_level_json_shape() {
+        let payload = serde_json::json!({
+            "type": "invalid_request_error",
+            "code": "previous_response_not_found",
+            "message": "Previous response with id 'resp-123' not found.",
+        });
+
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message_from_value(&payload),
+            Some("Previous response with id 'resp-123' not found.".to_string())
+        );
+    }
+
+    #[test]
+    fn previous_response_message_detects_plain_text_signature() {
+        let body = b"previous_response_not_found: Previous response with id 'resp-123' not found.";
+
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message(body),
+            Some(
+                "previous_response_not_found: Previous response with id 'resp-123' not found."
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn previous_response_message_detects_plain_text_tool_context_signature() {
+        let body = b"invalid_request_error: No tool call found for output item call_123";
+
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message(body),
+            Some("invalid_request_error: No tool call found for output item call_123".to_string())
+        );
+    }
+
+    #[test]
+    fn previous_response_message_ignores_non_error_content_text() {
+        let payload = serde_json::json!({
+            "type": "response.output_text.delta",
+            "delta": "The docs mention previous_response_not_found and No tool call found as examples.",
+        });
+
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message_from_value(&payload),
+            None
+        );
     }
 }

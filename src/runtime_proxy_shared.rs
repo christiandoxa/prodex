@@ -25,6 +25,9 @@ pub(super) enum RuntimeStandardAttempt {
         profile_name: String,
         response: tiny_http::ResponseBox,
     },
+    StaleContinuation {
+        response: tiny_http::ResponseBox,
+    },
     RetryableFailure {
         profile_name: String,
         response: tiny_http::ResponseBox,

@@ -4,12 +4,22 @@ pub(crate) fn runtime_proxy_stale_continuation_message() -> &'static str {
     "Upstream no longer recognizes this conversation chain before output started. Retry from the last user message or restart the Codex turn; Prodex will not send a fresh request without the missing context."
 }
 
-fn runtime_proxy_stale_continuation_http_reply() -> RuntimeResponsesReply {
-    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+pub(crate) fn runtime_proxy_stale_continuation_http_parts() -> RuntimeBufferedResponseParts {
+    build_runtime_proxy_json_error_parts(
         409,
         "stale_continuation",
         runtime_proxy_stale_continuation_message(),
-    ))
+    )
+}
+
+pub(crate) fn runtime_proxy_translate_previous_response_http_parts(
+    parts: RuntimeBufferedResponseParts,
+) -> RuntimeBufferedResponseParts {
+    if extract_runtime_proxy_previous_response_message(&parts.body).is_some() {
+        runtime_proxy_stale_continuation_http_parts()
+    } else {
+        parts
+    }
 }
 
 pub(crate) fn runtime_proxy_precommit_budget_exhausted(
@@ -57,11 +67,9 @@ pub(crate) fn runtime_proxy_final_responses_failure_reply(
     match last_failure {
         Some((failure, false)) => match failure {
             RuntimeUpstreamFailureResponse::Http(response) => match response {
-                RuntimeResponsesReply::Buffered(parts)
-                    if extract_runtime_proxy_previous_response_message(&parts.body).is_some() =>
-                {
-                    runtime_proxy_stale_continuation_http_reply()
-                }
+                RuntimeResponsesReply::Buffered(parts) => RuntimeResponsesReply::Buffered(
+                    runtime_proxy_translate_previous_response_http_parts(parts),
+                ),
                 other => other,
             },
             RuntimeUpstreamFailureResponse::Websocket(_) => {

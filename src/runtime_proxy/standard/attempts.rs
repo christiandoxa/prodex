@@ -161,7 +161,21 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
                 ),
             );
         }
-        let response = build_runtime_proxy_response_from_parts(parts);
+        let previous_response_not_found =
+            extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+        let response = build_runtime_proxy_response_from_parts(
+            runtime_proxy_translate_previous_response_http_parts(parts),
+        );
+
+        if previous_response_not_found {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http stale_continuation reason=previous_response_not_found route=standard profile={profile_name}"
+                ),
+            );
+            return Ok(RuntimeStandardAttempt::StaleContinuation { response });
+        }
 
         if retryable_quota {
             return Ok(RuntimeStandardAttempt::RetryableFailure {
@@ -338,7 +352,26 @@ pub(super) fn attempt_runtime_standard_request(
                 ),
             );
         }
-        let response = build_runtime_proxy_response_from_parts(parts);
+        let previous_response_not_found =
+            extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+        let response = build_runtime_proxy_response_from_parts(
+            runtime_proxy_translate_previous_response_http_parts(parts),
+        );
+
+        if previous_response_not_found {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http stale_continuation reason=previous_response_not_found route={} profile={profile_name}",
+                    if compact_request {
+                        "compact"
+                    } else {
+                        "standard"
+                    }
+                ),
+            );
+            return Ok(RuntimeStandardAttempt::StaleContinuation { response });
+        }
 
         if retryable_quota || retryable_overload {
             return Ok(RuntimeStandardAttempt::RetryableFailure {

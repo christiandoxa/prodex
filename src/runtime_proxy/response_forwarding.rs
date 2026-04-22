@@ -537,7 +537,7 @@ pub(crate) fn write_runtime_streaming_response(
         log_writer_error("headers_start", 0, 0, &err);
         err
     })?;
-    for (name, value) in response.headers {
+    for (name, value) in &response.headers {
         write!(writer, "{name}: {value}\r\n").map_err(|err| {
             log_writer_error("header_line", 0, 0, &err);
             err
@@ -553,6 +553,7 @@ pub(crate) fn write_runtime_streaming_response(
     let mut buffer = [0_u8; 8192];
     let mut total_bytes = 0usize;
     let mut chunk_count = 0usize;
+    let mut sse_pending = Vec::new();
     loop {
         let read = match response.body.read(&mut buffer) {
             Ok(read) => read,
@@ -612,42 +613,48 @@ pub(crate) fn write_runtime_streaming_response(
             );
             return Err(err);
         }
-        chunk_count += 1;
-        total_bytes += read;
-        if chunk_count == 1 {
-            runtime_proxy_log_to_path(
-                &response.log_path,
-                &format!(
-                    "request={} transport=http first_local_chunk profile={} bytes={} elapsed_ms={}",
-                    response.request_id,
-                    response.profile_name,
-                    read,
-                    started_at.elapsed().as_millis()
-                ),
-            );
-            note_runtime_profile_latency_observation(
-                &response.shared,
-                &response.profile_name,
-                RuntimeRouteKind::Responses,
-                "ttfb",
-                started_at.elapsed().as_millis() as u64,
-            );
+        if flush_each_chunk {
+            sse_pending.extend_from_slice(&buffer[..read]);
+            while let Some(event) = runtime_take_next_sse_event_bytes(&mut sse_pending) {
+                let translated =
+                    runtime_translate_previous_response_sse_event_bytes(&event).unwrap_or(event);
+                write_runtime_stream_chunk(
+                    &mut writer,
+                    &response,
+                    &started_at,
+                    &log_writer_error,
+                    &translated,
+                    flush_each_chunk,
+                    &mut chunk_count,
+                    &mut total_bytes,
+                )?;
+            }
+            continue;
         }
-        write!(writer, "{:X}\r\n", read).map_err(|err| {
-            log_writer_error("chunk_size", chunk_count, total_bytes, &err);
-            err
-        })?;
-        writer.write_all(&buffer[..read]).inspect_err(|err| {
-            log_writer_error("chunk_body", chunk_count, total_bytes, err);
-        })?;
-        writer.write_all(b"\r\n").inspect_err(|err| {
-            log_writer_error("chunk_suffix", chunk_count, total_bytes, err);
-        })?;
-        if flush_each_chunk || chunk_count == 1 {
-            writer.flush().inspect_err(|err| {
-                log_writer_error("chunk_flush", chunk_count, total_bytes, err);
-            })?;
-        }
+        write_runtime_stream_chunk(
+            &mut writer,
+            &response,
+            &started_at,
+            &log_writer_error,
+            &buffer[..read],
+            flush_each_chunk,
+            &mut chunk_count,
+            &mut total_bytes,
+        )?;
+    }
+    if flush_each_chunk && !sse_pending.is_empty() {
+        let translated = runtime_translate_previous_response_sse_event_bytes(&sse_pending)
+            .unwrap_or(sse_pending);
+        write_runtime_stream_chunk(
+            &mut writer,
+            &response,
+            &started_at,
+            &log_writer_error,
+            &translated,
+            flush_each_chunk,
+            &mut chunk_count,
+            &mut total_bytes,
+        )?;
     }
     writer.write_all(b"0\r\n\r\n").inspect_err(|err| {
         log_writer_error("trailer", chunk_count, total_bytes, err);
@@ -676,6 +683,111 @@ pub(crate) fn write_runtime_streaming_response(
     Ok(())
 }
 
+fn write_runtime_stream_chunk(
+    writer: &mut Box<dyn Write + Send + 'static>,
+    response: &RuntimeStreamingResponse,
+    started_at: &Instant,
+    log_writer_error: &impl Fn(&str, usize, usize, &io::Error),
+    chunk: &[u8],
+    flush_each_chunk: bool,
+    chunk_count: &mut usize,
+    total_bytes: &mut usize,
+) -> io::Result<()> {
+    if chunk.is_empty() {
+        return Ok(());
+    }
+
+    *chunk_count += 1;
+    *total_bytes += chunk.len();
+    if *chunk_count == 1 {
+        runtime_proxy_log_to_path(
+            &response.log_path,
+            &format!(
+                "request={} transport=http first_local_chunk profile={} bytes={} elapsed_ms={}",
+                response.request_id,
+                response.profile_name,
+                chunk.len(),
+                started_at.elapsed().as_millis()
+            ),
+        );
+        note_runtime_profile_latency_observation(
+            &response.shared,
+            &response.profile_name,
+            RuntimeRouteKind::Responses,
+            "ttfb",
+            started_at.elapsed().as_millis() as u64,
+        );
+    }
+    write!(writer, "{:X}\r\n", chunk.len()).map_err(|err| {
+        log_writer_error("chunk_size", *chunk_count, *total_bytes, &err);
+        err
+    })?;
+    writer.write_all(chunk).inspect_err(|err| {
+        log_writer_error("chunk_body", *chunk_count, *total_bytes, err);
+    })?;
+    writer.write_all(b"\r\n").inspect_err(|err| {
+        log_writer_error("chunk_suffix", *chunk_count, *total_bytes, err);
+    })?;
+    if flush_each_chunk || *chunk_count == 1 {
+        writer.flush().inspect_err(|err| {
+            log_writer_error("chunk_flush", *chunk_count, *total_bytes, err);
+        })?;
+    }
+    Ok(())
+}
+
+fn runtime_take_next_sse_event_bytes(pending: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let mut offset = 0usize;
+    while offset < pending.len() {
+        let line_len = pending[offset..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|index| index + 1)?;
+        let line_end = offset + line_len;
+        let trimmed = pending[offset..line_end].trim_ascii_end();
+        if trimmed.is_empty() {
+            return Some(pending.drain(..line_end).collect());
+        }
+        offset = line_end;
+    }
+    None
+}
+
+fn runtime_translate_previous_response_sse_event_bytes(event: &[u8]) -> Option<Vec<u8>> {
+    let event_text = String::from_utf8_lossy(event);
+    let mut data_lines = Vec::new();
+    for line in event_text.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            break;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            data_lines.push(data.trim_start().to_string());
+        }
+    }
+
+    if !parse_runtime_sse_event(&data_lines).previous_response_not_found {
+        return None;
+    }
+
+    Some(
+        format!(
+            "event: response.failed\r\ndata: {}\r\n\r\n",
+            serde_json::json!({
+                "type": "response.failed",
+                "status": 409,
+                "response": {
+                    "error": {
+                        "code": "stale_continuation",
+                        "message": runtime_proxy_stale_continuation_message(),
+                    }
+                }
+            })
+        )
+        .into_bytes(),
+    )
+}
+
 pub(super) fn runtime_proxy_header_value(
     headers: &reqwest::header::HeaderMap,
     name: &str,
@@ -698,4 +810,45 @@ pub(super) fn runtime_proxy_tungstenite_header_value(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sse_previous_response_event_translation_redacts_raw_error() {
+        let event = concat!(
+            "event: response.failed\r\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"Previous response with id 'resp-123' not found.\"}}}\r\n",
+            "\r\n"
+        )
+        .as_bytes()
+        .to_vec();
+
+        let translated =
+            runtime_translate_previous_response_sse_event_bytes(&event).expect("translation");
+        let text = String::from_utf8(translated).expect("utf8");
+
+        assert!(text.contains("\"code\":\"stale_continuation\""));
+        assert!(!text.contains("previous_response_not_found"));
+    }
+
+    #[test]
+    fn sse_event_boundary_detection_handles_crlf_blank_line() {
+        let mut pending = concat!(
+            "event: response.created\r\n",
+            "data: {\"type\":\"response.created\"}\r\n",
+            "\r\n",
+            "event: response.failed\r\n"
+        )
+        .as_bytes()
+        .to_vec();
+
+        let first = runtime_take_next_sse_event_bytes(&mut pending).expect("first event");
+        let first = String::from_utf8(first).expect("utf8");
+
+        assert!(first.contains("response.created"));
+        assert!(pending.starts_with(b"event: response.failed"));
+    }
 }

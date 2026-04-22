@@ -55,6 +55,7 @@ pub(super) fn proxy_runtime_noncompact_request(
                 )?;
                 Ok(response)
             }
+            RuntimeStandardAttempt::StaleContinuation { response } => Ok(response),
             RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
             RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
                 Ok(build_runtime_proxy_text_response(
@@ -227,6 +228,7 @@ pub(super) fn proxy_runtime_noncompact_request(
                 profile_name: _,
                 response,
             } => return Ok(response),
+            RuntimeStandardAttempt::StaleContinuation { response } => return Ok(response),
             RuntimeStandardAttempt::RetryableFailure {
                 profile_name,
                 response,

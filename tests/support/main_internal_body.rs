@@ -838,6 +838,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlySseHeadersArrayTurnState,
     HttpOnlyCompactOverloaded,
+    HttpOnlyCompactPreviousResponseNotFound,
     HttpOnlyLargeCompactResponse,
     HttpOnlyUsageLimitMessage,
     HttpOnlyUsageLimitMessageLateReadyFifth,
@@ -913,6 +914,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_compact_overloaded() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactOverloaded)
+    }
+
+    fn start_http_compact_previous_response_not_found() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactPreviousResponseNotFound)
     }
 
     fn start_http_large_compact_response() -> Self {
@@ -2155,6 +2160,7 @@ fn handle_runtime_proxy_backend_request(
                 .lock()
                 .expect("responses_bodies poisoned")
                 .push(request_body);
+            let previous_response_id = request_previous_response_id(&request);
             match (account_id.as_str(), mode) {
                 (
                     "main-account",
@@ -2203,6 +2209,31 @@ fn handle_runtime_proxy_backend_request(
                     None,
                     None,
                 ),
+                (_, RuntimeProxyBackendMode::HttpOnlyCompactPreviousResponseNotFound)
+                    if previous_response_id.is_some() =>
+                {
+                    (
+                        "HTTP/1.1 400 Bad Request",
+                        "application/json",
+                        serde_json::json!({
+                            "type": "error",
+                            "status": 400,
+                            "error": {
+                                "type": "invalid_request_error",
+                                "code": "previous_response_not_found",
+                                "message": format!(
+                                    "Previous response with id '{}' not found.",
+                                    previous_response_id.as_deref().unwrap_or_default()
+                                ),
+                                "param": "previous_response_id",
+                            }
+                        })
+                        .to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                }
                 ("second-account", RuntimeProxyBackendMode::HttpOnlyCompactOverloaded) => (
                     "HTTP/1.1 200 OK",
                     "application/json",
@@ -5743,6 +5774,91 @@ fn runtime_proxy_http_tool_output_with_session_surfaces_stale_continuation_witho
     assert!(
         !log.contains("previous_response_fresh_fallback reason=previous_response_not_found"),
         "tool-output-only context misses must not trigger fresh replay: {log}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continuation() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_compact_previous_response_not_found();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            runtime_compact_session_lineage_key("sess-compact"),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("x-openai-subagent", "compact")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-compact-missing",
+                "session_id": "sess-compact",
+                "input": [],
+                "instructions": "compact",
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("compact request should succeed");
+
+    assert_eq!(response.status().as_u16(), 409);
+    let body = response.text().expect("compact body should decode");
+    assert!(
+        body.contains("\"code\":\"stale_continuation\""),
+        "compact previous_response miss should surface stale_continuation: {body}"
+    );
+    assert!(
+        !body.contains("previous_response_not_found"),
+        "compact path should not leak raw previous_response_not_found: {body}"
+    );
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(
+        responses_bodies.len(),
+        1,
+        "compact path should not retry after a stale continuation: {responses_bodies:?}"
+    );
+    assert!(
+        responses_bodies[0].contains("\"previous_response_id\":\"resp-compact-missing\""),
+        "compact request should preserve the original previous_response_id: {}",
+        responses_bodies[0]
     );
 }
 

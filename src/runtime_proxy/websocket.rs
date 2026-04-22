@@ -697,7 +697,18 @@ pub(super) fn send_runtime_proxy_websocket_error(
     code: &str,
     message: &str,
 ) -> Result<()> {
-    let payload = serde_json::json!({
+    let payload = runtime_proxy_websocket_error_payload_text(status, code, message);
+    local_socket
+        .send(WsMessage::Text(payload.into()))
+        .context("failed to send runtime websocket error frame")
+}
+
+pub(super) fn runtime_proxy_websocket_error_payload_text(
+    status: u16,
+    code: &str,
+    message: &str,
+) -> String {
+    serde_json::json!({
         "type": "error",
         "status": status,
         "error": {
@@ -705,10 +716,7 @@ pub(super) fn send_runtime_proxy_websocket_error(
             "message": message,
         }
     })
-    .to_string();
-    local_socket
-        .send(WsMessage::Text(payload.into()))
-        .context("failed to send runtime websocket error frame")
+    .to_string()
 }
 
 pub(super) fn forward_runtime_proxy_websocket_error(
@@ -790,11 +798,52 @@ pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
             &frame.response_ids,
             previous_response_owner_recorded,
         )?;
+        let text = runtime_translate_previous_response_websocket_text_frame(&frame.text);
         local_socket
-            .send(WsMessage::Text(frame.text.into()))
+            .send(WsMessage::Text(text.into()))
             .context("failed to forward buffered runtime websocket text frame")?;
     }
     Ok(())
+}
+
+pub(super) fn runtime_translate_previous_response_websocket_text_frame(payload: &str) -> String {
+    if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
+        return payload.to_string();
+    }
+
+    let message = runtime_proxy_stale_continuation_message();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message);
+    };
+
+    let event_type = runtime_response_event_type_from_value(&value);
+    if event_type.as_deref() == Some("response.failed") {
+        if value.get("response").is_some() {
+            return serde_json::json!({
+                "type": "response.failed",
+                "status": 409,
+                "response": {
+                    "error": {
+                        "code": "stale_continuation",
+                        "message": message,
+                    }
+                }
+            })
+            .to_string();
+        }
+
+        return serde_json::json!({
+            "type": "response.failed",
+            "status": 409,
+            "error": {
+                "code": "stale_continuation",
+                "message": message,
+            }
+        })
+        .to_string();
+    }
+
+    runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
 }
 
 pub(super) fn inspect_runtime_websocket_text_frame(
@@ -876,4 +925,69 @@ pub(super) fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool
 pub(crate) fn is_runtime_terminal_event(payload: &str) -> bool {
     runtime_response_event_type(payload)
         .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_previous_response_frame_translation_preserves_failed_event_shape() {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "status": 400,
+            "error": {
+                "code": "previous_response_not_found",
+                "message": "Previous response with id 'resp-123' not found.",
+            }
+        })
+        .to_string();
+
+        let translated = runtime_translate_previous_response_websocket_text_frame(&payload);
+        let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
+
+        assert_eq!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some("response.failed")
+        );
+        assert_eq!(
+            value.get("status").and_then(serde_json::Value::as_u64),
+            Some(409)
+        );
+        assert_eq!(
+            value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("stale_continuation")
+        );
+        assert!(
+            !translated.contains("previous_response_not_found"),
+            "translated frame should not leak raw previous_response_not_found: {translated}"
+        );
+    }
+
+    #[test]
+    fn websocket_previous_response_plain_text_translation_uses_proxy_error_shape() {
+        let translated = runtime_translate_previous_response_websocket_text_frame(
+            "previous_response_not_found: Previous response with id 'resp-123' not found.",
+        );
+
+        let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
+        assert_eq!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some("error")
+        );
+        assert_eq!(
+            value.get("status").and_then(serde_json::Value::as_u64),
+            Some(409)
+        );
+        assert_eq!(
+            value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("stale_continuation")
+        );
+    }
 }

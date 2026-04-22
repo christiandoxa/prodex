@@ -219,6 +219,7 @@ pub(super) fn proxy_runtime_compact_request(
                     )?;
                     Ok(response)
                 }
+                RuntimeStandardAttempt::StaleContinuation { response } => Ok(response),
                 RuntimeStandardAttempt::RetryableFailure {
                     profile_name,
                     response,
@@ -386,6 +387,7 @@ pub(super) fn proxy_runtime_compact_request(
                     )?;
                     Ok(response)
                 }
+                RuntimeStandardAttempt::StaleContinuation { response } => Ok(response),
                 RuntimeStandardAttempt::RetryableFailure {
                     profile_name,
                     response,
@@ -499,6 +501,7 @@ pub(super) fn proxy_runtime_compact_request(
                 );
                 return Ok(response);
             }
+            RuntimeStandardAttempt::StaleContinuation { response } => return Ok(response),
             RuntimeStandardAttempt::RetryableFailure {
                 profile_name,
                 response,

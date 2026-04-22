@@ -2980,6 +2980,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     &inspected.response_ids,
                     &mut previous_response_owner_recorded,
                 )?;
+                let text = runtime_translate_previous_response_websocket_text_frame(&text);
                 local_socket
                     .send(WsMessage::Text(text.into()))
                     .with_context(|| {
