@@ -1026,7 +1026,8 @@ fn runtime_live_response_turn_states_for_profile(
         .iter()
         .filter(|(_, binding)| binding.profile_name == profile_name)
         .filter_map(|(key, _)| runtime_response_turn_state_lineage_parts(key))
-        .filter_map(|(_, turn_state)| filter.contains(turn_state).then(|| turn_state.to_string()))
+        .filter(|(_, turn_state)| filter.contains(*turn_state))
+        .map(|(_, turn_state)| turn_state.to_string())
         .collect()
 }
 
