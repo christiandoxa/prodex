@@ -1158,6 +1158,41 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
         !body.contains("\"code\":\"stale_continuation\""),
         "post-commit HTTP continuation error must not be rewritten after commit: {body}"
     );
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .statuses
+            .response
+            .get("resp-second")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+            && continuations
+                .statuses
+                .response
+                .get("resp-second-next")
+                .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+            && !continuations
+                .response_profile_bindings
+                .contains_key("resp-second")
+            && !continuations
+                .response_profile_bindings
+                .contains_key("resp-second-next")
+    });
+    assert!(
+        continuations
+            .statuses
+            .response
+            .get("resp-second")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
+        "upstream-confirmed dead previous_response_id should be tombstoned"
+    );
+    assert!(
+        continuations
+            .statuses
+            .response
+            .get("resp-second-next")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
+        "response id emitted before the committed failure should be cleared back out"
+    );
 }
 
 #[test]
@@ -1264,6 +1299,41 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
     assert!(
         !error_message.contains("stale_continuation"),
         "post-commit websocket continuation error must not be rewritten after commit: {error_message}"
+    );
+
+    let continuations = wait_for_runtime_continuations(&paths, |continuations| {
+        continuations
+            .statuses
+            .response
+            .get("resp-second")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+            && continuations
+                .statuses
+                .response
+                .get("resp-second-next")
+                .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
+            && !continuations
+                .response_profile_bindings
+                .contains_key("resp-second")
+            && !continuations
+                .response_profile_bindings
+                .contains_key("resp-second-next")
+    });
+    assert!(
+        continuations
+            .statuses
+            .response
+            .get("resp-second")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
+        "upstream-confirmed dead previous_response_id should be tombstoned"
+    );
+    assert!(
+        continuations
+            .statuses
+            .response
+            .get("resp-second-next")
+            .is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead),
+        "response id emitted before the committed websocket failure should be cleared back out"
     );
 }
 

@@ -249,6 +249,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
                 profile_name.to_string(),
                 &prelude,
                 &response_ids,
+                request_previous_response_id,
                 response_turn_state.as_deref(),
             )),
             request_id,
@@ -281,6 +282,9 @@ impl RuntimeSseTapState {
                     &event.response_ids,
                     RuntimeRouteKind::Responses,
                 );
+                if event.previous_response_not_found {
+                    self.clear_dead_chain(shared, profile_name);
+                }
                 self.data_lines.clear();
                 self.line.clear();
                 continue;
@@ -304,6 +308,9 @@ impl RuntimeSseTapState {
             &event.response_ids,
             RuntimeRouteKind::Responses,
         );
+        if event.previous_response_not_found {
+            self.clear_dead_chain(shared, profile_name);
+        }
     }
 
     fn remember_response_ids(
@@ -359,6 +366,23 @@ impl RuntimeSseTapState {
                 );
             }
         }
+    }
+
+    fn clear_dead_chain(&self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
+        let mut dead_response_ids = self
+            .remembered_response_ids
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(previous_response_id) = self.request_previous_response_id.as_deref() {
+            dead_response_ids.push(previous_response_id.to_string());
+        }
+        let _ = clear_runtime_dead_response_bindings(
+            shared,
+            profile_name,
+            &dead_response_ids,
+            "previous_response_not_found_after_commit",
+        );
     }
 }
 
@@ -442,6 +466,7 @@ impl RuntimeSseTapReader {
         profile_name: String,
         prelude: &[u8],
         remembered_response_ids: &[String],
+        request_previous_response_id: Option<&str>,
         turn_state: Option<&str>,
     ) -> Self {
         let mut state = RuntimeSseTapState {
@@ -450,6 +475,7 @@ impl RuntimeSseTapReader {
                 .map(|_| remembered_response_ids.iter().cloned().collect())
                 .unwrap_or_default(),
             turn_state: turn_state.map(str::to_string),
+            request_previous_response_id: request_previous_response_id.map(str::to_string),
             ..RuntimeSseTapState::default()
         };
         state.observe(&shared, &profile_name, prelude);

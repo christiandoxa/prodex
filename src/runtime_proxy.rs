@@ -2128,6 +2128,7 @@ pub(super) fn attempt_runtime_websocket_request(
     let mut committed = false;
     let mut first_upstream_frame_seen = false;
     let mut buffered_precommit_text_frames = Vec::new();
+    let mut committed_response_ids = BTreeSet::new();
     let mut previous_response_owner_recorded = false;
     let mut precommit_hold_count = 0usize;
     loop {
@@ -2272,6 +2273,9 @@ pub(super) fn attempt_runtime_websocket_request(
                         ),
                     );
                     committed = true;
+                    for frame in &buffered_precommit_text_frames {
+                        committed_response_ids.extend(frame.response_ids.iter().cloned());
+                    }
                     forward_runtime_proxy_buffered_websocket_text_frames(
                         local_socket,
                         &mut buffered_precommit_text_frames,
@@ -2287,6 +2291,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     )?;
                 }
 
+                committed_response_ids.extend(inspected.response_ids.iter().cloned());
                 remember_runtime_websocket_response_ids(
                     RuntimeWebsocketResponseBindingContext {
                         shared,
@@ -2299,6 +2304,24 @@ pub(super) fn attempt_runtime_websocket_request(
                     &inspected.response_ids,
                     &mut previous_response_owner_recorded,
                 )?;
+                let committed_previous_response_not_found = committed
+                    && matches!(
+                        inspected.retry_kind,
+                        Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
+                    );
+                if committed_previous_response_not_found {
+                    let mut dead_response_ids =
+                        committed_response_ids.iter().cloned().collect::<Vec<_>>();
+                    if let Some(previous_response_id) = request_previous_response_id {
+                        dead_response_ids.push(previous_response_id.to_string());
+                    }
+                    let _ = clear_runtime_dead_response_bindings(
+                        shared,
+                        profile_name,
+                        &dead_response_ids,
+                        "previous_response_not_found_after_commit",
+                    );
+                }
                 let text = runtime_translate_previous_response_websocket_text_frame(&text);
                 local_socket
                     .send(WsMessage::Text(text.into()))
@@ -2314,12 +2337,17 @@ pub(super) fn attempt_runtime_websocket_request(
                             inspected.event_type.as_deref().unwrap_or("-"),
                         ),
                     );
-                    websocket_session.store(
-                        upstream_socket,
-                        profile_name,
-                        upstream_turn_state,
-                        inflight_guard.take(),
-                    );
+                    if committed_previous_response_not_found {
+                        let _ = upstream_socket.close(None);
+                        websocket_session.reset();
+                    } else {
+                        websocket_session.store(
+                            upstream_socket,
+                            profile_name,
+                            upstream_turn_state,
+                            inflight_guard.take(),
+                        );
+                    }
                     return Ok(RuntimeWebsocketAttempt::Delivered);
                 }
             }

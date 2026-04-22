@@ -79,6 +79,7 @@ pub(super) struct RuntimeSseTapState {
     pub(super) remembered_response_ids: BTreeSet<String>,
     pub(super) response_ids_with_turn_state: BTreeSet<String>,
     pub(super) turn_state: Option<String>,
+    pub(super) request_previous_response_id: Option<String>,
 }
 
 #[allow(clippy::large_enum_variant)]

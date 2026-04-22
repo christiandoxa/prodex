@@ -2689,6 +2689,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
         prelude,
         &[],
         None,
+        None,
     );
     let mut body = Vec::new();
     reader

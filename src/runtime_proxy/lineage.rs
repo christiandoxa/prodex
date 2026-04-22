@@ -995,6 +995,77 @@ pub(crate) fn clear_runtime_response_turn_state_lineage(
     changed
 }
 
+pub(crate) fn clear_runtime_dead_response_bindings(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    response_ids: &[String],
+    reason: &str,
+) -> Result<bool> {
+    let response_ids = response_ids
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<BTreeSet<_>>();
+    if response_ids.is_empty() {
+        return Ok(false);
+    }
+
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    let mut changed = false;
+    for response_id in &response_ids {
+        if runtime
+            .state
+            .response_profile_bindings
+            .get(*response_id)
+            .is_some_and(|binding| binding.profile_name != profile_name)
+        {
+            continue;
+        }
+        changed = runtime
+            .state
+            .response_profile_bindings
+            .remove(*response_id)
+            .is_some()
+            || changed;
+        changed = clear_runtime_response_turn_state_lineage(
+            &mut runtime.state.response_profile_bindings,
+            response_id,
+        ) || changed;
+        changed = runtime_mark_continuation_status_dead(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::Response,
+            response_id,
+            now,
+        ) || changed;
+    }
+
+    if changed {
+        schedule_runtime_state_save_from_runtime(
+            shared,
+            &runtime,
+            &format!("dead_response_binding_clear:{profile_name}"),
+        );
+        drop(runtime);
+        runtime_proxy_log(
+            shared,
+            format!(
+                "response_bindings_cleared profile={profile_name} count={} first={:?} reason={reason}",
+                response_ids.len(),
+                response_ids.first().copied(),
+            ),
+        );
+    } else {
+        drop(runtime);
+    }
+
+    Ok(changed)
+}
+
 pub(crate) fn remember_runtime_successful_previous_response_owner(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
