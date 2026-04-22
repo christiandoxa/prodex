@@ -529,13 +529,10 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         Some("previous_response_not_found_locked_affinity=1")
     );
     assert_eq!(
-        fields.get("Replay fallback ok").map(String::as_str),
+        fields.get("Legacy prev recovery").map(String::as_str),
         Some("2")
     );
-    assert_eq!(
-        fields.get("Replay fallback blocked").map(String::as_str),
-        Some("1")
-    );
+    assert_eq!(fields.get("Prev fail-closed").map(String::as_str), Some("1"));
     assert_eq!(
         fields.get("Active next step").map(String::as_str),
         Some("Reduce concurrent fresh work or wait for in-flight requests to drain before retrying. Latest load: 12/12.")
@@ -545,8 +542,8 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         Some("Inspect repeated lane=compact markers and trim bursty compact traffic if it is starving responses. Latest load: 4/4.")
     );
     assert_eq!(
-        fields.get("Replay next step").map(String::as_str),
-        Some("Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: previous_response_not_found.")
+        fields.get("Continuation next step").map(String::as_str),
+        Some("Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; fail-closed stale continuation handling blocks fresh replay when continuity is unverified. Start a fresh turn instead of forcing rotation if the owner cannot be recovered. Latest guard: previous_response_not_found.")
     );
     assert_eq!(
         fields.get("Compact committed").map(String::as_str),
@@ -651,7 +648,7 @@ fn runtime_doctor_finalize_summary_prefers_session_replayable_blocked_fallback_d
 
     assert_eq!(
         summary.diagnosis,
-        "Recent session-replayable previous_response_id fallback was blocked before commit. Latest reason: previous_response_not_found. Next step: Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: previous_response_not_found."
+        "Recent session-scoped previous_response_id continuation failed closed before commit. Fresh replay is disabled for stale continuation handling. Latest reason: previous_response_not_found. Next step: Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; fail-closed stale continuation handling blocks fresh replay when continuity is unverified. Start a fresh turn instead of forcing rotation if the owner cannot be recovered. Latest guard: previous_response_not_found."
     );
 }
 
@@ -687,7 +684,7 @@ fn runtime_doctor_finalize_summary_explains_continuation_only_blocked_fallback()
 
     assert_eq!(
         summary.diagnosis,
-        "Recent context-preserving non-replayable follow-up was blocked from fresh fallback before commit. This preserves continuity and should not be treated as a fresh fallback failure. Latest reason: previous_response_not_found. Next step: Inspect `previous_response_not_found`, affinity bindings, and owning-profile chain markers before retrying; this was a context-preserving non-replayable follow-up, not a fresh fallback failure. Start a fresh turn only if context continuity can be abandoned. Latest block: previous_response_not_found."
+        "Recent context-dependent previous_response_id continuation failed closed before commit. Fresh replay is disabled to preserve continuity. Latest reason: previous_response_not_found. Next step: Inspect `previous_response_not_found`, affinity bindings, and owning-profile chain markers before retrying; Prodex failed closed because this follow-up is context-dependent and cannot be replayed safely. Start a fresh turn only if context continuity can be abandoned. Latest guard: previous_response_not_found."
     );
 }
 
@@ -723,28 +720,28 @@ fn runtime_doctor_log_summary_surfaces_continuation_only_blocked_fallback() {
     assert!(
         summary
             .diagnosis
-            .contains("context-preserving non-replayable follow-up"),
+            .contains("context-dependent previous_response_id continuation"),
         "doctor diagnosis should explain continuation-only blocking: {}",
         summary.diagnosis
     );
     assert!(
         summary
             .diagnosis
-            .contains("not be treated as a fresh fallback failure"),
+            .contains("Fresh replay is disabled"),
         "doctor diagnosis should avoid misclassifying the guard: {}",
         summary.diagnosis
     );
     assert_eq!(
-        fields.get("Replay shape").map(String::as_str),
+        fields.get("Continuation shape").map(String::as_str),
         Some("continuation_only")
     );
     assert_eq!(
-        fields.get("Replay blocked shapes").map(String::as_str),
+        fields.get("Fail-closed shapes").map(String::as_str),
         Some("continuation_only=1")
     );
     assert!(
         fields
-            .get("Replay next step")
+            .get("Continuation next step")
             .is_some_and(|value| value.contains("affinity bindings")),
         "doctor fields should point to affinity inspection: {fields:?}"
     );

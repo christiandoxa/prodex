@@ -54,6 +54,27 @@ pub(super) struct RuntimeBrokerTrafficMetrics {
     pub(super) standard: RuntimeBrokerLaneMetrics,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(super) struct RuntimeBrokerContinuationSignalMetrics {
+    pub(super) response: usize,
+    pub(super) turn_state: usize,
+    pub(super) session_id: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(super) struct RuntimeBrokerRouteContinuityMetrics {
+    pub(super) responses: usize,
+    pub(super) compact: usize,
+    pub(super) websocket: usize,
+    pub(super) standard: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(super) struct RuntimeBrokerPreviousResponseContinuityMetrics {
+    pub(super) negative_cache_entries: RuntimeBrokerRouteContinuityMetrics,
+    pub(super) negative_cache_failures: RuntimeBrokerRouteContinuityMetrics,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(super) struct RuntimeBrokerContinuationMetrics {
     pub(super) response_bindings: usize,
@@ -63,6 +84,12 @@ pub(super) struct RuntimeBrokerContinuationMetrics {
     pub(super) verified: usize,
     pub(super) suspect: usize,
     pub(super) dead: usize,
+    #[serde(default)]
+    pub(super) failure_counts: RuntimeBrokerContinuationSignalMetrics,
+    #[serde(default)]
+    pub(super) not_found_streaks: RuntimeBrokerContinuationSignalMetrics,
+    #[serde(default)]
+    pub(super) stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +105,8 @@ pub(super) struct RuntimeBrokerMetrics {
     pub(super) degraded_profiles: usize,
     pub(super) degraded_routes: usize,
     pub(super) continuations: RuntimeBrokerContinuationMetrics,
+    #[serde(default)]
+    pub(super) previous_response_continuity: RuntimeBrokerPreviousResponseContinuityMetrics,
 }
 
 #[derive(Debug, Clone, Serialize)]

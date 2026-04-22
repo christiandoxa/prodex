@@ -192,16 +192,6 @@ pub(crate) fn runtime_websocket_previous_response_reuse_is_nonreplayable(
         && turn_state_override.is_none()
 }
 
-#[allow(dead_code)]
-pub(crate) fn runtime_websocket_previous_response_owner_matches_profile(
-    profile_name: &str,
-    bound_profile: Option<&str>,
-    pinned_profile: Option<&str>,
-) -> bool {
-    bound_profile.is_some_and(|owner| owner == profile_name)
-        || pinned_profile.is_some_and(|owner| owner == profile_name)
-}
-
 pub(crate) fn runtime_websocket_previous_response_reuse_is_stale(
     nonreplayable_previous_response_reuse: bool,
     reuse_terminal_idle: Option<Duration>,

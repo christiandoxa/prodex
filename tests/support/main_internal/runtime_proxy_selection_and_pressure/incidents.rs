@@ -38,10 +38,10 @@ fn runtime_incident_replay_classifies_previous_response_fallback_from_log_text()
     );
     assert_eq!(
         summary.diagnosis,
-        "Recent session-replayable previous_response_id fallback succeeded before commit. Latest reason: previous_response_not_found."
+        "Legacy previous_response recovery marker was observed for session-scoped previous_response_id continuation, but current runtime should fail closed instead of treating this as recoverable. Latest reason: previous_response_not_found. Restart active prodex/codex sessions if this came from a live broker."
     );
     assert_eq!(
-        fields.get("Replay fallback ok").map(String::as_str),
+        fields.get("Legacy prev recovery").map(String::as_str),
         Some("1")
     );
     assert_eq!(

@@ -27,6 +27,30 @@ pub struct RuntimeBrokerContinuationMetrics {
     pub verified: u64,
     pub suspect: u64,
     pub dead: u64,
+    pub failure_counts: RuntimeBrokerContinuationSignalMetrics,
+    pub not_found_streaks: RuntimeBrokerContinuationSignalMetrics,
+    pub stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeBrokerContinuationSignalMetrics {
+    pub response: u64,
+    pub turn_state: u64,
+    pub session_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeBrokerRouteContinuityMetrics {
+    pub responses: u64,
+    pub compact: u64,
+    pub websocket: u64,
+    pub standard: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeBrokerPreviousResponseContinuityMetrics {
+    pub negative_cache_entries: RuntimeBrokerRouteContinuityMetrics,
+    pub negative_cache_failures: RuntimeBrokerRouteContinuityMetrics,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -52,6 +76,7 @@ pub struct RuntimeBrokerSnapshot {
     pub degraded_profiles: u64,
     pub degraded_routes: u64,
     pub continuations: RuntimeBrokerContinuationMetrics,
+    pub previous_response_continuity: RuntimeBrokerPreviousResponseContinuityMetrics,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +172,52 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "prodex_runtime_broker_continuation_bindings",
             "Continuation bindings grouped by lifecycle.",
             &self.snapshot.continuations,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_continuation_signal_family(
+            &mut self.out,
+            "prodex_runtime_broker_continuation_failure_counts",
+            "Current aggregate continuity failure counts stored on continuation statuses by binding kind.",
+            &self.snapshot.continuations.failure_counts,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_continuation_signal_family(
+            &mut self.out,
+            "prodex_runtime_broker_continuation_not_found_streaks",
+            "Current aggregate not-found streaks stored on continuation statuses by binding kind.",
+            &self.snapshot.continuations.not_found_streaks,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_continuation_signal_family(
+            &mut self.out,
+            "prodex_runtime_broker_continuation_stale_verified_bindings",
+            "Verified continuation statuses that have aged past the stale horizon by binding kind.",
+            &self.snapshot.continuations.stale_verified_bindings,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_route_continuity_family(
+            &mut self.out,
+            "prodex_runtime_broker_previous_response_negative_cache_entries",
+            "Current active previous_response not-found negative-cache entries by route.",
+            &self
+                .snapshot
+                .previous_response_continuity
+                .negative_cache_entries,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_route_continuity_family(
+            &mut self.out,
+            "prodex_runtime_broker_previous_response_negative_cache_failures",
+            "Current effective previous_response not-found negative-cache failure score by route.",
+            &self
+                .snapshot
+                .previous_response_continuity
+                .negative_cache_failures,
             self.snapshot.broker_key.as_str(),
             self.snapshot.listen_addr.as_str(),
         );
@@ -393,6 +464,63 @@ fn render_continuation_lifecycle_family(
     }
 }
 
+fn render_continuation_signal_family(
+    out: &mut String,
+    metric_name: &str,
+    help: &str,
+    metrics: &RuntimeBrokerContinuationSignalMetrics,
+    broker_key: &str,
+    listen_addr: &str,
+) {
+    push_help(out, metric_name, help);
+    push_type(out, metric_name, "gauge");
+    for (kind_label, value) in [
+        ("response", metrics.response),
+        ("turn_state", metrics.turn_state),
+        ("session_id", metrics.session_id),
+    ] {
+        push_gauge(
+            out,
+            metric_name,
+            labels(&[
+                ("broker_key", broker_key),
+                ("listen_addr", listen_addr),
+                ("binding_kind", kind_label),
+            ]),
+            value as f64,
+        );
+    }
+}
+
+fn render_route_continuity_family(
+    out: &mut String,
+    metric_name: &str,
+    help: &str,
+    metrics: &RuntimeBrokerRouteContinuityMetrics,
+    broker_key: &str,
+    listen_addr: &str,
+) {
+    push_help(out, metric_name, help);
+    push_type(out, metric_name, "gauge");
+    for (route, value) in [
+        ("responses", metrics.responses),
+        ("compact", metrics.compact),
+        ("websocket", metrics.websocket),
+        ("standard", metrics.standard),
+    ] {
+        push_gauge(
+            out,
+            metric_name,
+            labels(&[
+                ("broker_key", broker_key),
+                ("listen_addr", listen_addr),
+                ("route", route),
+            ]),
+            value as f64,
+        );
+    }
+}
+
 fn render_inflight_family(
     out: &mut String,
     metric_name: &str,
@@ -557,6 +685,35 @@ mod tests {
                 verified: 3,
                 suspect: 2,
                 dead: 1,
+                failure_counts: RuntimeBrokerContinuationSignalMetrics {
+                    response: 5,
+                    turn_state: 2,
+                    session_id: 1,
+                },
+                not_found_streaks: RuntimeBrokerContinuationSignalMetrics {
+                    response: 3,
+                    turn_state: 1,
+                    session_id: 0,
+                },
+                stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics {
+                    response: 1,
+                    turn_state: 0,
+                    session_id: 1,
+                },
+            },
+            previous_response_continuity: RuntimeBrokerPreviousResponseContinuityMetrics {
+                negative_cache_entries: RuntimeBrokerRouteContinuityMetrics {
+                    responses: 2,
+                    compact: 1,
+                    websocket: 1,
+                    standard: 0,
+                },
+                negative_cache_failures: RuntimeBrokerRouteContinuityMetrics {
+                    responses: 4,
+                    compact: 2,
+                    websocket: 1,
+                    standard: 0,
+                },
             },
         }
     }
@@ -585,6 +742,21 @@ mod tests {
         ));
         assert!(rendered.contains(
             "prodex_runtime_broker_continuation_bindings{broker_key=\"broker-123\",lifecycle=\"verified\",listen_addr=\"127.0.0.1:8080\"} 3"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_failure_counts{binding_kind=\"response\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 5"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_not_found_streaks{binding_kind=\"turn_state\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 1"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_stale_verified_bindings{binding_kind=\"session_id\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 1"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_previous_response_negative_cache_entries{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\",route=\"responses\"} 2"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_previous_response_negative_cache_failures{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\",route=\"compact\"} 2"
         ));
         assert!(rendered.contains("broker_key=\"broker-123\""));
         assert!(rendered.contains("listen_addr=\"127.0.0.1:8080\""));

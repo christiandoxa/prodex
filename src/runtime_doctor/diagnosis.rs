@@ -148,7 +148,7 @@ fn runtime_doctor_admission_pressure_load(summary: &RuntimeDoctorSummary, marker
     }
 }
 
-pub(crate) fn runtime_doctor_context_fallback_blocked_next_step(
+pub(crate) fn runtime_doctor_previous_response_fail_closed_next_step(
     summary: &RuntimeDoctorSummary,
 ) -> String {
     let reason = runtime_doctor_marker_last_field(
@@ -157,13 +157,13 @@ pub(crate) fn runtime_doctor_context_fallback_blocked_next_step(
         "reason",
     )
     .unwrap_or("unknown_reason");
-    if runtime_doctor_has_continuation_only_fallback_block(summary) {
+    if runtime_doctor_has_context_dependent_fail_closed(summary) {
         return format!(
-            "Inspect `previous_response_not_found`, affinity bindings, and owning-profile chain markers before retrying; this was a context-preserving non-replayable follow-up, not a fresh fallback failure. Start a fresh turn only if context continuity can be abandoned. Latest block: {reason}."
+            "Inspect `previous_response_not_found`, affinity bindings, and owning-profile chain markers before retrying; Prodex failed closed because this follow-up is context-dependent and cannot be replayed safely. Start a fresh turn only if context continuity can be abandoned. Latest guard: {reason}."
         );
     }
     format!(
-        "Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; if continuity stays unverified, start a fresh turn instead of forcing rotation. Latest block: {reason}."
+        "Inspect `previous_response_not_found` and `chain_dead_upstream_confirmed` for the owning context before retrying; fail-closed stale continuation handling blocks fresh replay when continuity is unverified. Start a fresh turn instead of forcing rotation if the owner cannot be recovered. Latest guard: {reason}."
     )
 }
 
@@ -264,6 +264,7 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
             &[
                 "previous_response_not_found",
                 "previous_response_negative_cache",
+                "previous_response_fresh_fallback",
                 "chain_retried_owner",
                 "chain_dead_upstream_confirmed",
                 "stale_continuation",
@@ -384,12 +385,12 @@ pub(crate) fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSum
     summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
 }
 
-fn runtime_doctor_previous_response_fresh_fallback_label(
+fn runtime_doctor_previous_response_continuation_label(
     summary: &RuntimeDoctorSummary,
     marker: &str,
 ) -> String {
     let request_shape = if marker == "previous_response_fresh_fallback_blocked"
-        && runtime_doctor_has_continuation_only_fallback_block(summary)
+        && runtime_doctor_has_context_dependent_fail_closed(summary)
     {
         Some("continuation_only".to_string())
     } else {
@@ -404,11 +405,12 @@ fn runtime_doctor_previous_response_fresh_fallback_label(
             })
     };
     match request_shape.as_deref() {
-        Some("session_replayable") => "session-replayable previous_response_id fallback",
-        Some("replayable_input") => "replayable-input previous_response_id fallback",
-        Some("tool_output_only") => "tool-output-only previous_response_id fallback",
-        Some("continuation_only") => "continuation-only previous_response_id fallback",
-        _ => "previous_response_id fresh fallback",
+        Some("session_replayable") => "session-scoped previous_response_id continuation",
+        Some("empty_input") => "empty-input previous_response_id continuation",
+        Some("replayable_input") => "input-only previous_response_id continuation",
+        Some("tool_output_only") => "tool-output previous_response_id continuation",
+        Some("continuation_only") => "context-dependent previous_response_id continuation",
+        _ => "previous_response_id continuation",
     }
     .to_string()
 }
@@ -437,7 +439,7 @@ fn runtime_doctor_previous_response_fresh_fallback_blocked_shape_count(
     0
 }
 
-fn runtime_doctor_has_continuation_only_fallback_block(summary: &RuntimeDoctorSummary) -> bool {
+fn runtime_doctor_has_context_dependent_fail_closed(summary: &RuntimeDoctorSummary) -> bool {
     runtime_doctor_previous_response_fresh_fallback_blocked_shape_count(
         summary,
         "continuation_only",
@@ -636,7 +638,7 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
     } else if runtime_doctor_marker_count(summary, "profile_bad_pairing") > 0 {
         "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
     } else if runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked") > 0 {
-        "Recent compact lineage guard blocked a fresh fallback so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
+        "Recent compact lineage guard failed closed so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
     } else if runtime_doctor_marker_count(summary, "compact_pressure_shed") > 0 {
         "Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic.".to_string()
     } else if runtime_doctor_marker_count(summary, "chain_dead_upstream_confirmed") > 0 {
@@ -649,7 +651,7 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         )
     } else if runtime_doctor_marker_count(summary, "stale_continuation") > 0 {
         format!(
-            "Recent stale continuation was surfaced to Codex. Latest reason: {}.",
+            "Recent stale continuation was surfaced to Codex via fail-closed handling. Latest reason: {}.",
             summary
                 .latest_stale_continuation_reason
                 .clone()
@@ -665,26 +667,28 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         )
     } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback_blocked") > 0 {
         let marker = "previous_response_fresh_fallback_blocked";
-        let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
+        let label = runtime_doctor_previous_response_continuation_label(summary, marker);
         let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
             .unwrap_or("inspect previous_response_fresh_fallback_blocked markers");
-        if runtime_doctor_has_continuation_only_fallback_block(summary) {
+        if runtime_doctor_has_context_dependent_fail_closed(summary) {
             format!(
-                "Recent context-preserving non-replayable follow-up was blocked from fresh fallback before commit. This preserves continuity and should not be treated as a fresh fallback failure. Latest reason: {reason}. Next step: {}",
-                runtime_doctor_context_fallback_blocked_next_step(summary)
+                "Recent context-dependent previous_response_id continuation failed closed before commit. Fresh replay is disabled to preserve continuity. Latest reason: {reason}. Next step: {}",
+                runtime_doctor_previous_response_fail_closed_next_step(summary)
             )
         } else {
             format!(
-                "Recent {label} was blocked before commit. Latest reason: {reason}. Next step: {}",
-                runtime_doctor_context_fallback_blocked_next_step(summary)
+                "Recent {label} failed closed before commit. Fresh replay is disabled for stale continuation handling. Latest reason: {reason}. Next step: {}",
+                runtime_doctor_previous_response_fail_closed_next_step(summary)
             )
         }
     } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback") > 0 {
         let marker = "previous_response_fresh_fallback";
-        let label = runtime_doctor_previous_response_fresh_fallback_label(summary, marker);
+        let label = runtime_doctor_previous_response_continuation_label(summary, marker);
         let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
             .unwrap_or("inspect previous_response_fresh_fallback markers");
-        format!("Recent {label} succeeded before commit. Latest reason: {reason}.")
+        format!(
+            "Legacy previous_response recovery marker was observed for {label}, but current runtime should fail closed instead of treating this as recoverable. Latest reason: {reason}. Restart active prodex/codex sessions if this came from a live broker."
+        )
     } else if runtime_doctor_marker_count(summary, "previous_response_not_found") > 0 {
         format!(
             "Recent previous_response_id continuity failures were observed: {}.",

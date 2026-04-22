@@ -57,12 +57,13 @@ pub(crate) fn runtime_request_previous_response_id_from_value(
         .map(str::to_string)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_request_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
     let _ = request;
     // Hard fuse: runtime must never synthesize a fresh request from a chained
-    // previous_response continuation. Keep stale call sites harmless.
+    // previous_response continuation. Tests still call this helper directly.
     None
 }
 
@@ -80,13 +81,6 @@ pub(crate) fn runtime_request_without_turn_state_header(
             .collect(),
         body: request.body.clone(),
     }
-}
-
-pub(crate) fn runtime_request_without_previous_response_affinity(
-    request: &RuntimeProxyRequest,
-) -> Option<RuntimeProxyRequest> {
-    let request = runtime_request_without_previous_response_id(request)?;
-    Some(runtime_request_without_turn_state_header(&request))
 }
 
 pub(crate) fn runtime_request_value_requires_previous_response_affinity(
@@ -316,21 +310,6 @@ impl RuntimePreviousResponseFreshFallbackState<'_> {
     }
 }
 
-pub(crate) fn reset_runtime_previous_response_fresh_fallback_state(
-    mut state: RuntimePreviousResponseFreshFallbackState<'_>,
-) {
-    state.reset();
-}
-
-pub(crate) fn apply_runtime_responses_previous_response_fresh_fallback(
-    request: &mut RuntimeProxyRequest,
-    fresh_request: RuntimeProxyRequest,
-    fallback_state: RuntimePreviousResponseFreshFallbackState<'_>,
-) {
-    *request = fresh_request;
-    reset_runtime_previous_response_fresh_fallback_state(fallback_state);
-}
-
 pub(crate) struct RuntimeWebsocketFreshFallbackTarget<'a> {
     pub(crate) request_text: &'a mut String,
     pub(crate) handshake_request: &'a mut RuntimeProxyRequest,
@@ -340,12 +319,12 @@ pub(crate) struct RuntimeWebsocketFreshFallbackTarget<'a> {
 pub(crate) fn apply_runtime_websocket_previous_response_fresh_fallback(
     fresh_request_text: String,
     target: RuntimeWebsocketFreshFallbackTarget<'_>,
-    fallback_state: RuntimePreviousResponseFreshFallbackState<'_>,
+    mut fallback_state: RuntimePreviousResponseFreshFallbackState<'_>,
 ) {
     *target.request_text = fresh_request_text;
     *target.handshake_request = runtime_request_without_turn_state_header(target.handshake_request);
     target.websocket_reuse_fresh_retry_profiles.clear();
-    reset_runtime_previous_response_fresh_fallback_state(fallback_state);
+    fallback_state.reset();
 }
 
 pub(crate) fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {

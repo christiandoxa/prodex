@@ -163,9 +163,9 @@ const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Stale continuations", "stale_continuation"),
     ("Prev not found", "previous_response_not_found"),
     ("Prev negative cache", "previous_response_negative_cache"),
-    ("Replay fallback ok", "previous_response_fresh_fallback"),
+    ("Legacy prev recovery", "previous_response_fresh_fallback"),
     (
-        "Replay fallback blocked",
+        "Prev fail-closed",
         "previous_response_fresh_fallback_blocked",
     ),
     ("Compact guard", "compact_fresh_fallback_blocked"),

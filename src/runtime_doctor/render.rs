@@ -308,12 +308,10 @@ fn runtime_doctor_push_marker_detail_rows(
                 ),
             );
     }
-    if marker == "previous_response_fresh_fallback"
-        || marker == "previous_response_fresh_fallback_blocked"
-    {
+    if marker == "previous_response_fresh_fallback" {
         fields
             .push(
-                "Replay shape",
+                "Legacy fallback shape",
                 summary
                     .marker_last_fields
                     .get(marker)
@@ -322,27 +320,49 @@ fn runtime_doctor_push_marker_detail_rows(
                     .unwrap_or_else(|| "-".to_string()),
             )
             .push(
-                "Replay reason",
+                "Legacy fallback reason",
                 summary
                     .marker_last_fields
                     .get(marker)
                     .and_then(|fields| fields.get("reason"))
                     .cloned()
                     .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Legacy fallback note",
+                "Current runtime should fail closed; restart active prodex/codex sessions if this marker came from a live broker.",
             );
-        if marker == "previous_response_fresh_fallback_blocked" {
-            fields
-                .push(
-                    "Replay blocked shapes",
-                    diagnosis::runtime_doctor_count_breakdown(
-                        &summary.previous_response_fresh_fallback_blocked_by_request_shape,
-                    ),
-                )
-                .push(
-                    "Replay next step",
-                    diagnosis::runtime_doctor_context_fallback_blocked_next_step(summary),
-                );
-        }
+    }
+    if marker == "previous_response_fresh_fallback_blocked" {
+        fields
+            .push(
+                "Continuation shape",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("request_shape"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Continuation reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Fail-closed shapes",
+                diagnosis::runtime_doctor_count_breakdown(
+                    &summary.previous_response_fresh_fallback_blocked_by_request_shape,
+                ),
+            )
+            .push(
+                "Continuation next step",
+                diagnosis::runtime_doctor_previous_response_fail_closed_next_step(summary),
+            );
     }
     if marker == "stale_continuation" {
         fields
