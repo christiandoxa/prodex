@@ -138,48 +138,136 @@ pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffi
                 .is_some_and(|profile_name| profile_name == affinity.candidate_name))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeQuotaBlockedAffinityReleasePolicy {
+    KeepAffinity,
+    ReleaseAffinity,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeQuotaBlockedAffinityReleaseRequest<'a> {
+    pub(crate) affinity: RuntimeCandidateAffinity<'a>,
+    pub(crate) fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+}
+
+pub(crate) fn runtime_quota_blocked_affinity_release_policy(
+    request: RuntimeQuotaBlockedAffinityReleaseRequest<'_>,
+) -> RuntimeQuotaBlockedAffinityReleasePolicy {
+    if runtime_previous_response_fresh_fallback_policy(
+        RuntimePreviousResponseFreshFallbackPolicyInput {
+            has_previous_response_context: request.fresh_fallback_shape.is_some(),
+            request_requires_locked_previous_response_affinity: false,
+            fresh_fallback_shape: request.fresh_fallback_shape,
+        },
+    )
+    .is_fail_closed()
+    {
+        // Fail closed: classified previous_response continuations stay chained to the owner.
+        return RuntimeQuotaBlockedAffinityReleasePolicy::KeepAffinity;
+    }
+
+    if request
+        .affinity
+        .strict_affinity_profile
+        .is_some_and(|profile_name| profile_name == request.affinity.candidate_name)
+        || request
+            .affinity
+            .turn_state_profile
+            .is_some_and(|profile_name| profile_name == request.affinity.candidate_name)
+        || (request.affinity.route_kind == RuntimeRouteKind::Compact
+            && request
+                .affinity
+                .session_profile
+                .is_some_and(|profile_name| profile_name == request.affinity.candidate_name))
+    {
+        return RuntimeQuotaBlockedAffinityReleasePolicy::KeepAffinity;
+    }
+
+    RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity
+}
+
 pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
     affinity: RuntimeCandidateAffinity<'_>,
     _request_requires_previous_response_affinity: bool,
     fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    if fresh_fallback_shape.is_some() {
-        // Fail closed: previous_response continuations stay chained to the owning profile.
-        return false;
-    }
+    matches!(
+        runtime_quota_blocked_affinity_release_policy(RuntimeQuotaBlockedAffinityReleaseRequest {
+            affinity,
+            fresh_fallback_shape,
+        }),
+        RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity
+    )
+}
 
-    if affinity
-        .strict_affinity_profile
-        .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-        || affinity
-            .turn_state_profile
-            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-        || (affinity.route_kind == RuntimeRouteKind::Compact
-            && affinity
-                .session_profile
-                .is_some_and(|profile_name| profile_name == affinity.candidate_name))
-    {
-        return false;
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RuntimePreviousResponseNotFoundFallbackPolicy {
+    pub(crate) stale_continuation: RuntimePreviousResponseStaleContinuationPolicy,
+    pub(crate) fresh_fallback: RuntimePreviousResponseFreshFallbackPolicy,
+}
 
-    if affinity.trusted_previous_response_affinity
-        && affinity
-            .pinned_profile
-            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-    {
-        return true;
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimePreviousResponseStaleContinuationPolicy {
+    NotApplicable,
+    RetryWithTurnState,
+    FailClosed,
+}
 
-    true
+impl RuntimePreviousResponseStaleContinuationPolicy {
+    pub(crate) fn requires_stale_continuation(self) -> bool {
+        matches!(self, Self::FailClosed)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimePreviousResponseNotFoundFallbackRequest<'a> {
+    pub(crate) previous_response_id: Option<&'a str>,
+    pub(crate) has_turn_state_retry: bool,
+    pub(crate) request_requires_locked_previous_response_affinity: bool,
+    pub(crate) previous_response_fresh_fallback_used: bool,
+    pub(crate) fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+}
+
+pub(crate) fn runtime_previous_response_not_found_fallback_policy(
+    request: RuntimePreviousResponseNotFoundFallbackRequest<'_>,
+) -> RuntimePreviousResponseNotFoundFallbackPolicy {
+    let stale_continuation = match (request.previous_response_id, request.has_turn_state_retry) {
+        (Some(_), false) => RuntimePreviousResponseStaleContinuationPolicy::FailClosed,
+        (Some(_), true) => RuntimePreviousResponseStaleContinuationPolicy::RetryWithTurnState,
+        (None, _) => RuntimePreviousResponseStaleContinuationPolicy::NotApplicable,
+    };
+    let fresh_fallback = runtime_previous_response_fresh_fallback_policy(
+        RuntimePreviousResponseFreshFallbackPolicyInput {
+            has_previous_response_context: request.previous_response_id.is_some()
+                || request.previous_response_fresh_fallback_used,
+            request_requires_locked_previous_response_affinity: request
+                .request_requires_locked_previous_response_affinity,
+            fresh_fallback_shape: request.fresh_fallback_shape,
+        },
+    );
+
+    RuntimePreviousResponseNotFoundFallbackPolicy {
+        stale_continuation,
+        fresh_fallback,
+    }
 }
 
 pub(crate) fn runtime_quota_blocked_previous_response_fresh_fallback_allowed(
-    _previous_response_id: Option<&str>,
-    _trusted_previous_response_affinity: bool,
-    _previous_response_fresh_fallback_used: bool,
-    _fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    previous_response_id: Option<&str>,
+    trusted_previous_response_affinity: bool,
+    previous_response_fresh_fallback_used: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    false
+    runtime_previous_response_fresh_fallback_policy(
+        RuntimePreviousResponseFreshFallbackPolicyInput {
+            has_previous_response_context: previous_response_id.is_some()
+                || trusted_previous_response_affinity
+                || previous_response_fresh_fallback_used,
+            request_requires_locked_previous_response_affinity: false,
+            fresh_fallback_shape,
+        },
+    )
+    .allows_fresh_fallback()
 }
 
 pub(crate) fn runtime_websocket_previous_response_reuse_is_nonreplayable(
@@ -205,9 +293,25 @@ pub(crate) fn runtime_websocket_previous_response_reuse_is_stale(
 
 #[allow(dead_code)]
 pub(crate) fn runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed(
-    _request: RuntimeWebsocketReuseWatchdogPreviousResponseFallback<'_>,
+    request: RuntimeWebsocketReuseWatchdogPreviousResponseFallback<'_>,
 ) -> bool {
-    false
+    let profile_matches_bound_owner = request.bound_profile == Some(request.profile_name);
+    let profile_matches_pinned_owner = request.pinned_profile == Some(request.profile_name);
+
+    runtime_previous_response_fresh_fallback_policy(
+        RuntimePreviousResponseFreshFallbackPolicyInput {
+            has_previous_response_context: request.previous_response_id.is_some()
+                || request.previous_response_fresh_fallback_used
+                || request.trusted_previous_response_affinity
+                || profile_matches_bound_owner
+                || profile_matches_pinned_owner
+                || request.request_turn_state.is_some(),
+            request_requires_locked_previous_response_affinity: request
+                .request_requires_previous_response_affinity,
+            fresh_fallback_shape: request.fresh_fallback_shape,
+        },
+    )
+    .allows_fresh_fallback()
 }
 
 #[allow(dead_code)]
@@ -224,22 +328,43 @@ pub(crate) struct RuntimeWebsocketReuseWatchdogPreviousResponseFallback<'a> {
     pub(crate) fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_websocket_previous_response_not_found_requires_stale_continuation(
     previous_response_id: Option<&str>,
     has_turn_state_retry: bool,
-    _request_requires_locked_previous_response_affinity: bool,
-    _fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    request_requires_locked_previous_response_affinity: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    previous_response_id.is_some() && !has_turn_state_retry
+    runtime_previous_response_not_found_fallback_policy(
+        RuntimePreviousResponseNotFoundFallbackRequest {
+            previous_response_id,
+            has_turn_state_retry,
+            request_requires_locked_previous_response_affinity,
+            previous_response_fresh_fallback_used: false,
+            fresh_fallback_shape,
+        },
+    )
+    .stale_continuation
+    .requires_stale_continuation()
 }
 
 pub(crate) fn runtime_previous_response_not_found_fresh_fallback_allowed(
-    _previous_response_id: Option<&str>,
-    _previous_response_fresh_fallback_used: bool,
-    _request_requires_locked_previous_response_affinity: bool,
-    _fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    previous_response_id: Option<&str>,
+    previous_response_fresh_fallback_used: bool,
+    request_requires_locked_previous_response_affinity: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
-    false
+    runtime_previous_response_not_found_fallback_policy(
+        RuntimePreviousResponseNotFoundFallbackRequest {
+            previous_response_id,
+            has_turn_state_retry: false,
+            request_requires_locked_previous_response_affinity,
+            previous_response_fresh_fallback_used,
+            fresh_fallback_shape,
+        },
+    )
+    .fresh_fallback
+    .allows_fresh_fallback()
 }
 
 pub(crate) fn runtime_quota_precommit_floor_percent(route_kind: RuntimeRouteKind) -> i64 {

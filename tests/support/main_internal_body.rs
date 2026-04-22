@@ -4464,6 +4464,21 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
             executable_sha256: None,
         },
     );
+    let mut log = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&proxy.log_path)
+        .expect("runtime log should open for append");
+    writeln!(
+        log,
+        "[2026-04-22 10:00:00.000 +00:00] request=7 transport=http route=responses stale_continuation reason=previous_response_not_found profile=main"
+    )
+    .expect("runtime log should append stale continuation");
+    writeln!(
+        log,
+        "[2026-04-22 10:00:00.001 +00:00] request=7 transport=websocket route=websocket websocket_session=17 chain_dead_upstream_confirmed profile=main previous_response_id=resp-7 reason=previous_response_not_found_locked_affinity via=- event=-"
+    )
+    .expect("runtime log should append chain dead marker");
+    drop(log);
 
     let response = Client::builder()
         .build()
@@ -4494,6 +4509,19 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     assert_eq!(metrics.traffic.responses.lane_limit_rejections_total, 0);
     assert_eq!(metrics.local_overload_backoff_remaining_seconds, 0);
     assert_eq!(metrics.continuations.response_bindings, 0);
+    assert_eq!(
+        metrics.continuity_failure_reasons.stale_continuation,
+        BTreeMap::from([("previous_response_not_found".to_string(), 1)])
+    );
+    assert_eq!(
+        metrics
+            .continuity_failure_reasons
+            .chain_dead_upstream_confirmed,
+        BTreeMap::from([(
+            "previous_response_not_found_locked_affinity".to_string(),
+            1,
+        )])
+    );
 }
 
 #[test]
@@ -4542,6 +4570,21 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
             executable_sha256: None,
         },
     );
+    let mut log = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&proxy.log_path)
+        .expect("runtime log should open for append");
+    writeln!(
+        log,
+        "[2026-04-22 10:00:00.010 +00:00] request=9 transport=websocket route=websocket websocket_session=21 chain_retried_owner profile=main previous_response_id=resp-9 delay_ms=20 reason=previous_response_not_found_locked_affinity via=-"
+    )
+    .expect("runtime log should append chain retry marker");
+    writeln!(
+        log,
+        "[2026-04-22 10:00:00.011 +00:00] request=9 websocket_session=21 stale_continuation reason=websocket_reuse_watchdog_locked_affinity profile=main event=timeout"
+    )
+    .expect("runtime log should append stale continuation marker");
+    drop(log);
 
     let response = Client::builder()
         .build()
@@ -4572,8 +4615,15 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
     assert!(body.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
     assert!(body.contains("prodex_runtime_broker_continuation_binding_counts"));
+    assert!(body.contains("prodex_runtime_broker_continuity_failures_total"));
     assert!(body.contains("binding_kind=\"response\""));
     assert!(body.contains("lifecycle=\"warm\""));
+    assert!(body.contains(
+        "event=\"chain_retried_owner\",listen_addr=\""
+    ));
+    assert!(body.contains(
+        "reason=\"websocket_reuse_watchdog_locked_affinity\""
+    ));
 }
 
 #[test]

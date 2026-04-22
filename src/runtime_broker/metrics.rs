@@ -116,6 +116,22 @@ fn add_route_continuity_signal(
     true
 }
 
+fn runtime_broker_continuity_failure_reason_metrics(
+    log_path: &Path,
+) -> RuntimeBrokerContinuityFailureReasonMetrics {
+    // Admin metrics scrapes can afford a full-run log scan so Prometheus can
+    // expose cumulative reason counters without adding hot-path bookkeeping.
+    let Ok(log) = fs::read(log_path) else {
+        return RuntimeBrokerContinuityFailureReasonMetrics::default();
+    };
+    let summary = summarize_runtime_log_tail(&log);
+    RuntimeBrokerContinuityFailureReasonMetrics {
+        chain_retried_owner: summary.chain_retried_owner_by_reason,
+        chain_dead_upstream_confirmed: summary.chain_dead_upstream_confirmed_by_reason,
+        stale_continuation: summary.stale_continuation_by_reason,
+    }
+}
+
 pub(crate) fn runtime_broker_prometheus_snapshot(
     metadata: &RuntimeBrokerMetadata,
     metrics: &RuntimeBrokerMetrics,
@@ -159,6 +175,7 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             degraded_routes: self.metrics.degraded_routes as u64,
             continuations: self.build_continuations(),
             previous_response_continuity: self.build_previous_response_continuity(),
+            continuity_failure_reasons: self.build_continuity_failure_reasons(),
         }
     }
 
@@ -233,6 +250,25 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
         }
     }
 
+    fn build_continuity_failure_reasons(
+        &self,
+    ) -> runtime_metrics::RuntimeBrokerContinuityFailureReasonMetrics {
+        runtime_metrics::RuntimeBrokerContinuityFailureReasonMetrics {
+            chain_retried_owner: Self::build_reason_counts(
+                &self.metrics.continuity_failure_reasons.chain_retried_owner,
+            ),
+            chain_dead_upstream_confirmed: Self::build_reason_counts(
+                &self
+                    .metrics
+                    .continuity_failure_reasons
+                    .chain_dead_upstream_confirmed,
+            ),
+            stale_continuation: Self::build_reason_counts(
+                &self.metrics.continuity_failure_reasons.stale_continuation,
+            ),
+        }
+    }
+
     fn build_lane(lane: &RuntimeBrokerLaneMetrics) -> runtime_metrics::RuntimeBrokerLaneMetrics {
         runtime_metrics::RuntimeBrokerLaneMetrics {
             active: lane.active as u64,
@@ -252,6 +288,13 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             websocket: metrics.websocket as u64,
             standard: metrics.standard as u64,
         }
+    }
+
+    fn build_reason_counts(metrics: &BTreeMap<String, usize>) -> BTreeMap<String, u64> {
+        metrics
+            .iter()
+            .map(|(reason, count)| (reason.clone(), *count as u64))
+            .collect()
     }
 }
 
@@ -360,5 +403,56 @@ pub(crate) fn runtime_broker_metrics_snapshot(
             &runtime.profile_health,
             now,
         ),
+        continuity_failure_reasons: runtime_broker_continuity_failure_reason_metrics(
+            &shared.log_path,
+        ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_log_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "prodex-runtime-broker-metrics-{name}-{}-{}.log",
+            std::process::id(),
+            Local::now().timestamp_nanos_opt().unwrap_or_default()
+        ))
+    }
+
+    #[test]
+    fn continuity_failure_reason_metrics_follow_runtime_log_summary() {
+        let log_path = temp_log_path("reasons");
+        fs::write(
+            &log_path,
+            concat!(
+                "[2026-04-22 10:00:00.000 +00:00] request=3 transport=websocket route=websocket websocket_session=sess-1 chain_retried_owner profile=second previous_response_id=resp-second delay_ms=20 reason=previous_response_not_found_locked_affinity via=-\n",
+                "[2026-04-22 10:00:00.001 +00:00] request=3 websocket_session=sess-1 stale_continuation reason=websocket_reuse_watchdog_locked_affinity profile=second event=timeout\n",
+                "[2026-04-22 10:00:00.002 +00:00] request=4 transport=http route=responses stale_continuation reason=previous_response_not_found profile=main\n",
+                "[2026-04-22 10:00:00.003 +00:00] request=3 transport=websocket route=websocket websocket_session=sess-1 chain_dead_upstream_confirmed profile=second previous_response_id=resp-second reason=previous_response_not_found_locked_affinity via=- event=-\n"
+            ),
+        )
+        .expect("test log should write");
+
+        let metrics = runtime_broker_continuity_failure_reason_metrics(&log_path);
+
+        assert_eq!(
+            metrics.chain_retried_owner,
+            BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1,)])
+        );
+        assert_eq!(
+            metrics.chain_dead_upstream_confirmed,
+            BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1,)])
+        );
+        assert_eq!(
+            metrics.stale_continuation,
+            BTreeMap::from([
+                ("previous_response_not_found".to_string(), 1),
+                ("websocket_reuse_watchdog_locked_affinity".to_string(), 1,),
+            ])
+        );
+
+        fs::remove_file(&log_path).expect("test log should clean up");
+    }
 }

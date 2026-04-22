@@ -4,75 +4,24 @@ fn runtime_proxy_websocket_empty_session_previous_response_does_not_fresh_fallba
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
 
-    let temp_dir = TestDir::new();
-    let backend =
-        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
-    let second_home = temp_dir.path.join("homes/second");
-    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state(),
+        "second",
+        &["second"],
+        &[("resp-second", "second")],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_websocket("backend-api/codex/realtime?call_id=call-123");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "previous_response_id": "resp-second",
+            "session_id": "sess-replayable",
+            "input": [],
+        }),
+    );
 
-    let now = Local::now().timestamp();
-    let state = AppState {
-        active_profile: Some("second".to_string()),
-        profiles: BTreeMap::from([(
-            "second".to_string(),
-            ProfileEntry {
-                codex_home: second_home,
-                managed: true,
-                email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
-            },
-        )]),
-        last_run_selected_at: BTreeMap::new(),
-        response_profile_bindings: BTreeMap::from([(
-            "resp-second".to_string(),
-            ResponseProfileBinding {
-                profile_name: "second".to_string(),
-                bound_at: now,
-            },
-        )]),
-        session_profile_bindings: BTreeMap::new(),
-    };
-    let paths = AppPaths {
-        root: temp_dir.path.join("prodex"),
-        state_file: temp_dir.path.join("prodex/state.json"),
-        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-        shared_codex_root: temp_dir.path.join("shared"),
-        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-    };
-    state.save(&paths).expect("failed to save initial state");
-
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
-        .expect("runtime proxy should start");
-
-    let (mut socket, _response) = ws_connect(format!(
-        "ws://{}/backend-api/codex/realtime?call_id=call-123",
-        proxy.listen_addr
-    ))
-    .expect("websocket client should connect");
-    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
-
-    socket
-        .send(WsMessage::Text(
-            serde_json::json!({
-                "previous_response_id": "resp-second",
-                "session_id": "sess-replayable",
-                "input": [],
-            })
-            .to_string()
-            .into(),
-        ))
-        .expect("websocket request should send");
-
-    let response_message = loop {
-        match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => break text.to_string(),
-            WsMessage::Ping(payload) => socket
-                .send(WsMessage::Pong(payload))
-                .expect("websocket pong should send"),
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket response: {other:?}"),
-        }
-    };
+    let response_message = read_runtime_websocket_text(&mut socket);
     let _ = socket.close(None);
 
     assert!(
@@ -80,36 +29,29 @@ fn runtime_proxy_websocket_empty_session_previous_response_does_not_fresh_fallba
         "empty session-scoped previous_response continuation should fail stale instead of replaying fresh: {response_message}"
     );
 
-    let websocket_requests = backend.websocket_requests();
+    let websocket_requests = fixture.backend.websocket_requests();
     assert_eq!(
         websocket_requests.len(),
         1,
         "backend should observe only the original continuation"
     );
 
-    let first_request: serde_json::Value =
-        serde_json::from_str(&websocket_requests[0]).expect("first websocket request should parse");
-    assert_eq!(
-        first_request
-            .get("previous_response_id")
-            .and_then(serde_json::Value::as_str),
-        Some("resp-second")
-    );
-    assert_eq!(
-        first_request
-            .get("session_id")
-            .and_then(serde_json::Value::as_str),
-        Some("sess-replayable")
-    );
+    let first_request = &websocket_requests[0];
+    for (field, value) in [
+        ("previous_response_id", "resp-second"),
+        ("session_id", "sess-replayable"),
+    ] {
+        assert_request_json_field(
+            first_request,
+            field,
+            value,
+            "empty session-scoped continuation should preserve original context",
+        );
+    }
 
-    let log_tail = wait_for_runtime_log_tail_until(
-        || fs::read(&proxy.log_path).ok(),
-        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
-        2_000,
-        5_000,
-        20,
-    );
-    let log = String::from_utf8_lossy(&log_tail);
+    let log = fixture.wait_for_log(|log| {
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+    });
     assert!(
         !log.contains("previous_response_fresh_fallback reason="),
         "empty session-scoped continuations must not drop previous_response_id: {log}"
@@ -126,79 +68,28 @@ fn runtime_proxy_websocket_tool_output_with_session_does_not_fresh_fallback() {
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
 
-    let temp_dir = TestDir::new();
-    let backend =
-        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state();
-    let second_home = temp_dir.path.join("homes/second");
-    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_previous_response_missing_without_turn_state(),
+        "second",
+        &["second"],
+        &[("resp-second", "second")],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_websocket("backend-api/codex/realtime?call_id=call-123");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "previous_response_id": "resp-second",
+            "session_id": "sess-replayable",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_h7GvfUPAvb95drykPBrTw65i",
+                "output": "ok"
+            }],
+        }),
+    );
 
-    let now = Local::now().timestamp();
-    let state = AppState {
-        active_profile: Some("second".to_string()),
-        profiles: BTreeMap::from([(
-            "second".to_string(),
-            ProfileEntry {
-                codex_home: second_home,
-                managed: true,
-                email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
-            },
-        )]),
-        last_run_selected_at: BTreeMap::new(),
-        response_profile_bindings: BTreeMap::from([(
-            "resp-second".to_string(),
-            ResponseProfileBinding {
-                profile_name: "second".to_string(),
-                bound_at: now,
-            },
-        )]),
-        session_profile_bindings: BTreeMap::new(),
-    };
-    let paths = AppPaths {
-        root: temp_dir.path.join("prodex"),
-        state_file: temp_dir.path.join("prodex/state.json"),
-        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-        shared_codex_root: temp_dir.path.join("shared"),
-        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-    };
-    state.save(&paths).expect("failed to save initial state");
-
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
-        .expect("runtime proxy should start");
-
-    let (mut socket, _response) = ws_connect(format!(
-        "ws://{}/backend-api/codex/realtime?call_id=call-123",
-        proxy.listen_addr
-    ))
-    .expect("websocket client should connect");
-    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
-
-    socket
-        .send(WsMessage::Text(
-            serde_json::json!({
-                "previous_response_id": "resp-second",
-                "session_id": "sess-replayable",
-                "input": [{
-                    "type": "function_call_output",
-                    "call_id": "call_h7GvfUPAvb95drykPBrTw65i",
-                    "output": "ok"
-                }],
-            })
-            .to_string()
-            .into(),
-        ))
-        .expect("websocket request should send");
-
-    let response_message = loop {
-        match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => break text.to_string(),
-            WsMessage::Ping(payload) => socket
-                .send(WsMessage::Pong(payload))
-                .expect("websocket pong should send"),
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket response: {other:?}"),
-        }
-    };
+    let response_message = read_runtime_websocket_text(&mut socket);
     let _ = socket.close(None);
 
     assert!(
@@ -210,38 +101,28 @@ fn runtime_proxy_websocket_tool_output_with_session_does_not_fresh_fallback() {
         "proxy should not surface the fresh tool-output context error: {response_message}"
     );
 
-    let websocket_requests = backend.websocket_requests();
+    let websocket_requests = fixture.backend.websocket_requests();
     assert!(
         !websocket_requests.is_empty(),
         "backend should observe at least the original continuation"
     );
-    assert!(
-        websocket_requests
-            .iter()
-            .all(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
-        "websocket retries must preserve previous_response_id: {websocket_requests:?}"
-    );
-    assert!(
-        websocket_requests
-            .iter()
-            .all(|request| request.contains("\"session_id\":\"sess-replayable\"")),
-        "websocket retries must preserve session_id: {websocket_requests:?}"
-    );
-    assert!(
-        websocket_requests
-            .iter()
-            .all(|request| request.contains("\"call_id\":\"call_h7GvfUPAvb95drykPBrTw65i\"")),
-        "websocket retries must preserve the original tool output: {websocket_requests:?}"
-    );
+    for (field, value) in [
+        ("previous_response_id", "resp-second"),
+        ("session_id", "sess-replayable"),
+        ("call_id", "call_h7GvfUPAvb95drykPBrTw65i"),
+    ] {
+        assert_all_requests_json_field(
+            &websocket_requests,
+            field,
+            value,
+            "backend should observe at least the original continuation",
+            "websocket retries must preserve original continuation context",
+        );
+    }
 
-    let log_tail = wait_for_runtime_log_tail_until(
-        || fs::read(&proxy.log_path).ok(),
-        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
-        2_000,
-        5_000,
-        20,
-    );
-    let log = String::from_utf8_lossy(&log_tail);
+    let log = fixture.wait_for_log(|log| {
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+    });
     assert!(
         log.contains("previous_response_not_found"),
         "runtime log should classify the broken continuation before surfacing stale: {log}"
@@ -264,78 +145,28 @@ fn runtime_proxy_websocket_tool_output_with_session_blocks_proactive_session_rep
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
 
-    let temp_dir = TestDir::new();
-    let backend = RuntimeProxyBackend::start_websocket_owned_tool_output_needs_session_replay();
-    let second_home = temp_dir.path.join("homes/second");
-    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_owned_tool_output_needs_session_replay(),
+        "second",
+        &["second"],
+        &[("resp-second", "second")],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "previous_response_id": "resp-second",
+            "session_id": "sess-replayable",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_J7U3Kdc539EyfWU4nZj9LCWQZ",
+                "output": "ok"
+            }],
+        }),
+    );
 
-    let now = Local::now().timestamp();
-    let state = AppState {
-        active_profile: Some("second".to_string()),
-        profiles: BTreeMap::from([(
-            "second".to_string(),
-            ProfileEntry {
-                codex_home: second_home,
-                managed: true,
-                email: Some("second@example.com".to_string()),
-                provider: ProfileProvider::Openai,
-            },
-        )]),
-        last_run_selected_at: BTreeMap::new(),
-        response_profile_bindings: BTreeMap::from([(
-            "resp-second".to_string(),
-            ResponseProfileBinding {
-                profile_name: "second".to_string(),
-                bound_at: now,
-            },
-        )]),
-        session_profile_bindings: BTreeMap::new(),
-    };
-    let paths = AppPaths {
-        root: temp_dir.path.join("prodex"),
-        state_file: temp_dir.path.join("prodex/state.json"),
-        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-        shared_codex_root: temp_dir.path.join("shared"),
-        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-    };
-    state.save(&paths).expect("failed to save initial state");
-
-    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
-        .expect("runtime proxy should start");
-
-    let (mut socket, _response) = ws_connect(format!(
-        "ws://{}/backend-api/prodex/responses",
-        proxy.listen_addr
-    ))
-    .expect("websocket client should connect");
-    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
-
-    socket
-        .send(WsMessage::Text(
-            serde_json::json!({
-                "previous_response_id": "resp-second",
-                "session_id": "sess-replayable",
-                "input": [{
-                    "type": "function_call_output",
-                    "call_id": "call_J7U3Kdc539EyfWU4nZj9LCWQZ",
-                    "output": "ok"
-                }],
-            })
-            .to_string()
-            .into(),
-        ))
-        .expect("websocket request should send");
-
-    let response_message = loop {
-        match socket.read().expect("websocket response should read") {
-            WsMessage::Text(text) => break text.to_string(),
-            WsMessage::Ping(payload) => socket
-                .send(WsMessage::Pong(payload))
-                .expect("websocket pong should send"),
-            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
-            other => panic!("unexpected websocket response: {other:?}"),
-        }
-    };
+    let response_message = read_runtime_websocket_text(&mut socket);
     let _ = socket.close(None);
 
     assert!(
@@ -347,32 +178,27 @@ fn runtime_proxy_websocket_tool_output_with_session_blocks_proactive_session_rep
         "proxy should translate upstream tool-context loss before it reaches Codex: {response_message}"
     );
 
-    let websocket_requests = backend.websocket_requests();
+    let websocket_requests = fixture.backend.websocket_requests();
     assert!(
         !websocket_requests.is_empty(),
         "backend should observe the guarded continuation"
     );
-    assert!(
-        websocket_requests
-            .iter()
-            .all(|request| request.contains("\"previous_response_id\":\"resp-second\"")),
-        "proactive replay must not drop previous_response_id: {websocket_requests:?}"
-    );
-    assert!(
-        websocket_requests
-            .iter()
-            .all(|request| request.contains("\"session_id\":\"sess-replayable\"")),
-        "guarded attempts must preserve session_id: {websocket_requests:?}"
-    );
+    for (field, value) in [
+        ("previous_response_id", "resp-second"),
+        ("session_id", "sess-replayable"),
+    ] {
+        assert_all_requests_json_field(
+            &websocket_requests,
+            field,
+            value,
+            "backend should observe the guarded continuation",
+            "guarded attempts must preserve original continuation context",
+        );
+    }
 
-    let log_tail = wait_for_runtime_log_tail_until(
-        || fs::read(&proxy.log_path).ok(),
-        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
-        2_000,
-        5_000,
-        20,
-    );
-    let log = String::from_utf8_lossy(&log_tail);
+    let log = fixture.wait_for_log(|log| {
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+    });
     assert!(
         !log.contains(
             "previous_response_fresh_fallback reason=websocket_missing_turn_state_tool_result"

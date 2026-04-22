@@ -90,23 +90,31 @@ pub(crate) fn runtime_previous_response_not_found_decision(
         }
         _ => None,
     };
-    let stale_continuation =
-        runtime_websocket_previous_response_not_found_requires_stale_continuation(
-            input.previous_response_id,
-            input.has_turn_state_retry,
+    let fallback_policy = runtime_previous_response_not_found_fallback_policy(
+        RuntimePreviousResponseNotFoundFallbackRequest {
+            previous_response_id: input.previous_response_id,
+            has_turn_state_retry: input.has_turn_state_retry,
             request_requires_locked_previous_response_affinity,
-            input.fresh_fallback_shape,
-        );
+            previous_response_fresh_fallback_used: input.previous_response_fresh_fallback_used,
+            fresh_fallback_shape: input.fresh_fallback_shape,
+        },
+    );
 
     RuntimePreviousResponseNotFoundDecision {
         retry_delay,
         retry_reason,
         chain_retry_reason,
         request_requires_locked_previous_response_affinity,
-        stale_continuation,
-        fresh_fallback_allowed: false,
-        fresh_fallback_blocked_without_affinity: !input.has_turn_state_retry
-            && !request_requires_locked_previous_response_affinity,
+        stale_continuation: fallback_policy
+            .stale_continuation
+            .requires_stale_continuation(),
+        fresh_fallback_allowed: fallback_policy.fresh_fallback.allows_fresh_fallback(),
+        fresh_fallback_blocked_without_affinity: fallback_policy
+            .fresh_fallback
+            .blocks_without_affinity(
+                input.has_turn_state_retry,
+                request_requires_locked_previous_response_affinity,
+            ),
     }
 }
 

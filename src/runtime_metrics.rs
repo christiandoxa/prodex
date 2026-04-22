@@ -40,6 +40,13 @@ pub struct RuntimeBrokerContinuationSignalMetrics {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeBrokerContinuityFailureReasonMetrics {
+    pub chain_retried_owner: BTreeMap<String, u64>,
+    pub chain_dead_upstream_confirmed: BTreeMap<String, u64>,
+    pub stale_continuation: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeBrokerRouteContinuityMetrics {
     pub responses: u64,
     pub compact: u64,
@@ -77,6 +84,7 @@ pub struct RuntimeBrokerSnapshot {
     pub degraded_routes: u64,
     pub continuations: RuntimeBrokerContinuationMetrics,
     pub previous_response_continuity: RuntimeBrokerPreviousResponseContinuityMetrics,
+    pub continuity_failure_reasons: RuntimeBrokerContinuityFailureReasonMetrics,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +204,14 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "prodex_runtime_broker_continuation_stale_verified_bindings",
             "Verified continuation statuses that have aged past the stale horizon by binding kind.",
             &self.snapshot.continuations.stale_verified_bindings,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_continuity_failure_reason_family(
+            &mut self.out,
+            "prodex_runtime_broker_continuity_failures_total",
+            "Cumulative continuity failure events observed in the broker runtime log by event and reason.",
+            &self.snapshot.continuity_failure_reasons,
             self.snapshot.broker_key.as_str(),
             self.snapshot.listen_addr.as_str(),
         );
@@ -521,6 +537,40 @@ fn render_route_continuity_family(
     }
 }
 
+fn render_continuity_failure_reason_family(
+    out: &mut String,
+    metric_name: &str,
+    help: &str,
+    metrics: &RuntimeBrokerContinuityFailureReasonMetrics,
+    broker_key: &str,
+    listen_addr: &str,
+) {
+    push_help(out, metric_name, help);
+    push_type(out, metric_name, "counter");
+    for (event, reasons) in [
+        ("chain_retried_owner", &metrics.chain_retried_owner),
+        (
+            "chain_dead_upstream_confirmed",
+            &metrics.chain_dead_upstream_confirmed,
+        ),
+        ("stale_continuation", &metrics.stale_continuation),
+    ] {
+        for (reason, value) in reasons {
+            push_gauge(
+                out,
+                metric_name,
+                labels(&[
+                    ("broker_key", broker_key),
+                    ("listen_addr", listen_addr),
+                    ("event", event),
+                    ("reason", reason.as_str()),
+                ]),
+                *value as f64,
+            );
+        }
+    }
+}
+
 fn render_inflight_family(
     out: &mut String,
     metric_name: &str,
@@ -715,6 +765,20 @@ mod tests {
                     standard: 0,
                 },
             },
+            continuity_failure_reasons: RuntimeBrokerContinuityFailureReasonMetrics {
+                chain_retried_owner: BTreeMap::from([(
+                    "previous_response_not_found_locked_affinity".to_string(),
+                    2,
+                )]),
+                chain_dead_upstream_confirmed: BTreeMap::from([(
+                    "previous_response_not_found_locked_affinity".to_string(),
+                    1,
+                )]),
+                stale_continuation: BTreeMap::from([
+                    ("previous_response_not_found".to_string(), 3),
+                    ("websocket_reuse_watchdog_locked_affinity".to_string(), 1),
+                ]),
+            },
         }
     }
 
@@ -751,6 +815,13 @@ mod tests {
         ));
         assert!(rendered.contains(
             "prodex_runtime_broker_continuation_stale_verified_bindings{binding_kind=\"session_id\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 1"
+        ));
+        assert!(rendered.contains("# HELP prodex_runtime_broker_continuity_failures_total"));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuity_failures_total{broker_key=\"broker-123\",event=\"chain_retried_owner\",listen_addr=\"127.0.0.1:8080\",reason=\"previous_response_not_found_locked_affinity\"} 2"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuity_failures_total{broker_key=\"broker-123\",event=\"stale_continuation\",listen_addr=\"127.0.0.1:8080\",reason=\"websocket_reuse_watchdog_locked_affinity\"} 1"
         ));
         assert!(rendered.contains(
             "prodex_runtime_broker_previous_response_negative_cache_entries{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\",route=\"responses\"} 2"

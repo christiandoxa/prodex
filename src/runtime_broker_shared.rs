@@ -62,6 +62,16 @@ pub(super) struct RuntimeBrokerContinuationSignalMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub(super) struct RuntimeBrokerContinuityFailureReasonMetrics {
+    #[serde(default)]
+    pub(super) chain_retried_owner: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub(super) chain_dead_upstream_confirmed: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub(super) stale_continuation: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub(super) struct RuntimeBrokerRouteContinuityMetrics {
     pub(super) responses: usize,
     pub(super) compact: usize,
@@ -107,6 +117,8 @@ pub(super) struct RuntimeBrokerMetrics {
     pub(super) continuations: RuntimeBrokerContinuationMetrics,
     #[serde(default)]
     pub(super) previous_response_continuity: RuntimeBrokerPreviousResponseContinuityMetrics,
+    #[serde(default)]
+    pub(super) continuity_failure_reasons: RuntimeBrokerContinuityFailureReasonMetrics,
 }
 
 #[derive(Debug, Clone, Serialize)]
