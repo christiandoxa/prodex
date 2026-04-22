@@ -15,7 +15,21 @@ pub(crate) fn runtime_broker_key_for_binary_identity(
 }
 
 pub(crate) fn runtime_broker_current_binary_identity_key() -> String {
-    format!("version={}", runtime_current_prodex_version())
+    let identity = runtime_current_prodex_binary_identity();
+    match (
+        identity.prodex_version.as_deref(),
+        identity.executable_sha256.as_deref(),
+        identity.executable_path.as_ref(),
+    ) {
+        (Some(version), Some(sha256), _) => format!("version={version};sha256={sha256}"),
+        (Some(version), None, Some(path)) => {
+            format!("version={version};path={}", path.display())
+        }
+        (Some(version), None, None) => format!("version={version}"),
+        (None, Some(sha256), _) => format!("sha256={sha256}"),
+        (None, None, Some(path)) => format!("path={}", path.display()),
+        (None, None, None) => "unknown".to_string(),
+    }
 }
 
 pub(crate) fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {

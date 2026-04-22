@@ -5007,25 +5007,34 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
 }
 
 #[test]
-fn runtime_broker_key_is_scoped_to_prodex_version() {
+fn runtime_broker_key_is_scoped_to_prodex_binary_identity() {
     let first = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
         false,
-        "version=0.39.0",
+        "version=0.39.0;sha256=alpha",
     );
     let second = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
         false,
-        "version=0.40.0",
+        "version=0.39.0;sha256=beta",
+    );
+    let third = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        false,
+        "version=0.40.0;sha256=alpha",
     );
     let review = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
         true,
-        "version=0.39.0",
+        "version=0.39.0;sha256=alpha",
     );
 
     assert_ne!(
         first, second,
+        "runtime broker keys must not reuse brokers from a different binary build"
+    );
+    assert_ne!(
+        first, third,
         "runtime broker keys must not reuse brokers from a different prodex version"
     );
     assert_ne!(
