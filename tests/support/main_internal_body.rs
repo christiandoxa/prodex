@@ -5017,11 +5017,11 @@ fn runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback() 
         .send()
         .expect("responses request should succeed");
 
-    assert_eq!(response.status().as_u16(), 400);
+    assert_eq!(response.status().as_u16(), 409);
     let body = response.text().expect("responses body should decode");
     assert!(
-        body.contains("previous_response_not_found"),
-        "client should see the upstream continuity failure: {body}"
+        body.contains("\"code\":\"stale_continuation\""),
+        "client should see stale_continuation instead of raw previous_response loss: {body}"
     );
 
     let responses_bodies = backend.responses_bodies();
@@ -5129,13 +5129,13 @@ fn runtime_proxy_http_message_followup_previous_response_does_not_fresh_fallback
 
     assert_eq!(
         response.status().as_u16(),
-        400,
-        "message follow-up should stay chained instead of becoming a fresh success"
+        409,
+        "message follow-up should fail stale instead of becoming a fresh success"
     );
     let body = response.text().expect("responses body should decode");
     assert!(
-        body.contains("previous_response_not_found"),
-        "client should see previous_response continuity failure: {body}"
+        body.contains("\"code\":\"stale_continuation\""),
+        "client should see stale_continuation instead of raw continuity loss: {body}"
     );
     assert!(
         !body.contains("\"id\":\"resp-second\""),
@@ -5230,13 +5230,13 @@ fn runtime_proxy_http_message_followup_with_session_header_does_not_fresh_fallba
 
     assert_eq!(
         response.status().as_u16(),
-        400,
+        409,
         "session header must not make a message follow-up replayable"
     );
     let body = response.text().expect("responses body should decode");
     assert!(
-        body.contains("previous_response_not_found"),
-        "client should see previous_response continuity failure: {body}"
+        body.contains("\"code\":\"stale_continuation\""),
+        "client should see stale_continuation instead of raw continuity loss: {body}"
     );
     assert!(
         !body.contains("\"id\":\"resp-second\""),
@@ -5328,13 +5328,13 @@ fn runtime_proxy_http_message_followup_with_turn_metadata_session_does_not_fresh
 
     assert_eq!(
         response.status().as_u16(),
-        400,
+        409,
         "turn metadata session_id must not make a message follow-up replayable"
     );
     let body = response.text().expect("responses body should decode");
     assert!(
-        body.contains("previous_response_not_found"),
-        "client should see previous_response continuity failure: {body}"
+        body.contains("\"code\":\"stale_continuation\""),
+        "client should see stale_continuation instead of raw continuity loss: {body}"
     );
     assert!(
         !body.contains("\"id\":\"resp-second\""),
@@ -5638,8 +5638,7 @@ fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
 }
 
 #[test]
-fn runtime_proxy_http_tool_output_with_session_passes_through_tool_context_missing_without_fresh_retry()
-{
+fn runtime_proxy_http_tool_output_with_session_surfaces_stale_continuation_without_fresh_retry() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_previous_response_tool_context_missing();
     let second_home = temp_dir.path.join("homes/second");
@@ -5701,11 +5700,15 @@ fn runtime_proxy_http_tool_output_with_session_passes_through_tool_context_missi
         .send()
         .expect("responses request should succeed");
 
-    assert_eq!(response.status().as_u16(), 400);
+    assert_eq!(response.status().as_u16(), 409);
     let body = response.text().expect("responses body should decode");
     assert!(
-        body.contains("No tool call found"),
-        "HTTP should pass through the upstream tool-context error when the original continuation failed: {body}"
+        body.contains("\"code\":\"stale_continuation\""),
+        "HTTP should translate tool-context loss into stale_continuation: {body}"
+    );
+    assert!(
+        !body.contains("No tool call found"),
+        "HTTP should not surface the upstream tool-context string after classification: {body}"
     );
 
     let responses_bodies = backend.responses_bodies();

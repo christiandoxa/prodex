@@ -359,18 +359,33 @@ fn websocket_previous_response_fresh_fallback_shape_matrix_promotes_only_safe_se
 }
 
 #[test]
-fn runtime_request_strips_previous_response_id_from_function_call_output_payloads() {
+fn runtime_request_does_not_strip_previous_response_id_from_continuations() {
     let request = tool_output_only_request()
         .previous_response_id("resp_123")
         .build();
 
     assert!(
-        runtime_request_without_previous_response_id(&request).is_some(),
-        "helper should still be able to strip previous_response_id when explicitly asked"
+        runtime_request_without_previous_response_id(&request).is_none(),
+        "runtime must not manufacture a fresh request from a previous_response continuation"
     );
     assert!(
         runtime_request_requires_previous_response_affinity(&request),
         "function call outputs should keep previous_response affinity during normal proxying"
+    );
+}
+
+#[test]
+fn runtime_request_text_does_not_strip_previous_response_id_from_continuations() {
+    let request_text = serde_json::json!({
+        "previous_response_id": "resp_123",
+        "session_id": "sess_123",
+        "input": [],
+    })
+    .to_string();
+
+    assert!(
+        runtime_request_text_without_previous_response_id(&request_text).is_none(),
+        "websocket continuations must not drop previous_response_id even with session metadata"
     );
 }
 

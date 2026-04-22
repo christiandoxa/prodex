@@ -60,19 +60,10 @@ pub(crate) fn runtime_request_previous_response_id_from_value(
 pub(crate) fn runtime_request_without_previous_response_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
-    let mut value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
-    let object = value.as_object_mut()?;
-    let removed = object.remove("previous_response_id")?;
-    if removed.as_str().map(str::trim).is_none_or(str::is_empty) {
-        return None;
-    }
-    let body = serde_json::to_vec(&value).ok()?;
-    Some(RuntimeProxyRequest {
-        method: request.method.clone(),
-        path_and_query: request.path_and_query.clone(),
-        headers: request.headers.clone(),
-        body,
-    })
+    let _ = request;
+    // Hard fuse: runtime must never synthesize a fresh request from a chained
+    // previous_response continuation. Keep stale call sites harmless.
+    None
 }
 
 pub(crate) fn runtime_request_without_turn_state_header(
@@ -281,13 +272,9 @@ pub(crate) fn runtime_websocket_request_requires_locked_previous_response_affini
 pub(crate) fn runtime_request_text_without_previous_response_id(
     request_text: &str,
 ) -> Option<String> {
-    let mut value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
-    let object = value.as_object_mut()?;
-    let removed = object.remove("previous_response_id")?;
-    if removed.as_str().map(str::trim).is_none_or(str::is_empty) {
-        return None;
-    }
-    serde_json::to_string(&value).ok()
+    let _ = request_text;
+    // Hard fuse: websocket continuations must also stay chained.
+    None
 }
 
 pub(crate) struct RuntimePreviousResponseFreshFallbackState<'a> {

@@ -1,5 +1,17 @@
 use super::*;
 
+pub(crate) fn runtime_proxy_stale_continuation_message() -> &'static str {
+    "Upstream no longer recognizes this conversation chain before output started. Retry from the last user message or restart the Codex turn; Prodex will not send a fresh request without the missing context."
+}
+
+fn runtime_proxy_stale_continuation_http_reply() -> RuntimeResponsesReply {
+    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+        409,
+        "stale_continuation",
+        runtime_proxy_stale_continuation_message(),
+    ))
+}
+
 pub(crate) fn runtime_proxy_precommit_budget_exhausted(
     started_at: Instant,
     attempts: usize,
@@ -44,7 +56,14 @@ pub(crate) fn runtime_proxy_final_responses_failure_reply(
 ) -> RuntimeResponsesReply {
     match last_failure {
         Some((failure, false)) => match failure {
-            RuntimeUpstreamFailureResponse::Http(response) => response,
+            RuntimeUpstreamFailureResponse::Http(response) => match response {
+                RuntimeResponsesReply::Buffered(parts)
+                    if extract_runtime_proxy_previous_response_message(&parts.body).is_some() =>
+                {
+                    runtime_proxy_stale_continuation_http_reply()
+                }
+                other => other,
+            },
             RuntimeUpstreamFailureResponse::Websocket(_) => {
                 RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                     503,
@@ -126,6 +145,6 @@ pub(crate) fn send_runtime_proxy_stale_continuation_websocket_error(
         local_socket,
         409,
         "stale_continuation",
-        "Upstream no longer recognizes this conversation chain before output started. Retry from the last user message or restart the Codex turn; Prodex will not send a fresh request without the missing context.",
+        runtime_proxy_stale_continuation_message(),
     )
 }
