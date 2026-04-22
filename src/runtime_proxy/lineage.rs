@@ -953,6 +953,14 @@ pub(crate) fn clear_runtime_response_turn_state_lineage(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     previous_response_id: &str,
 ) -> bool {
+    !drain_runtime_response_turn_state_lineage(bindings, previous_response_id, None).is_empty()
+}
+
+fn drain_runtime_response_turn_state_lineage(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
+    previous_response_id: &str,
+    bound_profile: Option<&str>,
+) -> BTreeSet<String> {
     let prefix = format!(
         "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
         previous_response_id.len()
@@ -960,13 +968,19 @@ pub(crate) fn clear_runtime_response_turn_state_lineage(
     let keys = bindings
         .range(prefix.clone()..)
         .take_while(|(key, _)| key.starts_with(&prefix))
+        .filter(|(_, binding)| {
+            bound_profile.is_none_or(|profile_name| binding.profile_name == profile_name)
+        })
         .map(|(key, _)| key.clone())
         .collect::<Vec<_>>();
-    let changed = !keys.is_empty();
+    let mut removed_turn_states = BTreeSet::new();
     for key in keys {
+        if let Some((_, turn_state)) = runtime_response_turn_state_lineage_parts(&key) {
+            removed_turn_states.insert(turn_state.to_string());
+        }
         bindings.remove(&key);
     }
-    changed
+    removed_turn_states
 }
 
 fn runtime_previous_response_turn_state_from_bindings(
@@ -1003,16 +1017,17 @@ fn runtime_previous_response_turn_state_from_bindings(
     selected.map(|(_, turn_state)| turn_state)
 }
 
-fn runtime_turn_state_has_live_response_lineage(
+fn runtime_live_response_turn_states_for_profile(
     bindings: &BTreeMap<String, ResponseProfileBinding>,
-    turn_state: &str,
     profile_name: &str,
-) -> bool {
-    bindings.iter().any(|(key, binding)| {
-        binding.profile_name == profile_name
-            && runtime_response_turn_state_lineage_parts(key)
-                .is_some_and(|(_, candidate_turn_state)| candidate_turn_state == turn_state)
-    })
+    filter: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    bindings
+        .iter()
+        .filter(|(_, binding)| binding.profile_name == profile_name)
+        .filter_map(|(key, _)| runtime_response_turn_state_lineage_parts(key))
+        .filter_map(|(_, turn_state)| filter.contains(turn_state).then(|| turn_state.to_string()))
+        .collect()
 }
 
 pub(crate) fn clear_runtime_dead_response_bindings(
@@ -1047,23 +1062,19 @@ pub(crate) fn clear_runtime_dead_response_bindings(
         {
             continue;
         }
-        if let Some(turn_state) = runtime_previous_response_turn_state_from_bindings(
-            &runtime.state.response_profile_bindings,
-            response_id,
-            Some(profile_name),
-        ) {
-            dead_turn_states.insert(turn_state);
-        }
         changed = runtime
             .state
             .response_profile_bindings
             .remove(*response_id)
             .is_some()
             || changed;
-        changed = clear_runtime_response_turn_state_lineage(
+        let removed_turn_states = drain_runtime_response_turn_state_lineage(
             &mut runtime.state.response_profile_bindings,
             response_id,
-        ) || changed;
+            Some(profile_name),
+        );
+        changed = !removed_turn_states.is_empty() || changed;
+        dead_turn_states.extend(removed_turn_states);
         changed = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
@@ -1071,16 +1082,17 @@ pub(crate) fn clear_runtime_dead_response_bindings(
             now,
         ) || changed;
     }
+    let surviving_turn_states = runtime_live_response_turn_states_for_profile(
+        &runtime.state.response_profile_bindings,
+        profile_name,
+        &dead_turn_states,
+    );
     for turn_state in dead_turn_states {
         if runtime
             .turn_state_bindings
             .get(turn_state.as_str())
             .is_some_and(|binding| binding.profile_name == profile_name)
-            && !runtime_turn_state_has_live_response_lineage(
-                &runtime.state.response_profile_bindings,
-                turn_state.as_str(),
-                profile_name,
-            )
+            && !surviving_turn_states.contains(turn_state.as_str())
         {
             changed = runtime
                 .turn_state_bindings
@@ -1267,19 +1279,15 @@ pub(crate) fn clear_runtime_stale_previous_response_binding(
     Ok(true)
 }
 
-pub(crate) fn release_runtime_quota_blocked_affinity(
-    shared: &RuntimeRotationProxyShared,
+fn release_runtime_affinity_bindings(
+    runtime: &mut RuntimeRotationState,
     profile_name: &str,
     previous_response_id: Option<&str>,
     turn_state: Option<&str>,
     session_id: Option<&str>,
-) -> Result<bool> {
-    let mut runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    now: i64,
+) -> bool {
     let mut changed = false;
-    let now = Local::now().timestamp();
     let release_session_affinity = previous_response_id.is_none() && turn_state.is_none();
 
     if let Some(previous_response_id) = previous_response_id
@@ -1343,6 +1351,30 @@ pub(crate) fn release_runtime_quota_blocked_affinity(
         changed = true;
     }
 
+    changed
+}
+
+pub(crate) fn release_runtime_quota_blocked_affinity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<bool> {
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    let changed = release_runtime_affinity_bindings(
+        &mut runtime,
+        profile_name,
+        previous_response_id,
+        turn_state,
+        session_id,
+        now,
+    );
+
     if changed {
         schedule_runtime_state_save_from_runtime(
             shared,
@@ -1393,67 +1425,15 @@ pub(crate) fn release_runtime_previous_response_affinity(
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let mut changed = false;
     let now = Local::now().timestamp();
-    let release_session_affinity = previous_response_id.is_none() && turn_state.is_none();
-
-    if let Some(previous_response_id) = previous_response_id
-        && runtime
-            .state
-            .response_profile_bindings
-            .get(previous_response_id)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-    {
-        runtime
-            .state
-            .response_profile_bindings
-            .remove(previous_response_id);
-        let _ = clear_runtime_response_turn_state_lineage(
-            &mut runtime.state.response_profile_bindings,
-            previous_response_id,
-        );
-        let _ = runtime_mark_continuation_status_dead(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::Response,
-            previous_response_id,
-            now,
-        );
-        changed = true;
-    }
-
-    if let Some(turn_state) = turn_state
-        && runtime
-            .turn_state_bindings
-            .get(turn_state)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-    {
-        runtime.turn_state_bindings.remove(turn_state);
-        let _ = runtime_mark_continuation_status_dead(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::TurnState,
-            turn_state,
-            now,
-        );
-        changed = true;
-    }
-
-    if release_session_affinity
-        && let Some(session_id) = session_id
-        && runtime
-            .session_id_bindings
-            .get(session_id)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-    {
-        runtime.session_id_bindings.remove(session_id);
-        runtime.state.session_profile_bindings.remove(session_id);
-        let _ = runtime_mark_continuation_status_dead(
-            &mut runtime.continuation_statuses,
-            RuntimeContinuationBindingKind::SessionId,
-            session_id,
-            now,
-        );
-        changed = true;
-    }
+    let changed = release_runtime_affinity_bindings(
+        &mut runtime,
+        profile_name,
+        previous_response_id,
+        turn_state,
+        session_id,
+        now,
+    );
 
     if changed {
         schedule_runtime_state_save_from_runtime(

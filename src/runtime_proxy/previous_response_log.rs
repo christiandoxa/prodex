@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Clone, Copy)]
 pub(crate) struct RuntimePreviousResponseLogContext<'a> {
     pub(crate) request_id: u64,
@@ -79,6 +81,22 @@ pub(crate) fn runtime_previous_response_stale_continuation_log_message(
         runtime_previous_response_event_prefix(context),
         runtime_previous_response_log_suffix(context),
     )
+}
+
+pub(crate) fn runtime_proxy_log_previous_response_stale_continuation(
+    shared: &RuntimeRotationProxyShared,
+    context: RuntimePreviousResponseLogContext<'_>,
+    profile_name: &str,
+) {
+    runtime_proxy_record_continuity_failure_reason(
+        shared,
+        "stale_continuation",
+        "previous_response_not_found_locked_affinity",
+    );
+    runtime_proxy_log(
+        shared,
+        runtime_previous_response_stale_continuation_log_message(context, profile_name),
+    );
 }
 
 pub(crate) fn runtime_previous_response_not_found_fresh_fallback_log_message(

@@ -1,5 +1,70 @@
 use super::*;
 
+pub(crate) fn runtime_sse_trimmed_line_bytes(line: &[u8]) -> &[u8] {
+    let mut end = line.len();
+    while end > 0 && matches!(line.get(end - 1), Some(b'\r' | b'\n')) {
+        end -= 1;
+    }
+    &line[..end]
+}
+
+fn runtime_sse_emit_event<F>(data_lines: &mut Vec<String>, on_event: &mut F)
+where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    if data_lines.is_empty() {
+        return;
+    }
+    on_event(parse_runtime_sse_event(data_lines));
+    data_lines.clear();
+}
+
+fn runtime_sse_finish_line<F>(line: &mut Vec<u8>, data_lines: &mut Vec<String>, on_event: &mut F)
+where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    let trimmed = runtime_sse_trimmed_line_bytes(line);
+    if trimmed.is_empty() {
+        runtime_sse_emit_event(data_lines, on_event);
+        line.clear();
+        return;
+    }
+
+    if let Some(payload) = trimmed.strip_prefix(b"data:") {
+        data_lines.push(String::from_utf8_lossy(payload).trim_start().to_owned());
+    }
+    line.clear();
+}
+
+pub(crate) fn runtime_sse_consume_chunk<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    chunk: &[u8],
+    mut on_event: F,
+) where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    for byte in chunk {
+        line.push(*byte);
+        if *byte == b'\n' {
+            runtime_sse_finish_line(line, data_lines, &mut on_event);
+        }
+    }
+}
+
+pub(crate) fn runtime_sse_finish_pending<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    mut on_event: F,
+) where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    if !line.is_empty() {
+        runtime_sse_finish_line(line, data_lines, &mut on_event);
+    }
+    runtime_sse_emit_event(data_lines, &mut on_event);
+}
+
 pub(crate) fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {
     if data_lines.is_empty() {
         return None;
@@ -510,6 +575,59 @@ fn extract_runtime_turn_state_header_value(value: &serde_json::Value) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_sse_helpers_ignore_comments_and_handle_crlf_boundaries() {
+        let mut line = Vec::new();
+        let mut data_lines = Vec::new();
+        let mut events = Vec::new();
+
+        runtime_sse_consume_chunk(
+            &mut line,
+            &mut data_lines,
+            concat!(
+                ": keep-alive\r\n",
+                "event: response.created\r\n",
+                "data: {\"type\":\"response.created\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
+                "\r\n",
+            )
+            .as_bytes(),
+            |event| events.push(event),
+        );
+
+        assert!(line.is_empty());
+        assert!(data_lines.is_empty());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].response_ids, vec!["resp-1".to_string()]);
+        assert_eq!(events[0].turn_state.as_deref(), Some("ts-1"));
+        assert_eq!(events[0].event_type.as_deref(), Some("response.created"));
+    }
+
+    #[test]
+    fn runtime_sse_helpers_flush_partial_event_at_finish() {
+        let mut line = Vec::new();
+        let mut data_lines = Vec::new();
+        let mut events = Vec::new();
+
+        runtime_sse_consume_chunk(
+            &mut line,
+            &mut data_lines,
+            b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-2\"}",
+            |event| events.push(event),
+        );
+        assert!(events.is_empty());
+
+        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| events.push(event));
+
+        assert!(line.is_empty());
+        assert!(data_lines.is_empty());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].response_ids, vec!["resp-2".to_string()]);
+        assert_eq!(
+            events[0].event_type.as_deref(),
+            Some("response.in_progress")
+        );
+    }
 
     #[test]
     fn previous_response_message_detects_top_level_json_shape() {

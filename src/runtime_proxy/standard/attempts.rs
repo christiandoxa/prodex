@@ -168,6 +168,11 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
         );
 
         if previous_response_not_found {
+            runtime_proxy_record_continuity_failure_reason(
+                shared,
+                "stale_continuation",
+                "previous_response_not_found",
+            );
             runtime_proxy_log(
                 shared,
                 format!(
@@ -359,6 +364,11 @@ pub(super) fn attempt_runtime_standard_request(
         );
 
         if previous_response_not_found {
+            runtime_proxy_record_continuity_failure_reason(
+                shared,
+                "stale_continuation",
+                "previous_response_not_found",
+            );
             runtime_proxy_log(
                 shared,
                 format!(

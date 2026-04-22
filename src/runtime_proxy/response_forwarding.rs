@@ -266,68 +266,47 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
 
 impl RuntimeSseTapState {
     fn prime_from_prelude(&mut self, chunk: &[u8]) {
-        for byte in chunk {
-            self.line.push(*byte);
-            if *byte != b'\n' {
-                continue;
-            }
-
-            let trimmed = runtime_sse_trimmed_line_bytes(&self.line);
-            if trimmed.is_empty() {
-                let event = parse_runtime_sse_event(&self.data_lines);
-                if let Some(turn_state) = event.turn_state {
-                    self.turn_state = Some(turn_state);
-                }
-                self.data_lines.clear();
-                self.line.clear();
-                continue;
-            }
-
-            if let Some(payload) = trimmed.strip_prefix(b"data:") {
-                self.data_lines
-                    .push(String::from_utf8_lossy(payload).trim_start().to_owned());
-            }
-            self.line.clear();
+        let mut events = Vec::new();
+        runtime_sse_consume_chunk(&mut self.line, &mut self.data_lines, chunk, |event| {
+            events.push(event);
+        });
+        for event in events {
+            self.observe_prelude_event(event);
         }
     }
 
     fn observe(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str, chunk: &[u8]) {
-        for byte in chunk {
-            self.line.push(*byte);
-            if *byte != b'\n' {
-                continue;
-            }
-
-            let trimmed = runtime_sse_trimmed_line_bytes(&self.line);
-            if trimmed.is_empty() {
-                let event = parse_runtime_sse_event(&self.data_lines);
-                if let Some(turn_state) = event.turn_state {
-                    self.turn_state = Some(turn_state);
-                }
-                self.remember_response_ids(
-                    shared,
-                    profile_name,
-                    &event.response_ids,
-                    RuntimeRouteKind::Responses,
-                );
-                if event.previous_response_not_found {
-                    self.clear_dead_chain(shared, profile_name);
-                }
-                self.data_lines.clear();
-                self.line.clear();
-                continue;
-            }
-
-            if let Some(payload) = trimmed.strip_prefix(b"data:") {
-                self.data_lines
-                    .push(String::from_utf8_lossy(payload).trim_start().to_owned());
-            }
-            self.line.clear();
+        let mut events = Vec::new();
+        runtime_sse_consume_chunk(&mut self.line, &mut self.data_lines, chunk, |event| {
+            events.push(event);
+        });
+        for event in events {
+            self.observe_stream_event(shared, profile_name, event);
         }
     }
 
     fn finish(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
-        let event = parse_runtime_sse_event(&self.data_lines);
+        let mut events = Vec::new();
+        runtime_sse_finish_pending(&mut self.line, &mut self.data_lines, |event| {
+            events.push(event);
+        });
+        for event in events {
+            self.observe_stream_event(shared, profile_name, event);
+        }
+    }
+
+    fn observe_prelude_event(&mut self, event: RuntimeParsedSseEvent) {
+        if let Some(turn_state) = event.turn_state {
+            self.turn_state = Some(turn_state);
+        }
+    }
+
+    fn observe_stream_event(
+        &mut self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        event: RuntimeParsedSseEvent,
+    ) {
         if let Some(turn_state) = event.turn_state {
             self.turn_state = Some(turn_state);
         }
@@ -419,14 +398,6 @@ impl RuntimeSseTapState {
             "previous_response_not_found_after_commit",
         );
     }
-}
-
-fn runtime_sse_trimmed_line_bytes(line: &[u8]) -> &[u8] {
-    let mut end = line.len();
-    while end > 0 && matches!(line.get(end - 1), Some(b'\r' | b'\n')) {
-        end -= 1;
-    }
-    &line[..end]
 }
 
 pub(crate) struct RuntimeSseTapReader {

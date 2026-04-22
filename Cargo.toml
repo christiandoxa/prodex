@@ -26,3 +26,10 @@ tiny_http = "0.12.0"
 tokio = { version = "1.52.1", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"
 tungstenite = { version = "0.29.0", default-features = false, features = ["handshake", "rustls-tls-native-roots", "url"] }
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "runtime_proxy_hot_paths"
+harness = false

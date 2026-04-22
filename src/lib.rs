@@ -77,6 +77,9 @@ mod shared_types;
 mod terminal_ui;
 mod update_notice;
 
+#[doc(hidden)]
+pub mod bench_support;
+
 use app_commands::*;
 pub(crate) use app_state::*;
 use audit_log::*;

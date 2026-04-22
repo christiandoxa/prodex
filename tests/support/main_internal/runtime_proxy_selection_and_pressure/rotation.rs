@@ -1857,6 +1857,77 @@ fn clear_runtime_dead_response_bindings_keeps_turn_state_when_other_lineage_surv
 }
 
 #[test]
+fn clear_runtime_dead_response_bindings_clears_all_removed_turn_state_affinities() {
+    let temp_dir = TestDir::new();
+    let shared = runtime_shared_for_dead_response_binding_cleanup(&temp_dir);
+    let response_ids = vec![String::from("resp-main")];
+
+    remember_runtime_response_ids_with_turn_state(
+        &shared,
+        "main",
+        &response_ids,
+        Some("turn-first"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("first response-turn_state lineage should be recorded");
+    remember_runtime_response_ids_with_turn_state(
+        &shared,
+        "main",
+        &response_ids,
+        Some("turn-second"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("second response-turn_state lineage should be recorded");
+    remember_runtime_turn_state(
+        &shared,
+        "main",
+        Some("turn-first"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("first direct turn-state affinity should be recorded");
+    remember_runtime_turn_state(
+        &shared,
+        "main",
+        Some("turn-second"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("second direct turn-state affinity should be recorded");
+    wait_for_runtime_background_queues_idle();
+
+    assert!(
+        clear_runtime_dead_response_bindings(&shared, "main", &response_ids, "test")
+            .expect("dead binding clear should succeed")
+    );
+    wait_for_runtime_background_queues_idle();
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert!(
+        !runtime.turn_state_bindings.contains_key("turn-first"),
+        "first removed turn_state should be cleared"
+    );
+    assert!(
+        !runtime.turn_state_bindings.contains_key("turn-second"),
+        "second removed turn_state should be cleared"
+    );
+    assert_eq!(
+        runtime
+            .continuation_statuses
+            .turn_state
+            .get("turn-first")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+    assert_eq!(
+        runtime
+            .continuation_statuses
+            .turn_state
+            .get("turn-second")
+            .map(|status| status.state),
+        Some(RuntimeContinuationBindingLifecycle::Dead)
+    );
+}
+
+#[test]
 fn websocket_success_without_turn_state_keeps_compact_lineage_alive() {
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");

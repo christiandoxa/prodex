@@ -351,6 +351,21 @@ fn runtime_broker_continuity_failure_reason_metrics(
     metrics
 }
 
+fn runtime_broker_continuity_failure_reason_metrics_available(
+    metrics: &RuntimeBrokerContinuityFailureReasonMetrics,
+) -> bool {
+    !metrics.chain_retried_owner.is_empty()
+        || !metrics.chain_dead_upstream_confirmed.is_empty()
+        || !metrics.stale_continuation.is_empty()
+}
+
+fn runtime_broker_live_continuity_failure_reason_metrics(
+    log_path: &Path,
+) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
+    let metrics = runtime_proxy_continuity_failure_reason_metrics(log_path);
+    runtime_broker_continuity_failure_reason_metrics_available(&metrics).then_some(metrics)
+}
+
 pub(crate) fn runtime_broker_prometheus_snapshot(
     metadata: &RuntimeBrokerMetadata,
     metrics: &RuntimeBrokerMetrics,
@@ -622,9 +637,10 @@ pub(crate) fn runtime_broker_metrics_snapshot(
             &runtime.profile_health,
             now,
         ),
-        continuity_failure_reasons: runtime_broker_continuity_failure_reason_metrics(
+        continuity_failure_reasons: runtime_broker_live_continuity_failure_reason_metrics(
             &shared.log_path,
-        ),
+        )
+        .unwrap_or_else(|| runtime_broker_continuity_failure_reason_metrics(&shared.log_path)),
     })
 }
 
@@ -667,6 +683,72 @@ mod tests {
             hits: cache.hits,
             misses: cache.misses,
             entries: cache.entries.len(),
+        }
+    }
+
+    fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-broker-metrics-shared-{}",
+            Local::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let runtime = RuntimeRotationState {
+            paths: AppPaths {
+                state_file: root.join("state.json"),
+                managed_profiles_root: root.join("profiles"),
+                shared_codex_root: root.join("shared"),
+                legacy_shared_codex_root: root.join("legacy-shared"),
+                root,
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: PathBuf::from("/tmp/prodex-runtime-broker-metrics-main"),
+                        managed: true,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+
+        RuntimeRotationProxyShared {
+            async_client: reqwest::Client::builder()
+                .build()
+                .expect("test async client"),
+            async_runtime: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .expect("test async runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(runtime)),
+            log_path,
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: 8,
+            lane_admission: RuntimeProxyLaneAdmission::new(runtime_proxy_lane_limits(8, 1, 1)),
         }
     }
 
@@ -804,6 +886,62 @@ mod tests {
             }
         );
 
+        fs::remove_file(&log_path).expect("test log should clean up");
+    }
+
+    #[test]
+    fn runtime_broker_metrics_snapshot_prefers_live_continuity_failure_counters() {
+        let _guard = acquire_test_runtime_lock();
+        clear_runtime_broker_continuity_failure_reason_cache();
+        let log_path = temp_log_path("live-counters");
+        clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
+        fs::write(
+            &log_path,
+            "[2026-04-22 10:00:00.000 +00:00] request=8 transport=http route=responses stale_continuation reason=previous_response_not_found profile=main\n",
+        )
+        .expect("test log should write");
+
+        let shared = test_runtime_broker_shared(log_path.clone());
+        runtime_proxy_record_continuity_failure_reason(
+            &shared,
+            "chain_dead_upstream_confirmed",
+            "previous_response_not_found_locked_affinity",
+        );
+        runtime_proxy_record_continuity_failure_reason(
+            &shared,
+            "stale_continuation",
+            "websocket_reuse_watchdog_locked_affinity",
+        );
+
+        let metrics = runtime_broker_metrics_snapshot(
+            &shared,
+            &RuntimeBrokerMetadata {
+                broker_key: "broker".to_string(),
+                listen_addr: "127.0.0.1:12345".to_string(),
+                started_at: Local::now().timestamp(),
+                current_profile: "main".to_string(),
+                include_code_review: false,
+                instance_token: "instance".to_string(),
+                admin_token: "secret".to_string(),
+                prodex_version: None,
+                executable_path: None,
+                executable_sha256: None,
+            },
+        )
+        .expect("broker metrics snapshot should succeed");
+
+        assert_eq!(
+            metrics
+                .continuity_failure_reasons
+                .chain_dead_upstream_confirmed,
+            BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1,)])
+        );
+        assert_eq!(
+            metrics.continuity_failure_reasons.stale_continuation,
+            BTreeMap::from([("websocket_reuse_watchdog_locked_affinity".to_string(), 1,)])
+        );
+
+        clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
         fs::remove_file(&log_path).expect("test log should clean up");
     }
 }

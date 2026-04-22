@@ -95,16 +95,6 @@ pub(super) fn runtime_proxy_has_continuation_priority(
         || session_profile.is_some()
 }
 
-fn runtime_profile_selection_state(runtime: &RuntimeRotationState) -> AppState {
-    AppState {
-        active_profile: runtime.state.active_profile.clone(),
-        profiles: runtime.state.profiles.clone(),
-        last_run_selected_at: runtime.state.last_run_selected_at.clone(),
-        response_profile_bindings: BTreeMap::new(),
-        session_profile_bindings: BTreeMap::new(),
-    }
-}
-
 pub(super) fn runtime_wait_affinity_owner<'a>(
     strict_affinity_profile: Option<&'a str>,
     pinned_profile: Option<&'a str>,
@@ -218,7 +208,7 @@ pub(super) fn runtime_has_route_eligible_quota_fallback(
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
     let (
-        profiles,
+        selection_state,
         retry_backoff_until,
         transport_backoff_until,
         route_circuit_open_until,
@@ -233,7 +223,7 @@ pub(super) fn runtime_has_route_eligible_quota_fallback(
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         (
-            runtime.state.profiles.clone(),
+            runtime_profile_selection_snapshot(&runtime),
             runtime.profile_retry_backoff_until.clone(),
             runtime.profile_transport_backoff_until.clone(),
             runtime.profile_route_circuit_open_until.clone(),
@@ -243,7 +233,7 @@ pub(super) fn runtime_has_route_eligible_quota_fallback(
             runtime.profile_probe_cache.clone(),
         )
     };
-    for (name, profile) in &profiles {
+    for (name, profile) in &selection_state.profiles {
         if name == profile_name || excluded_profiles.contains(name) {
             continue;
         }
@@ -1788,6 +1778,11 @@ pub(super) fn proxy_runtime_websocket_text_message(
                         );
                         continue;
                     }
+                    runtime_proxy_record_continuity_failure_reason(
+                        shared,
+                        "stale_continuation",
+                        "websocket_reuse_watchdog_locked_affinity",
+                    );
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -3800,7 +3795,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         (
-            runtime_profile_selection_state(&runtime),
+            runtime_profile_selection_snapshot(&runtime),
             runtime.current_profile.clone(),
             runtime.include_code_review,
             runtime.upstream_base_url.clone(),
@@ -3817,9 +3812,12 @@ pub(super) fn next_runtime_response_candidate_for_route(
 
     let mut reports = Vec::new();
     let mut cold_start_probe_jobs = Vec::new();
-    for (order_index, name) in active_profile_selection_order(&selection_state, &current_profile)
-        .into_iter()
-        .enumerate()
+    for (order_index, name) in active_profile_selection_order_with_view(
+        runtime_profile_selection_view(&selection_state),
+        &current_profile,
+    )
+    .into_iter()
+    .enumerate()
     {
         if excluded_profiles.contains(&name) {
             continue;
@@ -3836,7 +3834,7 @@ pub(super) fn next_runtime_response_candidate_for_route(
             });
             if runtime_profile_probe_cache_freshness(entry, now)
                 != RuntimeProbeCacheFreshness::Fresh
-                && profile.provider.supports_codex_runtime()
+                && profile.supports_codex_runtime()
             {
                 schedule_runtime_probe_refresh(shared, &name, &profile.codex_home);
             }
@@ -3900,11 +3898,11 @@ pub(super) fn next_runtime_response_candidate_for_route(
         .collect::<Vec<_>>();
 
     reports.sort_by_key(|report| report.order_index);
-    let mut candidates = ready_profile_candidates(
+    let mut candidates = ready_profile_candidates_with_view(
         &reports,
         include_code_review,
         Some(current_profile.as_str()),
-        &selection_state,
+        runtime_profile_selection_view(&selection_state),
         Some(&cached_usage_snapshots),
     );
 
@@ -4021,11 +4019,11 @@ pub(super) fn next_runtime_response_candidate_for_route(
             }
         }
         reports.sort_by_key(|report| report.order_index);
-        candidates = ready_profile_candidates(
+        candidates = ready_profile_candidates_with_view(
             &reports,
             include_code_review,
             Some(current_profile.as_str()),
-            &selection_state,
+            runtime_profile_selection_view(&selection_state),
             Some(&cached_usage_snapshots),
         );
         for job in cold_start_probe_jobs
@@ -4351,7 +4349,7 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         (
-            runtime_profile_selection_state(&runtime),
+            runtime_profile_selection_snapshot(&runtime),
             runtime.current_profile.clone(),
             runtime.profile_probe_cache.clone(),
             runtime.profile_usage_snapshots.clone(),
@@ -4360,28 +4358,31 @@ pub(super) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     };
     let now = Local::now().timestamp();
 
-    Ok(active_profile_selection_order(&state, &current_profile)
-        .into_iter()
-        .filter(|name| !excluded_profiles.contains(name))
-        .filter(|name| {
-            state.profiles.get(name).is_some_and(|profile| {
-                runtime_profile_auth_summary_for_selection_with_policy(
-                    name,
-                    &profile.codex_home,
-                    &profile_usage_auth,
-                    &cached_reports,
-                    allow_disk_auth_fallback,
-                )
-                .is_some_and(|summary| summary.quota_compatible)
-            })
+    Ok(active_profile_selection_order_with_view(
+        runtime_profile_selection_view(&state),
+        &current_profile,
+    )
+    .into_iter()
+    .filter(|name| !excluded_profiles.contains(name))
+    .filter(|name| {
+        state.profiles.get(name).is_some_and(|profile| {
+            runtime_profile_auth_summary_for_selection_with_policy(
+                name,
+                &profile.codex_home,
+                &profile_usage_auth,
+                &cached_reports,
+                allow_disk_auth_fallback,
+            )
+            .is_some_and(|summary| summary.quota_compatible)
         })
-        .filter(|name| !cached_reports.contains_key(name))
-        .filter(|name| {
-            !cached_usage_snapshots.get(name).is_some_and(|snapshot| {
-                runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
-            })
+    })
+    .filter(|name| !cached_reports.contains_key(name))
+    .filter(|name| {
+        !cached_usage_snapshots.get(name).is_some_and(|snapshot| {
+            runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
         })
-        .count())
+    })
+    .count())
 }
 
 pub(super) fn runtime_waitable_inflight_candidates_for_route(
@@ -4412,7 +4413,7 @@ pub(super) fn runtime_waitable_inflight_candidates_for_route(
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         (
-            runtime_profile_selection_state(&runtime),
+            runtime_profile_selection_snapshot(&runtime),
             runtime.current_profile.clone(),
             runtime.include_code_review,
             runtime.profile_probe_cache.clone(),
@@ -4428,9 +4429,12 @@ pub(super) fn runtime_waitable_inflight_candidates_for_route(
 
     let mut waitable_profiles = BTreeSet::new();
     let mut reports = Vec::new();
-    for (order_index, name) in active_profile_selection_order(&state, &current_profile)
-        .into_iter()
-        .enumerate()
+    for (order_index, name) in active_profile_selection_order_with_view(
+        runtime_profile_selection_view(&state),
+        &current_profile,
+    )
+    .into_iter()
+    .enumerate()
     {
         if excluded_profiles.contains(&name) {
             continue;
@@ -4449,11 +4453,11 @@ pub(super) fn runtime_waitable_inflight_candidates_for_route(
         });
     }
 
-    for candidate in ready_profile_candidates(
+    for candidate in ready_profile_candidates_with_view(
         &reports,
         include_code_review,
         Some(current_profile.as_str()),
-        &state,
+        runtime_profile_selection_view(&state),
         Some(&cached_usage_snapshots),
     ) {
         if excluded_profiles.contains(&candidate.name) {
@@ -4525,7 +4529,7 @@ pub(super) fn runtime_any_waited_candidate_relieved(
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         (
-            runtime_profile_selection_state(&runtime),
+            runtime_profile_selection_snapshot(&runtime),
             runtime.current_profile.clone(),
             runtime.include_code_review,
             runtime.profile_probe_cache.clone(),
@@ -4540,9 +4544,12 @@ pub(super) fn runtime_any_waited_candidate_relieved(
     };
 
     let mut reports = Vec::new();
-    for (order_index, name) in active_profile_selection_order(&state, &current_profile)
-        .into_iter()
-        .enumerate()
+    for (order_index, name) in active_profile_selection_order_with_view(
+        runtime_profile_selection_view(&state),
+        &current_profile,
+    )
+    .into_iter()
+    .enumerate()
     {
         if !waited_profiles.contains(&name) {
             continue;
@@ -4558,11 +4565,11 @@ pub(super) fn runtime_any_waited_candidate_relieved(
         });
     }
 
-    for candidate in ready_profile_candidates(
+    for candidate in ready_profile_candidates_with_view(
         &reports,
         include_code_review,
         Some(current_profile.as_str()),
-        &state,
+        runtime_profile_selection_view(&state),
         Some(&cached_usage_snapshots),
     ) {
         if !waited_profiles.contains(&candidate.name) {

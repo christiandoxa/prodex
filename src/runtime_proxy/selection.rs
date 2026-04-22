@@ -87,6 +87,61 @@ pub(crate) fn runtime_previous_response_affinity_is_bound(
         .is_some_and(|binding| binding.profile_name == bound_profile))
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeSelectionProfileEntry {
+    pub(crate) codex_home: PathBuf,
+    pub(crate) provider: ProfileProvider,
+}
+
+impl ProfileSelectionProvider for RuntimeSelectionProfileEntry {
+    fn runtime_pool_priority(&self) -> usize {
+        self.provider.runtime_pool_priority()
+    }
+}
+
+impl RuntimeSelectionProfileEntry {
+    pub(crate) fn supports_codex_runtime(&self) -> bool {
+        self.provider.supports_codex_runtime()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RuntimeProfileSelectionSnapshot {
+    pub(crate) profiles: BTreeMap<String, RuntimeSelectionProfileEntry>,
+    pub(crate) last_run_selected_at: BTreeMap<String, i64>,
+}
+
+pub(crate) fn runtime_profile_selection_snapshot(
+    runtime: &RuntimeRotationState,
+) -> RuntimeProfileSelectionSnapshot {
+    RuntimeProfileSelectionSnapshot {
+        profiles: runtime
+            .state
+            .profiles
+            .iter()
+            .map(|(name, profile)| {
+                (
+                    name.clone(),
+                    RuntimeSelectionProfileEntry {
+                        codex_home: profile.codex_home.clone(),
+                        provider: profile.provider.clone(),
+                    },
+                )
+            })
+            .collect(),
+        last_run_selected_at: runtime.state.last_run_selected_at.clone(),
+    }
+}
+
+pub(crate) fn runtime_profile_selection_view(
+    snapshot: &RuntimeProfileSelectionSnapshot,
+) -> ProfileSelectionView<'_, RuntimeSelectionProfileEntry> {
+    ProfileSelectionView {
+        profiles: &snapshot.profiles,
+        last_run_selected_at: &snapshot.last_run_selected_at,
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeCandidateAffinity<'a> {
     pub(crate) route_kind: RuntimeRouteKind,
@@ -647,26 +702,40 @@ pub(crate) fn next_runtime_previous_response_candidate(
 ) -> Result<Option<String>> {
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
-    let (state, current_profile, profile_health, profile_usage_auth, profile_probe_cache) = {
+    let (
+        selection_state,
+        current_profile,
+        previous_response_owner,
+        profile_health,
+        profile_usage_auth,
+        profile_probe_cache,
+    ) = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         (
-            runtime.state.clone(),
+            runtime_profile_selection_snapshot(&runtime),
             runtime.current_profile.clone(),
+            previous_response_id.and_then(|response_id| {
+                runtime
+                    .state
+                    .response_profile_bindings
+                    .get(response_id)
+                    .map(|binding| binding.profile_name.clone())
+            }),
             runtime.profile_health.clone(),
             runtime.profile_usage_auth.clone(),
             runtime.profile_probe_cache.clone(),
         )
     };
     let now = Local::now().timestamp();
-    if let Some(previous_response_id) = previous_response_id
-        && let Some(binding) = state.response_profile_bindings.get(previous_response_id)
+    if let (Some(previous_response_id), Some(owner)) =
+        (previous_response_id, previous_response_owner)
     {
-        let owner = binding.profile_name.as_str();
+        let owner = owner.as_str();
         if !excluded_profiles.contains(owner)
-            && state.profiles.contains_key(owner)
+            && selection_state.profiles.contains_key(owner)
             && !runtime_previous_response_negative_cache_active(
                 &profile_health,
                 previous_response_id,
@@ -679,7 +748,10 @@ pub(crate) fn next_runtime_previous_response_candidate(
         }
     }
 
-    for name in active_profile_selection_order(&state, &current_profile) {
+    for name in active_profile_selection_order_with_view(
+        runtime_profile_selection_view(&selection_state),
+        &current_profile,
+    ) {
         if excluded_profiles.contains(&name) {
             continue;
         }
@@ -703,7 +775,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
             );
             continue;
         }
-        let Some(profile) = state.profiles.get(&name) else {
+        let Some(profile) = selection_state.profiles.get(&name) else {
             continue;
         };
         if !runtime_profile_auth_summary_for_selection_with_policy(

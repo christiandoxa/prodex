@@ -172,10 +172,7 @@ pub(crate) fn handle_runtime_previous_response_not_found(
     *previous_response_retry_index = 0;
 
     if policy.fail_stale_continuation && decision.stale_continuation {
-        runtime_proxy_log(
-            shared,
-            runtime_previous_response_stale_continuation_log_message(log_context, profile_name),
-        );
+        runtime_proxy_log_previous_response_stale_continuation(shared, log_context, profile_name);
         runtime_proxy_log_chain_dead_upstream_confirmed(
             shared,
             RuntimeProxyChainLog {
