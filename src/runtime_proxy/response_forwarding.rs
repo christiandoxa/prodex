@@ -625,12 +625,10 @@ pub(crate) fn write_runtime_streaming_response(
         if flush_each_chunk {
             sse_pending.extend_from_slice(&buffer[..read]);
             while let Some(event) = runtime_take_next_sse_event_bytes(&mut sse_pending) {
-                let translated =
-                    runtime_translate_previous_response_sse_event_bytes(&event).unwrap_or(event);
                 write_runtime_stream_chunk(
                     &mut writer,
                     &chunk_context,
-                    &translated,
+                    &event,
                     &mut chunk_count,
                     &mut total_bytes,
                 )?;
@@ -646,12 +644,10 @@ pub(crate) fn write_runtime_streaming_response(
         )?;
     }
     if flush_each_chunk && !sse_pending.is_empty() {
-        let translated = runtime_translate_previous_response_sse_event_bytes(&sse_pending)
-            .unwrap_or(sse_pending);
         write_runtime_stream_chunk(
             &mut writer,
             &chunk_context,
-            &translated,
+            &sse_pending,
             &mut chunk_count,
             &mut total_bytes,
         )?;
@@ -769,41 +765,6 @@ fn runtime_take_next_sse_event_bytes(pending: &mut Vec<u8>) -> Option<Vec<u8>> {
     None
 }
 
-fn runtime_translate_previous_response_sse_event_bytes(event: &[u8]) -> Option<Vec<u8>> {
-    let event_text = String::from_utf8_lossy(event);
-    let mut data_lines = Vec::new();
-    for line in event_text.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty() {
-            break;
-        }
-        if let Some(data) = line.strip_prefix("data:") {
-            data_lines.push(data.trim_start().to_string());
-        }
-    }
-
-    if !parse_runtime_sse_event(&data_lines).previous_response_not_found {
-        return None;
-    }
-
-    Some(
-        format!(
-            "event: response.failed\r\ndata: {}\r\n\r\n",
-            serde_json::json!({
-                "type": "response.failed",
-                "status": 409,
-                "response": {
-                    "error": {
-                        "code": "stale_continuation",
-                        "message": runtime_proxy_stale_continuation_message(),
-                    }
-                }
-            })
-        )
-        .into_bytes(),
-    )
-}
-
 pub(super) fn runtime_proxy_header_value(
     headers: &reqwest::header::HeaderMap,
     name: &str,
@@ -832,22 +793,111 @@ pub(super) fn runtime_proxy_tungstenite_header_value(
 mod tests {
     use super::*;
 
+    struct SharedBufferWriter {
+        bytes: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Write for SharedBufferWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.bytes
+                .lock()
+                .map_err(|_| io::Error::other("test writer buffer is poisoned"))?
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn test_runtime_streaming_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
+        let root = env::temp_dir().join(format!(
+            "prodex-response-forwarding-test-{}",
+            std::process::id()
+        ));
+        let paths = AppPaths {
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared-codex"),
+            legacy_shared_codex_root: root.join("shared"),
+            root,
+        };
+
+        RuntimeRotationProxyShared {
+            async_client: reqwest::Client::new(),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths,
+                state: AppState::default(),
+                upstream_base_url: "http://127.0.0.1".to_string(),
+                include_code_review: false,
+                current_profile: "test".to_string(),
+                profile_usage_auth: BTreeMap::new(),
+                turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
+                continuation_statuses: RuntimeContinuationStatuses::default(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_usage_snapshots: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_route_circuit_open_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+            log_path,
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: 8,
+            lane_admission: RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+                responses: 8,
+                compact: 8,
+                websocket: 8,
+                standard: 8,
+            }),
+        }
+    }
+
     #[test]
-    fn sse_previous_response_event_translation_redacts_raw_error() {
+    fn streaming_sse_previous_response_error_passes_through_after_commit() {
         let event = concat!(
             "event: response.failed\r\n",
             "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"Previous response with id 'resp-123' not found.\"}}}\r\n",
             "\r\n"
-        )
-        .as_bytes()
-        .to_vec();
+        );
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedBufferWriter {
+            bytes: Arc::clone(&output),
+        };
+        let response = RuntimeStreamingResponse {
+            status: 200,
+            headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
+            body: Box::new(Cursor::new(event.as_bytes().to_vec())),
+            request_id: 1,
+            profile_name: "test".to_string(),
+            log_path: env::temp_dir().join(format!(
+                "prodex-response-forwarding-test-{}.log",
+                std::process::id()
+            )),
+            shared: test_runtime_streaming_shared(env::temp_dir().join(format!(
+                "prodex-response-forwarding-shared-test-{}.log",
+                std::process::id()
+            ))),
+            _inflight_guard: None,
+        };
 
-        let translated =
-            runtime_translate_previous_response_sse_event_bytes(&event).expect("translation");
-        let text = String::from_utf8(translated).expect("utf8");
+        write_runtime_streaming_response(Box::new(writer), response).expect("stream response");
+        let text = String::from_utf8(output.lock().expect("output").clone()).expect("utf8");
 
-        assert!(text.contains("\"code\":\"stale_continuation\""));
-        assert!(!text.contains("previous_response_not_found"));
+        assert!(text.contains("previous_response_not_found"));
+        assert!(!text.contains("stale_continuation"));
     }
 
     #[test]

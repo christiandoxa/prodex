@@ -798,7 +798,7 @@ pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
             &frame.response_ids,
             previous_response_owner_recorded,
         )?;
-        let text = runtime_translate_previous_response_websocket_text_frame(&frame.text);
+        let text = runtime_translate_precommit_previous_response_websocket_text_frame(&frame.text);
         local_socket
             .send(WsMessage::Text(text.into()))
             .context("failed to forward buffered runtime websocket text frame")?;
@@ -807,6 +807,10 @@ pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
 }
 
 pub(super) fn runtime_translate_previous_response_websocket_text_frame(payload: &str) -> String {
+    payload.to_string()
+}
+
+fn runtime_translate_precommit_previous_response_websocket_text_frame(payload: &str) -> String {
     if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
         return payload.to_string();
     }
@@ -932,7 +936,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn websocket_previous_response_frame_translation_preserves_failed_event_shape() {
+    fn websocket_direct_previous_response_frame_is_forwarded_without_translation() {
         let payload = serde_json::json!({
             "type": "response.failed",
             "status": 400,
@@ -944,6 +948,32 @@ mod tests {
         .to_string();
 
         let translated = runtime_translate_previous_response_websocket_text_frame(&payload);
+        let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
+
+        assert_eq!(translated, payload);
+        assert_eq!(
+            value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("previous_response_not_found")
+        );
+    }
+
+    #[test]
+    fn websocket_precommit_previous_response_frame_translation_preserves_failed_event_shape() {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "status": 400,
+            "error": {
+                "code": "previous_response_not_found",
+                "message": "Previous response with id 'resp-123' not found.",
+            }
+        })
+        .to_string();
+
+        let translated =
+            runtime_translate_precommit_previous_response_websocket_text_frame(&payload);
         let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
 
         assert_eq!(
@@ -968,8 +998,8 @@ mod tests {
     }
 
     #[test]
-    fn websocket_previous_response_plain_text_translation_uses_proxy_error_shape() {
-        let translated = runtime_translate_previous_response_websocket_text_frame(
+    fn websocket_precommit_previous_response_plain_text_translation_uses_proxy_error_shape() {
+        let translated = runtime_translate_precommit_previous_response_websocket_text_frame(
             "previous_response_not_found: Previous response with id 'resp-123' not found.",
         );
 

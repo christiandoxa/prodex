@@ -158,7 +158,22 @@ pub(crate) fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxySha
     drop(runtime);
 }
 
+#[allow(dead_code)]
 pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
+    match probe_runtime_proxy_active_request_slot(shared, transport, path) {
+        Ok(guard) => Ok(guard),
+        Err(rejection) => {
+            record_runtime_proxy_admission_rejection(shared, transport, path, rejection);
+            Err(rejection)
+        }
+    }
+}
+
+fn probe_runtime_proxy_active_request_slot(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
     path: &str,
@@ -176,10 +191,6 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
                     shared.active_request_limit
                 ),
             );
-            shared
-                .lane_admission
-                .global_limit_rejections_total_counter(lane)
-                .fetch_add(1, Ordering::Relaxed);
             return Err(RuntimeProxyAdmissionRejection::GlobalLimit);
         }
         let lane_active = lane_active_count.load(Ordering::SeqCst);
@@ -191,10 +202,6 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
                     runtime_route_kind_label(lane)
                 ),
             );
-            shared
-                .lane_admission
-                .lane_limit_rejections_total_counter(lane)
-                .fetch_add(1, Ordering::Relaxed);
             return Err(RuntimeProxyAdmissionRejection::LaneLimit(lane));
         }
         if shared
@@ -231,6 +238,30 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
     }
 }
 
+fn record_runtime_proxy_admission_rejection(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+    rejection: RuntimeProxyAdmissionRejection,
+) {
+    let lane = match rejection {
+        RuntimeProxyAdmissionRejection::GlobalLimit => {
+            runtime_proxy_request_lane(path, transport == "websocket")
+        }
+        RuntimeProxyAdmissionRejection::LaneLimit(lane) => lane,
+    };
+    match rejection {
+        RuntimeProxyAdmissionRejection::GlobalLimit => shared
+            .lane_admission
+            .global_limit_rejections_total_counter(lane)
+            .fetch_add(1, Ordering::Relaxed),
+        RuntimeProxyAdmissionRejection::LaneLimit(lane) => shared
+            .lane_admission
+            .lane_limit_rejections_total_counter(lane)
+            .fetch_add(1, Ordering::Relaxed),
+    };
+}
+
 pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
@@ -242,7 +273,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
     let budget = runtime_proxy_admission_wait_budget(path, pressure_mode);
     let mut waited = false;
     loop {
-        match try_acquire_runtime_proxy_active_request_slot(shared, transport, path) {
+        match probe_runtime_proxy_active_request_slot(shared, transport, path) {
             Ok(guard) => {
                 if waited {
                     runtime_proxy_log(
@@ -271,6 +302,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
                             }
                         ),
                     );
+                    record_runtime_proxy_admission_rejection(shared, transport, path, rejection);
                     return Err(rejection);
                 }
                 if !waited {
@@ -294,8 +326,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if let Ok(guard) =
-                    try_acquire_runtime_proxy_active_request_slot(shared, transport, path)
+                if let Ok(guard) = probe_runtime_proxy_active_request_slot(shared, transport, path)
                 {
                     return Ok(guard);
                 }

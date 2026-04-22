@@ -836,6 +836,7 @@ enum RuntimeProxyBackendMode {
     HttpOnlyResetBeforeFirstByte,
     HttpOnlyResetAfterFirstChunk,
     HttpOnlyPreviousResponseNeedsTurnState,
+    HttpOnlyPreviousResponseNotFoundAfterCommit,
     HttpOnlySseHeadersArrayTurnState,
     HttpOnlyCompactOverloaded,
     HttpOnlyCompactPreviousResponseNotFound,
@@ -854,6 +855,7 @@ enum RuntimeProxyBackendMode {
     WebsocketReusePrecommitHoldStall,
     WebsocketReuseOwnedPreviousResponseSilentHang,
     WebsocketReusePreviousResponseNeedsTurnState,
+    WebsocketPreviousResponseNotFoundAfterCommit,
     WebsocketPreviousResponseMissingWithoutTurnState,
     WebsocketOwnedToolOutputNeedsSessionReplay,
     WebsocketCloseMidTurn,
@@ -906,6 +908,10 @@ impl RuntimeProxyBackend {
 
     fn start_http_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState)
+    }
+
+    fn start_http_previous_response_not_found_after_commit() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit)
     }
 
     fn start_http_sse_headers_array_turn_state() -> Self {
@@ -984,6 +990,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState)
     }
 
+    fn start_websocket_previous_response_not_found_after_commit() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit)
+    }
+
     fn start_websocket_previous_response_missing_without_turn_state() -> Self {
         Self::start_with_mode(
             RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState,
@@ -1057,6 +1067,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall
                                 | RuntimeProxyBackendMode::WebsocketReuseOwnedPreviousResponseSilentHang
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
+                                | RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                                 | RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay
                                 | RuntimeProxyBackendMode::WebsocketCloseMidTurn
@@ -1537,6 +1548,43 @@ fn handle_runtime_proxy_backend_request(
                                 | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
                         )
                             .then_some(Duration::from_millis(100)),
+                    )
+                }
+                "second-account"
+                    if matches!(
+                        mode,
+                        RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit
+                    ) && runtime_proxy_backend_is_owned_continuation(
+                        "second-account",
+                        previous_response_id.as_deref(),
+                    ) =>
+                {
+                    let next_response_id = runtime_proxy_backend_next_response_id(
+                        previous_response_id.as_deref(),
+                    )
+                    .expect("next response id should exist");
+                    (
+                        "HTTP/1.1 200 OK",
+                        "text/event-stream",
+                        format!(
+                            concat!(
+                                "event: response.created\r\n",
+                                "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                                "\r\n",
+                                "event: response.output_text.delta\r\n",
+                                "data: {{\"type\":\"response.output_text.delta\",\"response\":{{\"id\":\"{}\"}},\"delta\":\"hello\"}}\r\n",
+                                "\r\n",
+                                "event: response.failed\r\n",
+                                "data: {{\"type\":\"response.failed\",\"response\":{{\"error\":{{\"code\":\"previous_response_not_found\",\"message\":\"Previous response with id '{}' not found.\",\"param\":\"previous_response_id\"}}}}}}\r\n",
+                                "\r\n"
+                            ),
+                            next_response_id,
+                            next_response_id,
+                            previous_response_id.as_deref().unwrap_or_default(),
+                        ),
+                        None,
+                        None,
+                        None,
                     )
                 }
                 "second-account"
@@ -2333,6 +2381,22 @@ fn handle_runtime_proxy_backend_request(
         return;
     }
     if content_type == "text/event-stream"
+        && matches!(
+            mode,
+            RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit
+        )
+        && account_id == "second-account"
+    {
+        for (index, event) in body.split("\r\n\r\n").filter(|event| !event.is_empty()).enumerate() {
+            let _ = stream.write_all(format!("{event}\r\n\r\n").as_bytes());
+            let _ = stream.flush();
+            if index == 1 {
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        return;
+    }
+    if content_type == "text/event-stream"
         && let Some(delay) = chunk_delay
     {
         let body_bytes = body.as_bytes();
@@ -2633,6 +2697,63 @@ fn handle_runtime_proxy_backend_websocket(
                 websocket
                     .send(WsMessage::Text(immediate_error.to_string().into()))
                     .expect("retryable error should be sent");
+            }
+            "second-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit
+                ) && runtime_proxy_backend_is_owned_continuation(
+                    "second-account",
+                    previous_response_id.as_deref(),
+                ) =>
+            {
+                let next_response_id =
+                    runtime_proxy_backend_next_response_id(previous_response_id.as_deref())
+                        .expect("next response id should exist");
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.created",
+                            "response": {
+                                "id": next_response_id.clone()
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("response.created should be sent");
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.output_text.delta",
+                            "response": {
+                                "id": next_response_id
+                            },
+                            "delta": "hello"
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("response.output_text.delta should be sent");
+                thread::sleep(Duration::from_millis(50));
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.failed",
+                            "status": 400,
+                            "error": {
+                                "code": "previous_response_not_found",
+                                "message": format!(
+                                    "Previous response with id '{}' not found.",
+                                    previous_response_id.as_deref().unwrap_or_default()
+                                ),
+                                "param": "previous_response_id",
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("post-commit previous_response_not_found should be sent");
             }
             "second-account"
                 if matches!(
@@ -4496,6 +4617,7 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_runtime_broker_lane_admissions_total"));
     assert!(body.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
     assert!(body.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
+    assert!(body.contains("prodex_runtime_broker_continuation_binding_counts"));
 }
 
 #[test]
@@ -5979,6 +6101,190 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
         responses_bodies[0].contains("\"previous_response_id\":\"resp-compact-missing\""),
         "compact request should preserve the original previous_response_id: {}",
         responses_bodies[0]
+    );
+}
+
+#[test]
+fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() {
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_http_previous_response_not_found_after_commit();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "previous_response_id": "resp-second",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "continue",
+                    }],
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("previous_response_not_found"),
+        "post-commit HTTP continuation error should pass through raw upstream payload: {body}"
+    );
+    assert!(
+        !body.contains("\"code\":\"stale_continuation\""),
+        "post-commit HTTP continuation error must not be rewritten after commit: {body}"
+    );
+}
+
+#[test]
+fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let temp_dir = TestDir::new();
+    let backend = RuntimeProxyBackend::start_websocket_previous_response_not_found_after_commit();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start");
+
+    let (mut socket, _response) = ws_connect(format!(
+        "ws://{}/backend-api/prodex/responses",
+        proxy.listen_addr
+    ))
+    .expect("websocket client should connect");
+    set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "previous_response_id": "resp-second",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "continue",
+                    }],
+                }],
+            })
+            .to_string()
+            .into(),
+        ))
+        .expect("websocket request should send");
+
+    let mut frames = Vec::new();
+    let error_message = loop {
+        match socket.read().expect("websocket response should read") {
+            WsMessage::Text(text) => {
+                let text = text.to_string();
+                let is_error = text.contains("previous_response_not_found")
+                    || text.contains("stale_continuation");
+                frames.push(text.clone());
+                if is_error {
+                    break text;
+                }
+            }
+            WsMessage::Ping(payload) => socket
+                .send(WsMessage::Pong(payload))
+                .expect("websocket pong should send"),
+            WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+            other => panic!("unexpected websocket response: {other:?}"),
+        }
+    };
+    let _ = socket.close(None);
+
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame.contains("\"type\":\"response.output_text.delta\"")),
+        "client should see committed model output before the later continuation error: {frames:?}"
+    );
+    assert!(
+        error_message.contains("previous_response_not_found"),
+        "post-commit websocket continuation error should pass through raw upstream payload: {error_message}"
+    );
+    assert!(
+        !error_message.contains("stale_continuation"),
+        "post-commit websocket continuation error must not be rewritten after commit: {error_message}"
     );
 }
 

@@ -134,7 +134,15 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "Route-specific health scores that are still degraded.",
             self.snapshot.degraded_routes as f64,
         );
-        render_continuation_family(
+        render_continuation_binding_counts_family(
+            &mut self.out,
+            "prodex_runtime_broker_continuation_binding_counts",
+            "Continuation binding counts grouped by binding kind.",
+            &self.snapshot.continuations,
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+        );
+        render_continuation_lifecycle_family(
             &mut self.out,
             "prodex_runtime_broker_continuation_bindings",
             "Continuation bindings grouped by lifecycle.",
@@ -328,7 +336,35 @@ struct LaneFamilyDescriptor<'a> {
     metric_type: &'a str,
 }
 
-fn render_continuation_family(
+fn render_continuation_binding_counts_family(
+    out: &mut String,
+    metric_name: &str,
+    help: &str,
+    continuations: &RuntimeBrokerContinuationMetrics,
+    broker_key: &str,
+    listen_addr: &str,
+) {
+    push_help(out, metric_name, help);
+    push_type(out, metric_name, "gauge");
+    for (kind_label, value) in [
+        ("response", continuations.response_bindings),
+        ("turn_state", continuations.turn_state_bindings),
+        ("session_id", continuations.session_id_bindings),
+    ] {
+        push_gauge(
+            out,
+            metric_name,
+            labels(&[
+                ("broker_key", broker_key),
+                ("listen_addr", listen_addr),
+                ("kind", kind_label),
+            ]),
+            value as f64,
+        );
+    }
+}
+
+fn render_continuation_lifecycle_family(
     out: &mut String,
     metric_name: &str,
     help: &str,
@@ -534,6 +570,16 @@ mod tests {
         assert!(rendered.contains("prodex_runtime_broker_lane_admissions_total"));
         assert!(rendered.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
         assert!(rendered.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
+        assert!(rendered.contains("# HELP prodex_runtime_broker_continuation_binding_counts"));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_binding_counts{broker_key=\"broker-123\",kind=\"response\",listen_addr=\"127.0.0.1:8080\"} 7"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_binding_counts{broker_key=\"broker-123\",kind=\"turn_state\",listen_addr=\"127.0.0.1:8080\"} 2"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_continuation_binding_counts{broker_key=\"broker-123\",kind=\"session_id\",listen_addr=\"127.0.0.1:8080\"} 1"
+        ));
         assert!(rendered.contains("broker_key=\"broker-123\""));
         assert!(rendered.contains("listen_addr=\"127.0.0.1:8080\""));
         assert!(rendered.contains("current_profile=\"main\""));
