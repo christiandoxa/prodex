@@ -241,7 +241,7 @@ fn runtime_broker_continuity_failure_reason_cache_fingerprint(
 fn runtime_broker_continuity_failure_reason_metrics_from_bytes(
     log: &[u8],
 ) -> RuntimeBrokerContinuityFailureReasonMetrics {
-    let summary = summarize_runtime_log_tail(&log);
+    let summary = summarize_runtime_log_tail(log);
     RuntimeBrokerContinuityFailureReasonMetrics {
         chain_retried_owner: summary.chain_retried_owner_by_reason,
         chain_dead_upstream_confirmed: summary.chain_dead_upstream_confirmed_by_reason,
