@@ -2138,11 +2138,9 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(if reuse_existing_session {
-                            runtime_proxy_websocket_precommit_progress_timeout_ms()
-                        } else {
-                            runtime_proxy_stream_idle_timeout_ms()
-                        })),
+                        Some(Duration::from_millis(
+                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+                        )),
                     )
                     .context("failed to restore runtime websocket upstream timeout")?;
                 }
@@ -2197,7 +2195,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     }
                 }
 
-                if reuse_existing_session && !committed && inspected.precommit_hold {
+                if !committed && inspected.precommit_hold {
                     if precommit_hold_count == 0 {
                         runtime_proxy_log(
                             shared,
@@ -2355,11 +2353,9 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(if reuse_existing_session {
-                            runtime_proxy_websocket_precommit_progress_timeout_ms()
-                        } else {
-                            runtime_proxy_stream_idle_timeout_ms()
-                        })),
+                        Some(Duration::from_millis(
+                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+                        )),
                     )
                     .context("failed to restore runtime websocket upstream timeout")?;
                 }
@@ -2420,11 +2416,9 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(if reuse_existing_session {
-                            runtime_proxy_websocket_precommit_progress_timeout_ms()
-                        } else {
-                            runtime_proxy_stream_idle_timeout_ms()
-                        })),
+                        Some(Duration::from_millis(
+                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+                        )),
                     )
                     .context("failed to restore runtime websocket upstream timeout")?;
                 }
@@ -2437,11 +2431,9 @@ pub(super) fn attempt_runtime_websocket_request(
                     first_upstream_frame_seen = true;
                     runtime_set_upstream_websocket_io_timeout(
                         &mut upstream_socket,
-                        Some(Duration::from_millis(if reuse_existing_session {
-                            runtime_proxy_websocket_precommit_progress_timeout_ms()
-                        } else {
-                            runtime_proxy_stream_idle_timeout_ms()
-                        })),
+                        Some(Duration::from_millis(
+                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+                        )),
                     )
                     .context("failed to restore runtime websocket upstream timeout")?;
                 }
@@ -2517,11 +2509,7 @@ pub(super) fn attempt_runtime_websocket_request(
             }
             Err(err) => {
                 websocket_session.reset();
-                if !committed
-                    && reuse_existing_session
-                    && precommit_hold_count > 0
-                    && runtime_websocket_timeout_error(&err)
-                {
+                if !committed && precommit_hold_count > 0 && runtime_websocket_timeout_error(&err) {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
                     runtime_proxy_log(
@@ -2540,19 +2528,22 @@ pub(super) fn attempt_runtime_websocket_request(
                         "websocket_precommit_hold_timeout",
                         &transport_error,
                     );
-                    if let Some(started_at) = reuse_started_at {
-                        runtime_proxy_log(
-                            shared,
-                            format!(
-                                "websocket_reuse_watchdog profile={profile_name} event=precommit_hold_timeout elapsed_ms={} committed={committed}",
-                                started_at.elapsed().as_millis()
-                            ),
-                        );
+                    if reuse_existing_session {
+                        if let Some(started_at) = reuse_started_at {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "websocket_reuse_watchdog profile={profile_name} event=precommit_hold_timeout elapsed_ms={} committed={committed}",
+                                    started_at.elapsed().as_millis()
+                                ),
+                            );
+                        }
+                        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                            profile_name: profile_name.to_string(),
+                            event: "precommit_hold_timeout",
+                        });
                     }
-                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                        profile_name: profile_name.to_string(),
-                        event: "precommit_hold_timeout",
-                    });
+                    return Err(transport_error);
                 }
                 if !committed && !first_upstream_frame_seen && runtime_websocket_timeout_error(&err)
                 {

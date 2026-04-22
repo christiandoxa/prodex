@@ -809,6 +809,7 @@ enum RuntimeProxyBackendMode {
     WebsocketReusePrecommitHoldStall,
     WebsocketReuseOwnedPreviousResponseSilentHang,
     WebsocketReusePreviousResponseNeedsTurnState,
+    WebsocketPreviousResponseNotFoundAfterPrelude,
     WebsocketPreviousResponseNotFoundAfterCommit,
     WebsocketPreviousResponseMissingWithoutTurnState,
     WebsocketOwnedToolOutputNeedsSessionReplay,
@@ -944,6 +945,12 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState)
     }
 
+    fn start_websocket_previous_response_not_found_after_prelude() -> Self {
+        Self::start_with_mode(
+            RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterPrelude,
+        )
+    }
+
     fn start_websocket_previous_response_not_found_after_commit() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit)
     }
@@ -1021,6 +1028,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall
                                 | RuntimeProxyBackendMode::WebsocketReuseOwnedPreviousResponseSilentHang
                                 | RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState
+                                | RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterPrelude
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState
                                 | RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay
@@ -2652,6 +2660,50 @@ fn handle_runtime_proxy_backend_websocket(
                 websocket
                     .send(WsMessage::Text(immediate_error.to_string().into()))
                     .expect("retryable error should be sent");
+            }
+            "second-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterPrelude
+                ) && runtime_proxy_backend_is_owned_continuation(
+                    "second-account",
+                    previous_response_id.as_deref(),
+                ) =>
+            {
+                let next_response_id =
+                    runtime_proxy_backend_next_response_id(previous_response_id.as_deref())
+                        .expect("next response id should exist");
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.created",
+                            "response": {
+                                "id": next_response_id
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("response.created should be sent");
+                thread::sleep(Duration::from_millis(50));
+                websocket
+                    .send(WsMessage::Text(
+                        serde_json::json!({
+                            "type": "response.failed",
+                            "status": 400,
+                            "error": {
+                                "code": "previous_response_not_found",
+                                "message": format!(
+                                    "Previous response with id '{}' not found.",
+                                    previous_response_id.as_deref().unwrap_or_default()
+                                ),
+                                "param": "previous_response_id",
+                            }
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .expect("precommit previous_response_not_found should be sent");
             }
             "second-account"
                 if matches!(

@@ -1116,6 +1116,76 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
 }
 
 #[test]
+fn runtime_proxy_websocket_previous_response_not_found_after_prelude_surfaces_stale_continuation() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_previous_response_not_found_after_prelude(),
+        "second",
+        &["second"],
+        &[("resp-second", "second")],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "previous_response_id": "resp-second",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "continue",
+                }],
+            }],
+        }),
+    );
+
+    let (frames, response_message) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("previous_response_not_found") || text.contains("stale_continuation")
+    });
+    let _ = socket.close(None);
+
+    assert!(
+        response_message.contains("\"code\":\"stale_continuation\""),
+        "precommit websocket continuation loss should surface stale_continuation: {response_message}"
+    );
+    assert!(
+        !response_message.contains("previous_response_not_found"),
+        "proxy should not leak raw previous_response_not_found before visible output: {response_message}"
+    );
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| frame.contains("\"type\":\"response.created\"")),
+        "precommit hold frames should stay buffered when continuation fails before visible output: {frames:?}"
+    );
+
+    let websocket_requests = fixture.backend.websocket_requests();
+    let first_request = assert_single_recorded_request(
+        &websocket_requests,
+        "backend should observe exactly one continuation attempt",
+    );
+    assert_request_json_field(
+        first_request,
+        "previous_response_id",
+        "resp-second",
+        "continuation request should preserve previous_response_id",
+    );
+
+    let log = fixture.wait_for_log(|log| {
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+    });
+    assert!(
+        log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "runtime log should classify the precommit loss as stale continuation: {log}"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() {
     let temp_dir = TestDir::new();
     let backend = RuntimeProxyBackend::start_http_previous_response_not_found_after_commit();
