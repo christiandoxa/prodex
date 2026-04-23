@@ -238,47 +238,6 @@ pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
     auth_summary_from_auth_text_result(read_auth_json_text(codex_home))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn non_openai_model_provider_disables_quota_summary() {
-        let root = temp_dir("non-openai-model-provider");
-        fs::create_dir_all(&root).unwrap();
-        fs::write(
-            root.join("config.toml"),
-            "model_provider = 'amazon-bedrock'\n",
-        )
-        .unwrap();
-        fs::write(
-            secret_store::auth_json_path(&root),
-            r#"{"tokens":{"access_token":"test-token"}}"#,
-        )
-        .unwrap();
-
-        let summary = read_auth_summary(&root);
-
-        assert_eq!(summary.label, "model-provider:amazon-bedrock");
-        assert!(!summary.quota_compatible);
-    }
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = env::temp_dir().join(format!(
-            "prodex-auth-summary-{name}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        if dir.exists() {
-            fs::remove_dir_all(&dir).unwrap();
-        }
-        dir
-    }
-}
-
 pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
     let auth_location = secret_store::auth_json_path(codex_home);
     let Some(content) = read_auth_json_text(codex_home)
@@ -584,4 +543,45 @@ fn write_auth_json_value(codex_home: &Path, auth_json: &serde_json::Value) -> Re
             serde_json::to_string_pretty(auth_json).context("failed to serialize auth JSON")?,
         )
         .map_err(anyhow::Error::new)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_openai_model_provider_disables_quota_summary() {
+        let root = temp_dir("non-openai-model-provider");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        fs::write(
+            secret_store::auth_json_path(&root),
+            r#"{"tokens":{"access_token":"test-token"}}"#,
+        )
+        .unwrap();
+
+        let summary = read_auth_summary(&root);
+
+        assert_eq!(summary.label, "model-provider:amazon-bedrock");
+        assert!(!summary.quota_compatible);
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!(
+            "prodex-auth-summary-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
+        dir
+    }
 }
