@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "default_scale_percent": 100,
+  "case_scale_percent": {
+    "runtime_route_eligible_quota_fallback_scan": 160,
+    "runtime_previous_response_candidate_selection": 170,
+    "runtime_mixed_pool_response_selection": 125,
+    "runtime_sse_lookahead_inspection": 190,
+    "runtime_dead_lineage_cleanup": 190
+  }
+}

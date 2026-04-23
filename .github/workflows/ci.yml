@@ -276,7 +276,7 @@ jobs:
       - name: Check runtime proxy benchmark regression thresholds
         env:
           PRODEX_RUNTIME_PROXY_BENCH_CHECK: "1"
-          PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE: "200"
+          PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
   runtime-stress:

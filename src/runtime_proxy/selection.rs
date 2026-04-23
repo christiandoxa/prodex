@@ -1220,3 +1220,619 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
     }
     Ok(Some(current_profile))
 }
+
+pub(crate) fn next_runtime_response_candidate_for_route(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<Option<String>> {
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let sync_probe_pressure_mode =
+        runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
+    let allow_disk_auth_fallback = !sync_probe_pressure_mode;
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let mut selection_state = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
+        runtime_route_selection_catalog(&runtime, route_kind, now)
+    };
+    let probe_plan = build_runtime_response_probe_plan(
+        &selection_state,
+        excluded_profiles,
+        route_kind,
+        allow_disk_auth_fallback,
+        sync_probe_pressure_mode,
+        inflight_soft_limit,
+        now,
+    );
+    for refresh in &probe_plan.stale_probe_refreshes {
+        schedule_runtime_probe_refresh(shared, &refresh.name, &refresh.codex_home);
+    }
+    if let Some(skip_jobs) = probe_plan.sync_probe_skip_jobs_count {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_sync_probe route={} reason=pressure_mode cold_start_jobs={}",
+                runtime_route_kind_label(route_kind),
+                skip_jobs,
+            ),
+        );
+    }
+
+    let mut reports = probe_plan.reports;
+    let mut ready_candidates = probe_plan.ready_candidates;
+    if probe_plan.should_sync_probe_cold_start {
+        let base_url = Some(selection_state.upstream_base_url.clone());
+        let sync_jobs = probe_plan
+            .sync_probe_jobs
+            .iter()
+            .take(RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT)
+            .cloned()
+            .collect::<Vec<_>>();
+        let probed_names = sync_jobs
+            .iter()
+            .map(|job| job.name.clone())
+            .collect::<BTreeSet<_>>();
+        let fresh_reports = map_parallel(sync_jobs, |job| {
+            let auth = job.provider.auth_summary(&job.codex_home);
+            let result = if auth.quota_compatible {
+                fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
+            } else {
+                Err("auth mode is not quota-compatible".to_string())
+            };
+
+            RunProfileProbeReport {
+                name: job.name,
+                order_index: job.order_index,
+                auth,
+                result,
+            }
+        });
+
+        for report in &fresh_reports {
+            apply_runtime_profile_probe_result(
+                shared,
+                &report.name,
+                report.auth.clone(),
+                report.result.clone(),
+            )?;
+        }
+        selection_state = {
+            let mut runtime = shared
+                .runtime
+                .lock()
+                .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+            prune_runtime_profile_selection_backoff(&mut runtime, now);
+            runtime_route_selection_catalog(&runtime, route_kind, now)
+        };
+        let cached_usage_snapshots = selection_state.persisted_usage_snapshots();
+
+        for fresh_report in fresh_reports {
+            if let Some(existing) = reports
+                .iter_mut()
+                .find(|report| report.name == fresh_report.name)
+            {
+                *existing = fresh_report;
+            }
+        }
+        reports.sort_by_key(|report| report.order_index);
+        ready_candidates = ready_profile_candidates_with_view(
+            &reports,
+            selection_state.include_code_review,
+            Some(selection_state.current_profile.as_str()),
+            runtime_route_selection_view(&selection_state),
+            Some(&cached_usage_snapshots),
+        );
+        for job in probe_plan
+            .cold_start_probe_jobs
+            .into_iter()
+            .filter(|job| !probed_names.contains(&job.name))
+        {
+            schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
+        }
+    } else {
+        if let Some(skip_profiles) = probe_plan.sync_probe_skip_profiles_count {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_sync_probe route={} reason=pressure_mode cold_start_profiles={}",
+                    runtime_route_kind_label(route_kind),
+                    skip_profiles
+                ),
+            );
+        }
+        for job in probe_plan.cold_start_probe_jobs {
+            schedule_runtime_probe_refresh(shared, &job.name, &job.codex_home);
+        }
+    }
+    let candidate_plan = build_runtime_response_candidate_execution_plan(
+        &selection_state,
+        excluded_profiles,
+        route_kind,
+        inflight_soft_limit,
+        ready_candidates,
+        |name| runtime_profile_selection_jitter(shared, name, route_kind),
+    );
+
+    for candidate in candidate_plan.ready_candidates {
+        if let Some(reason) = candidate.ready_skip_reason() {
+            if reason == "profile_inflight_soft_limit" {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "selection_skip_current route={} profile={} reason=profile_inflight_soft_limit inflight={} soft_limit={} health={} quota_source={} {}",
+                        runtime_route_kind_label(route_kind),
+                        candidate.name,
+                        candidate.inflight_count,
+                        candidate.inflight_soft_limit,
+                        candidate.health_sort_key,
+                        runtime_quota_source_label(candidate.quota_source),
+                        runtime_quota_summary_log_fields(candidate.quota_summary),
+                    ),
+                );
+            } else {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "selection_skip_current route={} profile={} reason={} inflight={} health={} quota_source={} {}",
+                        runtime_route_kind_label(route_kind),
+                        candidate.name,
+                        reason,
+                        candidate.inflight_count,
+                        candidate.health_sort_key,
+                        runtime_quota_source_label(candidate.quota_source),
+                        runtime_quota_summary_log_fields(candidate.quota_summary),
+                    ),
+                );
+            }
+            continue;
+        }
+        if !reserve_runtime_profile_route_circuit_half_open_probe(
+            shared,
+            &candidate.name,
+            route_kind,
+        )? {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    candidate.inflight_count,
+                    candidate.health_sort_key,
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(candidate.quota_summary),
+                ),
+            );
+            continue;
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_pick route={} profile={} mode=ready inflight={} health={} order={} {}",
+                runtime_route_kind_label(route_kind),
+                candidate.name,
+                candidate.inflight_count,
+                candidate.health_sort_key,
+                candidate.order_index,
+                format_args!(
+                    "quota_source={} {}",
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(candidate.quota_summary)
+                ),
+            ),
+        );
+        return Ok(Some(candidate.name.clone()));
+    }
+
+    let mut fallback = None;
+    for candidate in candidate_plan.fallback_candidates {
+        if let Some(reason) = candidate.fallback_skip_reason() {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason={} inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    reason,
+                    candidate.inflight_count,
+                    candidate.health_sort_key,
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(candidate.quota_summary),
+                ),
+            );
+            continue;
+        }
+        if !reserve_runtime_profile_route_circuit_half_open_probe(
+            shared,
+            &candidate.name,
+            route_kind,
+        )? {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    candidate.name,
+                    candidate.inflight_count,
+                    candidate.health_sort_key,
+                    runtime_quota_source_label(candidate.quota_source),
+                    runtime_quota_summary_log_fields(candidate.quota_summary),
+                ),
+            );
+            continue;
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} quota_source={} {}",
+                runtime_route_kind_label(route_kind),
+                candidate.name,
+                candidate.inflight_count,
+                candidate.health_sort_key,
+                candidate.backoff_sort_key,
+                candidate.order_index,
+                runtime_quota_source_label(candidate.quota_source),
+                runtime_quota_summary_log_fields(candidate.quota_summary),
+            ),
+        );
+        fallback = Some(candidate.name);
+        break;
+    }
+
+    if fallback.is_none() {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_pick route={} profile=none mode=exhausted excluded_count={}",
+                runtime_route_kind_label(route_kind),
+                excluded_profiles.len()
+            ),
+        );
+    }
+
+    Ok(fallback)
+}
+
+pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<usize> {
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
+    let now = Local::now().timestamp();
+    let state = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        runtime_route_selection_catalog(&runtime, route_kind, now)
+    };
+
+    Ok(active_profile_selection_order_with_view(
+        runtime_route_selection_view(&state),
+        &state.current_profile,
+    )
+    .into_iter()
+    .filter(|name| !excluded_profiles.contains(name))
+    .filter(|name| {
+        state.entry(name).is_some_and(|entry| {
+            entry
+                .cached_auth_summary
+                .clone()
+                .or_else(|| {
+                    allow_disk_auth_fallback.then(|| read_auth_summary(&entry.profile.codex_home))
+                })
+                .is_some_and(|summary| summary.quota_compatible)
+        })
+    })
+    .filter(|name| {
+        state
+            .entry(name)
+            .is_some_and(|entry| entry.cached_probe_entry.is_none())
+    })
+    .filter(|name| {
+        !state.entry(name).is_some_and(|entry| {
+            entry
+                .cached_usage_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
+                })
+        })
+    })
+    .count())
+}
+
+pub(crate) fn runtime_waitable_inflight_candidates_for_route(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    wait_affinity_owner: Option<&str>,
+) -> Result<BTreeSet<String>> {
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let state = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
+        runtime_route_selection_catalog(&runtime, route_kind, now)
+    };
+    let cached_usage_snapshots = state.persisted_usage_snapshots();
+
+    let mut waitable_profiles = BTreeSet::new();
+    let mut reports = Vec::new();
+    for (order_index, name) in active_profile_selection_order_with_view(
+        runtime_route_selection_view(&state),
+        &state.current_profile,
+    )
+    .into_iter()
+    .enumerate()
+    {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        if wait_affinity_owner.is_some_and(|owner| owner != name) {
+            continue;
+        }
+        let Some(entry) = state.entry(&name) else {
+            continue;
+        };
+        let Some(probe_entry) = entry.cached_probe_entry.as_ref() else {
+            continue;
+        };
+        reports.push(RunProfileProbeReport {
+            name,
+            order_index,
+            auth: probe_entry.auth.clone(),
+            result: probe_entry.result.clone(),
+        });
+    }
+
+    for candidate in ready_profile_candidates_with_view(
+        &reports,
+        state.include_code_review,
+        Some(state.current_profile.as_str()),
+        runtime_route_selection_view(&state),
+        Some(&cached_usage_snapshots),
+    ) {
+        if excluded_profiles.contains(&candidate.name) {
+            continue;
+        }
+        let Some(entry) = state.entry(&candidate.name) else {
+            continue;
+        };
+        if entry.in_selection_backoff || entry.auth_failure_active {
+            continue;
+        }
+        if runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_for_route(&candidate.usage, route_kind),
+            route_kind,
+        )
+        .is_some()
+        {
+            continue;
+        }
+        if entry.inflight_count >= inflight_soft_limit {
+            waitable_profiles.insert(candidate.name.clone());
+        }
+    }
+
+    Ok(waitable_profiles)
+}
+
+pub(crate) fn runtime_any_waited_candidate_relieved(
+    shared: &RuntimeRotationProxyShared,
+    waited_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    if waited_profiles.is_empty() {
+        return Ok(false);
+    }
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let state = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
+        runtime_route_selection_catalog(&runtime, route_kind, now)
+    };
+    let cached_usage_snapshots = state.persisted_usage_snapshots();
+
+    let mut reports = Vec::new();
+    for (order_index, name) in active_profile_selection_order_with_view(
+        runtime_route_selection_view(&state),
+        &state.current_profile,
+    )
+    .into_iter()
+    .enumerate()
+    {
+        if !waited_profiles.contains(&name) {
+            continue;
+        }
+        let Some(entry) = state.entry(&name) else {
+            continue;
+        };
+        let Some(probe_entry) = entry.cached_probe_entry.as_ref() else {
+            continue;
+        };
+        reports.push(RunProfileProbeReport {
+            name,
+            order_index,
+            auth: probe_entry.auth.clone(),
+            result: probe_entry.result.clone(),
+        });
+    }
+
+    for candidate in ready_profile_candidates_with_view(
+        &reports,
+        state.include_code_review,
+        Some(state.current_profile.as_str()),
+        runtime_route_selection_view(&state),
+        Some(&cached_usage_snapshots),
+    ) {
+        if !waited_profiles.contains(&candidate.name) {
+            continue;
+        }
+        let Some(entry) = state.entry(&candidate.name) else {
+            continue;
+        };
+        if entry.in_selection_backoff || entry.auth_failure_active {
+            continue;
+        }
+        if runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_for_route(&candidate.usage, route_kind),
+            route_kind,
+        )
+        .is_some()
+        {
+            continue;
+        }
+        if entry.inflight_count < inflight_soft_limit {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+pub(crate) struct RuntimeInflightReliefWait<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    excluded_profiles: &'a BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    selection_started_at: Instant,
+    continuation: bool,
+    wait_affinity_owner: Option<&'a str>,
+}
+
+impl<'a> RuntimeInflightReliefWait<'a> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        request_id: u64,
+        request: &'a RuntimeProxyRequest,
+        shared: &'a RuntimeRotationProxyShared,
+        excluded_profiles: &'a BTreeSet<String>,
+        route_kind: RuntimeRouteKind,
+        selection_started_at: Instant,
+        continuation: bool,
+        wait_affinity_owner: Option<&'a str>,
+    ) -> Self {
+        Self {
+            request_id,
+            request,
+            shared,
+            excluded_profiles,
+            route_kind,
+            selection_started_at,
+            continuation,
+            wait_affinity_owner,
+        }
+    }
+}
+
+pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+    wait: RuntimeInflightReliefWait<'_>,
+) -> Result<bool> {
+    let RuntimeInflightReliefWait {
+        request_id,
+        request,
+        shared,
+        excluded_profiles,
+        route_kind,
+        selection_started_at,
+        continuation,
+        wait_affinity_owner,
+    } = wait;
+
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let wait_budget = runtime_proxy_request_inflight_wait_budget(request, pressure_mode);
+    if wait_budget.is_zero() {
+        return Ok(false);
+    }
+    let waited_profiles = runtime_waitable_inflight_candidates_for_route(
+        shared,
+        excluded_profiles,
+        route_kind,
+        wait_affinity_owner,
+    )?;
+    if waited_profiles.is_empty() {
+        return Ok(false);
+    }
+
+    let (_, precommit_budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
+    let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
+    let total_wait_budget = wait_budget.min(remaining_budget);
+    if total_wait_budget.is_zero() {
+        return Ok(false);
+    }
+    let wait_deadline = Instant::now() + total_wait_budget;
+
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http inflight_wait_started route={} wait_ms={}",
+            runtime_route_kind_label(route_kind),
+            total_wait_budget.as_millis()
+        ),
+    );
+    let started_at = Instant::now();
+    let mut observed_revision = runtime_profile_inflight_release_revision(shared);
+    let mut signaled = false;
+    let mut useful_relief = false;
+    let mut wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
+    loop {
+        let remaining_wait = wait_deadline.saturating_duration_since(Instant::now());
+        if remaining_wait.is_zero() {
+            break;
+        }
+        match runtime_profile_inflight_wait_outcome_since(shared, remaining_wait, observed_revision)
+        {
+            RuntimeProfileInFlightWaitOutcome::InflightRelease => {
+                signaled = true;
+                wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
+                observed_revision = runtime_profile_inflight_release_revision(shared);
+                useful_relief =
+                    runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
+                if useful_relief {
+                    break;
+                }
+            }
+            RuntimeProfileInFlightWaitOutcome::OtherNotify => {
+                signaled = true;
+                wake_source = RuntimeProfileInFlightWaitOutcome::OtherNotify;
+                observed_revision = runtime_profile_inflight_release_revision(shared);
+            }
+            RuntimeProfileInFlightWaitOutcome::Timeout => {
+                if !signaled {
+                    wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
+                }
+                break;
+            }
+        }
+    }
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http inflight_wait_finished route={} waited_ms={} signaled={signaled} useful={} wake_source={}",
+            runtime_route_kind_label(route_kind),
+            started_at.elapsed().as_millis(),
+            useful_relief,
+            runtime_profile_inflight_wait_outcome_label(wake_source),
+        ),
+    );
+    Ok(useful_relief)
+}

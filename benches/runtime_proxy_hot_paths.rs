@@ -5,10 +5,14 @@ use prodex::bench_support::{
     RuntimeProxyQuotaFallbackBenchCase, RuntimeProxySseInspectBenchCase,
     run_runtime_proxy_hot_path_bench_check,
 };
+use serde::Deserialize;
 use serde_json::json;
+use std::collections::BTreeMap;
+use std::path::Path;
 
 const RUNTIME_PROXY_BENCH_CHECK_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_CHECK";
 const RUNTIME_PROXY_BENCH_THRESHOLD_SCALE_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE";
+const RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE";
 const RUNTIME_PROXY_BENCH_CHECK_JSON_PREFIX: &str = "runtime_proxy_hot_path_check_json";
 
 fn runtime_proxy_hot_paths(c: &mut Criterion) {
@@ -57,9 +61,62 @@ fn parse_threshold_scale_percent() -> Result<u64, String> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct RuntimeProxyHotPathThresholdFile {
+    #[serde(default)]
+    version: Option<u64>,
+    #[serde(default)]
+    default_scale_percent: Option<u64>,
+    #[serde(default)]
+    case_scale_percent: BTreeMap<String, u64>,
+}
+
+fn load_threshold_file(path: &Path) -> Result<RuntimeProxyHotPathThresholdFile, String> {
+    let raw = std::fs::read_to_string(path).map_err(|error| {
+        format!(
+            "{RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV} could not read {}: {error}",
+            path.display()
+        )
+    })?;
+    let file: RuntimeProxyHotPathThresholdFile = serde_json::from_str(&raw).map_err(|error| {
+        format!(
+            "{RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV} could not parse {}: {error}",
+            path.display()
+        )
+    })?;
+    if let Some(version) = file.version {
+        if version != 1 {
+            return Err(format!(
+                "{RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV} unsupported version {} in {}",
+                version,
+                path.display()
+            ));
+        }
+    }
+    Ok(file)
+}
+
+fn bench_check_config() -> Result<RuntimeProxyHotPathBenchCheckConfig, String> {
+    let mut config = RuntimeProxyHotPathBenchCheckConfig::default();
+
+    if let Some(path) = std::env::var_os(RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV) {
+        let threshold_file = load_threshold_file(Path::new(&path))?;
+        if let Some(default_scale_percent) = threshold_file.default_scale_percent {
+            config = config.with_threshold_scale_percent(default_scale_percent);
+        }
+        config = config.with_threshold_scale_overrides(threshold_file.case_scale_percent);
+    }
+
+    if std::env::var_os(RUNTIME_PROXY_BENCH_THRESHOLD_SCALE_ENV).is_some() {
+        config = config.with_threshold_scale_percent(parse_threshold_scale_percent()?);
+    }
+
+    Ok(config)
+}
+
 fn main() {
     if bench_check_requested() {
-        let threshold_scale_percent = match parse_threshold_scale_percent() {
+        let config = match bench_check_config() {
             Ok(value) => value,
             Err(error) => {
                 eprintln!("runtime_proxy_hot_path_check status=error message={error}");
@@ -67,10 +124,7 @@ fn main() {
             }
         };
 
-        let results = run_runtime_proxy_hot_path_bench_check(
-            RuntimeProxyHotPathBenchCheckConfig::default()
-                .with_threshold_scale_percent(threshold_scale_percent),
-        );
+        let results = run_runtime_proxy_hot_path_bench_check(config.clone());
 
         let mut failures = 0usize;
         for result in &results {
@@ -78,14 +132,17 @@ fn main() {
                 failures += 1;
             }
             println!(
-                "runtime_proxy_hot_path_check case={} status={} median_ns={} p90_ns={} threshold_ns={} base_threshold_ns={} required_scale_percent={} iterations={} warmup_iterations={} samples={}",
+                "runtime_proxy_hot_path_check case={} status={} median_ns={} p90_ns={} threshold_ns={} base_threshold_ns={} threshold_scale_percent={} required_scale_percent={} scale_headroom_percent={} threshold_headroom_ns={} iterations={} warmup_iterations={} samples={}",
                 result.name,
                 if result.passed() { "pass" } else { "fail" },
                 result.median_ns_per_iteration,
                 result.p90_ns_per_iteration,
                 result.threshold_ns_per_iteration,
                 result.base_threshold_ns_per_iteration,
+                result.threshold_scale_percent,
                 result.required_threshold_scale_percent(),
+                result.scale_headroom_percent(),
+                result.threshold_headroom_ns_per_iteration(),
                 result.measure_iterations,
                 result.warmup_iterations,
                 result.samples,
@@ -101,8 +158,10 @@ fn main() {
                     "p90_ns": result.p90_ns_per_iteration,
                     "threshold_ns": result.threshold_ns_per_iteration,
                     "base_threshold_ns": result.base_threshold_ns_per_iteration,
+                    "threshold_scale_percent": result.threshold_scale_percent,
                     "required_scale_percent": result.required_threshold_scale_percent(),
-                    "threshold_scale_percent": threshold_scale_percent,
+                    "scale_headroom_percent": result.scale_headroom_percent(),
+                    "threshold_headroom_ns": result.threshold_headroom_ns_per_iteration(),
                     "iterations": result.measure_iterations,
                     "warmup_iterations": result.warmup_iterations,
                     "samples": result.samples,
@@ -110,10 +169,11 @@ fn main() {
             );
         }
         println!(
-            "runtime_proxy_hot_path_check summary cases={} failures={} threshold_scale_percent={}",
+            "runtime_proxy_hot_path_check summary cases={} failures={} default_threshold_scale_percent={} threshold_scale_overrides={}",
             results.len(),
             failures,
-            threshold_scale_percent,
+            config.threshold_scale_percent,
+            config.threshold_scale_overrides.len(),
         );
         println!(
             "{} {}",
@@ -122,7 +182,8 @@ fn main() {
                 "event": "summary",
                 "cases": results.len(),
                 "failures": failures,
-                "threshold_scale_percent": threshold_scale_percent,
+                "default_threshold_scale_percent": config.threshold_scale_percent,
+                "threshold_scale_overrides": config.threshold_scale_overrides,
             })
         );
         if failures > 0 {

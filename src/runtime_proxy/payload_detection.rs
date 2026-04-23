@@ -1,5 +1,8 @@
 use super::*;
 
+const RUNTIME_PROXY_JSON_SCAN_LIMIT: usize = 2_048;
+const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
+
 pub(crate) fn runtime_sse_trimmed_line_bytes(line: &[u8]) -> &[u8] {
     let mut end = line.len();
     while end > 0 && matches!(line.get(end - 1), Some(b'\r' | b'\n')) {
@@ -8,11 +11,39 @@ pub(crate) fn runtime_sse_trimmed_line_bytes(line: &[u8]) -> &[u8] {
     &line[..end]
 }
 
+fn runtime_sse_event_marked_invalid(data_lines: &[String]) -> bool {
+    matches!(
+        data_lines.first().map(String::as_str),
+        Some(RUNTIME_SSE_INVALID_DATA_MARKER)
+    )
+}
+
+fn runtime_sse_mark_invalid(data_lines: &mut Vec<String>) {
+    data_lines.clear();
+    data_lines.push(RUNTIME_SSE_INVALID_DATA_MARKER.to_string());
+}
+
+fn runtime_sse_split_field(line: &[u8]) -> (&[u8], Option<&[u8]>) {
+    let Some(separator) = line.iter().position(|byte| *byte == b':') else {
+        return (line, None);
+    };
+
+    let mut value = &line[separator + 1..];
+    if value.first() == Some(&b' ') {
+        value = &value[1..];
+    }
+    (&line[..separator], Some(value))
+}
+
 fn runtime_sse_emit_event<F>(data_lines: &mut Vec<String>, on_event: &mut F)
 where
     F: FnMut(RuntimeParsedSseEvent),
 {
     if data_lines.is_empty() {
+        return;
+    }
+    if runtime_sse_event_marked_invalid(data_lines) {
+        data_lines.clear();
         return;
     }
     on_event(parse_runtime_sse_event(data_lines));
@@ -30,8 +61,28 @@ where
         return;
     }
 
-    if let Some(payload) = trimmed.strip_prefix(b"data:") {
-        data_lines.push(String::from_utf8_lossy(payload).trim_start().to_owned());
+    if trimmed.starts_with(b":") {
+        line.clear();
+        return;
+    }
+
+    let (field, value) = runtime_sse_split_field(trimmed);
+    if field == b"data" {
+        match value {
+            Some(bytes) => match std::str::from_utf8(bytes) {
+                Ok(text) => {
+                    if !runtime_sse_event_marked_invalid(data_lines) {
+                        data_lines.push(text.to_owned());
+                    }
+                }
+                Err(_) => runtime_sse_mark_invalid(data_lines),
+            },
+            None => {
+                if !runtime_sse_event_marked_invalid(data_lines) {
+                    data_lines.push(String::new());
+                }
+            }
+        }
     }
     line.clear();
 }
@@ -66,12 +117,13 @@ pub(crate) fn runtime_sse_finish_pending<F>(
 }
 
 pub(crate) fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {
-    if data_lines.is_empty() {
+    if data_lines.is_empty() || runtime_sse_event_marked_invalid(data_lines) {
         return None;
     }
 
     let payload = data_lines.join("\n");
-    serde_json::from_str::<serde_json::Value>(&payload).ok()
+    let payload = payload.trim_start_matches('\u{feff}');
+    serde_json::from_str::<serde_json::Value>(payload).ok()
 }
 
 pub(crate) fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
@@ -91,6 +143,37 @@ pub(crate) fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSse
     }
 }
 
+fn runtime_proxy_utf8_text(body: &[u8]) -> Option<&str> {
+    std::str::from_utf8(body).ok().map(str::trim)
+}
+
+fn runtime_json_find<T, F>(root: &serde_json::Value, mut candidate: F) -> Option<T>
+where
+    F: FnMut(&serde_json::Value) -> Option<T>,
+{
+    let mut stack = vec![root];
+    let mut visited = 0usize;
+
+    while let Some(value) = stack.pop() {
+        if let Some(result) = candidate(value) {
+            return Some(result);
+        }
+
+        visited += 1;
+        if visited >= RUNTIME_PROXY_JSON_SCAN_LIMIT {
+            break;
+        }
+
+        match value {
+            serde_json::Value::Array(values) => stack.extend(values.iter().rev()),
+            serde_json::Value::Object(map) => stack.extend(map.values().rev()),
+            _ => {}
+        }
+    }
+
+    None
+}
+
 pub(crate) fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
     if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
         && let Some(message) = extract_runtime_proxy_quota_message_from_value(&value)
@@ -98,7 +181,7 @@ pub(crate) fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String>
         return Some(message);
     }
 
-    extract_runtime_proxy_quota_message_from_text(&String::from_utf8_lossy(body))
+    runtime_proxy_utf8_text(body).and_then(extract_runtime_proxy_quota_message_from_text)
 }
 
 pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
@@ -140,7 +223,8 @@ pub(crate) fn extract_runtime_proxy_overload_message_from_websocket_payload(
             {
                 return Some(message);
             }
-            extract_runtime_proxy_overload_message_from_text(&String::from_utf8_lossy(bytes))
+            runtime_proxy_utf8_text(bytes)
+                .and_then(extract_runtime_proxy_overload_message_from_text)
         }
         RuntimeWebsocketErrorPayload::Empty => None,
     }
@@ -153,7 +237,8 @@ pub(crate) fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Op
         return Some(message);
     }
 
-    extract_runtime_proxy_previous_response_message_from_text(&String::from_utf8_lossy(body))
+    runtime_proxy_utf8_text(body)
+        .and_then(extract_runtime_proxy_previous_response_message_from_text)
 }
 
 pub(crate) fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<String> {
@@ -163,7 +248,9 @@ pub(crate) fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -
         return Some(message);
     }
 
-    let body_text = String::from_utf8_lossy(body).trim().to_string();
+    let body_text = runtime_proxy_utf8_text(body)
+        .unwrap_or_default()
+        .to_string();
     if matches!(status, 429 | 500 | 502 | 503 | 504 | 529)
         && let Some(message) = extract_runtime_proxy_overload_message_from_text(&body_text)
     {
@@ -182,35 +269,33 @@ pub(crate) fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -
 pub(crate) fn extract_runtime_proxy_overload_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    let direct_error = value.get("error");
-    let response_error = value
-        .get("response")
-        .and_then(|response| response.get("error"));
-    for error in [direct_error, response_error].into_iter().flatten() {
-        let code = error.get("code").and_then(serde_json::Value::as_str);
-        let message = error
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| error.get("detail").and_then(serde_json::Value::as_str));
-        if matches!(code, Some("server_is_overloaded" | "slow_down")) {
-            return Some(
-                message
-                    .unwrap_or("Upstream Codex backend is currently overloaded.")
-                    .to_string(),
-            );
-        }
-        if let Some(message) = message.filter(|message| runtime_proxy_overload_message(message)) {
-            return Some(message.to_string());
-        }
-    }
+    runtime_json_find(value, extract_runtime_proxy_overload_message_candidate)
+}
 
+fn extract_runtime_proxy_overload_message_candidate(value: &serde_json::Value) -> Option<String> {
     match value {
-        serde_json::Value::Array(values) => values
-            .iter()
-            .find_map(extract_runtime_proxy_overload_message_from_value),
-        serde_json::Value::Object(map) => map
-            .values()
-            .find_map(extract_runtime_proxy_overload_message_from_value),
+        serde_json::Value::String(message) => {
+            runtime_proxy_overload_message(message).then(|| message.to_string())
+        }
+        serde_json::Value::Object(map) => {
+            let message = map
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| map.get("detail").and_then(serde_json::Value::as_str));
+            let code = map.get("code").and_then(serde_json::Value::as_str);
+
+            if matches!(code, Some("server_is_overloaded" | "slow_down")) {
+                return Some(
+                    message
+                        .unwrap_or("Upstream Codex backend is currently overloaded.")
+                        .to_string(),
+                );
+            }
+
+            message
+                .filter(|message| runtime_proxy_overload_message(message))
+                .map(str::to_string)
+        }
         _ => None,
     }
 }
@@ -227,19 +312,7 @@ pub(crate) fn extract_runtime_proxy_overload_message_from_text(text: &str) -> Op
 pub(crate) fn extract_runtime_proxy_quota_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    if let Some(message) = extract_runtime_proxy_quota_message_candidate(value) {
-        return Some(message);
-    }
-
-    match value {
-        serde_json::Value::Array(values) => values
-            .iter()
-            .find_map(extract_runtime_proxy_quota_message_from_value),
-        serde_json::Value::Object(map) => map
-            .values()
-            .find_map(extract_runtime_proxy_quota_message_from_value),
-        _ => None,
-    }
+    runtime_json_find(value, extract_runtime_proxy_quota_message_candidate)
 }
 
 pub(crate) fn extract_runtime_proxy_quota_message_candidate(
@@ -335,25 +408,21 @@ pub(crate) fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> Strin
 pub(crate) fn extract_runtime_proxy_previous_response_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    if let Some(message) = extract_runtime_proxy_previous_response_message_candidate(value) {
-        return Some(message);
-    }
-
-    match value {
-        serde_json::Value::Array(values) => values
-            .iter()
-            .find_map(extract_runtime_proxy_previous_response_message_from_value),
-        serde_json::Value::Object(map) => map
-            .values()
-            .find_map(extract_runtime_proxy_previous_response_message_from_value),
-        _ => None,
-    }
+    runtime_json_find(
+        value,
+        extract_runtime_proxy_previous_response_message_candidate,
+    )
 }
 
 fn extract_runtime_proxy_previous_response_message_candidate(
     value: &serde_json::Value,
 ) -> Option<String> {
     match value {
+        serde_json::Value::String(message) => {
+            (runtime_proxy_previous_response_missing_text_signature(message)
+                || runtime_proxy_tool_context_missing_text_signature(message))
+            .then(|| message.to_string())
+        }
         serde_json::Value::Object(map) => {
             let message = map
                 .get("message")
@@ -401,8 +470,8 @@ fn extract_runtime_proxy_previous_response_message_from_text(text: &str) -> Opti
         return None;
     }
 
-    if runtime_proxy_previous_response_missing_message(trimmed)
-        || runtime_proxy_tool_context_missing_message(trimmed)
+    if runtime_proxy_previous_response_missing_text_signature(trimmed)
+        || runtime_proxy_tool_context_missing_text_signature(trimmed)
     {
         Some(trimmed.to_string())
     } else {
@@ -410,10 +479,24 @@ fn extract_runtime_proxy_previous_response_message_from_text(text: &str) -> Opti
     }
 }
 
+fn runtime_proxy_previous_response_missing_text_signature(message: &str) -> bool {
+    let lower = message.trim().to_ascii_lowercase();
+    lower.starts_with("previous_response_not_found")
+        || (lower.starts_with("previous response") && lower.contains("not found"))
+}
+
 fn runtime_proxy_previous_response_missing_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("previous_response_not_found")
         || (lower.contains("previous response") && lower.contains("not found"))
+}
+
+fn runtime_proxy_tool_context_missing_text_signature(message: &str) -> bool {
+    let lower = message.trim().to_ascii_lowercase();
+    (lower.starts_with("invalid_request_error:")
+        || lower.starts_with("no tool call found")
+        || lower.starts_with("no function call found"))
+        && runtime_proxy_tool_context_missing_message(message)
 }
 
 pub(crate) fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
@@ -576,6 +659,38 @@ fn extract_runtime_turn_state_header_value(value: &serde_json::Value) -> Option<
 mod tests {
     use super::*;
 
+    fn collect_runtime_sse_events(chunks: &[&[u8]]) -> Vec<RuntimeParsedSseEvent> {
+        let mut line = Vec::new();
+        let mut data_lines = Vec::new();
+        let mut events = Vec::new();
+
+        for chunk in chunks {
+            runtime_sse_consume_chunk(&mut line, &mut data_lines, chunk, |event| {
+                events.push(event)
+            });
+        }
+        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| events.push(event));
+
+        events
+    }
+
+    fn runtime_sse_event_signatures(
+        events: &[RuntimeParsedSseEvent],
+    ) -> Vec<(bool, bool, Vec<String>, Option<String>, Option<String>)> {
+        events
+            .iter()
+            .map(|event| {
+                (
+                    event.quota_blocked,
+                    event.previous_response_not_found,
+                    event.response_ids.clone(),
+                    event.event_type.clone(),
+                    event.turn_state.clone(),
+                )
+            })
+            .collect()
+    }
+
     #[test]
     fn runtime_sse_helpers_ignore_comments_and_handle_crlf_boundaries() {
         let mut line = Vec::new();
@@ -630,6 +745,46 @@ mod tests {
     }
 
     #[test]
+    fn runtime_sse_helpers_preserve_events_across_split_boundaries() {
+        let body = concat!(
+            ": keep-alive\r\n",
+            "data: {\"type\":\"response.created\",\"response_id\":\"resp-1\"}\r\n",
+            "\r\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-2\",\"headers\":{\"x-codex-turn-state\":\"ts-2\"}}}\n",
+            "\n",
+        )
+        .as_bytes();
+        let expected = runtime_sse_event_signatures(&collect_runtime_sse_events(&[body]));
+
+        for first in 0..=body.len() {
+            for second in first..=body.len() {
+                let actual = collect_runtime_sse_events(&[
+                    &body[..first],
+                    &body[first..second],
+                    &body[second..],
+                ]);
+                assert_eq!(
+                    runtime_sse_event_signatures(&actual),
+                    expected,
+                    "unexpected SSE parse for split {first}/{second}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_sse_helpers_drop_invalid_utf8_event_and_recover_next_event() {
+        let body = &b"data: {\"type\":\"response.created\",\"response_id\":\"resp-\xff\"}\n\n\
+data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
+
+        let events = collect_runtime_sse_events(&[body]);
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].response_ids, vec!["resp-2".to_string()]);
+        assert_eq!(events[0].event_type.as_deref(), Some("response.completed"));
+    }
+
+    #[test]
     fn previous_response_message_detects_top_level_json_shape() {
         let payload = serde_json::json!({
             "type": "invalid_request_error",
@@ -676,6 +831,103 @@ mod tests {
         assert_eq!(
             extract_runtime_proxy_previous_response_message_from_value(&payload),
             None
+        );
+    }
+
+    #[test]
+    fn quota_message_detects_nested_error_payloads() {
+        let payload = serde_json::json!({
+            "items": [
+                {
+                    "wrapper": {
+                        "error": {
+                            "code": "rate_limit_exceeded",
+                            "message": "You've hit your usage limit. Try again at 8pm."
+                        }
+                    }
+                }
+            ]
+        });
+
+        assert_eq!(
+            extract_runtime_proxy_quota_message_from_value(&payload),
+            Some("You've hit your usage limit. Try again at 8pm.".to_string())
+        );
+    }
+
+    #[test]
+    fn overload_message_detects_top_level_and_nested_error_payloads() {
+        let top_level = serde_json::json!({
+            "code": "server_is_overloaded",
+            "message": "Upstream Codex backend is currently overloaded.",
+        });
+        let nested = serde_json::json!({
+            "meta": [
+                {
+                    "response": {
+                        "error": {
+                            "message": "Selected model is at capacity. Please try again."
+                        }
+                    }
+                }
+            ]
+        });
+
+        assert_eq!(
+            extract_runtime_proxy_overload_message_from_value(&top_level),
+            Some("Upstream Codex backend is currently overloaded.".to_string())
+        );
+        assert_eq!(
+            extract_runtime_proxy_overload_message_from_value(&nested),
+            Some("Selected model is at capacity. Please try again.".to_string())
+        );
+    }
+
+    #[test]
+    fn previous_response_message_detects_nested_tool_context_payloads() {
+        let payload = serde_json::json!({
+            "items": [
+                {
+                    "response": {
+                        "error": {
+                            "type": "invalid_request_error",
+                            "message": "No tool call found for output item call_123"
+                        }
+                    }
+                }
+            ]
+        });
+
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message_from_value(&payload),
+            Some("No tool call found for output item call_123".to_string())
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_bodies_do_not_trigger_lossy_retry_classification() {
+        assert_eq!(
+            extract_runtime_proxy_quota_message(
+                b"\xffYou've hit your usage limit. Try again at 8pm."
+            ),
+            None
+        );
+        assert_eq!(
+            extract_runtime_proxy_previous_response_message(
+                b"\xffprevious_response_not_found: missing"
+            ),
+            None
+        );
+        assert_eq!(
+            extract_runtime_proxy_overload_message(
+                503,
+                b"\xffSelected model is at capacity. Please try again."
+            ),
+            None
+        );
+        assert_eq!(
+            extract_runtime_proxy_overload_message(500, b"\xff"),
+            Some("Upstream Codex backend is currently experiencing high demand.".to_string())
         );
     }
 }

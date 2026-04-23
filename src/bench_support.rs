@@ -135,7 +135,7 @@ const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS: u64 = 15;
 const BENCH_THRESHOLD_SCALE_DIVISOR: u64 = 100;
 
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeProxyHotPathBenchCheckConfig {
     pub samples: usize,
     pub warmup_iterations: usize,
@@ -143,6 +143,7 @@ pub struct RuntimeProxyHotPathBenchCheckConfig {
     pub max_measure_iterations: usize,
     pub target_sample_time: Duration,
     pub threshold_scale_percent: u64,
+    pub threshold_scale_overrides: BTreeMap<String, u64>,
 }
 
 impl Default for RuntimeProxyHotPathBenchCheckConfig {
@@ -156,6 +157,7 @@ impl Default for RuntimeProxyHotPathBenchCheckConfig {
                 DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS,
             ),
             threshold_scale_percent: BENCH_THRESHOLD_SCALE_DIVISOR,
+            threshold_scale_overrides: BTreeMap::new(),
         }
     }
 }
@@ -164,6 +166,26 @@ impl RuntimeProxyHotPathBenchCheckConfig {
     pub fn with_threshold_scale_percent(mut self, threshold_scale_percent: u64) -> Self {
         self.threshold_scale_percent = threshold_scale_percent.max(1);
         self
+    }
+
+    pub fn with_threshold_scale_overrides<I, K>(mut self, threshold_scale_overrides: I) -> Self
+    where
+        I: IntoIterator<Item = (K, u64)>,
+        K: Into<String>,
+    {
+        self.threshold_scale_overrides = threshold_scale_overrides
+            .into_iter()
+            .map(|(case_name, scale_percent)| (case_name.into(), scale_percent.max(1)))
+            .collect();
+        self
+    }
+
+    fn threshold_scale_percent_for(&self, case_name: &str) -> u64 {
+        self.threshold_scale_overrides
+            .get(case_name)
+            .copied()
+            .unwrap_or(self.threshold_scale_percent)
+            .max(1)
     }
 
     fn normalized(self) -> Self {
@@ -182,6 +204,11 @@ impl RuntimeProxyHotPathBenchCheckConfig {
             max_measure_iterations,
             target_sample_time,
             threshold_scale_percent: self.threshold_scale_percent.max(1),
+            threshold_scale_overrides: self
+                .threshold_scale_overrides
+                .into_iter()
+                .map(|(case_name, scale_percent)| (case_name, scale_percent.max(1)))
+                .collect(),
         }
     }
 }
@@ -194,6 +221,7 @@ pub struct RuntimeProxyHotPathBenchCheckResult {
     pub warmup_iterations: usize,
     pub measure_iterations: usize,
     pub base_threshold_ns_per_iteration: u64,
+    pub threshold_scale_percent: u64,
     pub median_ns_per_iteration: u64,
     pub p90_ns_per_iteration: u64,
     pub threshold_ns_per_iteration: u64,
@@ -214,6 +242,15 @@ impl RuntimeProxyHotPathBenchCheckResult {
             .saturating_add(self.base_threshold_ns_per_iteration - 1)
             / self.base_threshold_ns_per_iteration;
         required_percent.max(1)
+    }
+
+    pub fn scale_headroom_percent(&self) -> i128 {
+        i128::from(self.threshold_scale_percent)
+            - i128::from(self.required_threshold_scale_percent())
+    }
+
+    pub fn threshold_headroom_ns_per_iteration(&self) -> i128 {
+        i128::from(self.threshold_ns_per_iteration) - i128::from(self.median_ns_per_iteration)
     }
 }
 
@@ -251,11 +288,11 @@ const RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThr
 
 fn scaled_runtime_proxy_hot_path_threshold_ns(
     threshold: RuntimeProxyHotPathBenchThreshold,
-    config: RuntimeProxyHotPathBenchCheckConfig,
+    threshold_scale_percent: u64,
 ) -> u64 {
     threshold
         .max_median_ns_per_iteration
-        .saturating_mul(config.threshold_scale_percent)
+        .saturating_mul(threshold_scale_percent.max(1))
         / BENCH_THRESHOLD_SCALE_DIVISOR
 }
 
@@ -276,6 +313,7 @@ fn summarize_runtime_proxy_hot_path_samples(
     warmup_iterations: usize,
     measure_iterations: usize,
     base_threshold_ns_per_iteration: u64,
+    threshold_scale_percent: u64,
     threshold_ns_per_iteration: u64,
     mut ns_per_iteration_samples: Vec<u64>,
 ) -> RuntimeProxyHotPathBenchCheckResult {
@@ -290,6 +328,7 @@ fn summarize_runtime_proxy_hot_path_samples(
         warmup_iterations,
         measure_iterations,
         base_threshold_ns_per_iteration,
+        threshold_scale_percent,
         median_ns_per_iteration,
         p90_ns_per_iteration,
         threshold_ns_per_iteration,
@@ -304,7 +343,9 @@ fn run_runtime_proxy_hot_path_case<T, F>(
 where
     F: FnMut() -> T,
 {
-    let threshold_ns_per_iteration = scaled_runtime_proxy_hot_path_threshold_ns(threshold, config);
+    let threshold_scale_percent = config.threshold_scale_percent_for(threshold.name);
+    let threshold_ns_per_iteration =
+        scaled_runtime_proxy_hot_path_threshold_ns(threshold, threshold_scale_percent);
     for _ in 0..config.warmup_iterations {
         std::hint::black_box(step());
     }
@@ -334,6 +375,7 @@ where
         config.warmup_iterations,
         measure_iterations,
         threshold.max_median_ns_per_iteration,
+        threshold_scale_percent,
         threshold_ns_per_iteration,
         ns_per_iteration_samples,
     )
@@ -353,21 +395,25 @@ pub fn run_runtime_proxy_hot_path_bench_check(
 
     vec![
         run_runtime_proxy_hot_path_case(
-            config,
+            config.clone(),
             RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_THRESHOLD,
             || quota_fallback.has_route_eligible_quota_fallback(),
         ),
         run_runtime_proxy_hot_path_case(
-            config,
+            config.clone(),
             RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_THRESHOLD,
             || previous_response.next_previous_response_candidate(),
         ),
-        run_runtime_proxy_hot_path_case(config, RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD, || {
-            mixed_pool_selection.select_fresh_response_candidate()
-        }),
-        run_runtime_proxy_hot_path_case(config, RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD, || {
-            sse_inspect.inspect()
-        }),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD,
+            || mixed_pool_selection.select_fresh_response_candidate(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD,
+            || sse_inspect.inspect(),
+        ),
         run_runtime_proxy_hot_path_case(
             config,
             RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_THRESHOLD,
@@ -849,6 +895,7 @@ mod tests {
             max_measure_iterations: 0,
             target_sample_time: Duration::ZERO,
             threshold_scale_percent: 0,
+            threshold_scale_overrides: BTreeMap::from([("runtime_case".to_string(), 0)]),
         }
         .normalized();
 
@@ -861,6 +908,18 @@ mod tests {
             Duration::from_millis(DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS)
         );
         assert_eq!(config.threshold_scale_percent, 1);
+        assert_eq!(config.threshold_scale_percent_for("runtime_case"), 1);
+    }
+
+    #[test]
+    fn runtime_proxy_hot_path_bench_config_uses_case_override_thresholds() {
+        let config = RuntimeProxyHotPathBenchCheckConfig::default()
+            .with_threshold_scale_percent(150)
+            .with_threshold_scale_overrides([("runtime_case", 180), ("runtime_other", 90)]);
+
+        assert_eq!(config.threshold_scale_percent_for("runtime_case"), 180);
+        assert_eq!(config.threshold_scale_percent_for("runtime_other"), 90);
+        assert_eq!(config.threshold_scale_percent_for("runtime_missing"), 150);
     }
 
     #[test]
@@ -871,6 +930,7 @@ mod tests {
             32,
             128,
             10,
+            70,
             7,
             vec![9, 3, 5, 1, 7],
         );
@@ -880,9 +940,12 @@ mod tests {
         assert_eq!(result.warmup_iterations, 32);
         assert_eq!(result.measure_iterations, 128);
         assert_eq!(result.base_threshold_ns_per_iteration, 10);
+        assert_eq!(result.threshold_scale_percent, 70);
         assert_eq!(result.median_ns_per_iteration, 5);
         assert_eq!(result.p90_ns_per_iteration, 7);
         assert_eq!(result.required_threshold_scale_percent(), 50);
+        assert_eq!(result.scale_headroom_percent(), 20);
+        assert_eq!(result.threshold_headroom_ns_per_iteration(), 2);
         assert!(result.passed());
     }
 }

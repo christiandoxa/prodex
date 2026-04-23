@@ -547,3 +547,466 @@ pub(crate) fn runtime_quota_pressure_band_for_route(
         RuntimeQuotaPressureBand::Healthy
     }
 }
+
+pub(crate) fn runtime_profile_codex_home(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<Option<PathBuf>> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    Ok(runtime
+        .state
+        .profiles
+        .get(profile_name)
+        .map(|profile| profile.codex_home.clone()))
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn runtime_has_alternative_quota_compatible_profile(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> Result<bool> {
+    let allow_disk_fallback = !runtime_proxy_sync_probe_pressure_mode_active_for_route(
+        shared,
+        RuntimeRouteKind::Responses,
+    );
+    let fallback_profiles = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let mut fallback_profiles = Vec::new();
+        for (name, profile) in &runtime.state.profiles {
+            if name == profile_name {
+                continue;
+            }
+            if runtime_profile_cached_auth_summary_for_selection(
+                runtime.profile_usage_auth.get(name).cloned(),
+                runtime.profile_probe_cache.get(name).cloned(),
+            )
+            .is_some_and(|summary| summary.quota_compatible)
+            {
+                return Ok(true);
+            }
+            fallback_profiles.push((profile.codex_home.clone(), profile.provider.clone()));
+        }
+        fallback_profiles
+    };
+    if !allow_disk_fallback {
+        return Ok(false);
+    }
+    Ok(fallback_profiles
+        .into_iter()
+        .any(|(codex_home, provider)| provider.auth_summary(&codex_home).quota_compatible))
+}
+
+pub(crate) fn runtime_has_route_eligible_quota_fallback(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    let now = Local::now().timestamp();
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
+    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let fallback_profiles = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        prune_runtime_profile_selection_backoff(&mut runtime, now);
+        runtime_profile_selection_catalog(&runtime)
+            .entries
+            .into_iter()
+            .filter(|profile| {
+                profile.name != profile_name && !excluded_profiles.contains(&profile.name)
+            })
+            .map(|profile| {
+                let cached_auth_summary =
+                    runtime_profile_cached_auth_summary_from_maps_for_selection(
+                        &profile.name,
+                        &runtime.profile_usage_auth,
+                        &runtime.profile_probe_cache,
+                    );
+                let auth_failure_active = runtime_profile_auth_failure_active_with_auth_cache(
+                    &runtime.profile_health,
+                    &runtime.profile_usage_auth,
+                    &profile.name,
+                    now,
+                );
+                let in_selection_backoff = runtime_profile_name_in_selection_backoff(
+                    &profile.name,
+                    &runtime.profile_retry_backoff_until,
+                    &runtime.profile_transport_backoff_until,
+                    &runtime.profile_route_circuit_open_until,
+                    route_kind,
+                    now,
+                );
+                let inflight_count =
+                    runtime_profile_inflight_sort_key(&profile.name, &runtime.profile_inflight);
+
+                (
+                    profile.name,
+                    profile.codex_home,
+                    cached_auth_summary,
+                    auth_failure_active,
+                    in_selection_backoff,
+                    inflight_count,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (
+        _candidate_name,
+        codex_home,
+        cached_auth_summary,
+        auth_failure_active,
+        in_selection_backoff,
+        inflight_count,
+    ) in fallback_profiles
+    {
+        if auth_failure_active || in_selection_backoff || inflight_count >= inflight_soft_limit {
+            continue;
+        }
+
+        let quota_compatible = cached_auth_summary
+            .or_else(|| allow_disk_auth_fallback.then(|| read_auth_summary(&codex_home)))
+            .is_some_and(|summary| summary.quota_compatible);
+        if quota_compatible {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn refresh_runtime_profile_quota_inline(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    context: &str,
+) -> Result<()> {
+    let Some(codex_home) = runtime_profile_codex_home(shared, profile_name)? else {
+        return Ok(());
+    };
+    runtime_proxy_log(shared, format!("{context}_start profile={profile_name}"));
+    run_runtime_probe_jobs_inline(
+        shared,
+        vec![(profile_name.to_string(), codex_home)],
+        context,
+    );
+    Ok(())
+}
+
+pub(crate) fn runtime_quota_summary_requires_precommit_live_probe(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
+        && (matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Critical)
+            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Critical)
+            || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
+            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown))
+}
+
+pub(crate) fn runtime_quota_summary_requires_live_source_after_probe(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
+        && (matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
+            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown))
+}
+
+pub(crate) fn ensure_runtime_profile_precommit_quota_ready(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    context: &str,
+) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
+    let (mut quota_summary, mut quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+    if runtime_quota_summary_requires_precommit_live_probe(quota_summary, quota_source, route_kind)
+    {
+        refresh_runtime_profile_quota_inline(shared, profile_name, context)?;
+        (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+    }
+    Ok((quota_summary, quota_source))
+}
+
+pub(crate) fn runtime_proxy_direct_current_fallback_profile(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+) -> Result<Option<String>> {
+    let (profile_name, codex_home, auth_failure_active, cached_usage_auth_entry, probe_cache_entry) = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let profile_name = runtime.current_profile.clone();
+        let Some(profile) = runtime.state.profiles.get(&profile_name) else {
+            return Ok(None);
+        };
+        let now = Local::now().timestamp();
+        (
+            profile_name.clone(),
+            profile.codex_home.clone(),
+            runtime_profile_auth_failure_active(&runtime, &profile_name, now),
+            runtime.profile_usage_auth.get(&profile_name).cloned(),
+            runtime.profile_probe_cache.get(&profile_name).cloned(),
+        )
+    };
+    if excluded_profiles.contains(&profile_name) {
+        return Ok(None);
+    }
+    if auth_failure_active {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_current route={} profile={} reason=auth_failure_backoff",
+                runtime_route_kind_label(route_kind),
+                profile_name,
+            ),
+        );
+        return Ok(None);
+    }
+    let allow_disk_auth_fallback =
+        !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
+    if !runtime_profile_cached_auth_summary_for_selection(
+        cached_usage_auth_entry,
+        probe_cache_entry,
+    )
+    .unwrap_or_else(|| {
+        if allow_disk_auth_fallback {
+            read_auth_summary(&codex_home)
+        } else {
+            AuthSummary {
+                label: "uncached-auth".to_string(),
+                quota_compatible: false,
+            }
+        }
+    })
+    .quota_compatible
+    {
+        return Ok(None);
+    }
+    if runtime_profile_inflight_hard_limited_for_context(
+        shared,
+        &profile_name,
+        runtime_route_kind_inflight_context(route_kind),
+    )? {
+        return Ok(None);
+    }
+    if matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) {
+        let (quota_summary, quota_source) =
+            runtime_profile_quota_summary_for_route(shared, &profile_name, route_kind)?;
+        if quota_source.is_none()
+            || runtime_quota_summary_requires_live_source_after_probe(
+                quota_summary,
+                quota_source,
+                route_kind,
+            )
+            || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
+        {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "selection_skip_current route={} profile={} reason={} quota_source={} {}",
+                    runtime_route_kind_label(route_kind),
+                    profile_name,
+                    runtime_quota_precommit_guard_reason(quota_summary, route_kind).unwrap_or_else(
+                        || {
+                            runtime_quota_soft_affinity_rejection_reason(
+                                quota_summary,
+                                quota_source,
+                                route_kind,
+                            )
+                        }
+                    ),
+                    quota_source
+                        .map(runtime_quota_source_label)
+                        .unwrap_or("unknown"),
+                    runtime_quota_summary_log_fields(quota_summary),
+                ),
+            );
+            return Ok(None);
+        }
+    }
+    Ok(Some(profile_name))
+}
+
+pub(crate) fn runtime_quota_window_usable_for_auto_rotate(
+    status: RuntimeQuotaWindowStatus,
+) -> bool {
+    matches!(
+        status,
+        RuntimeQuotaWindowStatus::Ready
+            | RuntimeQuotaWindowStatus::Thin
+            | RuntimeQuotaWindowStatus::Critical
+    )
+}
+
+pub(crate) fn runtime_quota_summary_allows_soft_affinity(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+) -> bool {
+    source.is_some()
+        && runtime_quota_window_usable_for_auto_rotate(summary.five_hour.status)
+        && runtime_quota_window_usable_for_auto_rotate(summary.weekly.status)
+        && runtime_quota_precommit_guard_reason(summary, route_kind).is_none()
+}
+
+pub(crate) fn runtime_quota_soft_affinity_rejection_reason(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+) -> &'static str {
+    if source.is_none()
+        || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
+        || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown)
+    {
+        "quota_windows_unavailable"
+    } else if let Some(reason) = runtime_quota_precommit_guard_reason(summary, route_kind) {
+        reason
+    } else if matches!(
+        summary.five_hour.status,
+        RuntimeQuotaWindowStatus::Exhausted
+    ) || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted)
+    {
+        "quota_exhausted"
+    } else {
+        runtime_quota_pressure_band_reason(summary.route_band)
+    }
+}
+
+pub(crate) fn runtime_quota_source_sort_key(
+    route_kind: RuntimeRouteKind,
+    source: RuntimeQuotaSource,
+) -> usize {
+    match (route_kind, source) {
+        (
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket,
+            RuntimeQuotaSource::LiveProbe,
+        ) => 0,
+        (
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket,
+            RuntimeQuotaSource::PersistedSnapshot,
+        ) => 1,
+        _ => 0,
+    }
+}
+
+pub(crate) fn runtime_profile_quota_summary_for_route(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    Ok(runtime
+        .profile_probe_cache
+        .get(profile_name)
+        .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
+        .and_then(|entry| entry.result.as_ref().ok())
+        .map(|usage| {
+            (
+                runtime_quota_summary_for_route(usage, route_kind),
+                Some(RuntimeQuotaSource::LiveProbe),
+            )
+        })
+        .or_else(|| {
+            runtime
+                .profile_usage_snapshots
+                .get(profile_name)
+                .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
+                .map(|snapshot| {
+                    (
+                        runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now),
+                        Some(RuntimeQuotaSource::PersistedSnapshot),
+                    )
+                })
+        })
+        .unwrap_or((
+            RuntimeQuotaSummary {
+                five_hour: RuntimeQuotaWindowSummary {
+                    status: RuntimeQuotaWindowStatus::Unknown,
+                    remaining_percent: 0,
+                    reset_at: i64::MAX,
+                },
+                weekly: RuntimeQuotaWindowSummary {
+                    status: RuntimeQuotaWindowStatus::Unknown,
+                    remaining_percent: 0,
+                    reset_at: i64::MAX,
+                },
+                route_band: RuntimeQuotaPressureBand::Unknown,
+            },
+            None,
+        )))
+}
+
+pub(crate) fn runtime_profile_cached_auth_summary_for_selection(
+    usage_auth_entry: Option<RuntimeProfileUsageAuthCacheEntry>,
+    probe_entry: Option<RuntimeProfileProbeCacheEntry>,
+) -> Option<AuthSummary> {
+    if let Some(entry) = usage_auth_entry {
+        match runtime_profile_usage_auth_cache_entry_freshness(&entry) {
+            RuntimeProfileUsageAuthCacheFreshness::Fresh => {
+                return Some(AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                });
+            }
+            RuntimeProfileUsageAuthCacheFreshness::Stale
+            | RuntimeProfileUsageAuthCacheFreshness::Unknown => {}
+        }
+    }
+    probe_entry.map(|entry| entry.auth)
+}
+
+pub(crate) fn runtime_profile_cached_auth_summary_from_maps_for_selection(
+    profile_name: &str,
+    profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
+    profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
+) -> Option<AuthSummary> {
+    runtime_profile_cached_auth_summary_for_selection(
+        profile_usage_auth.get(profile_name).cloned(),
+        profile_probe_cache.get(profile_name).cloned(),
+    )
+}
+
+pub(crate) fn runtime_snapshot_blocks_same_request_cold_start_probe(
+    snapshot: &RuntimeProfileUsageSnapshot,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && runtime_usage_snapshot_is_usable(snapshot, now)
+        && runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now),
+            route_kind,
+        )
+        .is_some()
+}

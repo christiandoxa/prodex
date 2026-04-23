@@ -40,10 +40,15 @@ on:
         required: false
         default: "90"
         type: string
-      threshold_scale:
-        description: Threshold scale for fresh benchmark runs only
+      threshold_config_path:
+        description: Checked-in threshold config path for fresh benchmark runs
         required: false
-        default: "200"
+        default: "scripts/ci/runtime-proxy-bench-thresholds.json"
+        type: string
+      threshold_scale:
+        description: Optional global threshold scale override for fresh benchmark runs only
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -86,6 +91,7 @@ jobs:
           LOG_SOURCE_INPUT: ${{ inputs.log_source }}
           RUN_ID_INPUT: ${{ inputs.run_id }}
           BENCH_LOG_INPUT: ${{ inputs.bench_log }}
+          THRESHOLD_CONFIG_PATH_INPUT: ${{ inputs.threshold_config_path }}
           THRESHOLD_SCALE_INPUT: ${{ inputs.threshold_scale }}
         run: |
           set -euo pipefail
@@ -100,10 +106,21 @@ jobs:
 
           case "${LOG_SOURCE_INPUT}" in
             fresh-benchmark)
+              bench_env=(
+                "PRODEX_RUNTIME_PROXY_BENCH_CHECK=1"
+              )
+              if [ -n "${THRESHOLD_CONFIG_PATH_INPUT}" ]; then
+                if [ ! -f "${THRESHOLD_CONFIG_PATH_INPUT}" ]; then
+                  echo "threshold_config_path does not exist: ${THRESHOLD_CONFIG_PATH_INPUT}" >&2
+                  exit 1
+                fi
+                bench_env+=("PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE=${THRESHOLD_CONFIG_PATH_INPUT}")
+              fi
+              if [ -n "${THRESHOLD_SCALE_INPUT}" ]; then
+                bench_env+=("PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE=${THRESHOLD_SCALE_INPUT}")
+              fi
               set +e
-              PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 \
-              PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE="${THRESHOLD_SCALE_INPUT}" \
-              cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths \
+              env "${bench_env[@]}" cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths \
                 > "${log_file}" 2>&1
               fresh_bench_status=$?
               set -e
@@ -152,9 +169,10 @@ jobs:
             source_detail: process.argv[3],
             fresh_bench_status: Number.parseInt(process.argv[4], 10) || 0,
             threshold_scale: process.argv[5],
+            threshold_config_path: process.argv[6],
           };
           fs.writeFileSync(metadataPath, JSON.stringify(payload, null, 2) + "\n");
-          ' "${metadata_file}" "${source_kind}" "${source_detail}" "${fresh_bench_status}" "${THRESHOLD_SCALE_INPUT}"
+          ' "${metadata_file}" "${source_kind}" "${source_detail}" "${fresh_bench_status}" "${THRESHOLD_SCALE_INPUT}" "${THRESHOLD_CONFIG_PATH_INPUT}"
 
           {
             echo "artifact_dir=${artifact_dir}"
@@ -163,6 +181,7 @@ jobs:
             echo "source_kind=${source_kind}"
             echo "source_detail=${source_detail}"
             echo "fresh_bench_status=${fresh_bench_status}"
+            echo "threshold_config_path=${THRESHOLD_CONFIG_PATH_INPUT}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Run calibration summary
@@ -209,6 +228,9 @@ jobs:
             echo "- Basis: \`${{ inputs.basis }}\`"
             echo "- Margin percent: \`${{ inputs.margin_percent }}\`"
             echo "- Percentile: \`${{ inputs.percentile }}\`"
+            if [ -n "${{ steps.collect.outputs.threshold_config_path }}" ]; then
+              echo "- Threshold config path: \`${{ steps.collect.outputs.threshold_config_path }}\`"
+            fi
             if [ "${{ steps.collect.outputs.fresh_bench_status }}" != "0" ]; then
               echo "- Fresh benchmark exit status: \`${{ steps.collect.outputs.fresh_bench_status }}\`"
             fi
