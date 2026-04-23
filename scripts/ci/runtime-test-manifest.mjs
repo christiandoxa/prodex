@@ -47,67 +47,7 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_active_request_wait_recovers_after_short_burst",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_anthropic_admission_wait_recovers_after_short_burst",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_sheds_long_lived_queue_overload_fast",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_retries_after_websocket_reuse_precommit_hold_timeout",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_absorbs_brief_anthropic_queue_burst",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_absorbs_brief_long_lived_queue_burst",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_does_not_rotate_after_first_sse_chunk_reset",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_retries_same_compact_owner_after_websocket_reuse_watchdog",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_bound_previous_response_without_turn_state_replays_after_websocket_reuse_watchdog",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_stale_websocket_previous_response_reuse_replays_with_stored_turn_state",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_logs_local_writer_disconnect_after_first_chunk",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_surfaces_mid_turn_close_without_post_commit_rotate",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_passes_through_unauthorized_response_and_quarantines_profile_for_next_fresh_request",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
     name: "runtime_proxy_broker_health_endpoint_reports_registered_metadata",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_uses_current_profile_without_extra_runtime_quota_probe",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_reuses_rotated_profile_without_reprobing_quota",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
@@ -127,59 +67,55 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_keeps_previous_response_affinity_for_http_requests",
+    name: "runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is_full",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_keeps_previous_response_affinity_for_websocket_requests",
+    name: "runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_restores_compact_followup_owner_across_restart",
+    name: "compact_final_failure_logs_inflight_saturation_terminal_reason",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_retries_overloaded_compact_on_another_profile",
+    name: "compact_final_failure_logs_local_selection_terminal_reason",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_retries_quota_blocked_response_on_another_profile",
+    name: "compact_final_failure_logs_overload_terminal_reason",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_reuses_compact_owner_for_followup_until_response_commits",
+    name: "compact_final_failure_logs_quota_terminal_reason",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_retries_usage_limited_response_on_another_profile",
+    name: "responses_and_websocket_sync_probe_cold_start_under_background_probe_queue_pressure",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_websocket_releases_quota_blocked_previous_response_affinity_before_fresh_fallback",
+    name: "compact_and_standard_defer_sync_probe_cold_start_under_background_probe_queue_pressure",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_websocket_reuse_rotates_on_delayed_quota_before_commit",
+    name: "next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_mode",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_websocket_rotates_on_upstream_websocket_quota_error",
+    name: "runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_standard_request_preserves_plain_429_when_not_explicit_quota",
+    name: "runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_standard_request_retries_usage_limited_response_on_another_profile",
+    name: "websocket_previous_response_not_found_requires_stale_continuation_without_turn_state",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_masks_soft_quota_failure_when_no_ready_http_fallback_remains",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_masks_soft_quota_failure_when_no_ready_websocket_fallback_remains",
+    name: "websocket_reuse_watchdog_fresh_fallback_stays_blocked_for_locked_affinity",
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
@@ -195,64 +131,40 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: [TAGS.stressSkip, TAGS.stressSerialized],
   },
   {
-    name: "runtime_proxy_surfaces_service_unavailable_for_stale_websocket_previous_response_when_owner_snapshot_is_exhausted",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_preserves_function_call_output_affinity_when_previous_response_missing",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_preserves_quota_blocked_function_call_output_previous_response_affinity",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_websocket_requests",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_stale_critical_floor_snapshot_skips_current_profile_on_fresh_http_requests",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_preserves_quota_blocked_previous_response_affinity_without_turn_state",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_reuse_rotates_on_delayed_overload_before_commit",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_rotates_on_upstream_websocket_overload_error",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_session_affinity_rotates_on_delayed_overload_before_commit",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
-    name: "runtime_proxy_websocket_session_id_without_owner_promotes_rotated_profile",
-    tags: [TAGS.stressSkip, TAGS.stressSerialized],
-  },
-  {
     name: "runtime_proxy_worker_count_env_override_beats_policy_file",
     label: "env-sensitive-worker-count",
     tags: [TAGS.stressSkip, TAGS.stressSerialized, TAGS.envParallel],
   },
   {
-    name: "runtime_proxy_persists_previous_response_affinity_across_restart",
+    name: "runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_stale_continuation",
     tags: [TAGS.stressSkip, TAGS.stressContinuation],
   },
   {
-    name: "runtime_proxy_persists_session_affinity_across_restart_for_compact",
+    name: "runtime_proxy_websocket_previous_response_not_found_after_prelude_surfaces_stale_continuation",
     tags: [TAGS.stressSkip, TAGS.stressContinuation],
   },
   {
-    name: "runtime_proxy_retries_after_websocket_reuse_silent_hang",
+    name: "runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continuation",
     tags: [TAGS.stressSkip, TAGS.stressContinuation],
   },
   {
-    name: "runtime_proxy_does_not_rotate_after_multi_chunk_sse_stall",
+    name: "runtime_proxy_http_tool_output_with_session_surfaces_stale_continuation_without_fresh_retry",
+    tags: [TAGS.stressSkip, TAGS.stressContinuation],
+  },
+  {
+    name: "runtime_state_snapshot_save_retries_stale_continuation_generation",
+    tags: [TAGS.stressSkip, TAGS.stressContinuation],
+  },
+  {
+    name: "runtime_continuation_journal_save_retries_stale_generation",
+    tags: [TAGS.stressSkip, TAGS.stressContinuation],
+  },
+  {
+    name: "runtime_state_snapshot_retry_does_not_resurrect_released_response_binding",
+    tags: [TAGS.stressSkip, TAGS.stressContinuation],
+  },
+  {
+    name: "runtime_continuation_journal_retry_does_not_resurrect_released_response_binding",
     tags: [TAGS.stressSkip, TAGS.stressContinuation],
   },
 ];

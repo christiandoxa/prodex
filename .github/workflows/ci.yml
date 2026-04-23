@@ -248,6 +248,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Validate runtime CI manifest
+        run: npm run ci:runtime-manifest
+
       - name: Run runtime proxy internal test shard
         run: node scripts/ci/runtime-proxy-shard.mjs
 

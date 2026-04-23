@@ -220,6 +220,25 @@ pub(crate) fn runtime_doctor_active_pressure_next_step(summary: &RuntimeDoctorSu
     )
 }
 
+pub(crate) fn runtime_doctor_profile_inflight_saturated_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let profile =
+        runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "profile")
+            .map(|profile| format!(" on profile {profile}"))
+            .unwrap_or_default();
+    let hard_limit =
+        runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "hard_limit");
+    match hard_limit {
+        Some(limit) => format!(
+            "Wait for in-flight work{profile} to drop below hard limit {limit} before retrying, or let fresh selection land on another eligible profile."
+        ),
+        None => format!(
+            "Wait for in-flight work{profile} to drain before retrying, or let fresh selection land on another eligible profile."
+        ),
+    }
+}
+
 pub(crate) fn runtime_doctor_route_health_next_step(summary: &RuntimeDoctorSummary) -> String {
     let scope = runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
         .unwrap_or_else(|| "that route".to_string());
@@ -227,6 +246,82 @@ pub(crate) fn runtime_doctor_route_health_next_step(summary: &RuntimeDoctorSumma
         .unwrap_or("unknown_reason");
     format!(
         "Inspect recent transport or overload markers for {scope}, especially `{reason}`, and wait for that route score to decay before expecting fresh selection to reuse it."
+    )
+}
+
+pub(crate) fn runtime_doctor_persistence_backpressure_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let mut backlogs = Vec::new();
+    if let Some(backlog) = summary.state_save_queue_backlog {
+        backlogs.push(format!("state={backlog}"));
+    }
+    if let Some(backlog) = summary.continuation_journal_save_backlog {
+        backlogs.push(format!("journal={backlog}"));
+    }
+    let latest_reason =
+        runtime_doctor_marker_last_field(summary, "state_save_queue_backpressure", "reason")
+            .or_else(|| {
+                runtime_doctor_marker_last_field(
+                    summary,
+                    "continuation_journal_queue_backpressure",
+                    "reason",
+                )
+            });
+    let backlog_detail = if backlogs.is_empty() {
+        String::new()
+    } else {
+        format!(" Latest backlog: {}.", backlogs.join(" "))
+    };
+    let reason_detail = latest_reason
+        .map(|reason| format!(" Latest reason: {reason}."))
+        .unwrap_or_default();
+    format!(
+        "Reduce rapid rotation or continuation churn and wait for background persistence queues to drain.{backlog_detail}{reason_detail}"
+    )
+}
+
+pub(crate) fn runtime_doctor_sync_probe_skip_next_step(summary: &RuntimeDoctorSummary) -> String {
+    let route = runtime_doctor_marker_last_field(summary, "selection_skip_sync_probe", "route")
+        .unwrap_or("unknown");
+    let reason = runtime_doctor_marker_last_field(summary, "selection_skip_sync_probe", "reason")
+        .unwrap_or("unknown_reason");
+    let deferred =
+        runtime_doctor_marker_last_field(summary, "selection_skip_sync_probe", "cold_start_jobs")
+            .map(|count| format!("{count} cold-start job(s)"))
+            .or_else(|| {
+                runtime_doctor_marker_last_field(
+                    summary,
+                    "selection_skip_sync_probe",
+                    "cold_start_profiles",
+                )
+                .map(|count| format!("{count} cold-start profile(s)"))
+            })
+            .unwrap_or_else(|| "cold-start work".to_string());
+    format!(
+        "Inspect `selection_skip_sync_probe`, `profile_probe_refresh_backpressure`, and `profile_probe_refresh_queued` markers for route {route}; pressure mode ({reason}) deferred {deferred}, so cold-start profiles may stay on stale quota data until background probes finish."
+    )
+}
+
+pub(crate) fn runtime_doctor_probe_refresh_backpressure_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let profile =
+        runtime_doctor_marker_last_field(summary, "profile_probe_refresh_backpressure", "profile");
+    let backlog = runtime_doctor_marker_last_usize_field(
+        summary,
+        "profile_probe_refresh_backpressure",
+        "backlog",
+    )
+    .or(summary.profile_probe_refresh_backlog);
+    let profile_detail = profile
+        .map(|profile| format!(" for profile {profile}"))
+        .unwrap_or_default();
+    let backlog_detail = backlog
+        .map(|backlog| format!(" Latest probe backlog: {backlog}."))
+        .unwrap_or_default();
+    format!(
+        "Let the background quota-refresh queue drain{profile_detail} before expecting cold-start profiles to become selectable again.{backlog_detail}"
     )
 }
 
@@ -277,8 +372,10 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
             "persistence",
             &[
                 "state_save_error",
+                "state_save_queue_backpressure",
                 "state_save_skipped",
                 "continuation_journal_save_error",
+                "continuation_journal_queue_backpressure",
             ],
         ),
         (
@@ -292,6 +389,8 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "profile_latency",
                 "profile_bad_pairing",
                 "profile_probe_refresh_error",
+                "profile_probe_refresh_backpressure",
+                "selection_skip_sync_probe",
                 "responses_pre_send_skip",
                 "websocket_pre_send_skip",
                 "quota_critical_floor_before_send",
@@ -332,7 +431,10 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
 
 pub(crate) fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
     summary.state_save_queue_backlog =
-        runtime_doctor_marker_last_usize_field(summary, "state_save_queued", "backlog");
+        runtime_doctor_marker_last_usize_field(summary, "state_save_queue_backpressure", "backlog")
+            .or_else(|| {
+                runtime_doctor_marker_last_usize_field(summary, "state_save_queued", "backlog")
+            });
     summary.state_save_lag_ms =
         runtime_doctor_marker_last_u64_field(summary, "state_save_ok", "lag_ms")
             .or_else(|| {
@@ -343,9 +445,16 @@ pub(crate) fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSum
             });
     summary.continuation_journal_save_backlog = runtime_doctor_marker_last_usize_field(
         summary,
-        "continuation_journal_save_queued",
+        "continuation_journal_queue_backpressure",
         "backlog",
-    );
+    )
+    .or_else(|| {
+        runtime_doctor_marker_last_usize_field(
+            summary,
+            "continuation_journal_save_queued",
+            "backlog",
+        )
+    });
     summary.continuation_journal_save_lag_ms =
         runtime_doctor_marker_last_u64_field(summary, "continuation_journal_save_ok", "lag_ms")
             .or_else(|| {
@@ -355,8 +464,14 @@ pub(crate) fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSum
                     "lag_ms",
                 )
             });
-    summary.profile_probe_refresh_backlog =
-        runtime_doctor_marker_last_usize_field(summary, "profile_probe_refresh_queued", "backlog");
+    summary.profile_probe_refresh_backlog = runtime_doctor_marker_last_usize_field(
+        summary,
+        "profile_probe_refresh_backpressure",
+        "backlog",
+    )
+    .or_else(|| {
+        runtime_doctor_marker_last_usize_field(summary, "profile_probe_refresh_queued", "backlog")
+    });
     summary.profile_probe_refresh_lag_ms =
         runtime_doctor_marker_last_u64_field(summary, "profile_probe_refresh_ok", "lag_ms")
             .or_else(|| {
@@ -579,6 +694,8 @@ fn runtime_doctor_startup_audit_pressure(summary: &RuntimeDoctorSummary) -> Stri
 fn runtime_doctor_quota_freshness_pressure(summary: &RuntimeDoctorSummary) -> String {
     if summary.stale_persisted_usage_snapshots > 0
         || runtime_doctor_marker_count(summary, "profile_probe_refresh_error") > 0
+        || runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0
+        || runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0
         || runtime_doctor_top_facet(summary, "quota_source")
             .is_some_and(|value| value.starts_with("persisted_snapshot "))
     {
@@ -623,7 +740,17 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
     } else if runtime_doctor_marker_count(summary, "websocket_precommit_frame_timeout") > 0 {
         "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
     } else if runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0 {
-        "Recent per-profile in-flight saturation forced a fail-fast response.".to_string()
+        let profile =
+            runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "profile")
+                .unwrap_or("an eligible profile");
+        let hard_limit =
+            runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "hard_limit")
+                .map(|limit| format!(" at hard limit {limit}"))
+                .unwrap_or_default();
+        format!(
+            "Recent per-profile in-flight saturation blocked {profile}{hard_limit}. Next step: {}",
+            runtime_doctor_profile_inflight_saturated_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "profile_health") > 0 {
         let scope = runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
             .unwrap_or_else(|| "unknown route".to_string());
@@ -757,6 +884,38 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         "Recent upstream connect failures detected.".to_string()
     } else if runtime_doctor_marker_count(summary, "state_save_error") > 0 {
         "Recent runtime state save failures detected.".to_string()
+    } else if runtime_doctor_marker_count(summary, "state_save_queue_backpressure") > 0
+        || runtime_doctor_marker_count(summary, "continuation_journal_queue_backpressure") > 0
+    {
+        format!(
+            "Recent background persistence queue backpressure was detected. Next step: {}",
+            runtime_doctor_persistence_backpressure_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0 {
+        let route = runtime_doctor_marker_last_field(summary, "selection_skip_sync_probe", "route")
+            .unwrap_or("unknown");
+        format!(
+            "Recent fresh selection skipped inline quota probing on route {route} under pressure mode. Next step: {}",
+            runtime_doctor_sync_probe_skip_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0 {
+        let profile = runtime_doctor_marker_last_field(
+            summary,
+            "profile_probe_refresh_backpressure",
+            "profile",
+        )
+        .unwrap_or("unknown");
+        let backlog = runtime_doctor_marker_last_usize_field(
+            summary,
+            "profile_probe_refresh_backpressure",
+            "backlog",
+        )
+        .map(|backlog| format!(" with backlog {backlog}"))
+        .unwrap_or_default();
+        format!(
+            "Recent background quota refresh queue backpressure was detected for profile {profile}{backlog}. Next step: {}",
+            runtime_doctor_probe_refresh_backpressure_next_step(summary)
+        )
     } else if !summary.degraded_routes.is_empty() {
         format!(
             "Persisted degraded runtime routes are still active: {}",

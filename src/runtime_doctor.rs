@@ -124,15 +124,19 @@ const RUNTIME_DOCTOR_MARKERS: &[&str] = &[
     "state_save_skipped",
     "state_save_error",
     "state_save_queued",
+    "state_save_queue_backpressure",
     "continuation_journal_save_ok",
     "continuation_journal_save_error",
     "continuation_journal_save_queued",
+    "continuation_journal_queue_backpressure",
     "runtime_proxy_restore_counts",
     "runtime_proxy_startup_audit",
     "profile_probe_refresh_queued",
     "profile_probe_refresh_start",
     "profile_probe_refresh_ok",
     "profile_probe_refresh_error",
+    "profile_probe_refresh_backpressure",
+    "selection_skip_sync_probe",
     "quota_blocked_affinity_released",
 ];
 
@@ -140,6 +144,7 @@ const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Queue overload", "runtime_proxy_queue_overloaded"),
     ("Active limit", "runtime_proxy_active_limit_reached"),
     ("Lane limit", "runtime_proxy_lane_limit_reached"),
+    ("In-flight saturated", "profile_inflight_saturated"),
     ("Overload backoff", "runtime_proxy_overload_backoff"),
     ("Pre-commit budget", "precommit_budget_exhausted"),
     ("Responses pre-send skips", "responses_pre_send_skip"),
@@ -179,6 +184,7 @@ const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Compact final", "compact_final_failure"),
     ("Selection picks", "selection_pick"),
     ("Selection skips", "selection_skip_current"),
+    ("Sync-probe skips", "selection_skip_sync_probe"),
     ("WS reuse watchdog", "websocket_reuse_watchdog"),
     (
         "WS first-frame timeouts",
@@ -187,7 +193,12 @@ const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Stream read errors", "stream_read_error"),
     ("Writer errors", "local_writer_error"),
     ("State save errors", "state_save_error"),
+    ("State save pressure", "state_save_queue_backpressure"),
     ("Cont journal err", "continuation_journal_save_error"),
+    (
+        "Cont journal pressure",
+        "continuation_journal_queue_backpressure",
+    ),
     ("State save ok", "state_save_ok"),
     ("Cont journal ok", "continuation_journal_save_ok"),
     ("State save skipped", "state_save_skipped"),
@@ -196,6 +207,10 @@ const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Queue recovered", "runtime_proxy_queue_recovered"),
     ("Probe refresh", "profile_probe_refresh_start"),
     ("Probe refresh errors", "profile_probe_refresh_error"),
+    (
+        "Probe refresh pressure",
+        "profile_probe_refresh_backpressure",
+    ),
     ("Compat samples", "compat_request_surface"),
 ];
 
@@ -203,6 +218,7 @@ const RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS: &[&str] = &[
     "selection_pick",
     "selection_skip_current",
     "selection_skip_affinity",
+    "selection_skip_sync_probe",
     "precommit_budget_exhausted",
     "compact_precommit_budget_exhausted",
     "compact_candidate_exhausted",
@@ -221,8 +237,12 @@ const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
     "local_writer_error",
 ];
 
-const RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS: &[&str] =
-    &["state_save_error", "continuation_journal_save_error"];
+const RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS: &[&str] = &[
+    "state_save_error",
+    "state_save_queue_backpressure",
+    "continuation_journal_save_error",
+    "continuation_journal_queue_backpressure",
+];
 
 const RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS: &[&str] = &["state_save_skipped"];
 

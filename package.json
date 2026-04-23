@@ -13,6 +13,7 @@
     "npm:stage": "node scripts/npm/stage.mjs",
     "npm:publish": "node scripts/npm/publish.mjs",
     "docs:lint": "node scripts/docs/lint-markdown.mjs",
+    "ci:runtime-manifest": "node scripts/ci/runtime-test-manifest-guard.mjs",
     "ci:runtime-stress": "node scripts/ci/runtime-stress.mjs",
     "ci:npm-smoke": "node scripts/ci/npm-package-smoke.mjs",
     "ci:failed-jobs": "node scripts/ci/github-failure-summary.mjs"

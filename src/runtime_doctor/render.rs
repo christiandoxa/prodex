@@ -285,6 +285,33 @@ fn runtime_doctor_push_marker_detail_rows(
             diagnosis::runtime_doctor_lane_pressure_next_step(summary),
         );
     }
+    if marker == "profile_inflight_saturated"
+        && diagnosis::runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0
+    {
+        fields
+            .push(
+                "In-flight profile",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("profile"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "In-flight hard limit",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("hard_limit"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "In-flight next step",
+                diagnosis::runtime_doctor_profile_inflight_saturated_next_step(summary),
+            );
+    }
     if marker == "runtime_proxy_overload_backoff" {
         fields.push(
             "Connect failures",
@@ -420,6 +447,128 @@ fn runtime_doctor_push_marker_detail_rows(
             .push(
                 "Probe lag",
                 runtime_doctor_format_option(summary.profile_probe_refresh_lag_ms),
+            );
+    }
+    if marker == "state_save_queue_backpressure"
+        && diagnosis::runtime_doctor_marker_count(summary, "state_save_queue_backpressure") > 0
+    {
+        fields
+            .push(
+                "State pressure reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "State pressure backlog",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("backlog"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Persistence next step",
+                diagnosis::runtime_doctor_persistence_backpressure_next_step(summary),
+            );
+    }
+    if marker == "continuation_journal_queue_backpressure"
+        && diagnosis::runtime_doctor_marker_count(
+            summary,
+            "continuation_journal_queue_backpressure",
+        ) > 0
+    {
+        fields
+            .push(
+                "Cont journal pressure reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Cont journal pressure backlog",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("backlog"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            );
+    }
+    if marker == "selection_skip_sync_probe"
+        && diagnosis::runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0
+    {
+        let deferred = summary
+            .marker_last_fields
+            .get(marker)
+            .and_then(|fields| {
+                fields
+                    .get("cold_start_jobs")
+                    .map(|count| format!("{count} job(s)"))
+                    .or_else(|| {
+                        fields
+                            .get("cold_start_profiles")
+                            .map(|count| format!("{count} profile(s)"))
+                    })
+            })
+            .unwrap_or_else(|| "-".to_string());
+        fields
+            .push(
+                "Sync-probe route",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("route"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Sync-probe reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push("Sync-probe deferred", deferred)
+            .push(
+                "Sync-probe next step",
+                diagnosis::runtime_doctor_sync_probe_skip_next_step(summary),
+            );
+    }
+    if marker == "profile_probe_refresh_backpressure"
+        && diagnosis::runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0
+    {
+        fields
+            .push(
+                "Probe pressure profile",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("profile"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Probe pressure backlog",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("backlog"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Probe next step",
+                diagnosis::runtime_doctor_probe_refresh_backpressure_next_step(summary),
             );
     }
     if marker == "runtime_proxy_startup_audit" {

@@ -2,6 +2,8 @@
 import { spawn } from "node:child_process";
 import { RUNTIME_ENV_PARALLEL_CASES } from "./runtime-test-manifest.mjs";
 
+const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
+
 function parseArgs(argv) {
   const args = { runs: 2, testThreads: 4 };
   for (let index = 2; index < argv.length; index += 1) {
@@ -41,10 +43,41 @@ function parseArgs(argv) {
   return args;
 }
 
+function createZeroTestProbe() {
+  let sawZeroTests = false;
+  let tail = "";
+
+  return {
+    inspect(chunk) {
+      const text = tail + chunk;
+      if (ZERO_TESTS_PATTERN.test(text)) {
+        sawZeroTests = true;
+      }
+      tail = text.slice(-32);
+    },
+    sawZeroTests() {
+      return sawZeroTests || ZERO_TESTS_PATTERN.test(tail);
+    },
+  };
+}
+
 function run(command, args, label) {
   return new Promise((resolve, reject) => {
     process.stdout.write(`${label}: ${command} ${args.join(" ")}\n`);
-    const child = spawn(command, args, { stdio: "inherit" });
+    const child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"] });
+    const zeroTestProbe = createZeroTestProbe();
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+
+    child.stdout?.on("data", (chunk) => {
+      process.stdout.write(chunk);
+      zeroTestProbe.inspect(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      process.stderr.write(chunk);
+      zeroTestProbe.inspect(chunk);
+    });
     child.on("error", reject);
     child.on("close", (code, signal) => {
       if (signal) {
@@ -53,6 +86,10 @@ function run(command, args, label) {
       }
       if (code !== 0) {
         reject(new Error(`${label} exited with code ${code}`));
+        return;
+      }
+      if (zeroTestProbe.sawZeroTests()) {
+        reject(new Error(`${label} matched no tests (cargo reported "running 0 tests")`));
         return;
       }
       resolve();
@@ -83,4 +120,10 @@ async function main() {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`runtime-env-parallel: ${message}\n`);
+  process.exitCode = 1;
+}

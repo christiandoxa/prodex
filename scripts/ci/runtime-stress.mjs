@@ -6,6 +6,9 @@ import {
   RUNTIME_STRESS_SKIP_TESTS,
 } from "./runtime-test-manifest.mjs";
 
+const VALID_SUITES = new Set(["stress", "serialized", "continuation", "all"]);
+const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
+
 function parseArgs(argv) {
   const args = { suite: "all" };
   for (let index = 2; index < argv.length; index += 1) {
@@ -30,7 +33,26 @@ function parseArgs(argv) {
 function run(command, args, label) {
   return new Promise((resolve, reject) => {
     process.stdout.write(`${label}: ${command} ${args.join(" ")}\n`);
-    const child = spawn(command, args, { stdio: "inherit" });
+    const child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"] });
+    let sawZeroTests = false;
+    let outputTail = "";
+    const inspectOutput = (chunk) => {
+      const text = outputTail + chunk;
+      if (ZERO_TESTS_PATTERN.test(text)) {
+        sawZeroTests = true;
+      }
+      outputTail = text.slice(-32);
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      process.stdout.write(chunk);
+      inspectOutput(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      process.stderr.write(chunk);
+      inspectOutput(chunk);
+    });
     child.on("error", reject);
     child.on("close", (code, signal) => {
       if (signal) {
@@ -39,6 +61,10 @@ function run(command, args, label) {
       }
       if (code !== 0) {
         reject(new Error(`${label} exited with code ${code}`));
+        return;
+      }
+      if (sawZeroTests || ZERO_TESTS_PATTERN.test(outputTail)) {
+        reject(new Error(`${label} matched no tests (cargo reported "running 0 tests")`));
         return;
       }
       resolve();
@@ -104,6 +130,12 @@ async function main() {
     return;
   }
 
+  if (!VALID_SUITES.has(args.suite)) {
+    throw new Error(
+      `invalid --suite value: ${args.suite}. Expected one of: ${Array.from(VALID_SUITES).join(", ")}`,
+    );
+  }
+
   if (args.suite === "stress" || args.suite === "all") {
     await runStressSuite();
   }
@@ -115,4 +147,10 @@ async function main() {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`runtime-stress: ${message}\n`);
+  process.exitCode = 1;
+}

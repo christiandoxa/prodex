@@ -401,13 +401,16 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
             "turn-main:suspect".to_string(),
         ],
         failure_class_counts: BTreeMap::from([
-            ("admission".to_string(), 2),
+            ("admission".to_string(), 3),
             ("continuation".to_string(), 1),
+            ("persistence".to_string(), 2),
+            ("quota".to_string(), 2),
             ("transport".to_string(), 3),
         ]),
         marker_counts: BTreeMap::from([
             ("runtime_proxy_active_limit_reached", 1),
             ("runtime_proxy_lane_limit_reached", 1),
+            ("profile_inflight_saturated", 1),
             ("previous_response_fresh_fallback", 2),
             ("previous_response_fresh_fallback_blocked", 1),
             ("compact_committed", 1),
@@ -415,6 +418,10 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
             ("compact_retryable_failure", 1),
             ("compact_final_failure", 1),
             ("profile_health", 1),
+            ("selection_skip_sync_probe", 1),
+            ("state_save_queue_backpressure", 1),
+            ("continuation_journal_queue_backpressure", 1),
+            ("profile_probe_refresh_backpressure", 1),
         ]),
         marker_last_fields: BTreeMap::from([
             (
@@ -430,6 +437,13 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
                     ("lane".to_string(), "compact".to_string()),
                     ("active".to_string(), "4".to_string()),
                     ("limit".to_string(), "4".to_string()),
+                ]),
+            ),
+            (
+                "profile_inflight_saturated",
+                BTreeMap::from([
+                    ("profile".to_string(), "main".to_string()),
+                    ("hard_limit".to_string(), "8".to_string()),
                 ]),
             ),
             (
@@ -465,6 +479,35 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
                     ("route".to_string(), "responses".to_string()),
                     ("score".to_string(), "4".to_string()),
                     ("reason".to_string(), "stream_read_error".to_string()),
+                ]),
+            ),
+            (
+                "selection_skip_sync_probe",
+                BTreeMap::from([
+                    ("route".to_string(), "responses".to_string()),
+                    ("reason".to_string(), "pressure_mode".to_string()),
+                    ("cold_start_jobs".to_string(), "3".to_string()),
+                ]),
+            ),
+            (
+                "state_save_queue_backpressure",
+                BTreeMap::from([
+                    ("reason".to_string(), "session_id:main".to_string()),
+                    ("backlog".to_string(), "4".to_string()),
+                ]),
+            ),
+            (
+                "continuation_journal_queue_backpressure",
+                BTreeMap::from([
+                    ("reason".to_string(), "session_id:main".to_string()),
+                    ("backlog".to_string(), "2".to_string()),
+                ]),
+            ),
+            (
+                "profile_probe_refresh_backpressure",
+                BTreeMap::from([
+                    ("profile".to_string(), "second".to_string()),
+                    ("backlog".to_string(), "6".to_string()),
                 ]),
             ),
         ]),
@@ -520,7 +563,23 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
     assert_eq!(fields.get("Probe lag").map(String::as_str), Some("7"));
     assert_eq!(
         fields.get("Failure classes").map(String::as_str),
-        Some("admission=2, continuation=1, transport=3")
+        Some("admission=3, continuation=1, persistence=2, quota=2, transport=3")
+    );
+    assert_eq!(
+        fields.get("In-flight saturated").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("In-flight profile").map(String::as_str),
+        Some("main")
+    );
+    assert_eq!(
+        fields.get("In-flight hard limit").map(String::as_str),
+        Some("8")
+    );
+    assert_eq!(
+        fields.get("In-flight next step").map(String::as_str),
+        Some("Wait for in-flight work on profile main to drop below hard limit 8 before retrying, or let fresh selection land on another eligible profile.")
     );
     assert_eq!(
         fields.get("Suspect continuations").map(String::as_str),
@@ -535,6 +594,22 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
         Some("2")
     );
     assert_eq!(fields.get("Prev fail-closed").map(String::as_str), Some("1"));
+    assert_eq!(
+        fields.get("Sync-probe skips").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("Sync-probe route").map(String::as_str),
+        Some("responses")
+    );
+    assert_eq!(
+        fields.get("Sync-probe deferred").map(String::as_str),
+        Some("3 job(s)")
+    );
+    assert_eq!(
+        fields.get("Sync-probe next step").map(String::as_str),
+        Some("Inspect `selection_skip_sync_probe`, `profile_probe_refresh_backpressure`, and `profile_probe_refresh_queued` markers for route responses; pressure mode (pressure_mode) deferred 3 cold-start job(s), so cold-start profiles may stay on stale quota data until background probes finish.")
+    );
     assert_eq!(
         fields.get("Active next step").map(String::as_str),
         Some("Reduce concurrent fresh work or wait for in-flight requests to drain before retrying. Latest load: 12/12.")
@@ -586,6 +661,46 @@ fn runtime_doctor_fields_surface_queue_lag_and_failure_classes() {
     assert_eq!(
         fields.get("Chain dead reasons").map(String::as_str),
         Some("previous_response_not_found_locked_affinity=1")
+    );
+    assert_eq!(
+        fields.get("State save pressure").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("State pressure reason").map(String::as_str),
+        Some("session_id:main")
+    );
+    assert_eq!(
+        fields.get("State pressure backlog").map(String::as_str),
+        Some("4")
+    );
+    assert_eq!(
+        fields.get("Persistence next step").map(String::as_str),
+        Some("Reduce rapid rotation or continuation churn and wait for background persistence queues to drain. Latest backlog: state=4 journal=2. Latest reason: session_id:main.")
+    );
+    assert_eq!(
+        fields.get("Cont journal pressure").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("Cont journal pressure backlog").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        fields.get("Probe refresh pressure").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        fields.get("Probe pressure profile").map(String::as_str),
+        Some("second")
+    );
+    assert_eq!(
+        fields.get("Probe pressure backlog").map(String::as_str),
+        Some("6")
+    );
+    assert_eq!(
+        fields.get("Probe next step").map(String::as_str),
+        Some("Let the background quota-refresh queue drain for profile second before expecting cold-start profiles to become selectable again. Latest probe backlog: 6.")
     );
     assert_eq!(
         fields.get("Stale reasons").map(String::as_str),
@@ -831,6 +946,33 @@ fn runtime_doctor_finalize_summary_adds_active_pressure_guidance() {
 }
 
 #[test]
+fn runtime_doctor_finalize_summary_adds_profile_inflight_guidance() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary
+        .marker_counts
+        .insert("profile_inflight_saturated", 1);
+    summary.marker_last_fields.insert(
+        "profile_inflight_saturated",
+        BTreeMap::from([
+            ("profile".to_string(), "main".to_string()),
+            ("hard_limit".to_string(), "8".to_string()),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent per-profile in-flight saturation blocked main at hard limit 8. Next step: Wait for in-flight work on profile main to drop below hard limit 8 before retrying, or let fresh selection land on another eligible profile."
+    );
+}
+
+#[test]
 fn runtime_doctor_finalize_summary_adds_route_health_guidance() {
     let mut summary = RuntimeDoctorSummary {
         pointer_exists: true,
@@ -854,6 +996,65 @@ fn runtime_doctor_finalize_summary_adds_route_health_guidance() {
     assert_eq!(
         summary.diagnosis,
         "Recent route-specific health penalty is steering fresh selection away from main/responses (score 4, reason stream_read_error). Next step: Inspect recent transport or overload markers for main/responses, especially `stream_read_error`, and wait for that route score to decay before expecting fresh selection to reuse it."
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_adds_sync_probe_skip_guidance() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 1,
+        ..RuntimeDoctorSummary::default()
+    };
+    summary
+        .marker_counts
+        .insert("selection_skip_sync_probe", 1);
+    summary.marker_last_fields.insert(
+        "selection_skip_sync_probe",
+        BTreeMap::from([
+            ("route".to_string(), "responses".to_string()),
+            ("reason".to_string(), "pressure_mode".to_string()),
+            ("cold_start_profiles".to_string(), "2".to_string()),
+        ]),
+    );
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.selection_pressure,
+        "elevated"
+    );
+    assert_eq!(
+        summary.quota_freshness_pressure,
+        "stale_risk"
+    );
+    assert_eq!(
+        summary.diagnosis,
+        "Recent fresh selection skipped inline quota probing on route responses under pressure mode. Next step: Inspect `selection_skip_sync_probe`, `profile_probe_refresh_backpressure`, and `profile_probe_refresh_queued` markers for route responses; pressure mode (pressure_mode) deferred 2 cold-start profile(s), so cold-start profiles may stay on stale quota data until background probes finish."
+    );
+}
+
+#[test]
+fn runtime_doctor_finalize_summary_adds_background_queue_guidance() {
+    let mut summary = summarize_runtime_log_tail(
+        br#"[2026-04-21 10:00:00.000 +07:00] state_save_queue_backpressure revision=2 reason=session_id:main backlog=7
+[2026-04-21 10:00:00.001 +07:00] continuation_journal_queue_backpressure reason=session_id:main backlog=5
+[2026-04-21 10:00:00.002 +07:00] profile_probe_refresh_backpressure profile=second backlog=4
+"#,
+    );
+    summary.pointer_exists = true;
+    summary.log_exists = true;
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(summary.persistence_pressure, "elevated");
+    assert_eq!(summary.quota_freshness_pressure, "stale_risk");
+    assert_eq!(summary.state_save_queue_backlog, Some(7));
+    assert_eq!(summary.continuation_journal_save_backlog, Some(5));
+    assert_eq!(summary.profile_probe_refresh_backlog, Some(4));
+    assert_eq!(
+        summary.diagnosis,
+        "Recent background persistence queue backpressure was detected. Next step: Reduce rapid rotation or continuation churn and wait for background persistence queues to drain. Latest backlog: state=7 journal=5. Latest reason: session_id:main."
     );
 }
 
