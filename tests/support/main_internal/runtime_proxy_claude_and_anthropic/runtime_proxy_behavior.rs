@@ -1050,6 +1050,7 @@ fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() 
 
 #[test]
 fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let _shared = runtime_rotation_proxy_shared(
         &temp_dir,
@@ -1333,6 +1334,7 @@ fn runtime_probe_queued_execution_logs_refresh_marker_with_queue_lag() {
 
 #[test]
 fn runtime_probe_refresh_suppresses_nonlocal_upstream_in_tests_and_wakes_waiters() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1435,6 +1437,7 @@ fn runtime_probe_refresh_nonlocal_upstream_detection_keeps_loopback_exact() {
 
 #[test]
 fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
+    let _test_guard = crate::acquire_test_runtime_lock();
     let temp_dir = TestDir::new();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
