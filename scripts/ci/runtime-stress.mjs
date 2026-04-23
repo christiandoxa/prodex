@@ -103,7 +103,7 @@ async function runSerializedSuite() {
   await retry("serialized runtime stress", 2, async (attempt) => {
     process.stdout.write(`serialized runtime stress attempt ${attempt}\n`);
     for (const testName of RUNTIME_STRESS_SERIALIZED_TESTS) {
-      await run("cargo", ["test", "--lib", `main_internal_tests::${testName}`, "--", "--test-threads=1"], testName);
+      await run("cargo", ["test", "--lib", testName, "--", "--test-threads=1"], testName);
     }
   });
 }
@@ -112,7 +112,7 @@ async function runContinuationSuite() {
   for (let iteration = 1; iteration <= 2; iteration += 1) {
     process.stdout.write(`continuation-heavy iteration ${iteration}\n`);
     for (const testName of RUNTIME_STRESS_CONTINUATION_TESTS) {
-      await run("cargo", ["test", "--lib", `main_internal_tests::${testName}`, "--", "--test-threads=1"], testName);
+      await run("cargo", ["test", "--lib", testName, "--", "--test-threads=1"], testName);
     }
   }
 }

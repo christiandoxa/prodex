@@ -186,7 +186,7 @@ function cargoFilterFor(testCase) {
   if (testCase.filter) {
     return testCase.filter;
   }
-  return `main_internal_tests::${testCase.name}`;
+  return testCase.name;
 }
 
 export const RUNTIME_STRESS_SKIP_TESTS = testNamesWithTag(TAGS.stressSkip);
