@@ -109,7 +109,18 @@ jobs:
           fi
 
       - name: Run cargo audit
-        run: cargo audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo audit; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
 
       - name: Install cargo-deny
         shell: bash
@@ -120,7 +131,18 @@ jobs:
           fi
 
       - name: Run cargo deny checks
-        run: cargo deny check advisories sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo deny check advisories sources; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
 
   release-sync:
     runs-on: ubuntu-latest
