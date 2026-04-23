@@ -304,7 +304,7 @@ fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() 
 #[test]
 fn runtime_softened_backoffs_persist_after_proxy_startup() {
     let backend = RuntimeProxyBackend::start();
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
 
@@ -384,7 +384,7 @@ fn runtime_softened_backoffs_persist_after_proxy_startup() {
 
 #[test]
 fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     create_codex_home_if_missing(&profile_home).expect("profile home should be created");
 

@@ -107,7 +107,7 @@ pub(super) fn start_runtime_continuation_fixture(
     response_bindings: &[(&str, &str)],
     session_bindings: Vec<(String, &str)>,
 ) -> RuntimeContinuationFixture {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
 
     let profiles = profiles

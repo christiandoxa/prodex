@@ -68,7 +68,7 @@ fn custom_base_url_maps_to_codex_usage() {
 
 #[test]
 fn fetch_usage_json_refreshes_access_token_after_401() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let usage_server =
         TokenAwareServer::start_usage("fresh-token", "main-account", "main@example.com");
     let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
@@ -107,7 +107,7 @@ fn fetch_usage_json_refreshes_access_token_after_401() {
 
 #[test]
 fn read_auth_summary_classifies_api_key_auth() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let codex_home = temp_dir.path.join("homes/main");
     write_api_key_auth_json(&codex_home.join("auth.json"));
 
@@ -118,7 +118,7 @@ fn read_auth_summary_classifies_api_key_auth() {
 
 #[test]
 fn read_auth_summary_classifies_invalid_auth_json() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let codex_home = temp_dir.path.join("homes/main");
     fs::create_dir_all(&codex_home).expect("failed to create codex home");
     fs::write(codex_home.join("auth.json"), "{").expect("failed to write invalid auth.json");
@@ -130,7 +130,7 @@ fn read_auth_summary_classifies_invalid_auth_json() {
 
 #[test]
 fn read_usage_auth_prefers_account_id_from_access_token_claims() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let codex_home = temp_dir.path.join("homes/main");
     write_auth_json_with_tokens(
         &codex_home.join("auth.json"),
@@ -185,7 +185,7 @@ fn unique_profile_name_adds_numeric_suffix() {
 
 #[test]
 fn unique_profile_name_reclaims_untracked_managed_directory() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let state = AppState::default();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -210,7 +210,7 @@ fn unique_profile_name_reclaims_untracked_managed_directory() {
 
 #[test]
 fn remove_profile_deletes_managed_home_by_default() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
@@ -272,7 +272,7 @@ fn remove_profile_deletes_managed_home_by_default() {
 
 #[test]
 fn remove_all_profiles_clears_state_and_continuation_sidecars() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
@@ -531,7 +531,7 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
 
 #[test]
 fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
@@ -581,7 +581,7 @@ fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
 
 #[test]
 fn app_paths_discover_uses_prodex_root_for_default_shared_codex_home() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
@@ -594,7 +594,7 @@ fn app_paths_discover_uses_prodex_root_for_default_shared_codex_home() {
 
 #[test]
 fn app_paths_discover_resolves_relative_shared_codex_home_inside_prodex_root() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
@@ -606,7 +606,7 @@ fn app_paths_discover_resolves_relative_shared_codex_home_inside_prodex_root() {
 
 #[test]
 fn select_default_codex_home_prefers_legacy_home_until_prodex_shared_home_exists() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared_codex_home = temp_dir.path.join("prodex/.codex");
     let legacy_codex_home = temp_dir.path.join("home/.codex");
     fs::create_dir_all(&legacy_codex_home).expect("legacy codex home should exist");
@@ -655,7 +655,7 @@ fn usage_response_accepts_null_additional_rate_limits() {
 
 #[test]
 fn previous_response_owner_discovery_ignores_retry_backoff() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -749,7 +749,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
 
 #[test]
 fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     create_codex_home_if_missing(&profile_home).expect("profile home should be created");
 
@@ -857,7 +857,7 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
 
 #[test]
 fn previous_response_owner_profile_changes_still_persist() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     create_codex_home_if_missing(&main_home).expect("main profile home should be created");
@@ -970,7 +970,7 @@ fn previous_response_owner_profile_changes_still_persist() {
 
 #[test]
 fn duplicate_response_ids_do_not_requeue_persistence() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     create_codex_home_if_missing(&profile_home).expect("profile home should be created");
 
@@ -1055,7 +1055,7 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
 
 #[test]
 fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     create_codex_home_if_missing(&profile_home).expect("profile home should be created");
 
@@ -1188,7 +1188,7 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
 
 #[test]
 fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     create_codex_home_if_missing(&profile_home).expect("profile home should be created");
 
@@ -1350,7 +1350,7 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
 
 #[test]
 fn previous_response_release_preserves_session_and_compact_session_lineage_for_compact_followups() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -1561,7 +1561,7 @@ fn previous_response_release_preserves_session_and_compact_session_lineage_for_c
 
 #[test]
 fn clear_runtime_stale_previous_response_binding_marks_dead_tombstone() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -1692,7 +1692,7 @@ fn runtime_shared_for_dead_response_binding_cleanup(temp_dir: &TestDir) -> Runti
 
 #[test]
 fn clear_runtime_dead_response_bindings_clears_turn_state_when_last_lineage_dies() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_dead_response_binding_cleanup(&temp_dir);
     let response_ids = vec!["resp-main".to_string(), "resp-main-next".to_string()];
     let first_lineage = runtime_response_turn_state_lineage_key("resp-main", "turn-main");
@@ -1782,7 +1782,7 @@ fn clear_runtime_dead_response_bindings_clears_turn_state_when_last_lineage_dies
 
 #[test]
 fn clear_runtime_dead_response_bindings_keeps_turn_state_when_other_lineage_survives() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_dead_response_binding_cleanup(&temp_dir);
     let remaining_lineage = runtime_response_turn_state_lineage_key("resp-main-next", "turn-main");
 
@@ -1860,7 +1860,7 @@ fn clear_runtime_dead_response_bindings_keeps_turn_state_when_other_lineage_surv
 
 #[test]
 fn clear_runtime_dead_response_bindings_clears_all_removed_turn_state_affinities() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_dead_response_binding_cleanup(&temp_dir);
     let response_ids = vec![String::from("resp-main")];
 
@@ -1931,7 +1931,7 @@ fn clear_runtime_dead_response_bindings_clears_all_removed_turn_state_affinities
 
 #[test]
 fn websocket_success_without_turn_state_keeps_compact_lineage_alive() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
 
@@ -2047,7 +2047,7 @@ fn websocket_success_without_turn_state_keeps_compact_lineage_alive() {
 
 #[test]
 fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -2183,7 +2183,7 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
 
 #[test]
 fn websocket_success_with_turn_state_releases_compact_lineage() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
 
@@ -2289,7 +2289,7 @@ fn websocket_success_with_turn_state_releases_compact_lineage() {
 
 #[test]
 fn http_responses_success_with_turn_state_releases_compact_lineage() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_sse_headers_array_turn_state();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -2417,7 +2417,7 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
 
 #[test]
 fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_compatible() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     create_codex_home_if_missing(&main_home).expect("main home should be created");
@@ -2455,7 +2455,7 @@ fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_c
 
 #[test]
 fn runtime_rotation_proxy_stays_disabled_without_any_quota_compatible_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let state = AppState {
         active_profile: Some("main".to_string()),
         profiles: BTreeMap::from([
@@ -2488,7 +2488,7 @@ fn runtime_rotation_proxy_stays_disabled_without_any_quota_compatible_profile() 
 
 #[test]
 fn optimistic_current_candidate_skips_transport_backoff() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2688,7 +2688,7 @@ fn noncompact_session_priority_ignores_compact_session_profile() {
 
 #[test]
 fn optimistic_current_candidate_requires_quota_evidence_when_alternatives_exist() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -2787,7 +2787,7 @@ fn optimistic_current_candidate_requires_quota_evidence_when_alternatives_exist(
 
 #[test]
 fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2865,7 +2865,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
 
 #[test]
 fn optimistic_current_candidate_skips_busy_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2940,7 +2940,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
 
 #[test]
 fn optimistic_current_candidate_skips_thin_long_lived_quota() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -3023,7 +3023,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
 
 #[test]
 fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -3105,7 +3105,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
 
 #[test]
 fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -3194,7 +3194,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
 
 #[test]
 fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 

@@ -215,7 +215,7 @@ fn runtime_proxy_websocket_tool_output_with_session_blocks_proactive_session_rep
 
 #[test]
 fn runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -320,7 +320,7 @@ fn runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback() 
 
 #[test]
 fn runtime_proxy_http_message_followup_previous_response_does_not_fresh_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -420,7 +420,7 @@ fn runtime_proxy_http_message_followup_previous_response_does_not_fresh_fallback
 
 #[test]
 fn runtime_proxy_http_message_followup_with_session_header_does_not_fresh_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -514,7 +514,7 @@ fn runtime_proxy_http_message_followup_with_session_header_does_not_fresh_fallba
 
 #[test]
 fn runtime_proxy_http_message_followup_with_turn_metadata_session_does_not_fresh_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -633,7 +633,7 @@ fn runtime_proxy_http_message_followup_with_turn_metadata_session_does_not_fresh
 
 #[test]
 fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -769,7 +769,7 @@ fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fre
 
 #[test]
 fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -894,7 +894,7 @@ fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
 
 #[test]
 fn runtime_proxy_http_tool_output_with_session_surfaces_stale_continuation_without_fresh_retry() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_previous_response_tool_context_missing();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -1003,7 +1003,7 @@ fn runtime_proxy_http_tool_output_with_session_surfaces_stale_continuation_witho
 
 #[test]
 fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continuation() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_compact_previous_response_not_found();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -1189,7 +1189,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_prelude_surfaces_st
 
 #[test]
 fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_previous_response_not_found_after_commit();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -1356,7 +1356,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_websocket_previous_response_not_found_after_commit();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
@@ -1527,7 +1527,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
 
 #[test]
 fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");

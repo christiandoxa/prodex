@@ -71,7 +71,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
 
 #[test]
 fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = RuntimeRotationProxyShared {
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -137,7 +137,7 @@ fn runtime_profile_transport_health_penalty_weights_connect_failures_higher() {
 
 #[test]
 fn app_state_save_merges_existing_runtime_bindings() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -227,7 +227,7 @@ fn app_state_save_merges_existing_runtime_bindings() {
 
 #[test]
 fn app_state_housekeeping_prunes_stale_entries_on_save() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -304,7 +304,7 @@ fn app_state_housekeeping_prunes_stale_entries_on_save() {
 
 #[test]
 fn app_state_load_compacts_stale_entries_in_memory() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -365,7 +365,7 @@ fn app_state_load_compacts_stale_entries_in_memory() {
 
 #[test]
 fn app_state_response_bindings_are_not_pruned_just_for_size() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let mut response_profile_bindings = BTreeMap::new();
     for index in 0..(RESPONSE_PROFILE_BINDING_LIMIT + 3) {
@@ -407,7 +407,7 @@ fn app_state_response_bindings_are_not_pruned_just_for_size() {
 
 #[test]
 fn runtime_sidecar_housekeeping_prunes_stale_entries() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let profiles = BTreeMap::from([(
         "main".to_string(),
@@ -529,7 +529,7 @@ fn runtime_sidecar_housekeeping_prunes_stale_entries() {
 
 #[test]
 fn runtime_log_housekeeping_prunes_old_logs_and_stale_pointer() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let old_one = temp_dir
         .path
         .join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-111-1.log"));
@@ -576,7 +576,7 @@ fn runtime_log_housekeeping_prunes_old_logs_and_stale_pointer() {
 
 #[test]
 fn stale_login_dir_housekeeping_removes_old_temp_login_homes() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -600,7 +600,7 @@ fn stale_login_dir_housekeeping_removes_old_temp_login_homes() {
 
 #[test]
 fn perform_prodex_cleanup_removes_safe_local_artifacts() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let runtime_log_dir = temp_dir.path.join("runtime-logs");
     fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should exist");
 
@@ -773,7 +773,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
 
 #[test]
 fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -897,7 +897,7 @@ fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
 
 #[test]
 fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1053,7 +1053,7 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
 
 #[test]
 fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -1163,7 +1163,7 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
 
 #[test]
 fn runtime_state_save_scheduler_persists_latest_snapshot() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -1383,7 +1383,7 @@ fn runtime_state_save_sections_follow_dirty_reason_scope() {
 
 #[test]
 fn runtime_state_selected_snapshot_preserves_unselected_sections() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -1535,7 +1535,7 @@ fn runtime_state_selected_snapshot_preserves_unselected_sections() {
 
 #[test]
 fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1584,7 +1584,7 @@ fn runtime_backoffs_load_legacy_last_good_backup_when_primary_is_invalid() {
 
 #[test]
 fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let _guard = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", "1");
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -1630,7 +1630,7 @@ fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
 
 #[test]
 fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1682,7 +1682,7 @@ fn app_state_load_uses_last_good_backup_when_primary_is_invalid() {
 
 #[test]
 fn runtime_continuations_load_legacy_last_good_backup_when_primary_is_invalid() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1735,7 +1735,7 @@ fn runtime_continuations_load_legacy_last_good_backup_when_primary_is_invalid() 
 
 #[test]
 fn runtime_continuations_reject_stale_generation_overwrite() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1827,7 +1827,7 @@ fn runtime_continuations_reject_stale_generation_overwrite() {
 
 #[test]
 fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1934,7 +1934,7 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
 
 #[test]
 fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -2043,7 +2043,7 @@ fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
 
 #[test]
 fn runtime_continuation_journal_save_retries_stale_generation() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -2137,7 +2137,7 @@ fn runtime_continuation_journal_save_retries_stale_generation() {
 
 #[test]
 fn runtime_continuation_journal_save_for_profiles_preserves_bindings_without_state_file() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -2185,7 +2185,7 @@ fn runtime_continuation_journal_save_for_profiles_preserves_bindings_without_sta
 
 #[test]
 fn runtime_continuation_journal_retry_does_not_resurrect_released_response_binding() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),

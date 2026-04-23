@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -125,7 +125,7 @@ fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
 
 #[test]
 fn runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_usage_limit_message();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -252,7 +252,7 @@ fn runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_pr
 
 #[test]
 fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -330,7 +330,7 @@ fn runtime_proxy_streams_anthropic_messages_from_buffered_responses() {
 
 #[test]
 fn runtime_proxy_streams_anthropic_mcp_messages_without_buffering() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_anthropic_mcp_stream();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "second-account");
@@ -443,7 +443,7 @@ fn runtime_proxy_streams_anthropic_mcp_messages_without_buffering() {
 
 #[test]
 fn runtime_proxy_continues_anthropic_web_search_server_tool_responses() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_anthropic_web_search_followup();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -574,7 +574,7 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
     let _lane_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT", "1");
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(1, 1);
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_slow_stream();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -697,7 +697,7 @@ fn runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is
 fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(20, 250);
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "second-account");
@@ -823,7 +823,7 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
 fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(40, 250);
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "second-account");
@@ -937,7 +937,7 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
 
 #[test]
 fn runtime_profile_inflight_relief_wait_returns_immediately_after_prior_release() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -987,7 +987,7 @@ fn runtime_profile_inflight_relief_wait_returns_immediately_after_prior_release(
 
 #[test]
 fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -1050,8 +1050,8 @@ fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() 
 
 #[test]
 fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
-    let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::isolated();
     let _shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -1081,13 +1081,12 @@ fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
         usize::MAX,
     );
 
-    let observed_revision = runtime_probe_refresh_revision();
     note_runtime_probe_refresh_progress();
 
     let started_at = Instant::now();
     assert!(wait_for_runtime_probe_refresh_since(
         Duration::from_millis(100),
-        observed_revision,
+        probe_refresh.observed_revision(),
     ));
     assert!(
         started_at.elapsed() < ci_timing_upper_bound_ms(20, 100),
@@ -1097,8 +1096,8 @@ fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
 
 #[test]
 fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
-    let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -1128,7 +1127,6 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
         usize::MAX,
     );
 
-    let observed_revision = runtime_probe_refresh_revision();
     let active_guard = try_acquire_runtime_proxy_active_request_slot(
         &shared,
         "http",
@@ -1141,7 +1139,10 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
     });
 
     assert!(
-        !wait_for_runtime_probe_refresh_since(Duration::from_millis(100), observed_revision),
+        !wait_for_runtime_probe_refresh_since(
+            Duration::from_millis(100),
+            probe_refresh.observed_revision(),
+        ),
         "lane-release notify should not count as probe-refresh progress"
     );
 
@@ -1150,15 +1151,15 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
         .expect("active-request release thread should join");
     assert_eq!(
         runtime_probe_refresh_revision(),
-        observed_revision,
+        probe_refresh.observed_revision(),
         "lane-release notify should not change probe refresh revision"
     );
 }
 
 #[test]
 fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
-    let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let _probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -1233,7 +1234,7 @@ fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
 
 #[test]
 fn runtime_probe_inline_execution_logs_context_without_queue_lag() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -1283,7 +1284,7 @@ fn runtime_probe_inline_execution_logs_context_without_queue_lag() {
 
 #[test]
 fn runtime_probe_queued_execution_logs_refresh_marker_with_queue_lag() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
         RuntimeRotationState {
@@ -1334,8 +1335,8 @@ fn runtime_probe_queued_execution_logs_refresh_marker_with_queue_lag() {
 
 #[test]
 fn runtime_probe_refresh_suppresses_nonlocal_upstream_in_tests_and_wakes_waiters() {
-    let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     let shared = runtime_rotation_proxy_shared(
@@ -1381,17 +1382,18 @@ fn runtime_probe_refresh_suppresses_nonlocal_upstream_in_tests_and_wakes_waiters
         usize::MAX,
     );
 
-    let backlog_before = runtime_probe_refresh_queue_backlog();
-    let observed_revision = runtime_probe_refresh_revision();
     schedule_runtime_probe_refresh(&shared, "main", &main_home);
 
     assert_eq!(
         runtime_probe_refresh_queue_backlog(),
-        backlog_before,
+        probe_refresh.backlog_before(),
         "suppressed nonlocal probe refresh should not add background queue work"
     );
     assert!(
-        wait_for_runtime_probe_refresh_since(ci_timing_upper_bound_ms(20, 200), observed_revision),
+        wait_for_runtime_probe_refresh_since(
+            ci_timing_upper_bound_ms(20, 200),
+            probe_refresh.observed_revision(),
+        ),
         "suppressed nonlocal probe refresh should still wake probe-refresh waiters"
     );
 
@@ -1437,8 +1439,8 @@ fn runtime_probe_refresh_nonlocal_upstream_detection_keeps_loopback_exact() {
 
 #[test]
 fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
-    let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let probe_refresh = RuntimeProbeRefreshTestGuard::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     let shared = runtime_rotation_proxy_shared(
@@ -1484,13 +1486,12 @@ fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
         usize::MAX,
     );
 
-    let observed_revision = runtime_probe_refresh_revision();
     schedule_runtime_probe_refresh(&shared, "main", &main_home);
 
     assert!(
         wait_for_runtime_probe_refresh_since(
             ci_timing_upper_bound_ms(250, 1_000),
-            observed_revision
+            probe_refresh.observed_revision()
         ),
         "loopback upstreams should still run through the background refresh path in tests"
     );
@@ -1516,7 +1517,7 @@ fn runtime_probe_refresh_allows_loopback_upstream_in_tests() {
 fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(20, 20);
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
 
@@ -1629,7 +1630,7 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
 fn runtime_proxy_wait_scopes_to_session_owner_relief() {
     let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(40, 250);
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");

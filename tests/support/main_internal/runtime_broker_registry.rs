@@ -44,7 +44,7 @@ fn wait_for_runtime_child_exit(child: &mut Child) {
 
 #[test]
 fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let script_path = temp_dir.path.join("legacy-prodex.sh");
     fs::write(
         &script_path,
@@ -94,7 +94,7 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
 #[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -174,7 +174,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_broker_with_active_requests()
 {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "2000");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -289,7 +289,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
 
 #[test]
 fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -386,7 +386,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
 #[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy_registry_clears() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -472,7 +472,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
 #[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_registry_without_probe() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "200");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -544,7 +544,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_registry_withou
 
 #[test]
 fn find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),

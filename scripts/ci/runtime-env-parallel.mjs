@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { RUNTIME_ENV_PARALLEL_CASES } from "./runtime-test-manifest.mjs";
 
 function parseArgs(argv) {
   const args = { runs: 2, testThreads: 4 };
@@ -73,21 +74,12 @@ async function main() {
   }
 
   const threadArg = `--test-threads=${args.testThreads}`;
-  const claudeEnvFilter = "main_internal_tests::runtime_proxy_claude_";
-  const workerCountFilter = "main_internal_tests::runtime_proxy_worker_count_env_override_beats_policy_file";
 
   for (let iteration = 1; iteration <= args.runs; iteration += 1) {
     process.stdout.write(`env-sensitive parallel guard iteration ${iteration}/${args.runs}\n`);
-    await run(
-      "cargo",
-      ["test", "--lib", claudeEnvFilter, "--", threadArg],
-      "env-sensitive-claude",
-    );
-    await run(
-      "cargo",
-      ["test", "--lib", workerCountFilter, "--", threadArg],
-      "env-sensitive-worker-count",
-    );
+    for (const testCase of RUNTIME_ENV_PARALLEL_CASES) {
+      await run("cargo", ["test", "--lib", testCase.filter, "--", threadArg], testCase.label);
+    }
   }
 }
 

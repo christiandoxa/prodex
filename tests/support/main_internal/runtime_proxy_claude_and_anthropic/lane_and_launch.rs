@@ -32,7 +32,7 @@ fn runtime_proxy_interactive_wait_budget_extends_anthropic_messages() {
 
 #[test]
 fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
     let config_dir = temp_dir.path.join("claude-config");
     let codex_home = temp_dir.path.join("codex-home");
@@ -160,7 +160,7 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
 #[test]
 fn runtime_proxy_claude_launch_env_honors_model_override() {
     let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5.4-mini");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43124"
             .parse()
@@ -183,7 +183,7 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
 #[test]
 fn runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override() {
     let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "my-gateway-model");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43124"
             .parse()
@@ -209,7 +209,7 @@ fn runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_overrid
 #[test]
 fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
     let _model_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_MODEL");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let codex_home = temp_dir.path.join("codex-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
     fs::write(codex_home.join("config.toml"), "model = \"gpt-5.4\"\n")
@@ -236,7 +236,7 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
 #[test]
 fn runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_value() {
     let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5.4");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43124"
             .parse()
@@ -255,7 +255,7 @@ fn runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_
 
 #[test]
 fn runtime_proxy_claude_launch_env_sets_plugin_root_when_mem_enabled() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let plugin_root = temp_dir.path.join("claude-mem/plugin");
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43124"
@@ -402,7 +402,7 @@ fn parse_runtime_proxy_claude_version_text_extracts_semver_prefix() {
 
 #[test]
 fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let config_dir = temp_dir.path.join("claude-config");
     let cwd = temp_dir.path.join("workspace");
     fs::create_dir_all(&cwd).expect("workspace dir should exist");
@@ -462,7 +462,7 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
 
 #[test]
 fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let config_dir = temp_dir.path.join("claude-config");
     let cwd = temp_dir.path.join("workspace");
     let other_project = temp_dir.path.join("other");
@@ -569,7 +569,7 @@ fn ensure_runtime_proxy_claude_launch_config_preserves_existing_entries() {
 
 #[test]
 fn ensure_runtime_proxy_claude_launch_config_appends_default_web_tools_to_current_project() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let config_dir = temp_dir.path.join("claude-config");
     let cwd = temp_dir.path.join("workspace");
     fs::create_dir_all(&cwd).expect("workspace dir should exist");
@@ -603,7 +603,7 @@ fn ensure_runtime_proxy_claude_launch_config_appends_default_web_tools_to_curren
 
 #[test]
 fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let home_dir = temp_dir.path.join("home");
     let legacy_claude_dir = home_dir.join(".claude");
     let legacy_project_dir = legacy_claude_dir.join("projects/workspace");
@@ -683,7 +683,7 @@ fn prepare_runtime_proxy_claude_config_dir_imports_legacy_home_into_shared_state
 
 #[test]
 fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_shared_root() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let home_dir = temp_dir.path.join("home");
     fs::create_dir_all(&home_dir).expect("home dir should exist");
     let _home_guard =
@@ -779,7 +779,7 @@ fn prepare_runtime_proxy_claude_config_dir_migrates_existing_profile_state_into_
 
 #[test]
 fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),

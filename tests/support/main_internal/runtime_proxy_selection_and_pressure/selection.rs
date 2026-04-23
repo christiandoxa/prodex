@@ -1158,7 +1158,7 @@ fn ready_profile_candidates_prefer_openai_pool_before_other_providers() {
 
 #[test]
 fn runtime_launch_selection_resolve_falls_back_from_active_copilot_to_openai() {
-    let root = TestDir::new();
+    let root = TestDir::isolated();
     let copilot_home = root.path.join("copilot");
     let openai_home = root.path.join("openai-main");
     fs::create_dir_all(&copilot_home).expect("create copilot home");

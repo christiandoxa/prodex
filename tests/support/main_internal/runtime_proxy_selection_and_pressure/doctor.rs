@@ -860,7 +860,7 @@ fn runtime_doctor_finalize_summary_adds_route_health_guidance() {
 #[test]
 fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
     let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -953,7 +953,7 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
 #[test]
 fn runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases() {
     let _test_guard = crate::acquire_test_runtime_lock();
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1021,7 +1021,7 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
         TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "20");
     let _read_timeout_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "20");
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1094,7 +1094,7 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
 
 #[test]
 fn collect_orphan_managed_profile_dirs_ignores_tracked_and_fresh_dirs() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),
@@ -1142,7 +1142,7 @@ fn collect_orphan_managed_profile_dirs_ignores_tracked_and_fresh_dirs() {
 
 #[test]
 fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
         state_file: temp_dir.path.join("prodex/state.json"),

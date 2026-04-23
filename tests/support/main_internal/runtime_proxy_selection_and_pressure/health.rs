@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn runtime_profile_inflight_hard_limit_detects_saturation() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let hard_limit = runtime_proxy_profile_inflight_hard_limit();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
@@ -59,7 +59,7 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
 
 #[test]
 fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let hard_limit = runtime_proxy_profile_inflight_hard_limit();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
@@ -141,7 +141,7 @@ fn runtime_profile_inflight_limits_use_configured_overrides() {
         7
     );
 
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
             root: temp_dir.path.join("prodex"),
@@ -197,7 +197,7 @@ fn runtime_profile_inflight_limits_use_configured_overrides() {
 
 #[test]
 fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
             root: temp_dir.path.join("prodex"),
@@ -274,7 +274,7 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
 
 #[test]
 fn transport_backoff_escalates_for_repeated_failures() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -373,7 +373,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
 
 #[test]
 fn local_proxy_overload_backoff_activates_and_expires() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let runtime = RuntimeRotationState {
         paths: AppPaths {
             root: temp_dir.path.join("prodex"),
@@ -429,7 +429,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
 
 #[test]
 fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_ready() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -541,7 +541,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
 
 #[test]
 fn responses_selection_ignores_websocket_transport_backoff() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -662,7 +662,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
 
 #[test]
 fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -780,7 +780,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
 
 #[test]
 fn next_runtime_response_candidate_prefers_healthier_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -895,7 +895,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
 
 #[test]
 fn compact_health_penalty_does_not_degrade_responses_selection() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1019,7 +1019,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
 
 #[test]
 fn compact_bad_pairing_does_not_degrade_responses_selection() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1143,7 +1143,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
 
 #[test]
 fn websocket_bad_pairing_lightly_degrades_responses_selection() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1258,7 +1258,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
 
 #[test]
 fn next_runtime_response_candidate_prefers_less_loaded_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1367,7 +1367,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
 
 #[test]
 fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1476,7 +1476,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
 
 #[test]
 fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1591,7 +1591,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
 
 #[test]
 fn commit_runtime_proxy_profile_selection_clears_profile_health() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -1724,7 +1724,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
 
 #[test]
 fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -1799,7 +1799,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
 
 #[test]
 fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profile_for_compact() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1890,7 +1890,7 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
 
 #[test]
 fn commit_runtime_proxy_profile_selection_can_skip_current_profile_tracking() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1990,7 +1990,7 @@ fn commit_runtime_proxy_profile_selection_can_skip_current_profile_tracking() {
 
 #[test]
 fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_health() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2105,7 +2105,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
 
 #[test]
 fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2215,7 +2215,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
 
 #[test]
 fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_streak() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 

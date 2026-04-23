@@ -280,8 +280,24 @@ jobs:
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
   runtime-stress:
+    name: Runtime stress (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: stress
+            label: broad shard
+          - suite: serialized
+            label: serialized shard
+          - suite: continuation
+            label: continuation shard
+    env:
+      RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.suite }}
+      PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.suite }}/runtime-logs
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
 
     steps:
       - name: Check out repository
@@ -293,11 +309,73 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run runtime proxy stress tests
-        run: npm run ci:runtime-stress -- --suite stress
+      - name: Prepare runtime stress diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNTIME_STRESS_ARTIFACT_DIR}"
+          mkdir -p "${PRODEX_RUNTIME_LOG_DIR}"
+          {
+            echo "suite=${{ matrix.suite }}"
+            echo "label=${{ matrix.label }}"
+            echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
+            echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
+            echo "started_at=$(date -u +%FT%TZ)"
+            echo "command=npm run ci:runtime-stress -- --suite ${{ matrix.suite }}"
+          } > "${RUNTIME_STRESS_ARTIFACT_DIR}/metadata.txt"
 
-      - name: Run serialized runtime-sensitive stress tests
-        run: npm run ci:runtime-stress -- --suite serialized
+      - name: Run runtime stress ${{ matrix.label }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run ci:runtime-stress -- --suite "${{ matrix.suite }}" 2>&1 | tee "${RUNTIME_STRESS_ARTIFACT_DIR}/runtime-stress.log"
 
-      - name: Rerun continuation-heavy tests
-        run: npm run ci:runtime-stress -- --suite continuation
+      - name: Collect runtime stress diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNTIME_STRESS_ARTIFACT_DIR}" "${PRODEX_RUNTIME_LOG_DIR}"
+          diagnostics_path="${RUNTIME_STRESS_ARTIFACT_DIR}/diagnostics.txt"
+          pointer_path="${PRODEX_RUNTIME_LOG_DIR}/prodex-runtime-latest.path"
+          latest_log_path=""
+          {
+            echo "suite=${{ matrix.suite }}"
+            echo "label=${{ matrix.label }}"
+            echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
+            echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
+            echo "finished_at=$(date -u +%FT%TZ)"
+            echo "runtime_log_pointer=${pointer_path}"
+          } > "${diagnostics_path}"
+          if [[ -f "${pointer_path}" ]]; then
+            latest_log_path="$(tr -d '\r\n' < "${pointer_path}")"
+            echo "runtime_log_pointer_target=${latest_log_path}" >> "${diagnostics_path}"
+          else
+            echo "runtime_log_pointer_target=missing" >> "${diagnostics_path}"
+          fi
+          if [[ -z "${latest_log_path}" || ! -f "${latest_log_path}" ]]; then
+            latest_log_path="$(
+              find "${PRODEX_RUNTIME_LOG_DIR}" -maxdepth 1 -type f -name 'prodex-runtime*.log' -printf '%T@ %p\n' \
+                | sort -nr \
+                | head -n 1 \
+                | cut -d' ' -f2-
+            )"
+          fi
+          find "${PRODEX_RUNTIME_LOG_DIR}" -maxdepth 1 -type f -print \
+            | sort \
+            | sed 's/^/log_entry=/' >> "${diagnostics_path}"
+          if [[ -n "${latest_log_path}" && -f "${latest_log_path}" ]]; then
+            echo "latest_runtime_log=${latest_log_path}" >> "${diagnostics_path}"
+            cp "${latest_log_path}" "${RUNTIME_STRESS_ARTIFACT_DIR}/latest-runtime.log"
+            tail -n 200 "${latest_log_path}" | tee "${RUNTIME_STRESS_ARTIFACT_DIR}/latest-runtime-log-tail.txt"
+          else
+            echo "latest_runtime_log=missing" >> "${diagnostics_path}"
+          fi
+
+      - name: Upload runtime stress diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-stress-${{ matrix.suite }}-diagnostics
+          path: ${{ env.RUNTIME_STRESS_ARTIFACT_DIR }}
+          if-no-files-found: ignore

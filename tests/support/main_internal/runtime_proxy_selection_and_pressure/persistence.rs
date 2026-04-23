@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -89,7 +89,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
 
 #[test]
 fn optimistic_current_candidate_skips_route_performance_penalty() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -182,7 +182,7 @@ fn optimistic_current_candidate_skips_route_performance_penalty() {
 
 #[test]
 fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_path() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -288,7 +288,7 @@ fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_pa
 #[test]
 fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapshot_even_with_alternatives()
  {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -370,7 +370,7 @@ fn optimistic_current_candidate_allows_standard_fast_path_with_persisted_snapsho
 
 #[test]
 fn optimistic_current_candidate_allows_single_profile_standard_with_unknown_quota() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -427,7 +427,7 @@ fn optimistic_current_candidate_allows_single_profile_standard_with_unknown_quot
 
 #[test]
 fn affinity_candidate_skips_persisted_exhausted_session_owner() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -560,7 +560,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
 
 #[test]
 fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_websocket_fallback() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -662,7 +662,7 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
 
 #[test]
 fn fresh_websocket_fallback_skips_precommit_guarded_backoff_candidates() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -760,7 +760,7 @@ fn fresh_websocket_fallback_skips_precommit_guarded_backoff_candidates() {
 
 #[test]
 fn optimistic_current_candidate_skips_open_route_circuit() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -849,7 +849,7 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
 
 #[test]
 fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_changes() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     let cached_usage_auth = load_runtime_profile_usage_auth_cache_entry(&main_home)
@@ -945,8 +945,8 @@ fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_cha
 
 #[test]
 fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403() {
-    let temp_dir_401 = TestDir::new();
-    let temp_dir_403 = TestDir::new();
+    let temp_dir_401 = TestDir::isolated();
+    let temp_dir_403 = TestDir::isolated();
     let profile_home_401 = temp_dir_401.path.join("homes/main");
     let profile_home_403 = temp_dir_403.path.join("homes/main");
     write_auth_json(&profile_home_401.join("auth.json"), "main-account");
@@ -1063,7 +1063,7 @@ fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403()
 
 #[test]
 fn next_runtime_response_candidate_skips_auth_failed_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1179,7 +1179,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
 
 #[test]
 fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidate_is_auth_failed() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -1302,7 +1302,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
 
 #[test]
 fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_mode() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -1441,7 +1441,7 @@ fn sync_probe_pressure_mode_is_route_aware_for_background_queue_pressure() {
 #[test]
 fn responses_and_websocket_sync_probe_cold_start_under_background_probe_queue_pressure() {
     for route_kind in [RuntimeRouteKind::Responses, RuntimeRouteKind::Websocket] {
-        let temp_dir = TestDir::new();
+        let temp_dir = TestDir::isolated();
         let backend = RuntimeProxyBackend::start();
         let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, backend.base_url());
         let pressure_guard = force_runtime_probe_refresh_backlog(
@@ -1501,7 +1501,7 @@ fn responses_and_websocket_sync_probe_cold_start_under_background_probe_queue_pr
 #[test]
 fn compact_and_standard_defer_sync_probe_cold_start_under_background_probe_queue_pressure() {
     for route_kind in [RuntimeRouteKind::Compact, RuntimeRouteKind::Standard] {
-        let temp_dir = TestDir::new();
+        let temp_dir = TestDir::isolated();
         let (listener, base_url) = unresponsive_loopback_backend_listener();
         let shared = runtime_shared_for_cold_start_probe_selection(&temp_dir, base_url);
         let pressure_guard = force_runtime_probe_refresh_backlog(
@@ -1556,7 +1556,7 @@ fn compact_and_standard_defer_sync_probe_cold_start_under_background_probe_queue
 
 #[test]
 fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1675,7 +1675,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
 
 #[test]
 fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -1770,7 +1770,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
 
 #[test]
 fn previous_response_discovery_skips_exhausted_current_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");

@@ -82,11 +82,16 @@ pub(super) struct TestDir {
     pub(super) path: PathBuf,
 }
 
+pub(super) struct RuntimeProbeRefreshTestGuard {
+    _guard: crate::TestRuntimeLockGuard,
+    observed_revision: u64,
+    backlog_before: usize,
+}
+
 static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 impl TestDir {
     pub(super) fn new() -> Self {
-        wait_for_runtime_background_queues_idle();
         for _ in 0..32 {
             let unique = format!(
                 "prodex-runtime-test-{}-{}-{}",
@@ -105,6 +110,31 @@ impl TestDir {
             }
         }
         panic!("failed to allocate unique test temp dir after repeated collisions");
+    }
+
+    pub(super) fn isolated() -> Self {
+        wait_for_runtime_background_queues_idle();
+        Self::new()
+    }
+}
+
+impl RuntimeProbeRefreshTestGuard {
+    pub(super) fn new() -> Self {
+        let guard = crate::acquire_test_runtime_lock();
+        wait_for_runtime_background_queues_idle();
+        Self {
+            _guard: guard,
+            observed_revision: runtime_probe_refresh_revision(),
+            backlog_before: runtime_probe_refresh_queue_backlog(),
+        }
+    }
+
+    pub(super) fn observed_revision(&self) -> u64 {
+        self.observed_revision
+    }
+
+    pub(super) fn backlog_before(&self) -> usize {
+        self.backlog_before
     }
 }
 

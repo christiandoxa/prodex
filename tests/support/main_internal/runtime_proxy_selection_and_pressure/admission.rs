@@ -88,7 +88,7 @@ fn runtime_proxy_pressure_mode_shrinks_precommit_budget() {
 
 #[test]
 fn turn_state_affinity_prefers_bound_profile() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -188,7 +188,7 @@ fn turn_state_affinity_prefers_bound_profile() {
 
 #[test]
 fn turn_state_affinity_ignores_inflight_and_health_penalties() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -318,7 +318,7 @@ fn runtime_binding_touch_waits_for_full_interval_with_second_precision() {
 
 #[test]
 fn response_affinity_touch_persists_recent_use_for_housekeeping() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
@@ -411,7 +411,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
 
 #[test]
 fn response_affinity_skips_recent_negative_cache_for_same_route() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let paths = AppPaths {
@@ -497,7 +497,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
 
 #[test]
 fn response_affinity_skips_dead_continuation_status() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let paths = AppPaths {
@@ -589,7 +589,7 @@ fn response_affinity_skips_dead_continuation_status() {
 
 #[test]
 fn response_affinity_keeps_stale_verified_continuation_status_bound() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let paths = AppPaths {
@@ -693,7 +693,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
 
 #[test]
 fn session_affinity_skips_stale_verified_continuation_status() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let paths = AppPaths {
@@ -969,7 +969,7 @@ fn continuation_dead_status_present(
 
 #[test]
 fn previous_response_affinity_release_requires_repeated_not_found() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let shared =
         previous_response_affinity_test_shared(&temp_dir, "resp-main", now, BTreeMap::new());
@@ -1030,7 +1030,7 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
 
 #[test]
 fn previous_response_affinity_release_triggers_at_negative_cache_threshold() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let response_id = "resp-main";
     let negative_cache_key = runtime_previous_response_negative_cache_key(
@@ -1091,7 +1091,7 @@ fn previous_response_affinity_release_triggers_at_negative_cache_threshold() {
 
 #[test]
 fn previous_response_affinity_ignores_expired_negative_cache_until_threshold_rebuilds() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();
     let response_id = "resp-main";
     let negative_cache_key = runtime_previous_response_negative_cache_key(
@@ -1218,7 +1218,7 @@ fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expir
         RuntimeRouteKind::Standard,
     ] {
         for case in cases {
-            let temp_dir = TestDir::new();
+            let temp_dir = TestDir::isolated();
             let response_id = format!(
                 "resp-{}-{}",
                 runtime_route_kind_label(route_kind),
@@ -1308,7 +1308,7 @@ fn previous_response_negative_cache_keys_stay_route_scoped() {
                 continue;
             }
 
-            let temp_dir = TestDir::new();
+            let temp_dir = TestDir::isolated();
             let response_id = format!(
                 "resp-{}-from-{}",
                 runtime_route_kind_label(release_route),
@@ -1371,7 +1371,7 @@ fn previous_response_negative_cache_keys_stay_route_scoped() {
 
 #[test]
 fn runtime_continuation_status_pruning_uses_evidence_over_age() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -1466,7 +1466,7 @@ fn runtime_continuation_status_pruning_uses_evidence_over_age() {
 
 #[test]
 fn runtime_dead_continuation_tombstone_blocks_stale_binding_resurrection() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -1610,7 +1610,7 @@ fn runtime_continuation_tombstone_merge_boundaries_cover_all_binding_kinds() {
         };
 
         for case in cases {
-            let temp_dir = TestDir::new();
+            let temp_dir = TestDir::isolated();
             let profiles = single_profile_test_profiles(&temp_dir);
             let mut existing = RuntimeContinuationStore::default();
             let mut incoming = RuntimeContinuationStore::default();
@@ -1648,7 +1648,7 @@ fn runtime_continuation_tombstone_merge_boundaries_cover_all_binding_kinds() {
 
 #[test]
 fn runtime_dead_continuation_tombstone_overrides_same_second_verified_status() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -1713,7 +1713,7 @@ fn runtime_dead_continuation_tombstone_overrides_same_second_verified_status() {
 
 #[test]
 fn runtime_newer_binding_overrides_older_dead_tombstone() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -1772,7 +1772,7 @@ fn runtime_newer_binding_overrides_older_dead_tombstone() {
 
 #[test]
 fn runtime_continuation_store_compaction_prunes_response_bindings_to_limit() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -1849,7 +1849,7 @@ fn runtime_continuation_store_compaction_prunes_response_bindings_to_limit() {
 
 #[test]
 fn runtime_continuation_store_compaction_prunes_response_statuses_to_limit() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -1938,7 +1938,7 @@ fn runtime_continuation_store_compaction_prunes_response_statuses_to_limit() {
 
 #[test]
 fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_cold_binding() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let profile_home = temp_dir.path.join("homes/main");
     write_auth_json(&profile_home.join("auth.json"), "main-account");
     let profiles = BTreeMap::from([(
@@ -2028,7 +2028,7 @@ fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_c
 
 #[test]
 fn session_affinity_prefers_bound_profile_for_compact_requests() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
@@ -2133,7 +2133,7 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
 #[test]
 fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -2241,7 +2241,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
 
 #[test]
 fn compact_final_failure_logs_overload_terminal_reason() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -2328,7 +2328,7 @@ fn compact_final_failure_logs_overload_terminal_reason() {
 
 #[test]
 fn compact_final_failure_logs_quota_terminal_reason() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_usage_limit_message();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -2410,7 +2410,7 @@ fn compact_final_failure_logs_quota_terminal_reason() {
 
 #[test]
 fn compact_final_failure_logs_local_selection_terminal_reason() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2499,7 +2499,7 @@ fn compact_final_failure_logs_local_selection_terminal_reason() {
 
 #[test]
 fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -2617,7 +2617,7 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
 
 #[test]
 fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&second_home.join("auth.json"), "second-account");
 
@@ -2845,7 +2845,7 @@ fn runtime_proxy_passthrough_args_preserve_user_args_without_proxy() {
 
 #[test]
 fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let endpoint = RuntimeProxyEndpoint {
         listen_addr: "127.0.0.1:4455".parse().expect("listen addr"),
         openai_mount_path: "/backend-api/prodex/v0.2.99".to_string(),
@@ -3244,7 +3244,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 
 #[test]
 fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -3340,7 +3340,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
 
 #[test]
 fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
-    let temp_dir = TestDir::new();
+    let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
