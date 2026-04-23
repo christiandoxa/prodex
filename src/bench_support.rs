@@ -193,6 +193,7 @@ pub struct RuntimeProxyHotPathBenchCheckResult {
     pub samples: usize,
     pub warmup_iterations: usize,
     pub measure_iterations: usize,
+    pub base_threshold_ns_per_iteration: u64,
     pub median_ns_per_iteration: u64,
     pub p90_ns_per_iteration: u64,
     pub threshold_ns_per_iteration: u64,
@@ -201,6 +202,18 @@ pub struct RuntimeProxyHotPathBenchCheckResult {
 impl RuntimeProxyHotPathBenchCheckResult {
     pub fn passed(&self) -> bool {
         self.median_ns_per_iteration <= self.threshold_ns_per_iteration
+    }
+
+    pub fn required_threshold_scale_percent(&self) -> u64 {
+        if self.base_threshold_ns_per_iteration == 0 {
+            return u64::MAX;
+        }
+        let required_percent = self
+            .median_ns_per_iteration
+            .saturating_mul(BENCH_THRESHOLD_SCALE_DIVISOR)
+            .saturating_add(self.base_threshold_ns_per_iteration - 1)
+            / self.base_threshold_ns_per_iteration;
+        required_percent.max(1)
     }
 }
 
@@ -262,6 +275,7 @@ fn summarize_runtime_proxy_hot_path_samples(
     samples: usize,
     warmup_iterations: usize,
     measure_iterations: usize,
+    base_threshold_ns_per_iteration: u64,
     threshold_ns_per_iteration: u64,
     mut ns_per_iteration_samples: Vec<u64>,
 ) -> RuntimeProxyHotPathBenchCheckResult {
@@ -275,6 +289,7 @@ fn summarize_runtime_proxy_hot_path_samples(
         samples,
         warmup_iterations,
         measure_iterations,
+        base_threshold_ns_per_iteration,
         median_ns_per_iteration,
         p90_ns_per_iteration,
         threshold_ns_per_iteration,
@@ -318,6 +333,7 @@ where
         config.samples,
         config.warmup_iterations,
         measure_iterations,
+        threshold.max_median_ns_per_iteration,
         threshold_ns_per_iteration,
         ns_per_iteration_samples,
     )
@@ -854,6 +870,7 @@ mod tests {
             5,
             32,
             128,
+            10,
             7,
             vec![9, 3, 5, 1, 7],
         );
@@ -862,8 +879,10 @@ mod tests {
         assert_eq!(result.samples, 5);
         assert_eq!(result.warmup_iterations, 32);
         assert_eq!(result.measure_iterations, 128);
+        assert_eq!(result.base_threshold_ns_per_iteration, 10);
         assert_eq!(result.median_ns_per_iteration, 5);
         assert_eq!(result.p90_ns_per_iteration, 7);
+        assert_eq!(result.required_threshold_scale_percent(), 50);
         assert!(result.passed());
     }
 }

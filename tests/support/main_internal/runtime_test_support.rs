@@ -1,8 +1,10 @@
-fn running_in_ci() -> bool {
+use super::*;
+
+pub(super) fn running_in_ci() -> bool {
     std::env::var_os("GITHUB_ACTIONS").is_some() || std::env::var_os("CI").is_some()
 }
 
-fn ci_timing_upper_bound_ms(local_ms: u64, ci_ms: u64) -> Duration {
+pub(super) fn ci_timing_upper_bound_ms(local_ms: u64, ci_ms: u64) -> Duration {
     if running_in_ci() {
         Duration::from_millis(ci_ms.max(local_ms))
     } else {
@@ -10,7 +12,7 @@ fn ci_timing_upper_bound_ms(local_ms: u64, ci_ms: u64) -> Duration {
     }
 }
 
-fn ci_timing_budget_ms(local_ms: u64, ci_ms: u64) -> String {
+pub(super) fn ci_timing_budget_ms(local_ms: u64, ci_ms: u64) -> String {
     if running_in_ci() {
         ci_ms.max(local_ms).to_string()
     } else {
@@ -18,7 +20,7 @@ fn ci_timing_budget_ms(local_ms: u64, ci_ms: u64) -> String {
     }
 }
 
-fn ci_runtime_proxy_timeout_guard(
+pub(super) fn ci_runtime_proxy_timeout_guard(
     env_key: &'static str,
     local_ms: u64,
     ci_ms: u64,
@@ -26,7 +28,7 @@ fn ci_runtime_proxy_timeout_guard(
     TestEnvVarGuard::set(env_key, &ci_timing_budget_ms(local_ms, ci_ms))
 }
 
-fn ci_runtime_proxy_admission_wait_budget_guard(local_ms: u64, ci_ms: u64) -> TestEnvVarGuard {
+pub(super) fn ci_runtime_proxy_admission_wait_budget_guard(local_ms: u64, ci_ms: u64) -> TestEnvVarGuard {
     ci_runtime_proxy_timeout_guard(
         "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
         local_ms,
@@ -34,7 +36,7 @@ fn ci_runtime_proxy_admission_wait_budget_guard(local_ms: u64, ci_ms: u64) -> Te
     )
 }
 
-fn ci_runtime_proxy_websocket_timeout_guards() -> (TestEnvVarGuard, TestEnvVarGuard) {
+pub(super) fn ci_runtime_proxy_websocket_timeout_guards() -> (TestEnvVarGuard, TestEnvVarGuard) {
     (
         ci_runtime_proxy_timeout_guard(
             "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
@@ -49,7 +51,7 @@ fn ci_runtime_proxy_websocket_timeout_guards() -> (TestEnvVarGuard, TestEnvVarGu
     )
 }
 
-fn usage_with_main_windows(
+pub(super) fn usage_with_main_windows(
     five_hour_remaining: i64,
     five_hour_reset_offset_seconds: i64,
     weekly_remaining: i64,
@@ -76,14 +78,14 @@ fn usage_with_main_windows(
     }
 }
 
-struct TestDir {
-    path: PathBuf,
+pub(super) struct TestDir {
+    pub(super) path: PathBuf,
 }
 
 static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 impl TestDir {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         wait_for_runtime_background_queues_idle();
         for _ in 0..32 {
             let unique = format!(
@@ -106,7 +108,7 @@ impl TestDir {
     }
 }
 
-fn wait_for_runtime_background_queues_idle() {
+pub(super) fn wait_for_runtime_background_queues_idle() {
     let deadline = Instant::now() + ci_timing_upper_bound_ms(5_000, 10_000);
     let probe_refresh_grace = ci_timing_upper_bound_ms(250, 2_000);
     let mut lingering_probe_refresh_since = None;
@@ -156,7 +158,7 @@ fn wait_for_runtime_background_queues_idle() {
     }
 }
 
-fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapshot {
+pub(super) fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: now - (RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS + 1),
         five_hour_status: RuntimeQuotaWindowStatus::Critical,
@@ -168,7 +170,7 @@ fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileUsageSnapsho
     }
 }
 
-fn ready_runtime_usage_snapshot(now: i64, remaining_percent: i64) -> RuntimeProfileUsageSnapshot {
+pub(super) fn ready_runtime_usage_snapshot(now: i64, remaining_percent: i64) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: now,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
@@ -186,7 +188,7 @@ impl Drop for TestDir {
     }
 }
 
-fn runtime_rotation_proxy_shared(
+pub(super) fn runtime_rotation_proxy_shared(
     temp_dir: &TestDir,
     runtime: RuntimeRotationState,
     active_request_limit: usize,
@@ -212,7 +214,7 @@ fn runtime_rotation_proxy_shared(
     }
 }
 
-fn runtime_shared_for_cold_start_probe_selection(
+pub(super) fn runtime_shared_for_cold_start_probe_selection(
     temp_dir: &TestDir,
     upstream_base_url: String,
 ) -> RuntimeRotationProxyShared {
@@ -293,7 +295,7 @@ fn runtime_shared_for_cold_start_probe_selection(
     )
 }
 
-struct TestProbeRefreshBacklogGuard {
+pub(super) struct TestProbeRefreshBacklogGuard {
     keys: Vec<(PathBuf, String)>,
 }
 
@@ -310,7 +312,7 @@ impl Drop for TestProbeRefreshBacklogGuard {
     }
 }
 
-fn force_runtime_probe_refresh_backlog(
+pub(super) fn force_runtime_probe_refresh_backlog(
     shared: &RuntimeRotationProxyShared,
     backlog: usize,
 ) -> TestProbeRefreshBacklogGuard {
@@ -351,7 +353,7 @@ fn force_runtime_probe_refresh_backlog(
     TestProbeRefreshBacklogGuard { keys }
 }
 
-fn wait_for_runtime_log_tail_until<F, G>(
+pub(super) fn wait_for_runtime_log_tail_until<F, G>(
     mut read_tail: G,
     predicate: F,
     local_ms: u64,
@@ -382,7 +384,7 @@ where
     }
 }
 
-fn wait_for_state<F>(paths: &AppPaths, predicate: F) -> AppState
+pub(super) fn wait_for_state<F>(paths: &AppPaths, predicate: F) -> AppState
 where
     F: Fn(&AppState) -> bool,
 {
@@ -407,7 +409,7 @@ where
 }
 
 
-fn write_versioned_runtime_sidecar<T: Serialize>(
+pub(super) fn write_versioned_runtime_sidecar<T: Serialize>(
     path: &Path,
     backup_path: &Path,
     generation: u64,
@@ -425,7 +427,7 @@ fn write_versioned_runtime_sidecar<T: Serialize>(
     fs::write(backup_path, &json).expect("versioned sidecar backup should write");
 }
 
-fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16, String) {
+pub(super) fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16, String) {
     let status = response.status_code().0;
     let mut bytes = Vec::new();
     response
@@ -439,7 +441,7 @@ fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16,
     (status, body)
 }
 
-fn tiny_http_response_status_content_type_and_body(
+pub(super) fn tiny_http_response_status_content_type_and_body(
     response: tiny_http::ResponseBox,
 ) -> (u16, Option<String>, String) {
     let status = response.status_code().0;

@@ -5,9 +5,11 @@ use prodex::bench_support::{
     RuntimeProxyQuotaFallbackBenchCase, RuntimeProxySseInspectBenchCase,
     run_runtime_proxy_hot_path_bench_check,
 };
+use serde_json::json;
 
 const RUNTIME_PROXY_BENCH_CHECK_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_CHECK";
 const RUNTIME_PROXY_BENCH_THRESHOLD_SCALE_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE";
+const RUNTIME_PROXY_BENCH_CHECK_JSON_PREFIX: &str = "runtime_proxy_hot_path_check_json";
 
 fn runtime_proxy_hot_paths(c: &mut Criterion) {
     let quota_fallback = RuntimeProxyQuotaFallbackBenchCase::new(64);
@@ -76,15 +78,35 @@ fn main() {
                 failures += 1;
             }
             println!(
-                "runtime_proxy_hot_path_check case={} status={} median_ns={} p90_ns={} threshold_ns={} iterations={} warmup_iterations={} samples={}",
+                "runtime_proxy_hot_path_check case={} status={} median_ns={} p90_ns={} threshold_ns={} base_threshold_ns={} required_scale_percent={} iterations={} warmup_iterations={} samples={}",
                 result.name,
                 if result.passed() { "pass" } else { "fail" },
                 result.median_ns_per_iteration,
                 result.p90_ns_per_iteration,
                 result.threshold_ns_per_iteration,
+                result.base_threshold_ns_per_iteration,
+                result.required_threshold_scale_percent(),
                 result.measure_iterations,
                 result.warmup_iterations,
                 result.samples,
+            );
+            println!(
+                "{} {}",
+                RUNTIME_PROXY_BENCH_CHECK_JSON_PREFIX,
+                json!({
+                    "event": "case",
+                    "case": result.name,
+                    "status": if result.passed() { "pass" } else { "fail" },
+                    "median_ns": result.median_ns_per_iteration,
+                    "p90_ns": result.p90_ns_per_iteration,
+                    "threshold_ns": result.threshold_ns_per_iteration,
+                    "base_threshold_ns": result.base_threshold_ns_per_iteration,
+                    "required_scale_percent": result.required_threshold_scale_percent(),
+                    "threshold_scale_percent": threshold_scale_percent,
+                    "iterations": result.measure_iterations,
+                    "warmup_iterations": result.warmup_iterations,
+                    "samples": result.samples,
+                })
             );
         }
         println!(
@@ -92,6 +114,16 @@ fn main() {
             results.len(),
             failures,
             threshold_scale_percent,
+        );
+        println!(
+            "{} {}",
+            RUNTIME_PROXY_BENCH_CHECK_JSON_PREFIX,
+            json!({
+                "event": "summary",
+                "cases": results.len(),
+                "failures": failures,
+                "threshold_scale_percent": threshold_scale_percent,
+            })
         );
         if failures > 0 {
             std::process::exit(1);

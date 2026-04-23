@@ -1,4 +1,6 @@
-fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str) -> Option<&'static str> {
+use super::*;
+
+pub(super) fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str) -> Option<&'static str> {
     match account_id {
         "main-account" => Some("main"),
         "second-account" => Some("second"),
@@ -9,7 +11,7 @@ fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str) -> Option
     }
 }
 
-fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &str) -> Option<&'static str> {
+pub(super) fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &str) -> Option<&'static str> {
     match profile_name {
         "main" => Some("main-account"),
         "second" => Some("second-account"),
@@ -20,7 +22,7 @@ fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &str) -> Opti
     }
 }
 
-fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Option<&'static str> {
+pub(super) fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Option<&'static str> {
     match account_id {
         "second-account" => Some("resp-second"),
         "third-account" => Some("resp-third"),
@@ -30,7 +32,7 @@ fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Op
     }
 }
 
-fn runtime_proxy_backend_response_owner_account_id(response_id: &str) -> Option<&'static str> {
+pub(super) fn runtime_proxy_backend_response_owner_account_id(response_id: &str) -> Option<&'static str> {
     if response_id == "resp-second" || response_id.starts_with("resp-second-next") {
         Some("second-account")
     } else if response_id == "resp-third" || response_id.starts_with("resp-third-next") {
@@ -44,19 +46,19 @@ fn runtime_proxy_backend_response_owner_account_id(response_id: &str) -> Option<
     }
 }
 
-fn runtime_proxy_backend_profile_name_for_response_id(response_id: &str) -> Option<&'static str> {
+pub(super) fn runtime_proxy_backend_profile_name_for_response_id(response_id: &str) -> Option<&'static str> {
     runtime_proxy_backend_response_owner_account_id(response_id)
         .and_then(runtime_proxy_backend_profile_name_for_account_id)
 }
 
-fn runtime_proxy_backend_initial_response_id_for_profile_name(
+pub(super) fn runtime_proxy_backend_initial_response_id_for_profile_name(
     profile_name: &str,
 ) -> Option<&'static str> {
     runtime_proxy_backend_account_id_for_profile_name(profile_name)
         .and_then(runtime_proxy_backend_initial_response_id_for_account)
 }
 
-fn runtime_proxy_backend_next_response_id(previous_response_id: Option<&str>) -> Option<String> {
+pub(super) fn runtime_proxy_backend_next_response_id(previous_response_id: Option<&str>) -> Option<String> {
     match previous_response_id {
         Some("resp-second") | Some("resp-third") => {
             Some(format!("{}-next", previous_response_id.unwrap()))
@@ -71,7 +73,7 @@ fn runtime_proxy_backend_next_response_id(previous_response_id: Option<&str>) ->
     }
 }
 
-fn runtime_proxy_backend_is_owned_continuation(
+pub(super) fn runtime_proxy_backend_is_owned_continuation(
     account_id: &str,
     previous_response_id: Option<&str>,
 ) -> bool {
@@ -81,7 +83,7 @@ fn runtime_proxy_backend_is_owned_continuation(
     })
 }
 
-fn runtime_proxy_backend_profile_name_for_compact_turn_state(
+pub(super) fn runtime_proxy_backend_profile_name_for_compact_turn_state(
     turn_state: &str,
 ) -> Option<&'static str> {
     match turn_state {
@@ -92,7 +94,7 @@ fn runtime_proxy_backend_profile_name_for_compact_turn_state(
     }
 }
 
-fn runtime_proxy_response_ids_from_http_body(body: &str) -> Vec<String> {
+pub(super) fn runtime_proxy_response_ids_from_http_body(body: &str) -> Vec<String> {
     let response_ids = extract_runtime_response_ids_from_body_bytes(body.as_bytes());
     if !response_ids.is_empty() {
         return response_ids;
@@ -104,7 +106,7 @@ fn runtime_proxy_response_ids_from_http_body(body: &str) -> Vec<String> {
         .collect()
 }
 
-fn wait_for_backend_usage_accounts(
+pub(super) fn wait_for_backend_usage_accounts(
     backend: &RuntimeProxyBackend,
     expected_accounts: &[&str],
 ) -> Vec<String> {
@@ -125,13 +127,13 @@ fn wait_for_backend_usage_accounts(
     }
 }
 
-fn sorted_backend_usage_accounts(backend: &RuntimeProxyBackend) -> Vec<String> {
+pub(super) fn sorted_backend_usage_accounts(backend: &RuntimeProxyBackend) -> Vec<String> {
     let mut usage_accounts = backend.usage_accounts();
     usage_accounts.sort();
     usage_accounts
 }
 
-fn closed_loopback_backend_base_url() -> String {
+pub(super) fn closed_loopback_backend_base_url() -> String {
     let listener =
         TcpListener::bind("127.0.0.1:0").expect("closed loopback helper should bind a port");
     let addr = listener
@@ -141,7 +143,7 @@ fn closed_loopback_backend_base_url() -> String {
     format!("http://{addr}/backend-api")
 }
 
-fn unresponsive_loopback_backend_listener() -> (TcpListener, String) {
+pub(super) fn unresponsive_loopback_backend_listener() -> (TcpListener, String) {
     let listener =
         TcpListener::bind("127.0.0.1:0").expect("unresponsive loopback helper should bind");
     let addr = listener
@@ -151,7 +153,7 @@ fn unresponsive_loopback_backend_listener() -> (TcpListener, String) {
 }
 
 
-struct RuntimeProxyBackend {
+pub(super) struct RuntimeProxyBackend {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
     responses_accounts: Arc<Mutex<Vec<String>>>,
@@ -164,7 +166,7 @@ struct RuntimeProxyBackend {
 }
 
 #[derive(Clone, Copy)]
-enum RuntimeProxyBackendMode {
+pub(super) enum RuntimeProxyBackendMode {
     HttpOnly,
     HttpOnlyUnauthorizedMain,
     HttpOnlyBufferedJson,
@@ -207,167 +209,167 @@ enum RuntimeProxyBackendMode {
 }
 
 impl RuntimeProxyBackend {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnly)
     }
 
-    fn start_http_initial_body_stall() -> Self {
+    pub(super) fn start_http_initial_body_stall() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
     }
 
-    fn start_http_unauthorized_main() -> Self {
+    pub(super) fn start_http_unauthorized_main() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUnauthorizedMain)
     }
 
-    fn start_http_buffered_json() -> Self {
+    pub(super) fn start_http_buffered_json() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyBufferedJson)
     }
 
-    fn start_http_anthropic_web_search_followup() -> Self {
+    pub(super) fn start_http_anthropic_web_search_followup() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyAnthropicWebSearchFollowup)
     }
 
-    fn start_http_anthropic_mcp_stream() -> Self {
+    pub(super) fn start_http_anthropic_mcp_stream() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyAnthropicMcpStream)
     }
 
-    fn start_http_slow_stream() -> Self {
+    pub(super) fn start_http_slow_stream() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySlowStream)
     }
 
-    fn start_http_stall_after_several_chunks() -> Self {
+    pub(super) fn start_http_stall_after_several_chunks() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks)
     }
 
-    fn start_http_reset_before_first_byte() -> Self {
+    pub(super) fn start_http_reset_before_first_byte() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
     }
 
-    fn start_http_reset_after_first_chunk() -> Self {
+    pub(super) fn start_http_reset_after_first_chunk() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetAfterFirstChunk)
     }
 
-    fn start_http_previous_response_needs_turn_state() -> Self {
+    pub(super) fn start_http_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNeedsTurnState)
     }
 
-    fn start_http_previous_response_not_found_after_commit() -> Self {
+    pub(super) fn start_http_previous_response_not_found_after_commit() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit)
     }
 
-    fn start_http_sse_headers_array_turn_state() -> Self {
+    pub(super) fn start_http_sse_headers_array_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlySseHeadersArrayTurnState)
     }
 
-    fn start_http_compact_overloaded() -> Self {
+    pub(super) fn start_http_compact_overloaded() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactOverloaded)
     }
 
-    fn start_http_compact_previous_response_not_found() -> Self {
+    pub(super) fn start_http_compact_previous_response_not_found() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyCompactPreviousResponseNotFound)
     }
 
-    fn start_http_large_compact_response() -> Self {
+    pub(super) fn start_http_large_compact_response() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyLargeCompactResponse)
     }
 
-    fn start_http_usage_limit_message() -> Self {
+    pub(super) fn start_http_usage_limit_message() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
     }
 
-    fn start_http_usage_limit_message_late_ready_fifth() -> Self {
+    pub(super) fn start_http_usage_limit_message_late_ready_fifth() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth)
     }
 
-    fn start_http_delayed_quota_after_output_item_added() -> Self {
+    pub(super) fn start_http_delayed_quota_after_output_item_added() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyDelayedQuotaAfterOutputItemAdded)
     }
 
-    fn start_http_quota_then_tool_output_fresh_fallback_error() -> Self {
+    pub(super) fn start_http_quota_then_tool_output_fresh_fallback_error() -> Self {
         Self::start_with_mode(
             RuntimeProxyBackendMode::HttpOnlyQuotaThenToolOutputFreshFallbackError,
         )
     }
 
-    fn start_http_previous_response_tool_context_missing() -> Self {
+    pub(super) fn start_http_previous_response_tool_context_missing() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPreviousResponseToolContextMissing)
     }
 
-    fn start_http_plain_429() -> Self {
+    pub(super) fn start_http_plain_429() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyPlain429)
     }
 
-    fn start_websocket() -> Self {
+    pub(super) fn start_websocket() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::Websocket)
     }
 
-    fn start_websocket_overloaded() -> Self {
+    pub(super) fn start_websocket_overloaded() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketOverloaded)
     }
 
-    fn start_websocket_delayed_quota_after_prelude() -> Self {
+    pub(super) fn start_websocket_delayed_quota_after_prelude() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude)
     }
 
-    fn start_websocket_delayed_overload_after_prelude() -> Self {
+    pub(super) fn start_websocket_delayed_overload_after_prelude() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketDelayedOverloadAfterPrelude)
     }
 
-    fn start_websocket_reuse_silent_hang() -> Self {
+    pub(super) fn start_websocket_reuse_silent_hang() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReuseSilentHang)
     }
 
-    fn start_websocket_reuse_precommit_hold_stall() -> Self {
+    pub(super) fn start_websocket_reuse_precommit_hold_stall() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePrecommitHoldStall)
     }
 
-    fn start_websocket_reuse_owned_previous_response_silent_hang() -> Self {
+    pub(super) fn start_websocket_reuse_owned_previous_response_silent_hang() -> Self {
         Self::start_with_mode(
             RuntimeProxyBackendMode::WebsocketReuseOwnedPreviousResponseSilentHang,
         )
     }
 
-    fn start_websocket_reuse_previous_response_needs_turn_state() -> Self {
+    pub(super) fn start_websocket_reuse_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketReusePreviousResponseNeedsTurnState)
     }
 
-    fn start_websocket_previous_response_not_found_after_prelude() -> Self {
+    pub(super) fn start_websocket_previous_response_not_found_after_prelude() -> Self {
         Self::start_with_mode(
             RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterPrelude,
         )
     }
 
-    fn start_websocket_previous_response_not_found_after_commit() -> Self {
+    pub(super) fn start_websocket_previous_response_not_found_after_commit() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNotFoundAfterCommit)
     }
 
-    fn start_websocket_previous_response_missing_without_turn_state() -> Self {
+    pub(super) fn start_websocket_previous_response_missing_without_turn_state() -> Self {
         Self::start_with_mode(
             RuntimeProxyBackendMode::WebsocketPreviousResponseMissingWithoutTurnState,
         )
     }
 
-    fn start_websocket_owned_tool_output_needs_session_replay() -> Self {
+    pub(super) fn start_websocket_owned_tool_output_needs_session_replay() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketOwnedToolOutputNeedsSessionReplay)
     }
 
-    fn start_websocket_close_mid_turn() -> Self {
+    pub(super) fn start_websocket_close_mid_turn() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketCloseMidTurn)
     }
 
-    fn start_websocket_previous_response_needs_turn_state() -> Self {
+    pub(super) fn start_websocket_previous_response_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState)
     }
 
-    fn start_websocket_stale_reuse_needs_turn_state() -> Self {
+    pub(super) fn start_websocket_stale_reuse_needs_turn_state() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState)
     }
 
-    fn start_websocket_top_level_response_id() -> Self {
+    pub(super) fn start_websocket_top_level_response_id() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketTopLevelResponseId)
     }
 
-    fn start_websocket_realtime_sideband() -> Self {
+    pub(super) fn start_websocket_realtime_sideband() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketRealtimeSideband)
     }
 
@@ -472,39 +474,39 @@ impl RuntimeProxyBackend {
         }
     }
 
-    fn base_url(&self) -> String {
+    pub(super) fn base_url(&self) -> String {
         format!("http://{}/backend-api", self.addr)
     }
 
-    fn responses_accounts(&self) -> Vec<String> {
+    pub(super) fn responses_accounts(&self) -> Vec<String> {
         self.responses_accounts
             .lock()
             .expect("responses_accounts poisoned")
             .clone()
     }
 
-    fn responses_headers(&self) -> Vec<BTreeMap<String, String>> {
+    pub(super) fn responses_headers(&self) -> Vec<BTreeMap<String, String>> {
         self.responses_headers
             .lock()
             .expect("responses_headers poisoned")
             .clone()
     }
 
-    fn responses_bodies(&self) -> Vec<String> {
+    pub(super) fn responses_bodies(&self) -> Vec<String> {
         self.responses_bodies
             .lock()
             .expect("responses_bodies poisoned")
             .clone()
     }
 
-    fn websocket_requests(&self) -> Vec<String> {
+    pub(super) fn websocket_requests(&self) -> Vec<String> {
         self.websocket_requests
             .lock()
             .expect("websocket_requests poisoned")
             .clone()
     }
 
-    fn usage_accounts(&self) -> Vec<String> {
+    pub(super) fn usage_accounts(&self) -> Vec<String> {
         self.usage_accounts
             .lock()
             .expect("usage_accounts poisoned")
@@ -529,7 +531,7 @@ impl Drop for RuntimeProxyBackend {
     }
 }
 
-fn handle_runtime_proxy_backend_request(
+pub(super) fn handle_runtime_proxy_backend_request(
     mut stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
@@ -1773,7 +1775,7 @@ fn handle_runtime_proxy_backend_request(
     }
 }
 
-fn runtime_proxy_backend_is_websocket_upgrade(stream: &TcpStream) -> bool {
+pub(super) fn runtime_proxy_backend_is_websocket_upgrade(stream: &TcpStream) -> bool {
     let mut buffer = [0_u8; 2048];
     let Ok(read) = stream.peek(&mut buffer) else {
         return false;
@@ -1786,7 +1788,7 @@ fn runtime_proxy_backend_is_websocket_upgrade(stream: &TcpStream) -> bool {
 }
 
 #[allow(clippy::result_large_err)]
-fn handle_runtime_proxy_backend_websocket(
+pub(super) fn handle_runtime_proxy_backend_websocket(
     stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
@@ -2581,7 +2583,7 @@ fn handle_runtime_proxy_backend_websocket(
     }
 }
 
-fn read_http_request(stream: &mut TcpStream) -> Option<String> {
+pub(super) fn read_http_request(stream: &mut TcpStream) -> Option<String> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
     let mut buffer = [0_u8; 1024];
     let mut request = Vec::new();
@@ -2632,7 +2634,7 @@ fn read_http_request(stream: &mut TcpStream) -> Option<String> {
     (!request.is_empty()).then(|| String::from_utf8_lossy(&request).into_owned())
 }
 
-fn request_header(request: &str, header_name: &str) -> Option<String> {
+pub(super) fn request_header(request: &str, header_name: &str) -> Option<String> {
     request.lines().find_map(|line| {
         let (name, value) = line.split_once(':')?;
         if name.trim().eq_ignore_ascii_case(header_name) {
@@ -2643,7 +2645,7 @@ fn request_header(request: &str, header_name: &str) -> Option<String> {
     })
 }
 
-fn request_headers_map(request: &str) -> BTreeMap<String, String> {
+pub(super) fn request_headers_map(request: &str) -> BTreeMap<String, String> {
     request
         .lines()
         .skip(1)
@@ -2655,7 +2657,7 @@ fn request_headers_map(request: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-fn request_previous_response_id(request: &str) -> Option<String> {
+pub(super) fn request_previous_response_id(request: &str) -> Option<String> {
     let body = request
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
@@ -2663,7 +2665,7 @@ fn request_previous_response_id(request: &str) -> Option<String> {
     runtime_request_previous_response_id_from_text(body)
 }
 
-fn request_body_contains_only_function_call_output(request_body: &str) -> bool {
+pub(super) fn request_body_contains_only_function_call_output(request_body: &str) -> bool {
     let Ok(body) = serde_json::from_str::<serde_json::Value>(request_body) else {
         return false;
     };
@@ -2688,7 +2690,7 @@ fn request_body_contains_only_function_call_output(request_body: &str) -> bool {
         })
 }
 
-fn request_body_contains_session_id(request_body: &str) -> bool {
+pub(super) fn request_body_contains_session_id(request_body: &str) -> bool {
     let Ok(body) = serde_json::from_str::<serde_json::Value>(request_body) else {
         return false;
     };

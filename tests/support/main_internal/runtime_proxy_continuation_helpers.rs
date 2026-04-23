@@ -1,4 +1,9 @@
-fn wait_for_runtime_continuations<F>(paths: &AppPaths, predicate: F) -> RuntimeContinuationStore
+use super::*;
+
+pub(super) fn wait_for_runtime_continuations<F>(
+    paths: &AppPaths,
+    predicate: F,
+) -> RuntimeContinuationStore
 where
     F: Fn(&RuntimeContinuationStore) -> bool,
 {
@@ -32,7 +37,7 @@ where
     }
 }
 
-fn read_runtime_http_stream_until<F>(
+pub(super) fn read_runtime_http_stream_until<F>(
     mut response: reqwest::blocking::Response,
     predicate: F,
 ) -> String
@@ -58,7 +63,7 @@ where
     String::from_utf8_lossy(&body).into_owned()
 }
 
-fn dead_continuation_status(now: i64) -> RuntimeContinuationBindingStatus {
+pub(super) fn dead_continuation_status(now: i64) -> RuntimeContinuationBindingStatus {
     RuntimeContinuationBindingStatus {
         state: RuntimeContinuationBindingLifecycle::Dead,
         confidence: 0,
@@ -72,12 +77,12 @@ fn dead_continuation_status(now: i64) -> RuntimeContinuationBindingStatus {
     }
 }
 
-struct RuntimeContinuationHeader {
+pub(super) struct RuntimeContinuationHeader {
     name: &'static str,
     value: String,
 }
 
-type RuntimeContinuationClientWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
+pub(super) type RuntimeContinuationClientWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
 
 fn runtime_continuation_header(
     name: &'static str,
@@ -89,13 +94,13 @@ fn runtime_continuation_header(
     }
 }
 
-struct RuntimeContinuationFixture {
+pub(super) struct RuntimeContinuationFixture {
     _temp_dir: TestDir,
-    backend: RuntimeProxyBackend,
+    pub(super) backend: RuntimeProxyBackend,
     proxy: RuntimeRotationProxy,
 }
 
-fn start_runtime_continuation_fixture(
+pub(super) fn start_runtime_continuation_fixture(
     backend: RuntimeProxyBackend,
     active_profile: &str,
     profiles: &[&str],
@@ -173,11 +178,11 @@ fn start_runtime_continuation_fixture(
 }
 
 impl RuntimeContinuationFixture {
-    fn post_json(&self, route: &str, body: serde_json::Value) -> reqwest::blocking::Response {
+    pub(super) fn post_json(&self, route: &str, body: serde_json::Value) -> reqwest::blocking::Response {
         self.post_json_with_headers(route, &[], body)
     }
 
-    fn post_json_with_headers(
+    pub(super) fn post_json_with_headers(
         &self,
         route: &str,
         headers: &[RuntimeContinuationHeader],
@@ -197,7 +202,7 @@ impl RuntimeContinuationFixture {
             .expect("request should succeed")
     }
 
-    fn connect_websocket(&self, route: &str) -> RuntimeContinuationClientWebSocket {
+    pub(super) fn connect_websocket(&self, route: &str) -> RuntimeContinuationClientWebSocket {
         let (mut socket, _response) =
             ws_connect(format!("ws://{}/{}", self.proxy.listen_addr, route))
                 .expect("websocket client should connect");
@@ -205,7 +210,7 @@ impl RuntimeContinuationFixture {
         socket
     }
 
-    fn wait_for_log<F>(&self, predicate: F) -> String
+    pub(super) fn wait_for_log<F>(&self, predicate: F) -> String
     where
         F: Fn(&str) -> bool,
     {
@@ -220,17 +225,17 @@ impl RuntimeContinuationFixture {
     }
 }
 
-fn assert_single_recorded_request<'a>(requests: &'a [String], len_message: &str) -> &'a str {
+pub(super) fn assert_single_recorded_request<'a>(requests: &'a [String], len_message: &str) -> &'a str {
     assert_eq!(requests.len(), 1, "{len_message}: {requests:?}");
     &requests[0]
 }
 
-fn assert_request_json_field(request: &str, field: &str, value: &str, message: &str) {
+pub(super) fn assert_request_json_field(request: &str, field: &str, value: &str, message: &str) {
     let fragment = format!("\"{field}\":\"{value}\"");
     assert!(request.contains(&fragment), "{message}: {request}");
 }
 
-fn assert_all_requests_json_field(
+pub(super) fn assert_all_requests_json_field(
     requests: &[String],
     field: &str,
     value: &str,
@@ -243,7 +248,7 @@ fn assert_all_requests_json_field(
     }
 }
 
-fn send_runtime_websocket_json(
+pub(super) fn send_runtime_websocket_json(
     socket: &mut RuntimeContinuationClientWebSocket,
     payload: serde_json::Value,
 ) {
@@ -252,7 +257,7 @@ fn send_runtime_websocket_json(
         .expect("websocket request should send");
 }
 
-fn read_runtime_websocket_text(socket: &mut RuntimeContinuationClientWebSocket) -> String {
+pub(super) fn read_runtime_websocket_text(socket: &mut RuntimeContinuationClientWebSocket) -> String {
     loop {
         match socket.read().expect("websocket response should read") {
             WsMessage::Text(text) => return text.to_string(),
@@ -265,7 +270,7 @@ fn read_runtime_websocket_text(socket: &mut RuntimeContinuationClientWebSocket) 
     }
 }
 
-fn read_runtime_websocket_until<F>(
+pub(super) fn read_runtime_websocket_until<F>(
     socket: &mut RuntimeContinuationClientWebSocket,
     mut predicate: F,
 ) -> (Vec<String>, String)

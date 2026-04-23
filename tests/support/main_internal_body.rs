@@ -10,11 +10,23 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::TestEnvVarGuard;
 
-include!("main_internal/runtime_test_auth.rs");
-include!("main_internal/runtime_test_support.rs");
-include!("main_internal/runtime_test_websocket.rs");
-include!("main_internal/runtime_proxy_backend.rs");
-include!("main_internal/runtime_proxy_continuation_helpers.rs");
+#[path = "main_internal/runtime_test_auth.rs"]
+mod runtime_test_auth;
+#[path = "main_internal/runtime_test_support.rs"]
+mod runtime_test_support;
+#[path = "main_internal/runtime_test_websocket.rs"]
+mod runtime_test_websocket;
+#[path = "main_internal/runtime_proxy_backend.rs"]
+mod runtime_proxy_backend;
+
+use runtime_proxy_backend::*;
+use runtime_test_auth::*;
+use runtime_test_support::*;
+use runtime_test_websocket::*;
+
+#[path = "main_internal/runtime_proxy_continuation_helpers.rs"]
+mod runtime_proxy_continuation_helpers;
+use runtime_proxy_continuation_helpers::*;
 
 #[test]
 fn validates_profile_names() {

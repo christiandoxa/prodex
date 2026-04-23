@@ -445,6 +445,76 @@ mod tests {
         assert_eq!(plan.fallback_candidates[0].fallback_skip_reason(), None);
     }
 
+    #[test]
+    fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
+        let state = RuntimeRouteSelectionCatalog {
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            entries: vec![
+                selection_entry(
+                    "main",
+                    SelectionEntryFixture {
+                        cached_probe_entry: Some(RuntimeProfileProbeCacheEntry {
+                            checked_at: 0,
+                            auth: quota_compatible_auth(),
+                            result: Ok(test_usage_with_unbounded_main_windows(90, 95)),
+                        }),
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry("second", SelectionEntryFixture::default()),
+            ],
+        };
+        // State-derived report planning would find `main`; execution planning must preserve this
+        // already-prepared ready list instead.
+        let ready_candidates = vec![ReadyProfileCandidate {
+            name: "second".to_string(),
+            usage: test_usage_with_unbounded_main_windows(74, 82),
+            order_index: 41,
+            preferred: false,
+            provider_priority: 7,
+            quota_source: RuntimeQuotaSource::PersistedSnapshot,
+        }];
+
+        let plan = build_runtime_response_candidate_execution_plan(
+            &state,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            3,
+            ready_candidates,
+            |_| 0,
+        );
+
+        assert_eq!(
+            plan.ready_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["second"]
+        );
+        assert_eq!(plan.ready_candidates[0].order_index, 0);
+        assert_eq!(plan.ready_candidates[0].provider_priority, 7);
+        assert_eq!(
+            plan.ready_candidates[0].quota_source,
+            RuntimeQuotaSource::PersistedSnapshot
+        );
+        assert_eq!(
+            plan.ready_candidates[0]
+                .quota_summary
+                .five_hour
+                .remaining_percent,
+            74
+        );
+        assert_eq!(
+            plan.fallback_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["second"]
+        );
+    }
+
     #[derive(Default)]
     struct SelectionEntryFixture {
         cached_probe_entry: Option<RuntimeProfileProbeCacheEntry>,
@@ -501,6 +571,30 @@ mod tests {
                 secondary_window: Some(UsageWindow {
                     used_percent: Some((100 - weekly_remaining).clamp(0, 100)),
                     reset_at: Some(now + weekly_reset_offset_seconds),
+                    limit_window_seconds: Some(604_800),
+                }),
+            }),
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        }
+    }
+
+    fn test_usage_with_unbounded_main_windows(
+        five_hour_remaining: i64,
+        weekly_remaining: i64,
+    ) -> UsageResponse {
+        UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some((100 - five_hour_remaining).clamp(0, 100)),
+                    reset_at: Some(i64::MAX),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some((100 - weekly_remaining).clamp(0, 100)),
+                    reset_at: Some(i64::MAX),
                     limit_window_seconds: Some(604_800),
                 }),
             }),

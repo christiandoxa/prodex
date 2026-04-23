@@ -1,4 +1,6 @@
-struct TwoChunkReader {
+use super::*;
+
+pub(super) struct TwoChunkReader {
     chunks: Vec<Vec<u8>>,
     index: usize,
     offset: usize,
@@ -32,7 +34,7 @@ impl Read for TwoChunkReader {
     }
 }
 
-struct FailAfterFirstChunkWriter {
+pub(super) struct FailAfterFirstChunkWriter {
     saw_first_chunk_body: bool,
 }
 
@@ -69,7 +71,7 @@ impl Write for FailAfterFirstChunkWriter {
     }
 }
 
-struct FailOnUnexpectedMidStreamFlushWriter {
+pub(super) struct FailOnUnexpectedMidStreamFlushWriter {
     flush_count: usize,
     saw_trailer: bool,
 }
@@ -103,7 +105,7 @@ impl Write for FailOnUnexpectedMidStreamFlushWriter {
     }
 }
 
-fn set_test_websocket_io_timeout(
+pub(super) fn set_test_websocket_io_timeout(
     socket: &mut WsSocket<MaybeTlsStream<TcpStream>>,
     timeout: Duration,
 ) {
@@ -120,7 +122,7 @@ fn set_test_websocket_io_timeout(
     }
 }
 
-fn runtime_test_local_websocket_pair() -> (RuntimeLocalWebSocket, RuntimeUpstreamWebSocket) {
+pub(super) fn runtime_test_local_websocket_pair() -> (RuntimeLocalWebSocket, RuntimeUpstreamWebSocket) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("test websocket listener should bind");
     let addr = listener
         .local_addr()

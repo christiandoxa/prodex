@@ -1,8 +1,10 @@
-fn runtime_proxy_usage_body(email: &str) -> String {
+use super::*;
+
+pub(super) fn runtime_proxy_usage_body(email: &str) -> String {
     runtime_proxy_usage_body_with_remaining(email, 95, 95)
 }
 
-fn runtime_proxy_usage_body_with_remaining(
+pub(super) fn runtime_proxy_usage_body_with_remaining(
     email: &str,
     five_hour_remaining: i64,
     weekly_remaining: i64,
@@ -26,7 +28,7 @@ fn runtime_proxy_usage_body_with_remaining(
     .to_string()
 }
 
-fn future_epoch(offset_seconds: i64) -> i64 {
+pub(super) fn future_epoch(offset_seconds: i64) -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after unix epoch")
@@ -34,11 +36,11 @@ fn future_epoch(offset_seconds: i64) -> i64 {
         + offset_seconds
 }
 
-fn write_auth_json(path: &Path, account_id: &str) {
+pub(super) fn write_auth_json(path: &Path, account_id: &str) {
     write_auth_json_with_tokens(path, "test-token", account_id, None, None);
 }
 
-fn write_auth_json_with_tokens(
+pub(super) fn write_auth_json_with_tokens(
     path: &Path,
     access_token: &str,
     account_id: &str,
@@ -63,11 +65,11 @@ fn write_auth_json_with_tokens(
     fs::write(path, auth_json.to_string()).expect("failed to write auth.json");
 }
 
-fn fake_jwt_with_exp(exp: i64) -> String {
+pub(super) fn fake_jwt_with_exp(exp: i64) -> String {
     fake_jwt_with_exp_and_account_id(exp, "")
 }
 
-fn fake_jwt_with_exp_and_account_id(exp: i64, account_id: &str) -> String {
+pub(super) fn fake_jwt_with_exp_and_account_id(exp: i64, account_id: &str) -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
@@ -83,12 +85,12 @@ fn fake_jwt_with_exp_and_account_id(exp: i64, account_id: &str) -> String {
 }
 
 #[derive(Clone, Copy)]
-enum TokenAwareServerMode {
+pub(super) enum TokenAwareServerMode {
     RuntimeStatus,
     Usage,
 }
 
-struct TokenAwareServer {
+pub(super) struct TokenAwareServer {
     listen_addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
     auth_headers: Arc<Mutex<Vec<String>>>,
@@ -96,7 +98,7 @@ struct TokenAwareServer {
 }
 
 impl TokenAwareServer {
-    fn start(
+    pub(super) fn start(
         mode: TokenAwareServerMode,
         expected_token: &str,
         expected_account_id: &str,
@@ -185,7 +187,7 @@ impl TokenAwareServer {
         }
     }
 
-    fn start_runtime_status(expected_token: &str, expected_account_id: &str) -> Self {
+    pub(super) fn start_runtime_status(expected_token: &str, expected_account_id: &str) -> Self {
         Self::start(
             TokenAwareServerMode::RuntimeStatus,
             expected_token,
@@ -198,7 +200,7 @@ impl TokenAwareServer {
         )
     }
 
-    fn start_usage(expected_token: &str, expected_account_id: &str, email: &str) -> Self {
+    pub(super) fn start_usage(expected_token: &str, expected_account_id: &str, email: &str) -> Self {
         Self::start(
             TokenAwareServerMode::Usage,
             expected_token,
@@ -207,11 +209,11 @@ impl TokenAwareServer {
         )
     }
 
-    fn base_url(&self) -> String {
+    pub(super) fn base_url(&self) -> String {
         format!("http://{}/backend-api", self.listen_addr)
     }
 
-    fn auth_headers(&self) -> Vec<String> {
+    pub(super) fn auth_headers(&self) -> Vec<String> {
         self.auth_headers
             .lock()
             .expect("auth_headers poisoned")
@@ -229,7 +231,7 @@ impl Drop for TokenAwareServer {
     }
 }
 
-struct AuthRefreshServer {
+pub(super) struct AuthRefreshServer {
     listen_addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
     request_bodies: Arc<Mutex<Vec<String>>>,
@@ -237,7 +239,7 @@ struct AuthRefreshServer {
 }
 
 impl AuthRefreshServer {
-    fn start(access_token: &str, refresh_token: &str) -> Self {
+    pub(super) fn start(access_token: &str, refresh_token: &str) -> Self {
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("failed to bind auth refresh server");
         let listen_addr = listener
@@ -297,11 +299,11 @@ impl AuthRefreshServer {
         }
     }
 
-    fn url(&self) -> String {
+    pub(super) fn url(&self) -> String {
         format!("http://{}/oauth/token", self.listen_addr)
     }
 
-    fn request_bodies(&self) -> Vec<String> {
+    pub(super) fn request_bodies(&self) -> Vec<String> {
         self.request_bodies
             .lock()
             .expect("request_bodies poisoned")
@@ -319,7 +321,7 @@ impl Drop for AuthRefreshServer {
     }
 }
 
-fn write_api_key_auth_json(path: &Path) {
+pub(super) fn write_api_key_auth_json(path: &Path) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("failed to create auth parent dir");
     }
