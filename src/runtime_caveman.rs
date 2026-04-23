@@ -80,17 +80,21 @@ struct CavemanLaunchStrategy {
     codex_args: Vec<OsString>,
     include_code_review: bool,
     mem_mode: bool,
+    model_provider_override: Option<String>,
 }
 
 impl CavemanLaunchStrategy {
     fn new(args: CavemanArgs) -> Self {
         let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
         let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
+        let model_provider_override =
+            codex_cli_config_override_value(&codex_args, "model_provider");
         Self {
             args,
             codex_args,
             include_code_review,
             mem_mode,
+            model_provider_override,
         }
     }
 }
@@ -104,6 +108,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             base_url: self.args.base_url.as_deref(),
             include_code_review: self.include_code_review,
             force_runtime_proxy: false,
+            model_provider_override: self.model_provider_override.as_deref(),
         }
     }
 

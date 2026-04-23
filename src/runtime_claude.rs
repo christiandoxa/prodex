@@ -103,6 +103,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             base_url: self.args.base_url.as_deref(),
             include_code_review: false,
             force_runtime_proxy: true,
+            model_provider_override: None,
         }
     }
 

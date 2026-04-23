@@ -1,45 +1,7 @@
 use super::*;
 
-pub(crate) fn parse_toml_string_assignment(contents: &str, key: &str) -> Option<String> {
-    for raw_line in contents.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some(rest) = line.strip_prefix(key) else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        let rest = rest.strip_prefix('=')?.trim_start();
-        let rest = rest.strip_prefix('"')?;
-        let mut value = String::new();
-        let mut escaped = false;
-        for ch in rest.chars() {
-            if escaped {
-                value.push(match ch {
-                    'n' => '\n',
-                    'r' => '\r',
-                    't' => '\t',
-                    '"' => '"',
-                    '\\' => '\\',
-                    other => other,
-                });
-                escaped = false;
-                continue;
-            }
-            match ch {
-                '\\' => escaped = true,
-                '"' => return Some(value),
-                other => value.push(other),
-            }
-        }
-    }
-    None
-}
-
 pub(crate) fn runtime_proxy_claude_config_value(codex_home: &Path, key: &str) -> Option<String> {
-    let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
-    parse_toml_string_assignment(&contents, key).filter(|value| !value.trim().is_empty())
+    codex_config_value(codex_home, key)
 }
 
 pub(crate) fn runtime_proxy_claude_config_dir(codex_home: &Path) -> PathBuf {

@@ -2,7 +2,9 @@
 
 `prodex` is a wrapper for Codex and Claude Code when you want to work with multiple isolated profiles.
 
-Each profile can use a different account. Before starting a session, `prodex` checks quota and can route new work to another available profile. Existing sessions stay attached to the profile they started with.
+Each profile can use a different account. For default OpenAI/Codex profiles, `prodex` checks quota and can route new work to another available profile. Existing sessions stay attached to the profile they started with.
+
+If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
 
 It can also run Caveman mode and optionally connect Claude-Mem to the active session path.
 
@@ -94,6 +96,8 @@ prodex profile list
 prodex quota --all
 ```
 
+`prodex quota` supports OpenAI/Codex profiles and imported Copilot accounts. It does not support profiles whose `config.toml` selects a non-OpenAI `model_provider`.
+
 Run commands through `prodex`:
 
 ```bash
@@ -136,6 +140,8 @@ prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
+If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy.
+
 ## Caveman examples
 
 ```bash
@@ -147,6 +153,8 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
 
 `prodex caveman` runs Codex with a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
+
+If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
 If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
 
@@ -164,6 +172,8 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
 `prodex claude` uses the normal Claude Code flow.
+
+This path requires the default OpenAI/Codex provider. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not supported by `prodex claude`.
 
 `prodex claude caveman` loads Caveman only for that session while keeping state under the Prodex-managed `CLAUDE_CONFIG_DIR`, not the global `~/.claude`.
 

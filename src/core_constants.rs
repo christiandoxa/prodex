@@ -12,7 +12,7 @@ pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend
 pub(crate) const PRODEX_CLAUDE_PROXY_API_KEY: &str = "prodex-runtime-proxy";
 pub(crate) const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub(crate) const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
-pub(crate) const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5";
+pub(crate) const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5.4";
 pub(crate) const PRODEX_CLAUDE_CONFIG_DIR_NAME: &str = ".claude-code";
 pub(crate) const PRODEX_SHARED_CLAUDE_DIR_NAME: &str = "claude";
 pub(crate) const DEFAULT_CLAUDE_CONFIG_DIR_NAME: &str = ".claude";
@@ -230,7 +230,11 @@ Examples:
   prodex quota --profile main --detail
   prodex quota --all --detail
   prodex quota --all --once
-  prodex quota --raw --profile main";
+  prodex quota --raw --profile main
+
+Notes:
+  `prodex quota` supports OpenAI/Codex profiles and imported Copilot accounts.
+  If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, quota inspection is unavailable for that profile.";
 pub(crate) const CLI_RUN_AFTER_HELP: &str = "\
 Examples:
   prodex
@@ -244,7 +248,8 @@ Examples:
 Notes:
   Auto-rotate is enabled by default.
   Bare `prodex <args>` is treated as `prodex run <args>`.
-  A lone session id is forwarded as `codex resume <session-id>`.";
+  A lone session id is forwarded as `codex resume <session-id>`.
+  If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";
 pub(crate) const CLI_CLAUDE_AFTER_HELP: &str = "\
 Examples:
   prodex claude --print \"summarize this repo\"
@@ -259,6 +264,7 @@ Notes:
   Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
   Prefix Claude args with `caveman` and/or `mem` to load the Caveman or Claude-Mem plugin for that session only.
   Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
+  `prodex claude` requires the default OpenAI/Codex provider; profiles that set `model_provider` to a non-OpenAI backend are not supported on this path.
   Claude defaults to the current Codex model from `config.toml` when available.
   Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.
   Use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream Responses reasoning effort.
@@ -274,6 +280,7 @@ Examples:
 Notes:
   Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
+  If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
   Prefix Codex args with `mem` to point Claude-Mem transcript watching at the selected Prodex session path.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub(crate) const CLI_DOCTOR_AFTER_HELP: &str = "\

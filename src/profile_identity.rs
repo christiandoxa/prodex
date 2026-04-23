@@ -8,6 +8,19 @@ pub(crate) fn fetch_profile_email(codex_home: &Path) -> Result<String> {
         Err(err) => Some(err),
     };
 
+    if let Some(model_provider) = codex_non_openai_model_provider(codex_home, None) {
+        if let Some(auth_error) = auth_email_error {
+            bail!(
+                "failed to read account email from stored auth secret ({auth_error:#}); quota email fallback is unavailable for model_provider '{}'",
+                model_provider.provider_id,
+            );
+        }
+        bail!(
+            "stored auth secret did not contain an account email and quota email fallback is unavailable for model_provider '{}'",
+            model_provider.provider_id,
+        );
+    }
+
     match fetch_profile_email_from_usage(codex_home) {
         Ok(email) => Ok(email),
         Err(usage_error) => {
@@ -232,4 +245,78 @@ pub(crate) fn remove_dir_if_exists(path: &Path) -> Result<()> {
     }
 
     fs::remove_dir_all(path).with_context(|| format!("failed to delete {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fetch_profile_email_uses_auth_email_for_non_openai_model_provider() {
+        let root = temp_dir("non-openai-auth-email");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        fs::write(
+            secret_store::auth_json_path(&root),
+            format!(
+                r#"{{"tokens":{{"id_token":"{}","access_token":"test-token"}}}}"#,
+                chatgpt_id_token("user@example.com")
+            ),
+        )
+        .unwrap();
+
+        let email = fetch_profile_email(&root).unwrap();
+
+        assert_eq!(email, "user@example.com");
+    }
+
+    #[test]
+    fn fetch_profile_email_skips_usage_fallback_for_non_openai_model_provider() {
+        let root = temp_dir("non-openai-no-auth-email");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        fs::write(
+            secret_store::auth_json_path(&root),
+            r#"{"tokens":{"access_token":"test-token"}}"#,
+        )
+        .unwrap();
+
+        let err = fetch_profile_email(&root).unwrap_err();
+        let message = format!("{err:#}");
+
+        assert!(message.contains("amazon-bedrock"));
+        assert!(message.contains("quota email fallback is unavailable"));
+    }
+
+    fn chatgpt_id_token(email: &str) -> String {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"alg":"none","typ":"JWT"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
+            r#"{{"https://api.openai.com/profile":{{"email":"{email}"}}}}"#
+        ));
+        format!("{header}.{payload}.sig")
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!(
+            "prodex-profile-identity-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
+        dir
+    }
 }

@@ -1,8 +1,8 @@
 # Quick Start
 
-One OpenAI profile pool. Codex, Claude Code, Caveman mode, and optional Claude-Mem overlays.
+One Prodex profile pool for OpenAI-backed routing, plus direct pass-through when a profile selects a different upstream `model_provider`.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. All of these commands run on top of the same OpenAI-backed Prodex profile pool.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing; if a profile's `config.toml` sets a non-OpenAI `model_provider` such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
 
 For contributors: the crate is split across focused modules now. `src/main.rs` is the entrypoint, command handling lives under `src/app_commands/` and `src/command_dispatch.rs`, profile/quota flows live under `src/profile_commands/` and `src/quota_support/`, and runtime proxy code lives under `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, and `src/runtime_broker/`.
 
@@ -122,7 +122,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether the bundle should use optional password protection.
 
-`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. `prodex run`, `prodex login`, and `prodex logout` still target OpenAI/Codex profiles only, while `prodex quota` can also inspect Copilot provider quota data through the Copilot CLI account API.
+`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. `prodex run`, `prodex login`, and `prodex logout` still target OpenAI/Codex profiles only, while `prodex quota` can inspect Copilot provider quota data through the Copilot CLI account API. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
 
 ## 3. Run Codex CLI with `prodex`
 
@@ -139,6 +139,8 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
 
+If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy.
+
 ## 4. Run Codex with `prodex caveman`
 
 ```bash
@@ -149,6 +151,8 @@ prodex caveman exec "review this repo in caveman mode"
 ```
 
 Use this path when you want Codex itself as the front end but want Caveman mode preloaded from the upstream Caveman plugin. Prodex launches Caveman from a temporary overlay `CODEX_HOME` so the base profile home stays unchanged after the session exits.
+
+If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
 
@@ -163,7 +167,9 @@ prodex claude caveman -- -p "summarize this repo briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
 
-Use this path when you want Claude Code to be the front end while Prodex still routes requests through your OpenAI-backed profile pool.
+Use this path when you want Claude Code to be the front end while Prodex routes requests through your OpenAI-backed profile pool.
+
+This path requires the default OpenAI/Codex provider. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not supported by `prodex claude`.
 
 Use `prodex claude caveman` when you want the same Claude path but with the upstream Caveman plugin loaded through Claude's session-local `--plugin-dir` support. Prodex keeps the plugin bundle stable under `.prodex`, and the adapted Caveman hooks read and write the Prodex-managed `CLAUDE_CONFIG_DIR` instead of your global `~/.claude`.
 

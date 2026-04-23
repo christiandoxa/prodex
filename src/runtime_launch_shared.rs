@@ -7,6 +7,7 @@ pub(super) struct RuntimeLaunchRequest<'a> {
     pub(super) base_url: Option<&'a str>,
     pub(super) include_code_review: bool,
     pub(super) force_runtime_proxy: bool,
+    pub(super) model_provider_override: Option<&'a str>,
 }
 
 pub(super) struct PreparedRuntimeLaunch {

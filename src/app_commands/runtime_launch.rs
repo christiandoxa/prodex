@@ -5,17 +5,21 @@ struct RunCommandStrategy {
     codex_args: Vec<OsString>,
     include_code_review: bool,
     mem_mode: bool,
+    model_provider_override: Option<String>,
 }
 
 impl RunCommandStrategy {
     fn new(args: RunArgs) -> Self {
         let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
         let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
+        let model_provider_override =
+            codex_cli_config_override_value(&codex_args, "model_provider");
         Self {
             args,
             codex_args,
             include_code_review,
             mem_mode,
+            model_provider_override,
         }
     }
 }
@@ -29,6 +33,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             base_url: self.args.base_url.as_deref(),
             include_code_review: self.include_code_review,
             force_runtime_proxy: false,
+            model_provider_override: self.model_provider_override.as_deref(),
         }
     }
 
@@ -58,24 +63,39 @@ struct RuntimeLaunchSelection {
     selected_profile_name: String,
     codex_home: PathBuf,
     explicit_profile_requested: bool,
+    non_openai_model_provider: Option<CodexModelProviderSetting>,
 }
 
 impl RuntimeLaunchSelection {
-    fn resolve(state: &AppState, requested: Option<&str>) -> Result<Self> {
+    fn resolve(
+        state: &AppState,
+        requested: Option<&str>,
+        model_provider_override: Option<&str>,
+    ) -> Result<Self> {
         let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
         let codex_home = runtime_launch_profile_home(state, &profile_name)?;
+        let non_openai_model_provider =
+            codex_non_openai_model_provider(&codex_home, model_provider_override);
 
         Ok(Self {
             initial_profile_name: profile_name.clone(),
             selected_profile_name: profile_name,
             codex_home,
             explicit_profile_requested: requested.is_some(),
+            non_openai_model_provider,
         })
     }
 
-    fn select_profile(&mut self, state: &AppState, profile_name: &str) -> Result<()> {
+    fn select_profile(
+        &mut self,
+        state: &AppState,
+        profile_name: &str,
+        model_provider_override: Option<&str>,
+    ) -> Result<()> {
         self.codex_home = runtime_launch_profile_home(state, profile_name)?;
         self.selected_profile_name = profile_name.to_string();
+        self.non_openai_model_provider =
+            codex_non_openai_model_provider(&self.codex_home, model_provider_override);
         Ok(())
     }
 }
@@ -140,6 +160,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
 
     fn build(mut self) -> Result<PreparedRuntimeLaunch> {
         self.record_selection()?;
+        self.handle_non_openai_model_provider()?;
 
         let managed = self.selected_profile_is_managed()?;
         if managed {
@@ -162,6 +183,29 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             managed,
             runtime_proxy,
         })
+    }
+
+    fn handle_non_openai_model_provider(&self) -> Result<()> {
+        let Some(setting) = self.selection.non_openai_model_provider.as_ref() else {
+            return Ok(());
+        };
+
+        if self.request.force_runtime_proxy {
+            bail!(
+                "profile '{}' uses model_provider '{}' from {}. `prodex claude` requires the default OpenAI/Codex provider.",
+                self.selection.selected_profile_name,
+                setting.provider_id,
+                setting.source.display_name(),
+            );
+        }
+
+        print_wrapped_stderr(&section_header("Runtime Provider"));
+        print_wrapped_stderr(&format!(
+            "Detected model_provider '{}' from {}. Launching directly without prodex quota preflight or auto-rotate proxy.",
+            setting.provider_id,
+            setting.source.display_name(),
+        ));
+        Ok(())
     }
 
     fn record_selection(&mut self) -> Result<()> {
@@ -194,6 +238,10 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if selection.non_openai_model_provider.is_some() {
+            return Ok(None);
+        }
+
         let runtime_upstream_base_url = quota_base_url(request.base_url);
         if request.force_runtime_proxy
             || should_enable_runtime_rotation_proxy(
@@ -225,7 +273,11 @@ fn select_runtime_launch_profile(
     state: &mut AppState,
     request: &RuntimeLaunchRequest<'_>,
 ) -> Result<RuntimeLaunchSelection> {
-    let mut selection = RuntimeLaunchSelection::resolve(state, request.profile)?;
+    let mut selection =
+        RuntimeLaunchSelection::resolve(state, request.profile, request.model_provider_override)?;
+    if selection.non_openai_model_provider.is_some() {
+        return Ok(selection);
+    }
     if request.skip_quota_check {
         return Ok(selection);
     }
@@ -278,6 +330,7 @@ fn run_auto_runtime_launch_preflight(
             rotate_to_scored_runtime_candidate(
                 paths,
                 state,
+                request,
                 selection,
                 best_candidate,
                 selected_report,
@@ -296,6 +349,7 @@ fn run_auto_runtime_launch_preflight(
 fn rotate_to_scored_runtime_candidate(
     paths: &AppPaths,
     state: &mut AppState,
+    request: &RuntimeLaunchRequest<'_>,
     selection: &mut RuntimeLaunchSelection,
     best_candidate: &ReadyProfileCandidate,
     selected_report: Option<&RunProfileProbeReport>,
@@ -309,7 +363,7 @@ fn rotate_to_scored_runtime_candidate(
         include_code_review,
     );
 
-    activate_runtime_launch_profile(paths, state, selection, &best_candidate.name)?;
+    activate_runtime_launch_profile(paths, state, request, selection, &best_candidate.name)?;
     print_wrapped_stderr(&selection_message);
     Ok(())
 }
@@ -448,7 +502,7 @@ fn handle_blocked_selected_runtime_profile(
     if request.allow_auto_rotate {
         if let Some(next_profile) = alternatives.first() {
             let next_profile = next_profile.clone();
-            activate_runtime_launch_profile(paths, state, selection, &next_profile)?;
+            activate_runtime_launch_profile(paths, state, request, selection, &next_profile)?;
             print_wrapped_stderr(&format!("Auto-rotating to profile '{}'.", next_profile));
         } else {
             print_wrapped_stderr("No other ready profile was found.");
@@ -473,10 +527,11 @@ fn handle_blocked_selected_runtime_profile(
 fn activate_runtime_launch_profile(
     paths: &AppPaths,
     state: &mut AppState,
+    request: &RuntimeLaunchRequest<'_>,
     selection: &mut RuntimeLaunchSelection,
     profile_name: &str,
 ) -> Result<()> {
-    selection.select_profile(state, profile_name)?;
+    selection.select_profile(state, profile_name, request.model_provider_override)?;
     state.active_profile = Some(profile_name.to_string());
     state.save(paths)?;
     Ok(())
@@ -502,4 +557,137 @@ fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<P
         );
     }
     Ok(profile.codex_home.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
+        let root = temp_dir("skip-proxy-non-openai");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let bedrock_home = root.join("bedrock-home");
+        let openai_home = root.join("openai-home");
+        fs::create_dir_all(&bedrock_home).unwrap();
+        fs::create_dir_all(&openai_home).unwrap();
+        fs::write(
+            bedrock_home.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        fs::write(
+            secret_store::auth_json_path(&openai_home),
+            r#"{"tokens":{"access_token":"chatgpt-token"}}"#,
+        )
+        .unwrap();
+        write_state(
+            &root,
+            AppState {
+                active_profile: Some("bedrock".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "bedrock".to_string(),
+                        ProfileEntry {
+                            codex_home: bedrock_home.clone(),
+                            managed: false,
+                            email: None,
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                    (
+                        "openai".to_string(),
+                        ProfileEntry {
+                            codex_home: openai_home,
+                            managed: false,
+                            email: None,
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                ]),
+                ..AppState::default()
+            },
+        );
+
+        let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+            profile: Some("bedrock"),
+            allow_auto_rotate: true,
+            skip_quota_check: false,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: false,
+            model_provider_override: None,
+        })
+        .unwrap();
+
+        assert_eq!(prepared.codex_home, bedrock_home);
+        assert!(prepared.runtime_proxy.is_none());
+    }
+
+    #[test]
+    fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
+        let root = temp_dir("reject-claude-non-openai");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let bedrock_home = root.join("bedrock-home");
+        fs::create_dir_all(&bedrock_home).unwrap();
+        fs::write(
+            bedrock_home.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        write_state(
+            &root,
+            AppState {
+                active_profile: Some("bedrock".to_string()),
+                profiles: BTreeMap::from([(
+                    "bedrock".to_string(),
+                    ProfileEntry {
+                        codex_home: bedrock_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                ..AppState::default()
+            },
+        );
+
+        let err = match prepare_runtime_launch(RuntimeLaunchRequest {
+            profile: Some("bedrock"),
+            allow_auto_rotate: true,
+            skip_quota_check: false,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: true,
+            model_provider_override: None,
+        }) {
+            Ok(_) => panic!("expected Claude launch to reject non-OpenAI model providers"),
+            Err(err) => err,
+        };
+
+        let message = format!("{err:#}");
+        assert!(message.contains("amazon-bedrock"));
+        assert!(message.contains("prodex claude"));
+    }
+
+    fn write_state(root: &Path, state: AppState) {
+        fs::create_dir_all(root).unwrap();
+        let paths = AppPaths::discover().unwrap();
+        state.save(&paths).unwrap();
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!(
+            "prodex-runtime-launch-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
+        dir
+    }
 }

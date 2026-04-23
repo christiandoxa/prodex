@@ -163,6 +163,7 @@ pub(crate) fn fetch_profile_quota(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<ProviderQuotaSnapshot> {
+    ensure_profile_supports_quota(provider, codex_home)?;
     match provider {
         ProfileProvider::Openai => Ok(ProviderQuotaSnapshot::OpenAi(fetch_usage(
             codex_home, base_url,
@@ -178,6 +179,7 @@ pub(crate) fn fetch_profile_quota_json(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<serde_json::Value> {
+    ensure_profile_supports_quota(provider, codex_home)?;
     match provider {
         ProfileProvider::Openai => fetch_usage_json(codex_home, base_url),
         ProfileProvider::Copilot { host, login, .. } => {
@@ -202,6 +204,18 @@ pub(crate) fn fetch_usage_json(
     base_url: Option<&str>,
 ) -> Result<serde_json::Value> {
     UsageFetchFlow::new(codex_home, base_url)?.execute()
+}
+
+fn ensure_profile_supports_quota(provider: &ProfileProvider, codex_home: &Path) -> Result<()> {
+    if matches!(provider, ProfileProvider::Openai)
+        && let Some(model_provider) = codex_non_openai_model_provider(codex_home, None)
+    {
+        bail!(
+            "quota is unavailable for model_provider '{}'; prodex quota only supports the default OpenAI/Codex provider",
+            model_provider.provider_id,
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn print_quota_reports(reports: &[QuotaReport], detail: bool) {

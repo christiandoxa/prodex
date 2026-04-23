@@ -82,7 +82,7 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("gpt-5".to_string())
+        Some("opus".to_string())
     );
     assert_eq!(
         env.iter()
@@ -157,7 +157,7 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
 
 #[test]
 fn runtime_proxy_claude_launch_env_honors_model_override() {
-    let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5-mini");
+    let _model_guard = TestEnvVarGuard::set("PRODEX_CLAUDE_MODEL", "gpt-5.4-mini");
     let temp_dir = TestDir::new();
     let env = runtime_proxy_claude_launch_env(
         "127.0.0.1:43124"
@@ -171,7 +171,7 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some("gpt-5-mini".to_string())
+        Some("haiku".to_string())
     );
     assert!(env
         .iter()
@@ -296,7 +296,7 @@ fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models()
     );
     assert_eq!(
         runtime_proxy_claude_target_model("claude-haiku-3-5"),
-        "gpt-5-mini".to_string()
+        "gpt-5.4-mini".to_string()
     );
 }
 
@@ -420,13 +420,13 @@ fn ensure_runtime_proxy_claude_launch_config_seeds_onboarding_and_project_trust(
     let additional_model_options = config["additionalModelOptionsCache"]
         .as_array()
         .expect("additional model options cache should be an array");
-    assert_eq!(additional_model_options.len(), 6);
+    assert_eq!(additional_model_options.len(), 1);
     assert!(!additional_model_options.iter().any(|entry| {
         entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
     }));
     assert!(additional_model_options.iter().any(|entry| {
-        entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.2-codex")
-            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.2-codex")
+        entry.get("value").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
+            && entry.get("label").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
     }));
 
     let project_key = cwd.to_string_lossy().into_owned();
@@ -857,7 +857,7 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
         .expect("models data should be an array");
     assert_eq!(
         data.len(),
-        9,
+        4,
         "metadata route should expose the prodex Claude OpenAI model catalog"
     );
     assert!(data.iter().all(|model| {
@@ -873,16 +873,13 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
     assert!(data
         .iter()
         .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2") }));
-    assert!(data
-        .iter()
-        .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5") }));
     assert!(data.iter().any(|model| {
-        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5-mini")
+        model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4-mini")
     }));
 
     let model: serde_json::Value = client
         .get(format!(
-            "http://{}/v1/models/gpt-5?beta=true",
+            "http://{}/v1/models/gpt-5.4?beta=true",
             proxy.listen_addr
         ))
         .send()
@@ -891,13 +888,13 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
         .expect("model response should parse");
     assert_eq!(
         model.get("id").and_then(serde_json::Value::as_str),
-        Some("gpt-5")
+        Some("gpt-5.4")
     );
     assert_eq!(
         model
             .get("display_name")
             .and_then(serde_json::Value::as_str),
-        Some("GPT-5")
+        Some("GPT-5.4")
     );
 
     assert!(
