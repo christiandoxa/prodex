@@ -1349,7 +1349,7 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
 }
 
 #[test]
-fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through() {
+fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_stale_continuation() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -1446,12 +1446,27 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
         "client should see committed model output before the later continuation error: {frames:?}"
     );
     assert!(
-        error_message.contains("previous_response_not_found"),
-        "post-commit websocket continuation error should pass through raw upstream payload: {error_message}"
+        error_message.contains("\"code\":\"stale_continuation\""),
+        "post-commit websocket continuation error should surface stale_continuation: {error_message}"
     );
     assert!(
-        !error_message.contains("stale_continuation"),
-        "post-commit websocket continuation error must not be rewritten after commit: {error_message}"
+        !error_message.contains("previous_response_not_found"),
+        "proxy should not leak raw previous_response_not_found after a committed websocket chain dies: {error_message}"
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| {
+            log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
+        },
+        500,
+        2_000,
+        20,
+    );
+    let log_tail = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log_tail.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
+        "runtime log should classify the committed websocket loss as stale continuation: {log_tail}"
     );
 
     let continuations = wait_for_runtime_continuations(&paths, |continuations| {

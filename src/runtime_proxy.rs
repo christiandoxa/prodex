@@ -2318,8 +2318,37 @@ pub(super) fn attempt_runtime_websocket_request(
                         &dead_response_ids,
                         "previous_response_not_found_after_commit",
                     );
+                    runtime_proxy_log_previous_response_stale_continuation(
+                        shared,
+                        RuntimePreviousResponseLogContext {
+                            request_id,
+                            transport: "websocket",
+                            route: "websocket",
+                            websocket_session: None,
+                            via: None,
+                        },
+                        profile_name,
+                    );
+                    runtime_proxy_log_chain_dead_upstream_confirmed(
+                        shared,
+                        RuntimeProxyChainLog {
+                            request_id,
+                            transport: "websocket",
+                            route: "websocket",
+                            websocket_session: None,
+                            profile_name,
+                            previous_response_id: request_previous_response_id,
+                            reason: "previous_response_not_found_locked_affinity",
+                            via: None,
+                        },
+                        Some("post_commit"),
+                    );
                 }
-                let text = runtime_translate_previous_response_websocket_text_frame(&text);
+                let text = if committed_previous_response_not_found {
+                    runtime_translate_precommit_previous_response_websocket_text_frame(&text)
+                } else {
+                    runtime_translate_previous_response_websocket_text_frame(&text)
+                };
                 local_socket
                     .send(WsMessage::Text(text.into()))
                     .with_context(|| {

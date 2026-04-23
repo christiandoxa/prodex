@@ -810,7 +810,9 @@ pub(super) fn runtime_translate_previous_response_websocket_text_frame(payload: 
     payload.to_string()
 }
 
-fn runtime_translate_precommit_previous_response_websocket_text_frame(payload: &str) -> String {
+pub(super) fn runtime_translate_precommit_previous_response_websocket_text_frame(
+    payload: &str,
+) -> String {
     if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
         return payload.to_string();
     }
