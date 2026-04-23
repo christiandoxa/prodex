@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn translate_runtime_anthropic_messages_request_maps_tools_and_tool_results() {
+    let _effort_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_REASONING_EFFORT");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -2895,6 +2896,7 @@ fn translate_runtime_anthropic_messages_request_compacts_verbose_web_search_tool
 
 #[test]
 fn runtime_proxy_anthropic_reasoning_effort_normalizes_output_config_levels() {
+    let _effort_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_REASONING_EFFORT");
     let cases = [
         ("gpt-5.4", "low", Some("low")),
         ("gpt-5.4", "medium", Some("medium")),
@@ -2921,6 +2923,7 @@ fn runtime_proxy_anthropic_reasoning_effort_normalizes_output_config_levels() {
 
 #[test]
 fn translate_runtime_anthropic_messages_request_maps_max_effort_to_xhigh_for_supported_model() {
+    let _effort_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_REASONING_EFFORT");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -2958,6 +2961,7 @@ fn translate_runtime_anthropic_messages_request_maps_max_effort_to_xhigh_for_sup
 
 #[test]
 fn translate_runtime_anthropic_messages_request_keeps_max_effort_at_high_for_legacy_model() {
+    let _effort_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_REASONING_EFFORT");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
