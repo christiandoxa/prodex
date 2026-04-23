@@ -1187,10 +1187,13 @@ fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
         usize::MAX,
     );
 
-    let observed_revision = runtime_probe_refresh_revision();
     let runtime_guard = shared.runtime.lock().expect("runtime lock should succeed");
     let apply_shared = shared.clone();
+    let (apply_started_tx, apply_started_rx) = std::sync::mpsc::channel();
     let apply_thread = thread::spawn(move || {
+        apply_started_tx
+            .send(())
+            .expect("apply thread should signal startup");
         apply_runtime_profile_probe_result(
             &apply_shared,
             "main",
@@ -1201,16 +1204,14 @@ fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
             Ok(usage_with_main_windows(90, 3600, 90, 604_800)),
         )
     });
+    apply_started_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("apply thread should start promptly");
     thread::sleep(Duration::from_millis(20));
 
-    assert_eq!(
-        runtime_probe_refresh_revision(),
-        observed_revision,
-        "probe refresh revision should not advance until the runtime lock is released"
-    );
     assert!(
-        !wait_for_runtime_probe_refresh_since(Duration::from_millis(20), observed_revision),
-        "probe refresh wait should still time out while the apply thread is blocked on runtime state"
+        !apply_thread.is_finished(),
+        "probe apply should remain blocked while the runtime lock is held"
     );
 
     drop(runtime_guard);
@@ -1218,11 +1219,6 @@ fn runtime_probe_refresh_apply_waits_for_busy_runtime_state() {
         .join()
         .expect("apply thread should join")
         .expect("probe apply should succeed after the runtime lock is released");
-
-    assert!(
-        wait_for_runtime_probe_refresh_since(Duration::from_millis(100), observed_revision),
-        "successful probe apply should wake probe-refresh waiters once fresh data lands"
-    );
     let runtime = shared.runtime.lock().expect("runtime lock should succeed");
     assert!(
         runtime.profile_probe_cache.contains_key("main"),

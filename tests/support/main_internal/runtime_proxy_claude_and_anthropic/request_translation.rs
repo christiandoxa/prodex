@@ -1454,6 +1454,7 @@ fn translate_runtime_anthropic_messages_request_preserves_structured_error_tool_
 
 #[test]
 fn translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_tools() {
+    let _env_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
