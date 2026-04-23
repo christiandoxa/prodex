@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
     let temp_dir = TestDir::new();
@@ -1886,4 +1888,3 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         Some("second".to_string())
     );
 }
-

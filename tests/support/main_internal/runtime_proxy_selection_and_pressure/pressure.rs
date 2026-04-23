@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn runtime_proxy_default_worker_counts_stay_defensive() {
     assert_eq!(runtime_proxy_worker_count_default(1), 4);
@@ -498,4 +500,3 @@ fn runtime_fault_injection_consumes_budget() {
         "PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE"
     ));
 }
-

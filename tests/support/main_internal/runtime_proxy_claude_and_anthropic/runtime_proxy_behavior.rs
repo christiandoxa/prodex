@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn runtime_proxy_translates_anthropic_messages_to_responses_and_back() {
     let temp_dir = TestDir::new();

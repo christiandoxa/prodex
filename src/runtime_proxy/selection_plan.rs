@@ -515,6 +515,228 @@ mod tests {
         );
     }
 
+    #[test]
+    fn candidate_plan_orders_ready_candidates_by_execution_priority() {
+        let state = RuntimeRouteSelectionCatalog {
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            entries: vec![
+                selection_entry(
+                    "snapshot_same_load",
+                    SelectionEntryFixture {
+                        inflight_count: 1,
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "live_busy",
+                    SelectionEntryFixture {
+                        inflight_count: 2,
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "live_idle_healthy",
+                    SelectionEntryFixture {
+                        inflight_count: 1,
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "live_idle_unhealthy",
+                    SelectionEntryFixture {
+                        inflight_count: 1,
+                        health_sort_key: 5,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "lower_priority_provider",
+                    SelectionEntryFixture {
+                        inflight_count: 0,
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+            ],
+        };
+        let healthy_usage = test_usage_with_unbounded_main_windows(80, 85);
+        let ready_candidates = vec![
+            ready_candidate(
+                "snapshot_same_load",
+                healthy_usage.clone(),
+                0,
+                RuntimeQuotaSource::PersistedSnapshot,
+            ),
+            ready_candidate(
+                "live_busy",
+                healthy_usage.clone(),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate(
+                "live_idle_healthy",
+                healthy_usage.clone(),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate(
+                "live_idle_unhealthy",
+                healthy_usage.clone(),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate(
+                "lower_priority_provider",
+                healthy_usage,
+                1,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+        ];
+
+        let plan = build_runtime_response_candidate_execution_plan(
+            &state,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            3,
+            ready_candidates,
+            |_| 0,
+        );
+
+        assert_eq!(
+            plan.ready_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "live_idle_healthy",
+                "live_idle_unhealthy",
+                "live_busy",
+                "snapshot_same_load",
+                "lower_priority_provider",
+            ]
+        );
+        assert!(
+            plan.ready_candidates
+                .iter()
+                .all(|candidate| candidate.ready_skip_reason().is_none())
+        );
+    }
+
+    #[test]
+    fn candidate_plan_orders_fallback_candidates_and_reports_skip_reasons() {
+        let state = RuntimeRouteSelectionCatalog {
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            entries: vec![
+                selection_entry(
+                    "backoff",
+                    SelectionEntryFixture {
+                        in_selection_backoff: true,
+                        backoff_sort_key: (0, 0, 0, 0),
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "fresh",
+                    SelectionEntryFixture {
+                        backoff_sort_key: (1, 0, 0, 0),
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "auth",
+                    SelectionEntryFixture {
+                        auth_failure_active: true,
+                        backoff_sort_key: (2, 0, 0, 0),
+                        health_sort_key: 1,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(
+                    "quota",
+                    SelectionEntryFixture {
+                        backoff_sort_key: (3, 0, 0, 0),
+                        health_sort_key: 0,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+            ],
+        };
+        let healthy_usage = test_usage_with_unbounded_main_windows(80, 85);
+        let ready_candidates = vec![
+            ready_candidate(
+                "quota",
+                test_usage_with_main_windows(2, 3_600, 50, 86_400),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate(
+                "auth",
+                healthy_usage.clone(),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate(
+                "backoff",
+                healthy_usage.clone(),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate("fresh", healthy_usage, 0, RuntimeQuotaSource::LiveProbe),
+        ];
+
+        let plan = build_runtime_response_candidate_execution_plan(
+            &state,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            3,
+            ready_candidates,
+            |_| 0,
+        );
+
+        assert_eq!(
+            plan.ready_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fresh", "auth", "quota"]
+        );
+        assert_eq!(plan.ready_candidates[0].ready_skip_reason(), None);
+        assert_eq!(
+            plan.ready_candidates[1].ready_skip_reason(),
+            Some("auth_failure_backoff")
+        );
+        assert_eq!(
+            plan.ready_candidates[2].ready_skip_reason(),
+            Some("quota_critical_floor_before_send")
+        );
+        assert_eq!(
+            plan.fallback_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["backoff", "fresh", "auth", "quota"]
+        );
+        assert_eq!(plan.fallback_candidates[0].fallback_skip_reason(), None);
+        assert_eq!(plan.fallback_candidates[1].fallback_skip_reason(), None);
+        assert_eq!(
+            plan.fallback_candidates[2].fallback_skip_reason(),
+            Some("auth_failure_backoff")
+        );
+        assert_eq!(
+            plan.fallback_candidates[3].fallback_skip_reason(),
+            Some("quota_critical_floor_before_send")
+        );
+    }
+
     #[derive(Default)]
     struct SelectionEntryFixture {
         cached_probe_entry: Option<RuntimeProfileProbeCacheEntry>,
@@ -549,6 +771,22 @@ mod tests {
         AuthSummary {
             label: "chatgpt".to_string(),
             quota_compatible: true,
+        }
+    }
+
+    fn ready_candidate(
+        name: &str,
+        usage: UsageResponse,
+        provider_priority: usize,
+        quota_source: RuntimeQuotaSource,
+    ) -> ReadyProfileCandidate {
+        ReadyProfileCandidate {
+            name: name.to_string(),
+            usage,
+            order_index: 0,
+            preferred: false,
+            provider_priority,
+            quota_source,
         }
     }
 

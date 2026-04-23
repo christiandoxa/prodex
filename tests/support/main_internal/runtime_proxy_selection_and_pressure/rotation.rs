@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn rotates_profiles_after_current_profile() {
     let state = AppState {

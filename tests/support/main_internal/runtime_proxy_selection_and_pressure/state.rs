@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn merge_runtime_usage_snapshots_keeps_newer_entries() {
     let now = Local::now().timestamp();

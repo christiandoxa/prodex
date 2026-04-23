@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn runtime_doctor_json_value_includes_selection_markers() {
     let mut summary = RuntimeDoctorSummary {

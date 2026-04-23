@@ -1,0 +1,230 @@
+name: runtime proxy benchmark calibration
+
+on:
+  workflow_dispatch:
+    inputs:
+      log_source:
+        description: Where to get benchmark logs
+        required: false
+        default: fresh-benchmark
+        type: choice
+        options:
+          - fresh-benchmark
+          - run-log
+          - pasted-log
+      run_id:
+        description: Existing Actions run id to fetch logs from when log_source=run-log
+        required: false
+        default: ""
+        type: string
+      bench_log:
+        description: Raw benchmark log text when log_source=pasted-log
+        required: false
+        default: ""
+        type: string
+      basis:
+        description: Calibration basis for suggested thresholds
+        required: false
+        default: max
+        type: choice
+        options:
+          - max
+          - percentile
+      margin_percent:
+        description: Safety margin over the selected basis
+        required: false
+        default: "25"
+        type: string
+      percentile:
+        description: Percentile used for reporting and percentile basis mode
+        required: false
+        default: "90"
+        type: string
+      threshold_scale:
+        description: Threshold scale for fresh benchmark runs only
+        required: false
+        default: "200"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: bench-calibration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Rust toolchain
+        if: ${{ inputs.log_source == 'fresh-benchmark' }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        if: ${{ inputs.log_source == 'fresh-benchmark' }}
+        uses: Swatinem/rust-cache@v2
+
+      - name: Collect benchmark log
+        id: collect
+        shell: bash
+        env:
+          LOG_SOURCE_INPUT: ${{ inputs.log_source }}
+          RUN_ID_INPUT: ${{ inputs.run_id }}
+          BENCH_LOG_INPUT: ${{ inputs.bench_log }}
+          THRESHOLD_SCALE_INPUT: ${{ inputs.threshold_scale }}
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/bench-calibration"
+          log_file="${artifact_dir}/benchmark.log"
+          metadata_file="${artifact_dir}/metadata.json"
+          mkdir -p "${artifact_dir}"
+
+          source_kind=""
+          source_detail=""
+          fresh_bench_status=0
+
+          case "${LOG_SOURCE_INPUT}" in
+            fresh-benchmark)
+              set +e
+              PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 \
+              PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE="${THRESHOLD_SCALE_INPUT}" \
+              cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths \
+                > "${log_file}" 2>&1
+              fresh_bench_status=$?
+              set -e
+              source_kind="fresh-benchmark"
+              source_detail="runtime_proxy_hot_paths"
+              ;;
+            run-log)
+              if [ -z "${RUN_ID_INPUT}" ]; then
+                echo "run_id is required when log_source=run-log" >&2
+                exit 1
+              fi
+              gh run view "${RUN_ID_INPUT}" --repo "${GITHUB_REPOSITORY}" --log > "${log_file}"
+              source_kind="run-log"
+              source_detail="${RUN_ID_INPUT}"
+              ;;
+            pasted-log)
+              if [ -z "${BENCH_LOG_INPUT}" ]; then
+                echo "bench_log is required when log_source=pasted-log" >&2
+                exit 1
+              fi
+              printf '%s\n' "${BENCH_LOG_INPUT}" > "${log_file}"
+              source_kind="pasted-log"
+              source_detail="workflow_dispatch"
+              ;;
+            *)
+              echo "unsupported log_source: ${LOG_SOURCE_INPUT}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ ! -s "${log_file}" ]; then
+            echo "benchmark log source produced no data" >&2
+            exit 1
+          fi
+
+          node -e '
+          const fs = require("node:fs");
+          const metadataPath = process.argv[1];
+          const payload = {
+            event_name: process.env.GITHUB_EVENT_NAME,
+            ref: process.env.GITHUB_REF,
+            sha: process.env.GITHUB_SHA,
+            run_id: process.env.GITHUB_RUN_ID,
+            run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+            source_kind: process.argv[2],
+            source_detail: process.argv[3],
+            fresh_bench_status: Number.parseInt(process.argv[4], 10) || 0,
+            threshold_scale: process.argv[5],
+          };
+          fs.writeFileSync(metadataPath, JSON.stringify(payload, null, 2) + "\n");
+          ' "${metadata_file}" "${source_kind}" "${source_detail}" "${fresh_bench_status}" "${THRESHOLD_SCALE_INPUT}"
+
+          {
+            echo "artifact_dir=${artifact_dir}"
+            echo "log_file=${log_file}"
+            echo "metadata_file=${metadata_file}"
+            echo "source_kind=${source_kind}"
+            echo "source_detail=${source_detail}"
+            echo "fresh_bench_status=${fresh_bench_status}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Run calibration summary
+        id: calibrate
+        shell: bash
+        env:
+          BASIS_INPUT: ${{ inputs.basis }}
+          MARGIN_PERCENT_INPUT: ${{ inputs.margin_percent }}
+          PERCENTILE_INPUT: ${{ inputs.percentile }}
+        run: |
+          set -euo pipefail
+          artifact_dir="${{ steps.collect.outputs.artifact_dir }}"
+          table_file="${artifact_dir}/calibration.txt"
+          json_file="${artifact_dir}/calibration.json"
+
+          node scripts/ci/benchmark-calibration.mjs \
+            --basis "${BASIS_INPUT}" \
+            --margin-percent "${MARGIN_PERCENT_INPUT}" \
+            --percentile "${PERCENTILE_INPUT}" \
+            "${{ steps.collect.outputs.log_file }}" > "${table_file}"
+
+          node scripts/ci/benchmark-calibration.mjs \
+            --basis "${BASIS_INPUT}" \
+            --margin-percent "${MARGIN_PERCENT_INPUT}" \
+            --percentile "${PERCENTILE_INPUT}" \
+            --json \
+            "${{ steps.collect.outputs.log_file }}" > "${json_file}"
+
+          {
+            echo "table_file=${table_file}"
+            echo "json_file=${json_file}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Publish workflow summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Runtime proxy benchmark calibration"
+            echo
+            echo "- Source: \`${{ steps.collect.outputs.source_kind }}\`"
+            echo "- Source detail: \`${{ steps.collect.outputs.source_detail }}\`"
+            echo "- Basis: \`${{ inputs.basis }}\`"
+            echo "- Margin percent: \`${{ inputs.margin_percent }}\`"
+            echo "- Percentile: \`${{ inputs.percentile }}\`"
+            if [ "${{ steps.collect.outputs.fresh_bench_status }}" != "0" ]; then
+              echo "- Fresh benchmark exit status: \`${{ steps.collect.outputs.fresh_bench_status }}\`"
+            fi
+            if [ -f "${{ steps.calibrate.outputs.table_file }}" ]; then
+              echo
+              echo '```text'
+              cat "${{ steps.calibrate.outputs.table_file }}"
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload calibration artifact
+        if: ${{ always() && steps.collect.outputs.artifact_dir != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-calibration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.collect.outputs.artifact_dir }}
+          if-no-files-found: error
+          retention-days: 14

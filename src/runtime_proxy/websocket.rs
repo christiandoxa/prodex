@@ -406,7 +406,7 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
             return Err(transport_error);
         }
         let started_at = Instant::now();
-        match connect_runtime_proxy_upstream_websocket_with_timeout(request) {
+        match connect_runtime_proxy_upstream_websocket_with_timeout(request_id, shared, request) {
             Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
                 return Ok(RuntimeWebsocketConnectResult::Connected {
                     socket,
@@ -521,6 +521,8 @@ pub(super) fn runtime_websocket_error_payload_from_http_body(
 }
 
 pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
     request: tungstenite::http::Request<()>,
 ) -> std::result::Result<
     (
@@ -532,7 +534,7 @@ pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
     ),
     WsError,
 > {
-    let stream = connect_runtime_proxy_upstream_tcp_stream(request.uri())?;
+    let stream = connect_runtime_proxy_upstream_tcp_stream(request_id, shared, request.uri())?;
     let selected_addr = stream.selected_addr;
     let resolved_addrs = stream.resolved_addrs;
     let attempted_addrs = stream.attempted_addrs;
@@ -589,30 +591,106 @@ pub(super) fn runtime_configure_upstream_tcp_stream(
 
 type RuntimeWebsocketTcpConnectJob = Box<dyn FnOnce() + Send + 'static>;
 
+#[derive(Clone)]
+struct RuntimeWebsocketTcpConnectTaskObservability {
+    log_path: Option<PathBuf>,
+    request_id: Option<u64>,
+    addr: Option<SocketAddr>,
+}
+
+struct RuntimeWebsocketTcpConnectTask {
+    job: RuntimeWebsocketTcpConnectJob,
+    observability: RuntimeWebsocketTcpConnectTaskObservability,
+}
+
+impl RuntimeWebsocketTcpConnectTask {
+    fn new(
+        job: RuntimeWebsocketTcpConnectJob,
+        log_path: Option<&Path>,
+        request_id: Option<u64>,
+        addr: Option<SocketAddr>,
+    ) -> Self {
+        Self {
+            job,
+            observability: RuntimeWebsocketTcpConnectTaskObservability {
+                log_path: log_path.map(Path::to_path_buf),
+                request_id,
+                addr,
+            },
+        }
+    }
+
+    fn run(self) {
+        (self.job)();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RuntimeWebsocketTcpConnectOverflowSnapshot {
+    pending_jobs: usize,
+    max_pending_jobs: usize,
+    total_enqueued: usize,
+    total_dispatched: usize,
+}
+
+#[derive(Default)]
+struct RuntimeWebsocketTcpConnectOverflowState {
+    jobs: VecDeque<RuntimeWebsocketTcpConnectTask>,
+    total_enqueued: usize,
+    total_dispatched: usize,
+    max_pending_jobs: usize,
+}
+
 #[derive(Default)]
 struct RuntimeWebsocketTcpConnectOverflowQueue {
-    state: Mutex<VecDeque<RuntimeWebsocketTcpConnectJob>>,
+    state: Mutex<RuntimeWebsocketTcpConnectOverflowState>,
     work_available: Condvar,
 }
 
 impl RuntimeWebsocketTcpConnectOverflowQueue {
-    fn push(&self, job: RuntimeWebsocketTcpConnectJob) {
+    fn push(
+        &self,
+        task: RuntimeWebsocketTcpConnectTask,
+    ) -> RuntimeWebsocketTcpConnectOverflowSnapshot {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.push_back(job);
+        state.jobs.push_back(task);
+        state.total_enqueued = state.total_enqueued.saturating_add(1);
+        state.max_pending_jobs = state.max_pending_jobs.max(state.jobs.len());
+        let snapshot = RuntimeWebsocketTcpConnectOverflowSnapshot {
+            pending_jobs: state.jobs.len(),
+            max_pending_jobs: state.max_pending_jobs,
+            total_enqueued: state.total_enqueued,
+            total_dispatched: state.total_dispatched,
+        };
         self.work_available.notify_one();
+        snapshot
     }
 
-    fn pop(&self) -> RuntimeWebsocketTcpConnectJob {
+    fn pop(
+        &self,
+    ) -> (
+        RuntimeWebsocketTcpConnectTask,
+        RuntimeWebsocketTcpConnectOverflowSnapshot,
+    ) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         loop {
-            if let Some(job) = state.pop_front() {
-                return job;
+            if let Some(task) = state.jobs.pop_front() {
+                state.total_dispatched = state.total_dispatched.saturating_add(1);
+                return (
+                    task,
+                    RuntimeWebsocketTcpConnectOverflowSnapshot {
+                        pending_jobs: state.jobs.len(),
+                        max_pending_jobs: state.max_pending_jobs,
+                        total_enqueued: state.total_enqueued,
+                        total_dispatched: state.total_dispatched,
+                    },
+                );
             }
             state = self
                 .work_available
@@ -620,11 +698,25 @@ impl RuntimeWebsocketTcpConnectOverflowQueue {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
         }
     }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> RuntimeWebsocketTcpConnectOverflowSnapshot {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        RuntimeWebsocketTcpConnectOverflowSnapshot {
+            pending_jobs: state.jobs.len(),
+            max_pending_jobs: state.max_pending_jobs,
+            total_enqueued: state.total_enqueued,
+            total_dispatched: state.total_dispatched,
+        }
+    }
 }
 
 enum RuntimeWebsocketTcpConnectExecutorMode {
     Bounded {
-        sender: SyncSender<RuntimeWebsocketTcpConnectJob>,
+        sender: SyncSender<RuntimeWebsocketTcpConnectTask>,
         overflow: Arc<RuntimeWebsocketTcpConnectOverflowQueue>,
     },
     Inline,
@@ -632,6 +724,8 @@ enum RuntimeWebsocketTcpConnectExecutorMode {
 
 struct RuntimeWebsocketTcpConnectExecutor {
     mode: RuntimeWebsocketTcpConnectExecutorMode,
+    worker_count: usize,
+    queue_capacity: usize,
 }
 
 impl RuntimeWebsocketTcpConnectExecutor {
@@ -648,7 +742,7 @@ impl RuntimeWebsocketTcpConnectExecutor {
         let worker_count = worker_count.max(1);
         let queue_capacity = queue_capacity.max(worker_count).max(1);
         let (sender, receiver) =
-            mpsc::sync_channel::<RuntimeWebsocketTcpConnectJob>(queue_capacity);
+            mpsc::sync_channel::<RuntimeWebsocketTcpConnectTask>(queue_capacity);
         let receiver = Arc::new(Mutex::new(receiver));
         let overflow = Arc::new(RuntimeWebsocketTcpConnectOverflowQueue::default());
         let mut started_workers = 0usize;
@@ -667,6 +761,8 @@ impl RuntimeWebsocketTcpConnectExecutor {
         if started_workers == 0 {
             return Self {
                 mode: RuntimeWebsocketTcpConnectExecutorMode::Inline,
+                worker_count,
+                queue_capacity,
             };
         }
 
@@ -675,39 +771,95 @@ impl RuntimeWebsocketTcpConnectExecutor {
         let dispatcher_started = thread::Builder::new()
             .name("prodex-ws-connect-dispatch".to_string())
             .spawn(move || {
-                runtime_websocket_tcp_connect_dispatcher_loop(overflow_queue, overflow_sender)
+                runtime_websocket_tcp_connect_dispatcher_loop(
+                    overflow_queue,
+                    overflow_sender,
+                    worker_count,
+                    queue_capacity,
+                )
             })
             .is_ok();
         if !dispatcher_started {
             return Self {
                 mode: RuntimeWebsocketTcpConnectExecutorMode::Inline,
+                worker_count,
+                queue_capacity,
             };
         }
 
         Self {
             mode: RuntimeWebsocketTcpConnectExecutorMode::Bounded { sender, overflow },
+            worker_count,
+            queue_capacity,
         }
     }
 
+    #[cfg(test)]
     fn spawn<F>(&self, job: F)
     where
         F: FnOnce() + Send + 'static,
     {
-        self.spawn_boxed(Box::new(job));
+        self.spawn_observed(None, None, None, job);
     }
 
-    fn spawn_boxed(&self, job: RuntimeWebsocketTcpConnectJob) {
+    fn spawn_observed<F>(
+        &self,
+        log_path: Option<&Path>,
+        request_id: Option<u64>,
+        addr: Option<SocketAddr>,
+        job: F,
+    ) where
+        F: FnOnce() + Send + 'static,
+    {
+        self.spawn_boxed(RuntimeWebsocketTcpConnectTask::new(
+            Box::new(job),
+            log_path,
+            request_id,
+            addr,
+        ));
+    }
+
+    fn spawn_boxed(&self, task: RuntimeWebsocketTcpConnectTask) {
         match &self.mode {
             RuntimeWebsocketTcpConnectExecutorMode::Bounded { sender, overflow } => {
-                if let Err(err) = sender.try_send(job) {
+                if let Err(err) = sender.try_send(task) {
                     match err {
-                        mpsc::TrySendError::Full(job) | mpsc::TrySendError::Disconnected(job) => {
-                            overflow.push(job)
+                        mpsc::TrySendError::Full(task) => {
+                            let observability = task.observability.clone();
+                            let snapshot = overflow.push(task);
+                            runtime_websocket_tcp_connect_log_overflow_enqueue(
+                                &observability,
+                                self.worker_count,
+                                self.queue_capacity,
+                                snapshot,
+                                "queue_full",
+                            );
+                        }
+                        mpsc::TrySendError::Disconnected(task) => {
+                            let observability = task.observability.clone();
+                            let snapshot = overflow.push(task);
+                            runtime_websocket_tcp_connect_log_overflow_enqueue(
+                                &observability,
+                                self.worker_count,
+                                self.queue_capacity,
+                                snapshot,
+                                "executor_disconnected",
+                            );
                         }
                     }
                 }
             }
-            RuntimeWebsocketTcpConnectExecutorMode::Inline => job(),
+            RuntimeWebsocketTcpConnectExecutorMode::Inline => task.run(),
+        }
+    }
+
+    #[cfg(test)]
+    fn overflow_snapshot(&self) -> Option<RuntimeWebsocketTcpConnectOverflowSnapshot> {
+        match &self.mode {
+            RuntimeWebsocketTcpConnectExecutorMode::Bounded { overflow, .. } => {
+                Some(overflow.snapshot())
+            }
+            RuntimeWebsocketTcpConnectExecutorMode::Inline => None,
         }
     }
 }
@@ -742,19 +894,37 @@ fn runtime_websocket_tcp_connect_env_usize(name: &str, default: usize) -> usize 
 
 fn runtime_websocket_tcp_connect_dispatcher_loop(
     overflow: Arc<RuntimeWebsocketTcpConnectOverflowQueue>,
-    sender: SyncSender<RuntimeWebsocketTcpConnectJob>,
+    sender: SyncSender<RuntimeWebsocketTcpConnectTask>,
+    worker_count: usize,
+    queue_capacity: usize,
 ) {
     loop {
-        let job = overflow.pop();
-        match sender.send(job) {
-            Ok(()) => {}
-            Err(err) => (err.0)(),
+        let (task, snapshot) = overflow.pop();
+        let observability = task.observability.clone();
+        match sender.send(task) {
+            Ok(()) => runtime_websocket_tcp_connect_log_overflow_dispatch(
+                &observability,
+                worker_count,
+                queue_capacity,
+                snapshot,
+                "queue_available",
+            ),
+            Err(err) => {
+                runtime_websocket_tcp_connect_log_overflow_dispatch(
+                    &err.0.observability,
+                    worker_count,
+                    queue_capacity,
+                    snapshot,
+                    "executor_disconnected",
+                );
+                err.0.run();
+            }
         }
     }
 }
 
 fn runtime_websocket_tcp_connect_worker_loop(
-    receiver: Arc<Mutex<Receiver<RuntimeWebsocketTcpConnectJob>>>,
+    receiver: Arc<Mutex<Receiver<RuntimeWebsocketTcpConnectTask>>>,
 ) {
     loop {
         let job = {
@@ -767,22 +937,97 @@ fn runtime_websocket_tcp_connect_worker_loop(
         let Ok(job) = job else {
             break;
         };
-        job();
+        job.run();
     }
 }
 
+fn runtime_websocket_tcp_connect_log_overflow_enqueue(
+    observability: &RuntimeWebsocketTcpConnectTaskObservability,
+    worker_count: usize,
+    queue_capacity: usize,
+    snapshot: RuntimeWebsocketTcpConnectOverflowSnapshot,
+    reason: &str,
+) {
+    runtime_websocket_tcp_connect_log_overflow_event(
+        observability,
+        worker_count,
+        queue_capacity,
+        snapshot,
+        "websocket_connect_overflow_enqueue",
+        reason,
+    );
+}
+
+fn runtime_websocket_tcp_connect_log_overflow_dispatch(
+    observability: &RuntimeWebsocketTcpConnectTaskObservability,
+    worker_count: usize,
+    queue_capacity: usize,
+    snapshot: RuntimeWebsocketTcpConnectOverflowSnapshot,
+    reason: &str,
+) {
+    runtime_websocket_tcp_connect_log_overflow_event(
+        observability,
+        worker_count,
+        queue_capacity,
+        snapshot,
+        "websocket_connect_overflow_dispatch",
+        reason,
+    );
+}
+
+fn runtime_websocket_tcp_connect_log_overflow_event(
+    observability: &RuntimeWebsocketTcpConnectTaskObservability,
+    worker_count: usize,
+    queue_capacity: usize,
+    snapshot: RuntimeWebsocketTcpConnectOverflowSnapshot,
+    event: &str,
+    reason: &str,
+) {
+    let Some(log_path) = observability.log_path.as_ref() else {
+        return;
+    };
+
+    let request = observability
+        .request_id
+        .map(|request_id| format!("request={request_id} "))
+        .unwrap_or_default();
+    let addr = observability
+        .addr
+        .map(|addr| format!(" addr={addr}"))
+        .unwrap_or_default();
+    runtime_proxy_log_to_path(
+        log_path,
+        &format!(
+            "{request}transport=websocket {event} reason={reason}{addr} overflow_pending={} overflow_max_pending={} overflow_total_enqueued={} overflow_total_dispatched={} worker_count={worker_count} queue_capacity={queue_capacity}",
+            snapshot.pending_jobs,
+            snapshot.max_pending_jobs,
+            snapshot.total_enqueued,
+            snapshot.total_dispatched,
+        ),
+    );
+}
+
 pub(super) fn runtime_launch_websocket_tcp_connect_attempt(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
     sender: mpsc::Sender<RuntimeWebsocketTcpAttemptResult>,
     addr: SocketAddr,
     connect_timeout: Duration,
 ) {
-    RuntimeWebsocketTcpConnectExecutor::global().spawn(move || {
-        let result = TcpStream::connect_timeout(&addr, connect_timeout);
-        let _ = sender.send(RuntimeWebsocketTcpAttemptResult { addr, result });
-    });
+    RuntimeWebsocketTcpConnectExecutor::global().spawn_observed(
+        Some(shared.log_path.as_path()),
+        Some(request_id),
+        Some(addr),
+        move || {
+            let result = TcpStream::connect_timeout(&addr, connect_timeout);
+            let _ = sender.send(RuntimeWebsocketTcpAttemptResult { addr, result });
+        },
+    );
 }
 
 pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
     uri: &tungstenite::http::Uri,
 ) -> std::result::Result<RuntimeWebsocketTcpConnectSuccess, WsError> {
     let host = uri.host().ok_or(WsError::Url(WsUrlError::NoHostName))?;
@@ -819,6 +1064,8 @@ pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
     while next_index < addrs.len() || in_flight > 0 {
         if in_flight == 0 && next_index < addrs.len() {
             runtime_launch_websocket_tcp_connect_attempt(
+                request_id,
+                shared,
                 sender.clone(),
                 addrs[next_index],
                 connect_timeout,
@@ -834,6 +1081,8 @@ pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
                 Ok(result) => Some(result),
                 Err(RecvTimeoutError::Timeout) => {
                     runtime_launch_websocket_tcp_connect_attempt(
+                        request_id,
+                        shared,
                         sender.clone(),
                         addrs[next_index],
                         connect_timeout,
@@ -1136,6 +1385,15 @@ mod tests {
         }
     }
 
+    fn websocket_test_log_path(name: &str) -> PathBuf {
+        static NEXT_LOG_ID: AtomicU64 = AtomicU64::new(1);
+        std::env::temp_dir().join(format!(
+            "prodex-websocket-{name}-{}-{}.log",
+            std::process::id(),
+            NEXT_LOG_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
     #[test]
     fn websocket_tcp_connect_executor_bounds_concurrent_jobs() {
         let executor = RuntimeWebsocketTcpConnectExecutor::new(2, 8);
@@ -1275,6 +1533,124 @@ mod tests {
                 .recv_timeout(Duration::from_secs(1))
                 .expect("websocket connect job should complete after release");
         }
+    }
+
+    #[test]
+    fn websocket_tcp_connect_executor_logs_overflow_pressure() {
+        let executor = RuntimeWebsocketTcpConnectExecutor::new(1, 1);
+        let log_path = websocket_test_log_path("overflow-pressure");
+        let _ = std::fs::remove_file(&log_path);
+        let started = Arc::new(AtomicUsize::new(0));
+        let (start_tx, start_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let addr = "127.0.0.1:443"
+            .parse::<SocketAddr>()
+            .expect("socket addr should parse");
+
+        for _ in 0..3 {
+            let started = Arc::clone(&started);
+            let start_tx = start_tx.clone();
+            let done_tx = done_tx.clone();
+            let gate = Arc::clone(&gate);
+            executor.spawn_observed(Some(log_path.as_path()), Some(41), Some(addr), move || {
+                started.fetch_add(1, Ordering::SeqCst);
+                start_tx.send(()).expect("start signal should send");
+
+                let (released, ready) = &*gate;
+                let mut released = released
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                while !*released {
+                    released = ready
+                        .wait(released)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+
+                done_tx.send(()).expect("done signal should send");
+            });
+        }
+
+        start_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first websocket connect job should start");
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            1,
+            "only the worker job should start before release"
+        );
+        assert!(
+            matches!(
+                start_rx.recv_timeout(Duration::from_millis(100)),
+                Err(RecvTimeoutError::Timeout)
+            ),
+            "overflow websocket connect jobs should stay queued instead of starting inline"
+        );
+
+        let overflow_snapshot = executor
+            .overflow_snapshot()
+            .expect("bounded websocket executor should expose overflow state");
+        assert!(
+            overflow_snapshot.total_enqueued >= 1,
+            "overflow path should record at least one enqueued job: {overflow_snapshot:?}"
+        );
+        assert!(
+            overflow_snapshot.max_pending_jobs >= 1,
+            "overflow path should record queued overflow work before release: {overflow_snapshot:?}"
+        );
+
+        let (released, ready) = &*gate;
+        *released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        ready.notify_all();
+
+        for _ in 0..3 {
+            done_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("websocket connect job should complete after release");
+        }
+
+        let overflow_snapshot = executor
+            .overflow_snapshot()
+            .expect("bounded websocket executor should expose overflow state");
+        assert_eq!(
+            overflow_snapshot.pending_jobs, 0,
+            "overflow queue should drain after worker release"
+        );
+        assert!(
+            overflow_snapshot.total_dispatched >= 1,
+            "overflow dispatcher should hand work back to the bounded queue: {overflow_snapshot:?}"
+        );
+
+        runtime_proxy_flush_logs_for_path(&log_path);
+        let log = std::fs::read_to_string(&log_path).expect("overflow runtime log should exist");
+        assert!(
+            log.contains(
+                "request=41 transport=websocket websocket_connect_overflow_enqueue reason=queue_full"
+            ),
+            "overflow enqueue log marker missing: {log}"
+        );
+        assert!(
+            log.contains(
+                "request=41 transport=websocket websocket_connect_overflow_dispatch reason=queue_available"
+            ),
+            "overflow dispatch log marker missing: {log}"
+        );
+        assert!(
+            log.contains("addr=127.0.0.1:443"),
+            "overflow log should include the connect address: {log}"
+        );
+        assert!(
+            log.contains("overflow_total_enqueued=") && log.contains("overflow_total_dispatched="),
+            "overflow log should include queue counters: {log}"
+        );
+        assert!(
+            log.contains("worker_count=1 queue_capacity=1"),
+            "overflow log should include executor bounds: {log}"
+        );
+
+        let _ = std::fs::remove_file(&log_path);
     }
 
     #[test]

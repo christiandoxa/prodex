@@ -1,3 +1,5 @@
+use super::*;
+
 struct RuntimeResponsesRequestBuilder {
     previous_response_id: Option<&'static str>,
     session_id: Option<&'static str>,

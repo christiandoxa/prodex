@@ -405,7 +405,8 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
 }
 
 
-include!("main_internal/runtime_proxy_selection_and_pressure.rs");
+#[path = "main_internal/runtime_proxy_selection_and_pressure.rs"]
+mod runtime_proxy_selection_and_pressure;
 
 #[test]
 fn version_is_newer_compares_semver_like_versions() {
@@ -1284,7 +1285,8 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
     assert_eq!(health.current_profile, "second");
 }
 
-include!("main_internal/runtime_proxy_continuations.rs");
+#[path = "main_internal/runtime_proxy_continuations.rs"]
+mod runtime_proxy_continuations;
 
 #[test]
 fn runtime_proxy_worker_count_env_override_beats_policy_file() {
@@ -1606,7 +1608,8 @@ fn runtime_broker_lease_drop_removes_file() {
     );
 }
 
-include!("main_internal/runtime_broker_registry.rs");
+#[path = "main_internal/runtime_broker_registry.rs"]
+mod runtime_broker_registry;
 
 #[test]
 fn runtime_broker_startup_grace_covers_ready_timeout() {
@@ -2050,4 +2053,5 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
 }
 
 
-include!("main_internal/runtime_proxy_claude_and_anthropic.rs");
+#[path = "main_internal/runtime_proxy_claude_and_anthropic.rs"]
+mod runtime_proxy_claude_and_anthropic;

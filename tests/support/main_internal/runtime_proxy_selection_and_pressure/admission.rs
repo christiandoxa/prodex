@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn merge_runtime_continuation_store_keeps_compact_session_release_tombstone() {
     let profiles = BTreeMap::from([(

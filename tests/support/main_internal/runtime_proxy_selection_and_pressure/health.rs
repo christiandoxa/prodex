@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn runtime_profile_inflight_hard_limit_detects_saturation() {
     let temp_dir = TestDir::new();
@@ -2308,4 +2310,3 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
         "consecutive successes should accelerate route recovery"
     );
 }
-

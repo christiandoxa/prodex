@@ -29,4 +29,89 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run full local test suite
-        run: cargo test -q --all-features -- --test-threads=1
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/full-test-diagnostics"
+          cargo_log="${artifact_dir}/cargo-test.log"
+          runtime_pointer="/tmp/prodex-runtime-latest.path"
+
+          rm -rf "${artifact_dir}"
+          mkdir -p "${artifact_dir}"
+
+          cat > "${artifact_dir}/metadata.txt" <<EOF
+          event_name=${GITHUB_EVENT_NAME}
+          ref=${GITHUB_REF}
+          sha=${GITHUB_SHA}
+          run_id=${GITHUB_RUN_ID}
+          run_attempt=${GITHUB_RUN_ATTEMPT}
+          runner_os=${RUNNER_OS}
+          command=cargo test -q --all-features -- --test-threads=1
+          started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+          rustc -Vv > "${artifact_dir}/rustc-version.txt"
+          cargo -Vv > "${artifact_dir}/cargo-version.txt"
+
+          set +e
+          cargo test -q --all-features -- --test-threads=1 > "${cargo_log}" 2>&1
+          status=$?
+          set -e
+
+          printf 'exit_code=%s\nfinished_at=%s\n' \
+            "${status}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            >> "${artifact_dir}/metadata.txt"
+
+          if [ "${status}" -eq 0 ]; then
+            rm -rf "${artifact_dir}"
+            exit 0
+          fi
+
+          tail -n 200 "${cargo_log}" > "${artifact_dir}/cargo-test-tail.txt"
+
+          if [ -f "${runtime_pointer}" ]; then
+            cp "${runtime_pointer}" "${artifact_dir}/prodex-runtime-latest.path"
+            latest_runtime_log="$(tr -d '\r' < "${runtime_pointer}")"
+            printf 'runtime_log_pointer=%s\nruntime_log_target=%s\n' \
+              "${runtime_pointer}" \
+              "${latest_runtime_log}" \
+              >> "${artifact_dir}/metadata.txt"
+            if [ -n "${latest_runtime_log}" ] && [ -f "${latest_runtime_log}" ]; then
+              cp "${latest_runtime_log}" "${artifact_dir}/$(basename "${latest_runtime_log}")"
+              tail -n 200 "${latest_runtime_log}" > "${artifact_dir}/latest-runtime-log-tail.txt"
+            fi
+          else
+            printf 'runtime_log_pointer=%s\nruntime_log_target=missing\n' \
+              "${runtime_pointer}" \
+              >> "${artifact_dir}/metadata.txt"
+          fi
+
+          find /tmp -maxdepth 1 -type f \
+            \( -name 'prodex-runtime-*.log' -o -name 'prodex-runtime-latest.path' \) \
+            | sort > "${artifact_dir}/runtime-log-files.txt" || true
+
+          cargo run -q --all-features -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
+          cargo run -q --all-features -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
+
+          echo "Full test suite failed. Recent cargo output:"
+          cat "${artifact_dir}/cargo-test-tail.txt"
+
+          if [ -f "${artifact_dir}/latest-runtime-log-tail.txt" ]; then
+            echo
+            echo "Latest runtime log tail:"
+            cat "${artifact_dir}/latest-runtime-log-tail.txt"
+          fi
+
+          exit "${status}"
+
+      - name: Upload full-test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-test-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14

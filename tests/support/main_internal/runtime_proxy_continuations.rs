@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn runtime_proxy_websocket_empty_session_previous_response_does_not_fresh_fallback() {
     let _test_guard = crate::acquire_test_runtime_lock();
