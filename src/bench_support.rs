@@ -127,6 +127,239 @@ fn bench_runtime_shared(
     }
 }
 
+const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_SAMPLES: usize = 7;
+const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_WARMUP_ITERATIONS: usize = 64;
+const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_MIN_MEASURE_ITERATIONS: usize = 32;
+const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_MAX_MEASURE_ITERATIONS: usize = 4_096;
+const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS: u64 = 15;
+const BENCH_THRESHOLD_SCALE_DIVISOR: u64 = 100;
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeProxyHotPathBenchCheckConfig {
+    pub samples: usize,
+    pub warmup_iterations: usize,
+    pub min_measure_iterations: usize,
+    pub max_measure_iterations: usize,
+    pub target_sample_time: Duration,
+    pub threshold_scale_percent: u64,
+}
+
+impl Default for RuntimeProxyHotPathBenchCheckConfig {
+    fn default() -> Self {
+        Self {
+            samples: DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_SAMPLES,
+            warmup_iterations: DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_WARMUP_ITERATIONS,
+            min_measure_iterations: DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_MIN_MEASURE_ITERATIONS,
+            max_measure_iterations: DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_MAX_MEASURE_ITERATIONS,
+            target_sample_time: Duration::from_millis(
+                DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS,
+            ),
+            threshold_scale_percent: BENCH_THRESHOLD_SCALE_DIVISOR,
+        }
+    }
+}
+
+impl RuntimeProxyHotPathBenchCheckConfig {
+    pub fn with_threshold_scale_percent(mut self, threshold_scale_percent: u64) -> Self {
+        self.threshold_scale_percent = threshold_scale_percent.max(1);
+        self
+    }
+
+    fn normalized(self) -> Self {
+        let min_measure_iterations = self.min_measure_iterations.max(1);
+        let max_measure_iterations = self.max_measure_iterations.max(min_measure_iterations);
+        let target_sample_time = if self.target_sample_time.is_zero() {
+            Duration::from_millis(DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS)
+        } else {
+            self.target_sample_time
+        };
+
+        Self {
+            samples: self.samples.max(1),
+            warmup_iterations: self.warmup_iterations.max(1),
+            min_measure_iterations,
+            max_measure_iterations,
+            target_sample_time,
+            threshold_scale_percent: self.threshold_scale_percent.max(1),
+        }
+    }
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeProxyHotPathBenchCheckResult {
+    pub name: &'static str,
+    pub samples: usize,
+    pub warmup_iterations: usize,
+    pub measure_iterations: usize,
+    pub median_ns_per_iteration: u64,
+    pub p90_ns_per_iteration: u64,
+    pub threshold_ns_per_iteration: u64,
+}
+
+impl RuntimeProxyHotPathBenchCheckResult {
+    pub fn passed(&self) -> bool {
+        self.median_ns_per_iteration <= self.threshold_ns_per_iteration
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeProxyHotPathBenchThreshold {
+    name: &'static str,
+    max_median_ns_per_iteration: u64,
+}
+
+const RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_route_eligible_quota_fallback_scan",
+        max_median_ns_per_iteration: 30_000,
+    };
+const RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_previous_response_candidate_selection",
+        max_median_ns_per_iteration: 110_000,
+    };
+const RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_mixed_pool_response_selection",
+        max_median_ns_per_iteration: 2_400_000,
+    };
+const RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_sse_lookahead_inspection",
+        max_median_ns_per_iteration: 130_000,
+    };
+const RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_dead_lineage_cleanup",
+        max_median_ns_per_iteration: 190_000,
+    };
+
+fn scaled_runtime_proxy_hot_path_threshold_ns(
+    threshold: RuntimeProxyHotPathBenchThreshold,
+    config: RuntimeProxyHotPathBenchCheckConfig,
+) -> u64 {
+    threshold
+        .max_median_ns_per_iteration
+        .saturating_mul(config.threshold_scale_percent)
+        / BENCH_THRESHOLD_SCALE_DIVISOR
+}
+
+fn measure_runtime_proxy_hot_path_batch<T, F>(iterations: usize, mut step: F) -> u128
+where
+    F: FnMut() -> T,
+{
+    let started_at = Instant::now();
+    for _ in 0..iterations {
+        std::hint::black_box(step());
+    }
+    started_at.elapsed().as_nanos()
+}
+
+fn summarize_runtime_proxy_hot_path_samples(
+    name: &'static str,
+    samples: usize,
+    warmup_iterations: usize,
+    measure_iterations: usize,
+    threshold_ns_per_iteration: u64,
+    mut ns_per_iteration_samples: Vec<u64>,
+) -> RuntimeProxyHotPathBenchCheckResult {
+    ns_per_iteration_samples.sort_unstable();
+    let median_ns_per_iteration = ns_per_iteration_samples[ns_per_iteration_samples.len() / 2];
+    let p90_index = ((ns_per_iteration_samples.len() - 1) * 9) / 10;
+    let p90_ns_per_iteration = ns_per_iteration_samples[p90_index];
+
+    RuntimeProxyHotPathBenchCheckResult {
+        name,
+        samples,
+        warmup_iterations,
+        measure_iterations,
+        median_ns_per_iteration,
+        p90_ns_per_iteration,
+        threshold_ns_per_iteration,
+    }
+}
+
+fn run_runtime_proxy_hot_path_case<T, F>(
+    config: RuntimeProxyHotPathBenchCheckConfig,
+    threshold: RuntimeProxyHotPathBenchThreshold,
+    mut step: F,
+) -> RuntimeProxyHotPathBenchCheckResult
+where
+    F: FnMut() -> T,
+{
+    let threshold_ns_per_iteration = scaled_runtime_proxy_hot_path_threshold_ns(threshold, config);
+    for _ in 0..config.warmup_iterations {
+        std::hint::black_box(step());
+    }
+
+    let pilot_iterations = config.min_measure_iterations.min(64);
+    let pilot_elapsed_ns = measure_runtime_proxy_hot_path_batch(pilot_iterations, &mut step);
+    let pilot_ns_per_iteration =
+        (pilot_elapsed_ns / u128::from(pilot_iterations.max(1) as u64)).max(1);
+    let desired_iterations = (config.target_sample_time.as_nanos() / pilot_ns_per_iteration)
+        .try_into()
+        .unwrap_or(usize::MAX);
+    let measure_iterations =
+        desired_iterations.clamp(config.min_measure_iterations, config.max_measure_iterations);
+
+    let mut ns_per_iteration_samples = Vec::with_capacity(config.samples);
+    for _ in 0..config.samples {
+        let elapsed_ns = measure_runtime_proxy_hot_path_batch(measure_iterations, &mut step);
+        let ns_per_iteration = (elapsed_ns / u128::from(measure_iterations as u64))
+            .try_into()
+            .unwrap_or(u64::MAX);
+        ns_per_iteration_samples.push(ns_per_iteration);
+    }
+
+    summarize_runtime_proxy_hot_path_samples(
+        threshold.name,
+        config.samples,
+        config.warmup_iterations,
+        measure_iterations,
+        threshold_ns_per_iteration,
+        ns_per_iteration_samples,
+    )
+}
+
+#[doc(hidden)]
+pub fn run_runtime_proxy_hot_path_bench_check(
+    config: RuntimeProxyHotPathBenchCheckConfig,
+) -> Vec<RuntimeProxyHotPathBenchCheckResult> {
+    let config = config.normalized();
+
+    let quota_fallback = RuntimeProxyQuotaFallbackBenchCase::new(64);
+    let previous_response = RuntimeProxyPreviousResponseBenchCase::new(64);
+    let mixed_pool_selection = RuntimeProxyMixedPoolSelectionBenchCase::new(96);
+    let sse_inspect = RuntimeProxySseInspectBenchCase::new(128);
+    let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(128);
+
+    vec![
+        run_runtime_proxy_hot_path_case(
+            config,
+            RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_THRESHOLD,
+            || quota_fallback.has_route_eligible_quota_fallback(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config,
+            RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_THRESHOLD,
+            || previous_response.next_previous_response_candidate(),
+        ),
+        run_runtime_proxy_hot_path_case(config, RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD, || {
+            mixed_pool_selection.select_fresh_response_candidate()
+        }),
+        run_runtime_proxy_hot_path_case(config, RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD, || {
+            sse_inspect.inspect()
+        }),
+        run_runtime_proxy_hot_path_case(
+            config,
+            RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_THRESHOLD,
+            || lineage_cleanup.clear_dead_response_bindings(),
+        ),
+    ]
+}
+
 #[doc(hidden)]
 pub struct RuntimeProxyQuotaFallbackBenchCase {
     shared: RuntimeRotationProxyShared,
@@ -584,5 +817,53 @@ impl RuntimeProxyLineageCleanupBenchCase {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         runtime.turn_state_bindings.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_proxy_hot_path_bench_check_config_normalizes_zero_values() {
+        let config = RuntimeProxyHotPathBenchCheckConfig {
+            samples: 0,
+            warmup_iterations: 0,
+            min_measure_iterations: 0,
+            max_measure_iterations: 0,
+            target_sample_time: Duration::ZERO,
+            threshold_scale_percent: 0,
+        }
+        .normalized();
+
+        assert_eq!(config.samples, 1);
+        assert_eq!(config.warmup_iterations, 1);
+        assert_eq!(config.min_measure_iterations, 1);
+        assert_eq!(config.max_measure_iterations, 1);
+        assert_eq!(
+            config.target_sample_time,
+            Duration::from_millis(DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_TARGET_SAMPLE_TIME_MS)
+        );
+        assert_eq!(config.threshold_scale_percent, 1);
+    }
+
+    #[test]
+    fn runtime_proxy_hot_path_bench_summary_uses_sorted_percentiles() {
+        let result = summarize_runtime_proxy_hot_path_samples(
+            "runtime_case",
+            5,
+            32,
+            128,
+            7,
+            vec![9, 3, 5, 1, 7],
+        );
+
+        assert_eq!(result.name, "runtime_case");
+        assert_eq!(result.samples, 5);
+        assert_eq!(result.warmup_iterations, 32);
+        assert_eq!(result.measure_iterations, 128);
+        assert_eq!(result.median_ns_per_iteration, 5);
+        assert_eq!(result.p90_ns_per_iteration, 7);
+        assert!(result.passed());
     }
 }

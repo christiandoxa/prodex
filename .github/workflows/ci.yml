@@ -249,19 +249,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run runtime proxy internal test shard
-        run: |
-          set -euo pipefail
-          for attempt in 1 2; do
-            echo "runtime proxy shard attempt ${attempt}"
-            if cargo test --lib main_internal_tests::runtime_proxy_ -- --test-threads=1; then
-              exit 0
-            fi
-            if [ "${attempt}" -eq 2 ]; then
-              exit 1
-            fi
-            echo "retrying runtime proxy shard after a transient failure"
-            sleep 5
-          done
+        run: node scripts/ci/runtime-proxy-shard.mjs
+
+      - name: Upload runtime proxy shard diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-proxy-shard-diagnostics
+          path: target/ci/runtime-proxy
+          if-no-files-found: ignore
 
   runtime-proxy-bench-smoke:
     runs-on: ubuntu-latest
@@ -277,8 +273,11 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Compile and smoke runtime proxy benchmarks
-        run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths -- --test
+      - name: Check runtime proxy benchmark regression thresholds
+        env:
+          PRODEX_RUNTIME_PROXY_BENCH_CHECK: "1"
+          PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE: "200"
+        run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
   runtime-stress:
     runs-on: ubuntu-latest

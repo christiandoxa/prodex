@@ -1,9 +1,13 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, black_box, criterion_group};
 use prodex::bench_support::{
-    RuntimeProxyLineageCleanupBenchCase, RuntimeProxyMixedPoolSelectionBenchCase,
-    RuntimeProxyPreviousResponseBenchCase, RuntimeProxyQuotaFallbackBenchCase,
-    RuntimeProxySseInspectBenchCase,
+    RuntimeProxyHotPathBenchCheckConfig, RuntimeProxyLineageCleanupBenchCase,
+    RuntimeProxyMixedPoolSelectionBenchCase, RuntimeProxyPreviousResponseBenchCase,
+    RuntimeProxyQuotaFallbackBenchCase, RuntimeProxySseInspectBenchCase,
+    run_runtime_proxy_hot_path_bench_check,
 };
+
+const RUNTIME_PROXY_BENCH_CHECK_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_CHECK";
+const RUNTIME_PROXY_BENCH_THRESHOLD_SCALE_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_SCALE";
 
 fn runtime_proxy_hot_paths(c: &mut Criterion) {
     let quota_fallback = RuntimeProxyQuotaFallbackBenchCase::new(64);
@@ -33,4 +37,68 @@ fn runtime_proxy_hot_paths(c: &mut Criterion) {
 }
 
 criterion_group!(benches, runtime_proxy_hot_paths);
-criterion_main!(benches);
+
+fn bench_check_requested() -> bool {
+    std::env::var_os(RUNTIME_PROXY_BENCH_CHECK_ENV)
+        .map(|value| value != "0")
+        .unwrap_or(false)
+}
+
+fn parse_threshold_scale_percent() -> Result<u64, String> {
+    let Some(raw_value) = std::env::var_os(RUNTIME_PROXY_BENCH_THRESHOLD_SCALE_ENV) else {
+        return Ok(100);
+    };
+
+    let raw_value = raw_value.to_string_lossy();
+    raw_value.parse::<u64>().map_err(|error| {
+        format!("{RUNTIME_PROXY_BENCH_THRESHOLD_SCALE_ENV} must be an integer percent: {error}")
+    })
+}
+
+fn main() {
+    if bench_check_requested() {
+        let threshold_scale_percent = match parse_threshold_scale_percent() {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("runtime_proxy_hot_path_check status=error message={error}");
+                std::process::exit(2);
+            }
+        };
+
+        let results = run_runtime_proxy_hot_path_bench_check(
+            RuntimeProxyHotPathBenchCheckConfig::default()
+                .with_threshold_scale_percent(threshold_scale_percent),
+        );
+
+        let mut failures = 0usize;
+        for result in &results {
+            if !result.passed() {
+                failures += 1;
+            }
+            println!(
+                "runtime_proxy_hot_path_check case={} status={} median_ns={} p90_ns={} threshold_ns={} iterations={} warmup_iterations={} samples={}",
+                result.name,
+                if result.passed() { "pass" } else { "fail" },
+                result.median_ns_per_iteration,
+                result.p90_ns_per_iteration,
+                result.threshold_ns_per_iteration,
+                result.measure_iterations,
+                result.warmup_iterations,
+                result.samples,
+            );
+        }
+        println!(
+            "runtime_proxy_hot_path_check summary cases={} failures={} threshold_scale_percent={}",
+            results.len(),
+            failures,
+            threshold_scale_percent,
+        );
+        if failures > 0 {
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    benches();
+    Criterion::default().configure_from_args().final_summary();
+}

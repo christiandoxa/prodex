@@ -587,12 +587,117 @@ pub(super) fn runtime_configure_upstream_tcp_stream(
     Ok(())
 }
 
+type RuntimeWebsocketTcpConnectJob = Box<dyn FnOnce() + Send + 'static>;
+
+enum RuntimeWebsocketTcpConnectExecutorMode {
+    Bounded {
+        sender: SyncSender<RuntimeWebsocketTcpConnectJob>,
+    },
+    Inline,
+}
+
+struct RuntimeWebsocketTcpConnectExecutor {
+    mode: RuntimeWebsocketTcpConnectExecutorMode,
+}
+
+impl RuntimeWebsocketTcpConnectExecutor {
+    fn global() -> &'static Self {
+        static EXECUTOR: OnceLock<RuntimeWebsocketTcpConnectExecutor> = OnceLock::new();
+        EXECUTOR.get_or_init(|| {
+            let worker_count = runtime_websocket_tcp_connect_worker_count();
+            let queue_capacity = runtime_websocket_tcp_connect_queue_capacity(worker_count);
+            RuntimeWebsocketTcpConnectExecutor::new(worker_count, queue_capacity)
+        })
+    }
+
+    fn new(worker_count: usize, queue_capacity: usize) -> Self {
+        let worker_count = worker_count.max(1);
+        let queue_capacity = queue_capacity.max(worker_count).max(1);
+        let (sender, receiver) =
+            mpsc::sync_channel::<RuntimeWebsocketTcpConnectJob>(queue_capacity);
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut started_workers = 0usize;
+
+        for index in 0..worker_count {
+            let receiver = Arc::clone(&receiver);
+            let builder = thread::Builder::new().name(format!("prodex-ws-connect-{index}"));
+            if builder
+                .spawn(move || runtime_websocket_tcp_connect_worker_loop(receiver))
+                .is_ok()
+            {
+                started_workers += 1;
+            }
+        }
+
+        if started_workers == 0 {
+            return Self {
+                mode: RuntimeWebsocketTcpConnectExecutorMode::Inline,
+            };
+        }
+
+        Self {
+            mode: RuntimeWebsocketTcpConnectExecutorMode::Bounded { sender },
+        }
+    }
+
+    fn spawn<F>(&self, job: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.spawn_boxed(Box::new(job));
+    }
+
+    fn spawn_boxed(&self, job: RuntimeWebsocketTcpConnectJob) {
+        match &self.mode {
+            RuntimeWebsocketTcpConnectExecutorMode::Bounded { sender } => {
+                if let Err(err) = sender.try_send(job) {
+                    match err {
+                        mpsc::TrySendError::Full(job) | mpsc::TrySendError::Disconnected(job) => {
+                            job()
+                        }
+                    }
+                }
+            }
+            RuntimeWebsocketTcpConnectExecutorMode::Inline => job(),
+        }
+    }
+}
+
+fn runtime_websocket_tcp_connect_worker_count() -> usize {
+    let parallelism = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4);
+    parallelism.clamp(4, 16)
+}
+
+fn runtime_websocket_tcp_connect_queue_capacity(worker_count: usize) -> usize {
+    worker_count.saturating_mul(8).clamp(32, 128)
+}
+
+fn runtime_websocket_tcp_connect_worker_loop(
+    receiver: Arc<Mutex<Receiver<RuntimeWebsocketTcpConnectJob>>>,
+) {
+    loop {
+        let job = {
+            let receiver = receiver
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            receiver.recv()
+        };
+
+        let Ok(job) = job else {
+            break;
+        };
+        job();
+    }
+}
+
 pub(super) fn runtime_launch_websocket_tcp_connect_attempt(
     sender: mpsc::Sender<RuntimeWebsocketTcpAttemptResult>,
     addr: SocketAddr,
     connect_timeout: Duration,
 ) {
-    thread::spawn(move || {
+    RuntimeWebsocketTcpConnectExecutor::global().spawn(move || {
         let result = TcpStream::connect_timeout(&addr, connect_timeout);
         let _ = sender.send(RuntimeWebsocketTcpAttemptResult { addr, result });
     });
@@ -936,6 +1041,102 @@ pub(crate) fn is_runtime_terminal_event(payload: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn record_max_active(max_active: &AtomicUsize, active_now: usize) {
+        let mut observed = max_active.load(Ordering::SeqCst);
+        while active_now > observed {
+            match max_active.compare_exchange(
+                observed,
+                active_now,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(next) => observed = next,
+            }
+        }
+    }
+
+    #[test]
+    fn websocket_tcp_connect_executor_bounds_concurrent_jobs() {
+        let executor = RuntimeWebsocketTcpConnectExecutor::new(2, 8);
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(AtomicUsize::new(0));
+        let (start_tx, start_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+
+        for _ in 0..6 {
+            let active = Arc::clone(&active);
+            let max_active = Arc::clone(&max_active);
+            let started = Arc::clone(&started);
+            let start_tx = start_tx.clone();
+            let done_tx = done_tx.clone();
+            let gate = Arc::clone(&gate);
+            executor.spawn(move || {
+                let active_now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                record_max_active(&max_active, active_now);
+                started.fetch_add(1, Ordering::SeqCst);
+                start_tx.send(()).expect("start signal should send");
+
+                let (released, ready) = &*gate;
+                let mut released = released
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                while !*released {
+                    released = ready
+                        .wait(released)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+
+                active.fetch_sub(1, Ordering::SeqCst);
+                done_tx.send(()).expect("done signal should send");
+            });
+        }
+
+        for _ in 0..2 {
+            start_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("worker should start queued websocket connect job");
+        }
+
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            2,
+            "only worker-count websocket connect jobs should start before release"
+        );
+        assert!(
+            matches!(
+                start_rx.recv_timeout(Duration::from_millis(100)),
+                Err(RecvTimeoutError::Timeout)
+            ),
+            "websocket tcp connect executor should not exceed worker count"
+        );
+        assert_eq!(
+            max_active.load(Ordering::SeqCst),
+            2,
+            "websocket tcp connect executor should cap concurrent jobs"
+        );
+
+        let (released, ready) = &*gate;
+        *released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        ready.notify_all();
+
+        for _ in 0..6 {
+            done_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("websocket connect job should complete after release");
+        }
+
+        assert_eq!(
+            max_active.load(Ordering::SeqCst),
+            2,
+            "websocket tcp connect executor should stay bounded after draining queue"
+        );
+    }
 
     #[test]
     fn websocket_direct_previous_response_frame_is_forwarded_without_translation() {
