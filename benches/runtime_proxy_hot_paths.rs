@@ -84,14 +84,14 @@ fn load_threshold_file(path: &Path) -> Result<RuntimeProxyHotPathThresholdFile, 
             path.display()
         )
     })?;
-    if let Some(version) = file.version {
-        if version != 1 {
-            return Err(format!(
-                "{RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV} unsupported version {} in {}",
-                version,
-                path.display()
-            ));
-        }
+    if let Some(version) = file.version
+        && version != 1
+    {
+        return Err(format!(
+            "{RUNTIME_PROXY_BENCH_THRESHOLD_FILE_ENV} unsupported version {} in {}",
+            version,
+            path.display()
+        ));
     }
     Ok(file)
 }

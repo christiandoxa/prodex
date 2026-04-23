@@ -307,7 +307,7 @@ where
     started_at.elapsed().as_nanos()
 }
 
-fn summarize_runtime_proxy_hot_path_samples(
+struct RuntimeProxyHotPathSummaryInput {
     name: &'static str,
     samples: usize,
     warmup_iterations: usize,
@@ -315,8 +315,22 @@ fn summarize_runtime_proxy_hot_path_samples(
     base_threshold_ns_per_iteration: u64,
     threshold_scale_percent: u64,
     threshold_ns_per_iteration: u64,
-    mut ns_per_iteration_samples: Vec<u64>,
+    ns_per_iteration_samples: Vec<u64>,
+}
+
+fn summarize_runtime_proxy_hot_path_samples(
+    input: RuntimeProxyHotPathSummaryInput,
 ) -> RuntimeProxyHotPathBenchCheckResult {
+    let RuntimeProxyHotPathSummaryInput {
+        name,
+        samples,
+        warmup_iterations,
+        measure_iterations,
+        base_threshold_ns_per_iteration,
+        threshold_scale_percent,
+        threshold_ns_per_iteration,
+        mut ns_per_iteration_samples,
+    } = input;
     ns_per_iteration_samples.sort_unstable();
     let median_ns_per_iteration = ns_per_iteration_samples[ns_per_iteration_samples.len() / 2];
     let p90_index = ((ns_per_iteration_samples.len() - 1) * 9) / 10;
@@ -369,16 +383,16 @@ where
         ns_per_iteration_samples.push(ns_per_iteration);
     }
 
-    summarize_runtime_proxy_hot_path_samples(
-        threshold.name,
-        config.samples,
-        config.warmup_iterations,
+    summarize_runtime_proxy_hot_path_samples(RuntimeProxyHotPathSummaryInput {
+        name: threshold.name,
+        samples: config.samples,
+        warmup_iterations: config.warmup_iterations,
         measure_iterations,
-        threshold.max_median_ns_per_iteration,
+        base_threshold_ns_per_iteration: threshold.max_median_ns_per_iteration,
         threshold_scale_percent,
         threshold_ns_per_iteration,
         ns_per_iteration_samples,
-    )
+    })
 }
 
 #[doc(hidden)]
@@ -924,16 +938,16 @@ mod tests {
 
     #[test]
     fn runtime_proxy_hot_path_bench_summary_uses_sorted_percentiles() {
-        let result = summarize_runtime_proxy_hot_path_samples(
-            "runtime_case",
-            5,
-            32,
-            128,
-            10,
-            70,
-            7,
-            vec![9, 3, 5, 1, 7],
-        );
+        let result = summarize_runtime_proxy_hot_path_samples(RuntimeProxyHotPathSummaryInput {
+            name: "runtime_case",
+            samples: 5,
+            warmup_iterations: 32,
+            measure_iterations: 128,
+            base_threshold_ns_per_iteration: 10,
+            threshold_scale_percent: 70,
+            threshold_ns_per_iteration: 7,
+            ns_per_iteration_samples: vec![9, 3, 5, 1, 7],
+        });
 
         assert_eq!(result.name, "runtime_case");
         assert_eq!(result.samples, 5);

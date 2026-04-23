@@ -674,9 +674,11 @@ mod tests {
         events
     }
 
+    type RuntimeSseEventSignature = (bool, bool, Vec<String>, Option<String>, Option<String>);
+
     fn runtime_sse_event_signatures(
         events: &[RuntimeParsedSseEvent],
-    ) -> Vec<(bool, bool, Vec<String>, Option<String>, Option<String>)> {
+    ) -> Vec<RuntimeSseEventSignature> {
         events
             .iter()
             .map(|event| {
