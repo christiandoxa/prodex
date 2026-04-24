@@ -47,9 +47,10 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
         }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
-        Ok(RuntimeLaunchPlan::new(
-            ChildProcessPlan::new(codex_bin(), prepared.codex_home.clone()).with_args(runtime_args),
-        ))
+        Ok(RuntimeLaunchPlan::new(codex_child_plan(
+            prepared.codex_home.clone(),
+            runtime_args,
+        )))
     }
 }
 

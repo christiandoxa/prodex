@@ -2010,11 +2010,26 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
 
     let rendered_config = fs::read_to_string(&temp_config).expect("temp config should read");
     assert!(rendered_config.contains("plugins = true"));
-    assert!(rendered_config.contains("codex_hooks = true"));
-    assert!(rendered_config.contains("suppress_unstable_features_warning = true"));
+    assert!(!rendered_config.contains("codex_hooks"));
+    assert!(!rendered_config.contains("suppress_unstable_features_warning"));
+    assert!(rendered_config.contains("[[hooks.SessionStart]]"));
+    assert!(rendered_config.contains("[[hooks.SessionStart.hooks]]"));
+    assert!(rendered_config.contains("type = \"command\""));
+    assert!(rendered_config.contains("CAVEMAN MODE ACTIVE"));
     assert!(rendered_config.contains("[marketplaces.prodex-caveman]"));
     assert!(rendered_config.contains("[plugins.\"caveman@prodex-caveman\"]"));
     assert!(rendered_config.contains("enabled = true"));
+    let parsed_config: toml::Value =
+        toml::from_str(&rendered_config).expect("temp config should parse");
+    assert_eq!(
+        parsed_config["hooks"]["SessionStart"][0]["hooks"][0]["type"].as_str(),
+        Some("command")
+    );
+    assert!(
+        parsed_config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .is_some_and(|command| command.contains("CAVEMAN MODE ACTIVE"))
+    );
 
     let shared_rendered = fs::read_to_string(&shared_config).expect("shared config should read");
     assert!(
@@ -2025,14 +2040,9 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
         !base_home.join("hooks.json").exists(),
         "base home should not gain a persistent hooks.json file"
     );
-
-    let hooks: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(caveman_home.join("hooks.json")).expect("hooks should read"),
-    )
-    .expect("hooks should parse");
-    assert_eq!(
-        hooks["hooks"]["SessionStart"][0]["hooks"][0]["type"],
-        serde_json::Value::String("command".to_string())
+    assert!(
+        !caveman_home.join("hooks.json").exists(),
+        "temporary Caveman home should use inline config.toml hooks"
     );
 
     let marketplace_path =

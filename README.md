@@ -4,7 +4,7 @@
 
 The main feature is auto rotate. If one OpenAI/Codex profile runs out of quota, `prodex` can route new work to another profile that is still available. You do not need to switch accounts manually.
 
-It also keeps profiles isolated and keeps existing sessions attached to the profile they started with.
+It also keeps profiles isolated and keeps existing sessions attached to the profile they started with. For Codex CLI 0.124.0 and newer, Codex itself supports Amazon Bedrock and other OpenAI-compatible custom providers through `model_provider`; Prodex passes those profiles through directly instead of adding its OpenAI quota and rotation layer.
 
 ## Why use it
 
@@ -144,11 +144,13 @@ prodex profile remove second
 prodex profile remove --all
 ```
 
-## Notes
+## Bedrock and custom providers
 
 Auto rotate and quota checks apply to supported OpenAI/Codex profiles.
 
-If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch directly without quota preflight or the local auto-rotate proxy.
+Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure that in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
+
+If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy. Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 
 `prodex quota` is not available for those profiles.
 

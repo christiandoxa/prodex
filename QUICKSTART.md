@@ -2,13 +2,14 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus direct pass-through when a profile selects a different upstream `model_provider`.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing; if a profile's `config.toml` sets a non-OpenAI `model_provider` such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
 
 For contributors: the crate is split across focused modules now. `src/main.rs` is the entrypoint, command handling lives under `src/app_commands/` and `src/command_dispatch.rs`, profile/quota flows live under `src/profile_commands/` and `src/quota_support/`, and runtime proxy code lives under `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, and `src/runtime_broker/`.
 
 ## Requirements
 
-- An OpenAI account, plus at least one logged-in Prodex profile
+- An OpenAI account and at least one logged-in Prodex profile for quota-aware routing and auto-rotate
+- Codex CLI 0.124.0 or newer if you want to use Amazon Bedrock or another custom `model_provider`
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
@@ -45,11 +46,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.47.0`:
+The current local version in this repo is `0.48.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.47.0
-cargo install prodex --force --version 0.47.0
+npm install -g @christiandoxa/prodex@0.48.0
+cargo install prodex --force --version 0.48.0
 ```
 
 Dependency status in this repo:
@@ -139,7 +140,9 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
 
-If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy.
+Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
+
+If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy. Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 
 ## 4. Run Codex with `prodex caveman`
 
@@ -169,7 +172,7 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 Use this path when you want Claude Code to be the front end while Prodex routes requests through your OpenAI-backed profile pool.
 
-This path requires the default OpenAI/Codex provider. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not supported by `prodex claude`.
+This path requires the default OpenAI/Codex provider. Profiles whose `config.toml` sets a non-OpenAI `model_provider`, including `amazon-bedrock`, are not supported by `prodex claude`.
 
 Use `prodex claude caveman` when you want the same Claude path but with the upstream Caveman plugin loaded through Claude's session-local `--plugin-dir` support. Prodex keeps the plugin bundle stable under `.prodex`, and the adapted Caveman hooks read and write the Prodex-managed `CLAUDE_CONFIG_DIR` instead of your global `~/.claude`.
 

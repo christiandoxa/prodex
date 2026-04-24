@@ -201,7 +201,7 @@ fn run_codex_login(codex_home: &Path, codex_args: &[OsString]) -> Result<ExitSta
     let mut command_args = vec![OsString::from("login")];
     command_args.extend(codex_args.iter().cloned());
     run_child_plan(
-        &ChildProcessPlan::new(codex_bin(), codex_home.to_path_buf()).with_args(command_args),
+        &codex_child_plan(codex_home.to_path_buf(), command_args),
         None,
     )
 }
@@ -245,8 +245,7 @@ pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
     let codex_home = codex_home.codex_home.clone();
 
     let status = run_child_plan(
-        &ChildProcessPlan::new(codex_bin(), codex_home.clone())
-            .with_args(vec![OsString::from("logout")]),
+        &codex_child_plan(codex_home.clone(), vec![OsString::from("logout")]),
         None,
     )?;
     exit_with_status(status)

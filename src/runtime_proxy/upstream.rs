@@ -28,6 +28,9 @@ pub(super) fn send_runtime_proxy_upstream_request(
         if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
             continue;
         }
+        if name.eq_ignore_ascii_case("cookie") {
+            continue;
+        }
         if should_skip_runtime_request_header(name) {
             continue;
         }
@@ -40,6 +43,16 @@ pub(super) fn send_runtime_proxy_upstream_request(
     upstream_request = upstream_request
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .body(request.body.clone());
+
+    if let Some(cookie_header) = runtime_proxy_cookie_header_for_reqwest(
+        shared,
+        profile_name,
+        &upstream_url,
+        &request.headers,
+    ) && let Ok(cookie_header) = reqwest::header::HeaderValue::from_str(&cookie_header)
+    {
+        upstream_request = upstream_request.header(reqwest::header::COOKIE, cookie_header);
+    }
 
     if let Some(user_agent) = runtime_proxy_effective_user_agent(&request.headers) {
         upstream_request = upstream_request.header("User-Agent", user_agent);
@@ -84,6 +97,7 @@ pub(super) fn send_runtime_proxy_upstream_request(
             )));
         }
     };
+    runtime_proxy_capture_reqwest_cookies(shared, profile_name, &response);
     runtime_proxy_log(
         shared,
         format!(
@@ -134,6 +148,9 @@ pub(crate) fn send_runtime_proxy_upstream_responses_request(
         if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
             continue;
         }
+        if name.eq_ignore_ascii_case("cookie") {
+            continue;
+        }
         if should_skip_runtime_request_header(name) {
             continue;
         }
@@ -146,6 +163,16 @@ pub(crate) fn send_runtime_proxy_upstream_responses_request(
     upstream_request = upstream_request
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .body(request.body.clone());
+
+    if let Some(cookie_header) = runtime_proxy_cookie_header_for_reqwest(
+        shared,
+        profile_name,
+        &upstream_url,
+        &request.headers,
+    ) && let Ok(cookie_header) = reqwest::header::HeaderValue::from_str(&cookie_header)
+    {
+        upstream_request = upstream_request.header(reqwest::header::COOKIE, cookie_header);
+    }
 
     if let Some(user_agent) = runtime_proxy_effective_user_agent(&request.headers) {
         upstream_request = upstream_request.header("User-Agent", user_agent);
@@ -190,6 +217,7 @@ pub(crate) fn send_runtime_proxy_upstream_responses_request(
             )));
         }
     };
+    runtime_proxy_capture_reqwest_cookies(shared, profile_name, &response);
     runtime_proxy_log(
         shared,
         format!(

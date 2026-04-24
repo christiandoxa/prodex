@@ -216,6 +216,56 @@ mod tests {
         assert!(provider.is_none());
     }
 
+    #[test]
+    fn fast_service_tier_config_does_not_parse_as_model_provider() {
+        let root = temp_dir("fast-service-tier-not-model-provider");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "service_tier = null\n[notice]\nfast_default_opt_out = true\n",
+        )
+        .unwrap();
+
+        assert!(codex_configured_model_provider(&root).is_none());
+        assert!(codex_non_openai_model_provider(&root, None).is_none());
+        assert_eq!(
+            codex_cli_config_override_value(
+                &[
+                    OsString::from("-c"),
+                    OsString::from("service_tier=null"),
+                    OsString::from("--config=notice.fast_default_opt_out=true"),
+                ],
+                "model_provider",
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn model_provider_override_survives_fast_service_tier_config() {
+        let root = temp_dir("model-provider-with-fast-service-tier");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+
+        let override_value = codex_cli_config_override_value(
+            &[
+                OsString::from("-c"),
+                OsString::from("service_tier=null"),
+                OsString::from("--config=notice.fast_default_opt_out=true"),
+                OsString::from("--config"),
+                OsString::from("model_provider=openai"),
+            ],
+            "model_provider",
+        );
+
+        assert_eq!(override_value.as_deref(), Some("openai"));
+        assert!(codex_non_openai_model_provider(&root, override_value.as_deref()).is_none());
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!(
             "prodex-codex-config-{name}-{}-{}",

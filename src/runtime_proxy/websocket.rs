@@ -349,6 +349,9 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
             if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
                 continue;
             }
+            if name.eq_ignore_ascii_case("cookie") {
+                continue;
+            }
             if should_skip_runtime_request_header(name) {
                 continue;
             }
@@ -366,6 +369,17 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 WsHeaderValue::from_str(turn_state)
                     .context("failed to encode websocket turn-state header")?,
             );
+        }
+        if let Some(cookie_header) = runtime_proxy_cookie_header_for_websocket(
+            shared,
+            profile_name,
+            &upstream_url,
+            &handshake_request.headers,
+        ) && let Ok(cookie_header) = WsHeaderValue::from_str(&cookie_header)
+        {
+            request
+                .headers_mut()
+                .insert(WsHeaderName::from_static("cookie"), cookie_header);
         }
 
         request.headers_mut().insert(
@@ -408,6 +422,12 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
         let started_at = Instant::now();
         match connect_runtime_proxy_upstream_websocket_with_timeout(request_id, shared, request) {
             Ok((socket, response, selected_addr, resolved_addrs, attempted_addrs)) => {
+                runtime_proxy_capture_websocket_cookies(
+                    shared,
+                    profile_name,
+                    &upstream_url,
+                    response.headers(),
+                );
                 return Ok(RuntimeWebsocketConnectResult::Connected {
                     socket,
                     turn_state: {
@@ -438,6 +458,12 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 });
             }
             Err(WsError::Http(response)) => {
+                runtime_proxy_capture_websocket_cookies(
+                    shared,
+                    profile_name,
+                    &upstream_url,
+                    response.headers(),
+                );
                 let status = response.status().as_u16();
                 let body = response.body().clone().unwrap_or_default();
                 if status == 401

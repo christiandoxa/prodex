@@ -81,3 +81,49 @@ pub(crate) fn runtime_proxy_codex_args_with_mount_path(
     args.extend(user_args.iter().cloned());
     args
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_proxy_codex_args_preserve_fast_service_tier_overrides() {
+        let args = runtime_proxy_codex_args(
+            "127.0.0.1:4455".parse().expect("socket addr"),
+            &[
+                OsString::from("exec"),
+                OsString::from("-c"),
+                OsString::from("service_tier=null"),
+                OsString::from("--config=notice.fast_default_opt_out=true"),
+                OsString::from("hello"),
+            ],
+        )
+        .into_iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+        assert_eq!(args[0], "-c");
+        assert_eq!(
+            args[1],
+            "chatgpt_base_url=\"http://127.0.0.1:4455/backend-api\""
+        );
+        assert_eq!(args[2], "-c");
+        assert_eq!(
+            args[3],
+            format!(
+                "openai_base_url=\"http://127.0.0.1:4455{}\"",
+                RUNTIME_PROXY_OPENAI_MOUNT_PATH
+            )
+        );
+        assert_eq!(
+            &args[4..],
+            [
+                "exec",
+                "-c",
+                "service_tier=null",
+                "--config=notice.fast_default_opt_out=true",
+                "hello"
+            ]
+        );
+    }
+}

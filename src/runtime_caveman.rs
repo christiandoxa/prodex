@@ -123,10 +123,10 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home(&caveman_home)?;
         }
-        Ok(RuntimeLaunchPlan::new(
-            ChildProcessPlan::new(codex_bin(), caveman_home.clone()).with_args(runtime_args),
+        Ok(
+            RuntimeLaunchPlan::new(codex_child_plan(caveman_home.clone(), runtime_args))
+                .with_cleanup_path(caveman_home),
         )
-        .with_cleanup_path(caveman_home))
     }
 }
 
@@ -153,7 +153,6 @@ pub(super) fn configure_caveman_launch_home(codex_home: &Path) -> Result<()> {
     configure_caveman_config(codex_home)?;
     install_caveman_marketplace(codex_home)?;
     install_caveman_plugin_cache(codex_home)?;
-    write_caveman_hooks_file(codex_home)?;
     Ok(())
 }
 
@@ -226,11 +225,8 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
 
     let features = ensure_child_table(&mut table, "features");
     features.insert("plugins".to_string(), toml::Value::Boolean(true));
-    features.insert("codex_hooks".to_string(), toml::Value::Boolean(true));
-    table.insert(
-        "suppress_unstable_features_warning".to_string(),
-        toml::Value::Boolean(true),
-    );
+
+    configure_caveman_session_start_hook(&mut table);
 
     let marketplaces = ensure_child_table(&mut table, "marketplaces");
     let caveman_marketplace = ensure_child_table(marketplaces, PRODEX_CAVEMAN_MARKETPLACE_NAME);
@@ -257,6 +253,36 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
     fs::write(&config_path, rendered)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
     Ok(())
+}
+
+fn configure_caveman_session_start_hook(table: &mut toml::Table) {
+    let hooks = ensure_child_table(table, "hooks");
+    let session_start = hooks
+        .entry("SessionStart".to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    if !session_start.is_array() {
+        *session_start = toml::Value::Array(Vec::new());
+    }
+    let Some(session_start_groups) = session_start.as_array_mut() else {
+        unreachable!("SessionStart should be an array after insertion");
+    };
+
+    let mut command_hook = toml::Table::new();
+    command_hook.insert(
+        "type".to_string(),
+        toml::Value::String("command".to_string()),
+    );
+    command_hook.insert(
+        "command".to_string(),
+        toml::Value::String(PRODEX_CAVEMAN_HOOK_COMMAND.to_string()),
+    );
+
+    let mut group = toml::Table::new();
+    group.insert(
+        "hooks".to_string(),
+        toml::Value::Array(vec![toml::Value::Table(command_hook)]),
+    );
+    session_start_groups.push(toml::Value::Table(group));
 }
 
 fn ensure_child_table<'a>(parent: &'a mut toml::Table, key: &str) -> &'a mut toml::Table {
@@ -339,29 +365,6 @@ fn write_caveman_plugin_tree(root: &Path) -> Result<()> {
         fs::write(&path, file.contents)
             .with_context(|| format!("failed to write {}", path.display()))?;
     }
-    Ok(())
-}
-
-fn write_caveman_hooks_file(codex_home: &Path) -> Result<()> {
-    let hooks_path = codex_home.join("hooks.json");
-    let hooks = serde_json::json!({
-        "hooks": {
-            "SessionStart": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": PRODEX_CAVEMAN_HOOK_COMMAND,
-                        }
-                    ]
-                }
-            ]
-        }
-    });
-    let rendered = serde_json::to_string_pretty(&hooks)
-        .context("failed to serialize Caveman hooks configuration")?;
-    fs::write(&hooks_path, rendered)
-        .with_context(|| format!("failed to write {}", hooks_path.display()))?;
     Ok(())
 }
 
