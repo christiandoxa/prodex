@@ -1823,6 +1823,58 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_a
 }
 
 #[test]
+fn super_command_url_expands_to_local_openai_provider_config() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--url",
+        "http://127.0.0.1:8131",
+        "--model",
+        "local/qwen",
+        "exec",
+        "review this repo",
+    ])
+    .expect("super local provider command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131"));
+    assert_eq!(args.local_model.as_deref(), Some("local/qwen"));
+
+    let args = args.into_caveman_args();
+    assert!(args.full_access);
+    assert!(args.skip_quota_check);
+
+    let rendered = args
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(rendered.first().map(String::as_str), Some("mem"));
+    assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
+    assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
+    assert!(rendered.contains(
+        &"model_providers.prodex-local.base_url=\"http://127.0.0.1:8131/v1\"".to_string()
+    ));
+    assert!(rendered.contains(&"model_providers.prodex-local.wire_api=\"responses\"".to_string()));
+    assert!(rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string()));
+    assert!(rendered.contains(&"web_search=\"disabled\"".to_string()));
+    assert!(rendered.contains(&"features.js_repl=false".to_string()));
+    assert!(rendered.contains(&"features.image_generation=false".to_string()));
+    assert_eq!(
+        &rendered[rendered.len() - 2..],
+        ["exec", "review this repo"]
+    );
+
+    let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+    assert!(mem_mode);
+    assert_eq!(
+        codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
+        Some("prodex-local")
+    );
+}
+
+#[test]
 fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
     let output = render_profile_quota_watch_output(
         "main",

@@ -116,6 +116,7 @@ If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup t
 
 ```bash
 prodex super
+prodex super --url http://127.0.0.1:8131
 prodex super --profile main
 prodex super exec "review this repo in super mode"
 prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -124,6 +125,8 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 `prodex super` is a shortcut for `prodex caveman mem --full-access`.
 
 Use this when you want Caveman mode, Claude-Mem transcript watching, and launch-time full access together. Full access maps to Codex's sandbox-bypass launch flag, so use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+
+Use `prodex super --url http://127.0.0.1:8131` when you want the same Super mode front end to talk directly to a local OpenAI-compatible server such as `llama-server`. Prodex injects a temporary `prodex-local` Codex provider, appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, and skips quota/proxy routing for that launch. The default local model id is `unsloth/qwen3.5-35b-a3b`; override it with `--model`, for example `prodex super --url http://127.0.0.1:8131 --model local/qwen`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 ### Run Claude Code
 
@@ -183,6 +186,6 @@ prodex doctor --runtime
 
 ## More
 
-See [QUICKSTART.md](./QUICKSTART.md) for a longer walkthrough.
+See [QUICKSTART.md](./QUICKSTART.md) for a longer walkthrough, and [LOCAL.md](./LOCAL.md) for self-hosted local model setup.
 
 Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), including the fast/serial split and runtime parallel-safety assumptions.

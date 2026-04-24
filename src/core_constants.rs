@@ -282,6 +282,7 @@ Notes:
 pub(crate) const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
   prodex super
+  prodex super --url http://127.0.0.1:8131
   prodex super exec \"review latest diff in super mode\"
   prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
   prodex super --profile main
@@ -289,6 +290,8 @@ Examples:
 Notes:
   `prodex super` is a shortcut for `prodex caveman mem --full-access`.
   It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, and launch-time full access.
+  Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
+  When `--url` is set, Prodex injects a temporary `prodex-local` model provider and skips quota/proxy routing.
   Additional Codex args are appended after the implied `mem` prefix.";
 pub(crate) const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:

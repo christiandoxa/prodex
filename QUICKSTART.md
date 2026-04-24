@@ -48,11 +48,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.50.0`:
+The current local version in this repo is `0.51.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.50.0
-cargo install prodex --force --version 0.50.0
+npm install -g @christiandoxa/prodex@0.51.0
+cargo install prodex --force --version 0.51.0
 ```
 
 Dependency status in this repo:
@@ -151,6 +151,7 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 ```bash
 prodex caveman
 prodex caveman mem
+prodex super --url http://127.0.0.1:8131
 prodex caveman --profile second
 prodex caveman exec "review this repo in caveman mode"
 ```
@@ -160,6 +161,8 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
+
+Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 ## 5. Run Claude Code with `prodex claude`
 

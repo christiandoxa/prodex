@@ -356,8 +356,19 @@ pub(crate) struct SuperArgs {
     #[arg(long)]
     pub(crate) skip_quota_check: bool,
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
-    #[arg(long, value_name = "URL")]
+    #[arg(long, value_name = "URL", conflicts_with = "url")]
     pub(crate) base_url: Option<String>,
+    /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
+    #[arg(long, value_name = "URL")]
+    pub(crate) url: Option<String>,
+    /// Model id to use with --url.
+    #[arg(
+        long = "model",
+        visible_alias = "local-model",
+        value_name = "MODEL",
+        requires = "url"
+    )]
+    pub(crate) local_model: Option<String>,
     /// Arguments passed through to `codex` after the implied `mem` prefix.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub(crate) codex_args: Vec<OsString>,
@@ -365,19 +376,84 @@ pub(crate) struct SuperArgs {
 
 impl SuperArgs {
     pub(crate) fn into_caveman_args(self) -> CavemanArgs {
-        let mut codex_args = Vec::with_capacity(self.codex_args.len() + 1);
+        let local_provider_args = self
+            .url
+            .as_deref()
+            .map(|url| super_local_provider_codex_args(url, self.local_model.as_deref()))
+            .unwrap_or_default();
+        let skip_quota_check = self.skip_quota_check || self.url.is_some();
+
+        let mut codex_args =
+            Vec::with_capacity(self.codex_args.len() + 1 + local_provider_args.len());
         codex_args.push(OsString::from("mem"));
+        codex_args.extend(local_provider_args);
         codex_args.extend(self.codex_args);
         CavemanArgs {
             profile: self.profile,
             auto_rotate: self.auto_rotate,
             no_auto_rotate: self.no_auto_rotate,
-            skip_quota_check: self.skip_quota_check,
+            skip_quota_check,
             full_access: true,
             base_url: self.base_url,
             codex_args,
         }
     }
+}
+
+const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
+const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
+const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
+const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 131_072;
+const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 120_000;
+
+fn super_local_provider_codex_args(url: &str, model: Option<&str>) -> Vec<OsString> {
+    let base_url = super_local_provider_base_url(url);
+    let model = model
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or(SUPER_DEFAULT_LOCAL_MODEL);
+    let overrides = [
+        format!(
+            "model_provider={}",
+            toml_string_literal(SUPER_LOCAL_PROVIDER_ID)
+        ),
+        format!("model={}", toml_string_literal(model)),
+        format!(
+            "model_providers.{SUPER_LOCAL_PROVIDER_ID}.name={}",
+            toml_string_literal(SUPER_LOCAL_PROVIDER_NAME)
+        ),
+        format!(
+            "model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url={}",
+            toml_string_literal(&base_url)
+        ),
+        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.wire_api=\"responses\""),
+        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.supports_websockets=false"),
+        format!("model_context_window={SUPER_DEFAULT_CONTEXT_WINDOW}"),
+        format!("model_auto_compact_token_limit={SUPER_DEFAULT_AUTO_COMPACT_LIMIT}"),
+        "model_reasoning_summary=\"none\"".to_string(),
+        "model_supports_reasoning_summaries=false".to_string(),
+        "web_search=\"disabled\"".to_string(),
+        "features.js_repl=false".to_string(),
+        "features.image_generation=false".to_string(),
+    ];
+
+    let mut args = Vec::with_capacity(overrides.len() * 2);
+    for override_entry in overrides {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(override_entry));
+    }
+    args
+}
+
+fn super_local_provider_base_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if let Ok(mut parsed) = reqwest::Url::parse(trimmed) {
+        let path = parsed.path().trim_end_matches('/');
+        if path.is_empty() || path == "/" {
+            parsed.set_path("/v1");
+            return parsed.as_str().trim_end_matches('/').to_string();
+        }
+    }
+    trimmed.trim_end_matches('/').to_string()
 }
 
 #[derive(Args, Debug)]
