@@ -144,11 +144,15 @@ where
     K: Ord + Clone,
     J: RuntimeScheduledSaveJob,
 {
+    if pending.is_empty() {
+        return RuntimeDueJobs::Due(BTreeMap::new());
+    }
+
     let next_ready_at = pending
         .values()
         .map(RuntimeScheduledSaveJob::ready_at)
         .min()
-        .expect("scheduled save jobs should be present");
+        .expect("pending scheduled save jobs should be non-empty after guard");
     if next_ready_at > now {
         return RuntimeDueJobs::Wait(next_ready_at.saturating_duration_since(now));
     }

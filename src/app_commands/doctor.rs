@@ -31,7 +31,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         }
         let json = serde_json::to_string_pretty(&value)
             .context("failed to serialize runtime doctor summary")?;
-        println!("{json}");
+        print_stdout_line(&json);
         return Ok(());
     }
 
@@ -96,7 +96,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     print_panel("Doctor", &summary_fields);
 
     if args.runtime {
-        println!();
+        print_blank_line();
         print_panel("Runtime Proxy", &runtime_doctor_fields());
     }
 
@@ -111,7 +111,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             "external"
         };
 
-        println!();
+        print_blank_line();
         let mut fields = vec![
             (
                 "Current".to_string(),

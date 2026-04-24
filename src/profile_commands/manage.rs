@@ -206,7 +206,7 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
             "external"
         };
 
-        println!();
+        print_blank_line();
         let fields = vec![
             (
                 "Current".to_string(),

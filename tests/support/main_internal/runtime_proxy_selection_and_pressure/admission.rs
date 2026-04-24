@@ -87,6 +87,35 @@ fn runtime_proxy_pressure_mode_shrinks_precommit_budget() {
 }
 
 #[test]
+fn runtime_proxy_pressure_mode_preserves_continuation_budget() {
+    let pressure_budget_elapsed = Instant::now()
+        .checked_sub(Duration::from_millis(
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS + 5,
+        ))
+        .expect("checked_sub should succeed");
+
+    assert!(
+        !runtime_proxy_precommit_budget_exhausted(pressure_budget_elapsed, 0, true, true),
+        "continuations should keep extended budget under pressure"
+    );
+    assert!(
+        !runtime_proxy_precommit_budget_exhausted(
+            Instant::now(),
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
+            true,
+            true,
+        ),
+        "continuations should keep extended attempt limit under pressure"
+    );
+    assert!(runtime_proxy_precommit_budget_exhausted(
+        Instant::now(),
+        RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
+        true,
+        true,
+    ));
+}
+
+#[test]
 fn turn_state_affinity_prefers_bound_profile() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");

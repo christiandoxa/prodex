@@ -47,6 +47,7 @@ impl SecretBackendSelection {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn into_manager(self) -> SecretManager<Self> {
         SecretManager::new(self)
     }

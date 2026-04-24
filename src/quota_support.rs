@@ -219,7 +219,7 @@ fn ensure_profile_supports_quota(provider: &ProfileProvider, codex_home: &Path) 
 }
 
 pub(crate) fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
-    print!("{}", render_quota_reports(reports, detail));
+    print_stdout_text(&render_quota_reports(reports, detail));
 }
 
 pub(crate) fn quota_base_url(explicit: Option<&str>) -> String {

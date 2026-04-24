@@ -8,7 +8,11 @@ use std::time::SystemTime;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretLocation {
     File(PathBuf),
-    Keyring { service: String, account: String },
+    #[cfg_attr(not(test), allow(dead_code))]
+    Keyring {
+        service: String,
+        account: String,
+    },
 }
 
 impl SecretLocation {
@@ -16,10 +20,12 @@ impl SecretLocation {
         Self::File(path.into())
     }
 
+    #[allow(dead_code)]
     pub fn auth_json(codex_home: impl AsRef<Path>) -> Self {
         Self::File(codex_home.as_ref().join("auth.json"))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn keyring(service: impl Into<String>, account: impl Into<String>) -> Self {
         Self::Keyring {
             service: service.into(),
@@ -27,6 +33,7 @@ impl SecretLocation {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_file(&self) -> bool {
         matches!(self, Self::File(_))
     }
@@ -39,14 +46,17 @@ pub enum SecretValue {
 }
 
 impl SecretValue {
+    #[allow(dead_code)]
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text(value.into())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn bytes(value: impl Into<Vec<u8>>) -> Self {
         Self::Bytes(value.into())
     }
 
+    #[allow(dead_code)]
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(value) => Some(value.as_str()),
@@ -111,10 +121,12 @@ pub enum SecretBackendKind {
 }
 
 impl SecretBackendKind {
+    #[allow(dead_code)]
     pub fn file() -> Self {
         Self::File
     }
 
+    #[allow(dead_code)]
     pub fn keyring() -> Self {
         Self::Keyring
     }
@@ -165,10 +177,12 @@ impl SecretRevision {
         Self::new(metadata.len(), metadata.modified().ok())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn size_bytes(&self) -> u64 {
         self.size_bytes
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
     }
@@ -190,6 +204,7 @@ impl fmt::Display for SecretRevision {
 pub trait SecretBackend {
     fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError>;
     fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError>;
+    #[cfg_attr(not(test), allow(dead_code))]
     fn delete(&self, location: &SecretLocation) -> Result<(), SecretError>;
 }
 
@@ -210,12 +225,14 @@ impl<B> SecretManager<B> {
         Self { backend }
     }
 
+    #[allow(dead_code)]
     pub fn backend(&self) -> &B {
         &self.backend
     }
 }
 
 impl<B: SecretBackend> SecretManager<B> {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {
         self.backend.read(location)
     }
@@ -230,6 +247,7 @@ impl<B: SecretBackend> SecretManager<B> {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {
         self.backend.write(location, value)
     }
@@ -243,6 +261,7 @@ impl<B: SecretBackend> SecretManager<B> {
             .write(location, SecretValue::Text(value.into()))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn delete(&self, location: &SecretLocation) -> Result<(), SecretError> {
         self.backend.delete(location)
     }

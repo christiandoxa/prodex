@@ -6,24 +6,21 @@ mod render;
 mod state;
 mod types;
 
-#[allow(unused_imports)]
-pub(crate) use diagnosis::{
-    runtime_doctor_finalize_summary, runtime_doctor_marker_count, runtime_doctor_top_facet,
-};
-#[allow(unused_imports)]
 pub(crate) use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
-#[allow(unused_imports)]
-pub(crate) use render::{
-    runtime_doctor_fields, runtime_doctor_fields_for_summary, runtime_doctor_json_value,
-};
-#[allow(unused_imports)]
-pub(crate) use state::{
-    collect_runtime_doctor_state, collect_runtime_doctor_summary, runtime_doctor_degraded_routes,
-};
-#[allow(unused_imports)]
+pub(crate) use render::{runtime_doctor_fields, runtime_doctor_json_value};
+pub(crate) use state::collect_runtime_doctor_summary;
 pub(crate) use types::{
     RuntimeDoctorProfileSummary, RuntimeDoctorRouteSummary, RuntimeDoctorSummary,
 };
+
+#[cfg(test)]
+pub(crate) use diagnosis::{
+    runtime_doctor_finalize_summary, runtime_doctor_marker_count, runtime_doctor_top_facet,
+};
+#[cfg(test)]
+pub(crate) use render::runtime_doctor_fields_for_summary;
+#[cfg(test)]
+pub(crate) use state::{collect_runtime_doctor_state, runtime_doctor_degraded_routes};
 
 const RUNTIME_DOCTOR_FACETS: &[&str] = &[
     "lane",

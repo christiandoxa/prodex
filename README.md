@@ -79,6 +79,7 @@ Run through `prodex`:
 prodex
 prodex caveman
 prodex caveman mem
+prodex super
 prodex exec "review this repo"
 prodex claude -- -p "summarize this repo"
 prodex claude mem -- -p "recall past work on this repo"
@@ -110,6 +111,19 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 `prodex caveman` runs Codex with a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
 If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
+
+### Run Super mode
+
+```bash
+prodex super
+prodex super --profile main
+prodex super exec "review this repo in super mode"
+prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+```
+
+`prodex super` is a shortcut for `prodex caveman mem --full-access`.
+
+Use this when you want Caveman mode, Claude-Mem transcript watching, and launch-time full access together. Full access maps to Codex's sandbox-bypass launch flag, so use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
 ### Run Claude Code
 

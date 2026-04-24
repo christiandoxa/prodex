@@ -36,10 +36,8 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     if args.raw {
         let usage =
             fetch_profile_quota_json(&profile.provider, &codex_home, args.base_url.as_deref())?;
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?
-        );
+        let json = serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?;
+        print_stdout_line(&json);
         return Ok(());
     }
 
@@ -53,6 +51,6 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     }
 
     let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
-    println!("{}", render_profile_quota_snapshot(&profile_name, &quota));
+    print_stdout_line(&render_profile_quota_snapshot(&profile_name, &quota));
     Ok(())
 }

@@ -248,7 +248,7 @@ fn panel_lines_with_layout(
 
 pub(super) fn print_panel(title: &str, fields: &[(String, String)]) {
     for line in panel_lines_with_layout(title, fields, current_cli_width()) {
-        println!("{line}");
+        print_stdout_line(&line);
     }
 }
 
@@ -256,8 +256,29 @@ pub(super) fn render_panel(title: &str, fields: &[(String, String)]) -> String {
     panel_lines_with_layout(title, fields, current_cli_width()).join("\n")
 }
 
+pub(super) fn print_stdout_text(message: &str) {
+    print!("{message}");
+}
+
+pub(super) fn print_stdout_line(message: &str) {
+    println!("{message}");
+}
+
+pub(super) fn print_blank_line() {
+    println!();
+}
+
+pub(super) fn print_stderr_line(message: &str) {
+    eprintln!("{message}");
+}
+
+pub(super) fn print_stderr_prompt(prompt: &str) -> Result<()> {
+    eprint!("{prompt}");
+    io::stderr().flush().context("failed to flush prompt")
+}
+
 pub(super) fn print_wrapped_stderr(message: &str) {
     for line in wrap_text(message, current_cli_width()) {
-        eprintln!("{line}");
+        print_stderr_line(&line);
     }
 }

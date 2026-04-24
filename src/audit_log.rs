@@ -46,6 +46,58 @@ pub(super) struct AuditLogEventRecord {
     pub(super) details: Value,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct AuditLogSearchScope {
+    pub(super) path: PathBuf,
+    pub(super) log_size_bytes: u64,
+    pub(super) search_start_byte: u64,
+    pub(super) searched_bytes: u64,
+    pub(super) read_limit_bytes: u64,
+    pub(super) limited: bool,
+}
+
+impl AuditLogSearchScope {
+    fn missing(path: PathBuf) -> Self {
+        Self {
+            path,
+            log_size_bytes: 0,
+            search_start_byte: 0,
+            searched_bytes: 0,
+            read_limit_bytes: AUDIT_LOG_READ_MAX_BYTES,
+            limited: false,
+        }
+    }
+
+    fn searched_window(path: PathBuf, log_size_bytes: u64, search_start_byte: u64) -> Self {
+        let searched_bytes = log_size_bytes.saturating_sub(search_start_byte);
+        Self {
+            path,
+            log_size_bytes,
+            search_start_byte,
+            searched_bytes,
+            read_limit_bytes: AUDIT_LOG_READ_MAX_BYTES,
+            limited: search_start_byte > 0,
+        }
+    }
+
+    fn empty_search(path: PathBuf, log_size_bytes: u64) -> Self {
+        Self {
+            path,
+            log_size_bytes,
+            search_start_byte: log_size_bytes,
+            searched_bytes: 0,
+            read_limit_bytes: AUDIT_LOG_READ_MAX_BYTES,
+            limited: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct AuditLogReadResult {
+    pub(super) events: Vec<AuditLogEventRecord>,
+    pub(super) search_scope: AuditLogSearchScope,
+}
+
 pub(super) fn audit_log_dir() -> PathBuf {
     env::var_os("PRODEX_AUDIT_LOG_DIR")
         .filter(|value| !value.is_empty())
@@ -107,19 +159,32 @@ pub(super) fn audit_logs_json_value() -> Value {
     })
 }
 
+#[cfg(test)]
 pub(super) fn read_recent_audit_events(query: &AuditLogQuery) -> Result<Vec<AuditLogEventRecord>> {
-    let path = audit_log_path();
-    if !path.exists() {
+    if query.tail == 0 && !query.has_filters() {
         return Ok(Vec::new());
     }
+    Ok(read_recent_audit_events_with_scope(query)?.events)
+}
 
-    let candidate_lines = if query.has_filters() {
+pub(super) fn read_recent_audit_events_with_scope(
+    query: &AuditLogQuery,
+) -> Result<AuditLogReadResult> {
+    let path = audit_log_path();
+    if !path.exists() {
+        return Ok(AuditLogReadResult {
+            events: Vec::new(),
+            search_scope: AuditLogSearchScope::missing(path),
+        });
+    }
+
+    let candidate_read = if query.has_filters() {
         read_recent_audit_lines(&path, None)?
     } else {
         read_recent_audit_lines(&path, Some(query.tail))?
     };
     let mut matches = Vec::new();
-    for line in candidate_lines {
+    for line in candidate_read.lines {
         if line.trim().is_empty() {
             continue;
         }
@@ -133,36 +198,30 @@ pub(super) fn read_recent_audit_events(query: &AuditLogQuery) -> Result<Vec<Audi
 
     if matches.len() > query.tail {
         let keep_from = matches.len().saturating_sub(query.tail);
-        Ok(matches.split_off(keep_from))
-    } else {
-        Ok(matches)
+        matches = matches.split_off(keep_from);
     }
+
+    Ok(AuditLogReadResult {
+        events: matches,
+        search_scope: candidate_read.search_scope,
+    })
 }
 
-fn audit_log_query_matches(query: &AuditLogQuery, event: &AuditLogEventRecord) -> bool {
-    let component_matches = query
-        .component
-        .as_deref()
-        .is_none_or(|component| event.component == component);
-    let action_matches = query
-        .action
-        .as_deref()
-        .is_none_or(|action| event.action == action);
-    let outcome_matches = query
-        .outcome
-        .as_deref()
-        .is_none_or(|outcome| event.outcome == outcome);
-    component_matches && action_matches && outcome_matches
-}
-
-pub(super) fn render_audit_events_human(
+pub(super) fn render_audit_events_human_with_scope(
     path: &Path,
     query: &AuditLogQuery,
     events: &[AuditLogEventRecord],
+    search_scope: Option<&AuditLogSearchScope>,
 ) -> String {
     let mut output = String::new();
     output.push_str(&format!("Audit log: {}\n", path.display()));
     output.push_str(&format!("Tail: {}\n", query.tail));
+    if let Some(search_scope) = search_scope {
+        output.push_str(&format!(
+            "Search scope: {}\n",
+            format_audit_search_scope(search_scope)
+        ));
+    }
     if query.has_filters() {
         output.push_str(&format!("Filter: {}\n", format_audit_query(query)));
     }
@@ -185,6 +244,46 @@ pub(super) fn render_audit_events_human(
     }
     output.pop();
     output
+}
+
+pub(super) fn format_audit_search_scope(scope: &AuditLogSearchScope) -> String {
+    let search_end_byte = scope.search_start_byte.saturating_add(scope.searched_bytes);
+    let mut rendered = format!(
+        "searched {} of {} bytes (byte range {}..{})",
+        scope.searched_bytes, scope.log_size_bytes, scope.search_start_byte, search_end_byte
+    );
+    if scope.limited {
+        rendered.push_str(&format!(
+            " limited to last {} bytes",
+            scope.read_limit_bytes
+        ));
+    }
+    rendered
+}
+
+fn audit_log_query_matches(query: &AuditLogQuery, event: &AuditLogEventRecord) -> bool {
+    let component_matches = query
+        .component
+        .as_deref()
+        .is_none_or(|component| event.component == component);
+    let action_matches = query
+        .action
+        .as_deref()
+        .is_none_or(|action| event.action == action);
+    let outcome_matches = query
+        .outcome
+        .as_deref()
+        .is_none_or(|outcome| event.outcome == outcome);
+    component_matches && action_matches && outcome_matches
+}
+
+#[cfg(test)]
+pub(super) fn render_audit_events_human(
+    path: &Path,
+    query: &AuditLogQuery,
+    events: &[AuditLogEventRecord],
+) -> String {
+    render_audit_events_human_with_scope(path, query, events, None)
 }
 
 pub(super) fn format_audit_query(query: &AuditLogQuery) -> String {
@@ -223,17 +322,26 @@ fn truncate_audit_details(value: &str, max_chars: usize) -> String {
     }
 }
 
-fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<Vec<String>> {
-    if tail == Some(0) {
-        return Ok(Vec::new());
-    }
+struct AuditLogLineRead {
+    lines: Vec<String>,
+    search_scope: AuditLogSearchScope,
+}
+
+fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<AuditLogLineRead> {
     let file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let len = file
+    let log_size_bytes = file
         .metadata()
         .with_context(|| format!("failed to stat {}", path.display()))?
         .len();
-    let start = len.saturating_sub(AUDIT_LOG_READ_MAX_BYTES);
+    if tail == Some(0) {
+        return Ok(AuditLogLineRead {
+            lines: Vec::new(),
+            search_scope: AuditLogSearchScope::empty_search(path.to_path_buf(), log_size_bytes),
+        });
+    }
+
+    let start = log_size_bytes.saturating_sub(AUDIT_LOG_READ_MAX_BYTES);
     let mut reader = BufReader::new(file);
     reader
         .seek(SeekFrom::Start(start))
@@ -250,177 +358,17 @@ fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<Vec<Strin
         && lines.len() > tail
     {
         let keep_from = lines.len().saturating_sub(tail);
-        return Ok(lines.split_off(keep_from));
+        lines = lines.split_off(keep_from);
     }
-    Ok(lines)
+    Ok(AuditLogLineRead {
+        lines,
+        search_scope: AuditLogSearchScope::searched_window(
+            path.to_path_buf(),
+            log_size_bytes,
+            start,
+        ),
+    })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::TestEnvVarGuard;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let dir = env::temp_dir().join(format!(
-            "prodex-audit-log-{name}-{}-{nanos:x}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn audit_log_path_uses_env_override() {
-        let dir = temp_dir("path");
-        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
-
-        assert_eq!(audit_log_path(), dir.join(AUDIT_LOG_FILE_NAME));
-
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn append_audit_event_writes_json_line() {
-        let dir = temp_dir("append");
-        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
-
-        append_audit_event(
-            "profile",
-            "add",
-            "success",
-            serde_json::json!({
-                "profile_name": "main",
-                "managed": true,
-            }),
-        )
-        .unwrap();
-
-        let content = fs::read_to_string(audit_log_path()).unwrap();
-        let line = content.lines().next().unwrap();
-        let value: Value = serde_json::from_str(line).unwrap();
-        assert_eq!(
-            value.get("component").and_then(Value::as_str),
-            Some("profile")
-        );
-        assert_eq!(value.get("action").and_then(Value::as_str), Some("add"));
-        assert_eq!(
-            value.get("outcome").and_then(Value::as_str),
-            Some("success")
-        );
-        assert_eq!(
-            value
-                .pointer("/details/profile_name")
-                .and_then(Value::as_str),
-            Some("main")
-        );
-
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn read_recent_audit_events_applies_tail_and_filters() {
-        let dir = temp_dir("query");
-        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
-
-        fs::write(
-            audit_log_path(),
-            concat!(
-                "{\"recorded_at\":\"2026-04-08T00:00:00+00:00\",\"recorded_at_epoch\":1,\"pid\":10,\"component\":\"profile\",\"action\":\"add\",\"outcome\":\"success\",\"details\":{\"profile_name\":\"main\"}}\n",
-                "not-json\n",
-                "{\"recorded_at\":\"2026-04-08T00:00:01+00:00\",\"recorded_at_epoch\":2,\"pid\":10,\"component\":\"profile\",\"action\":\"use\",\"outcome\":\"success\",\"details\":{\"profile_name\":\"second\"}}\n",
-                "{\"recorded_at\":\"2026-04-08T00:00:02+00:00\",\"recorded_at_epoch\":3,\"pid\":10,\"component\":\"runtime\",\"action\":\"broker_start\",\"outcome\":\"success\",\"details\":{\"listen_addr\":\"127.0.0.1:12345\"}}\n"
-            ),
-        )
-        .unwrap();
-
-        let filtered = read_recent_audit_events(&AuditLogQuery {
-            tail: 5,
-            component: Some("profile".to_string()),
-            action: None,
-            outcome: Some("success".to_string()),
-        })
-        .unwrap();
-        assert_eq!(filtered.len(), 2);
-        assert_eq!(filtered[0].action, "add");
-        assert_eq!(filtered[1].action, "use");
-
-        let tailed = read_recent_audit_events(&AuditLogQuery {
-            tail: 1,
-            component: None,
-            action: None,
-            outcome: None,
-        })
-        .unwrap();
-        assert_eq!(tailed.len(), 1);
-        assert_eq!(tailed[0].component, "runtime");
-        assert_eq!(tailed[0].action, "broker_start");
-
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn read_recent_audit_events_with_filters_scans_beyond_last_tail_lines() {
-        let dir = temp_dir("query-filter-window");
-        let _guard = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
-
-        let mut content = String::new();
-        content.push_str(
-            "{\"recorded_at\":\"2026-04-08T00:00:00+00:00\",\"recorded_at_epoch\":1,\"pid\":10,\"component\":\"profile\",\"action\":\"use\",\"outcome\":\"success\",\"details\":{\"profile_name\":\"main\"}}\n",
-        );
-        for index in 0..20 {
-            content.push_str(&format!(
-                "{{\"recorded_at\":\"2026-04-08T00:00:{:02}+00:00\",\"recorded_at_epoch\":{},\"pid\":10,\"component\":\"runtime\",\"action\":\"broker_start\",\"outcome\":\"success\",\"details\":{{\"index\":{}}}}}\n",
-                index + 1,
-                index + 2,
-                index
-            ));
-        }
-        fs::write(audit_log_path(), content).unwrap();
-
-        let events = read_recent_audit_events(&AuditLogQuery {
-            tail: 5,
-            component: Some("profile".to_string()),
-            action: Some("use".to_string()),
-            outcome: Some("success".to_string()),
-        })
-        .unwrap();
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].component, "profile");
-        assert_eq!(events[0].action, "use");
-
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn render_audit_events_human_shows_filters_and_details() {
-        let output = render_audit_events_human(
-            Path::new("/tmp/prodex-audit.log"),
-            &AuditLogQuery {
-                tail: 25,
-                component: Some("profile".to_string()),
-                action: None,
-                outcome: Some("success".to_string()),
-            },
-            &[AuditLogEventRecord {
-                recorded_at: "2026-04-08T00:00:00+00:00".to_string(),
-                recorded_at_epoch: 1,
-                pid: 10,
-                component: "profile".to_string(),
-                action: "add".to_string(),
-                outcome: "success".to_string(),
-                details: serde_json::json!({"profile_name":"main"}),
-            }],
-        );
-
-        assert!(output.contains("Tail: 25"));
-        assert!(output.contains("Filter: component=profile outcome=success"));
-        assert!(output.contains("profile add success"));
-        assert!(output.contains("\"profile_name\":\"main\""));
-    }
-}
+mod tests;

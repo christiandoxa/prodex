@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod file_backend;
 mod keyring_backend;
 mod locations;

@@ -77,14 +77,8 @@ pub(crate) const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
 pub(crate) const RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER: u64 = 2;
 pub(crate) const RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS: u64 =
     if cfg!(test) { 150 } else { 800 };
-#[allow(dead_code)]
-pub(crate) const RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_BUDGET_MS: u64 =
-    if cfg!(test) { 250 } else { 1_500 };
 pub(crate) const RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT: usize =
     if cfg!(test) { 2 } else { 6 };
-#[allow(dead_code)]
-pub(crate) const RUNTIME_PROXY_PRESSURE_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
-    if cfg!(test) { 4 } else { 8 };
 pub(crate) const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else { 150 };
 pub(crate) const RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS: u64 = 5;
 pub(crate) const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };

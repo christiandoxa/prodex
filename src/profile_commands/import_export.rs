@@ -299,8 +299,7 @@ fn resolve_import_password() -> Result<String> {
 fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     let mut input = String::new();
     loop {
-        eprint!("{prompt}");
-        io::stderr().flush().context("failed to flush prompt")?;
+        print_stderr_prompt(prompt)?;
         input.clear();
         io::stdin()
             .read_line(&mut input)
@@ -310,7 +309,7 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
             "y" | "yes" => return Ok(true),
             "n" | "no" => return Ok(false),
             _ => {
-                eprintln!("Please answer yes or no.");
+                print_stderr_line("Please answer yes or no.");
             }
         }
     }

@@ -209,6 +209,19 @@ impl RuntimeScheduledSaveJob for TestScheduledJob {
 }
 
 #[test]
+fn runtime_take_due_scheduled_jobs_handles_empty_pending() {
+    let mut pending = BTreeMap::<String, TestScheduledJob>::new();
+
+    match runtime_take_due_scheduled_jobs(&mut pending, Instant::now()) {
+        RuntimeDueJobs::Due(due) => {
+            assert!(due.is_empty());
+            assert!(pending.is_empty());
+        }
+        RuntimeDueJobs::Wait(_) => panic!("empty pending work should not wait"),
+    }
+}
+
+#[test]
 fn runtime_take_due_scheduled_jobs_waits_for_future_entries() {
     let now = Instant::now();
     let mut pending = BTreeMap::from([(

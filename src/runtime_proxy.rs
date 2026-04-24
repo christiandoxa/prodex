@@ -51,8 +51,8 @@ pub(crate) use self::previous_response_orchestration::*;
 pub(super) use self::profile_state::*;
 pub(super) use self::quota::*;
 pub(crate) use self::response_forwarding::*;
-#[allow(unused_imports)]
-pub(super) use self::responses::attempt_runtime_responses_request;
+#[cfg(test)]
+pub(crate) use self::responses::attempt_runtime_responses_request;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 pub(crate) use self::selection::*;
 pub(crate) use self::selection_plan::*;
