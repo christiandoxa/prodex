@@ -45,6 +45,8 @@ jobs:
           artifact_dir="${RUNNER_TEMP}/upstream-compat"
           report="${artifact_dir}/report.json"
           text_report="${artifact_dir}/watchdog.txt"
+          guard_report="${artifact_dir}/baseline-guard.json"
+          guard_text="${artifact_dir}/baseline-guard.txt"
           summary="${artifact_dir}/summary.md"
           metadata="${artifact_dir}/metadata.json"
           mkdir -p "${artifact_dir}"
@@ -63,6 +65,27 @@ jobs:
           node -e "const fs = require('node:fs'); fs.writeFileSync(process.argv[1], JSON.stringify({ event_name: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF, sha: process.env.GITHUB_SHA, run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT, baseline_path: process.argv[2] }, null, 2) + '\n');" "${metadata}" "${baseline_path}"
 
           set +e
+          node scripts/compat/check-upstream-baseline.mjs --baseline "${baseline_path}" --report "${guard_report}" > "${guard_text}" 2>&1
+          guard_status=$?
+          set -e
+
+          if [ "${guard_status}" -ne 0 ]; then
+            {
+              echo "## Upstream compatibility"
+              echo
+              echo "- Baseline: \`${baseline_path}\`"
+              echo "- Offline guard: \`failed\`"
+              echo
+              echo "### Guard output"
+              echo '```'
+              sed -n '1,120p' "${guard_text}"
+              echo '```'
+            } > "${summary}"
+            cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
+            exit "${guard_status}"
+          fi
+
+          set +e
           node scripts/compat/watch-upstream.mjs --baseline "${baseline_path}" --report "${report}" > "${text_report}" 2>&1
           status=$?
           set -e
@@ -76,6 +99,7 @@ jobs:
           lines.push(`- Event: \`${process.env.GITHUB_EVENT_NAME}\``);
           lines.push(`- Ref: \`${process.env.GITHUB_REF}\``);
           lines.push(`- Baseline: \`${baselinePath}\``);
+          lines.push("- Offline guard: `passed`");
           lines.push(`- Fail on drift: \`${failOnDrift}\``);
 
           if (fs.existsSync(reportPath)) {

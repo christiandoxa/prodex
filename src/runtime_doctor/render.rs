@@ -914,8 +914,17 @@ pub(crate) fn runtime_doctor_fields_for_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
-    use std::path::PathBuf;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::{Path, PathBuf};
+
+    const LANE_PRESSURE_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/lane_pressure.log");
+    const PERSISTENCE_BACKPRESSURE_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/persistence_backpressure.log");
+    const PREVIOUS_RESPONSE_FAIL_CLOSED_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/previous_response_fail_closed.log");
+    const ROUTE_SCOPED_PROFILE_HEALTH_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/route_scoped_profile_health.log");
 
     fn json_object_keys(value: &serde_json::Value) -> BTreeSet<String> {
         value
@@ -924,6 +933,169 @@ mod tests {
             .keys()
             .cloned()
             .collect()
+    }
+
+    fn runtime_doctor_fixture_summary(log: &[u8]) -> RuntimeDoctorSummary {
+        let mut summary = summarize_runtime_log_tail(log);
+        summary.pointer_exists = true;
+        summary.log_exists = true;
+        summary.log_path = Some(PathBuf::from("/tmp/prodex-runtime-fixture.log"));
+        diagnosis::runtime_doctor_finalize_summary(&mut summary);
+        summary
+    }
+
+    fn runtime_doctor_fixture_fields(summary: &RuntimeDoctorSummary) -> BTreeMap<String, String> {
+        runtime_doctor_fields_for_summary(summary, Path::new("/tmp/prodex-runtime-latest.path"))
+            .into_iter()
+            .collect()
+    }
+
+    fn runtime_doctor_json_string<'a>(value: &'a serde_json::Value, key: &str) -> &'a str {
+        value[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} should be a JSON string"))
+    }
+
+    #[test]
+    fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
+        let summary = runtime_doctor_fixture_summary(LANE_PRESSURE_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(summary.line_count, 2);
+        assert_eq!(
+            value["marker_counts"]["runtime_proxy_lane_limit_reached"],
+            2
+        );
+        assert_eq!(
+            value["marker_last_fields"]["runtime_proxy_lane_limit_reached"]["lane"],
+            "compact"
+        );
+        assert_eq!(
+            value["marker_last_fields"]["runtime_proxy_lane_limit_reached"]["active"],
+            "7"
+        );
+        assert_eq!(value["facet_counts"]["lane"]["compact"], 2);
+        assert_eq!(value["failure_class_counts"]["admission"], 2);
+        assert!(
+            runtime_doctor_json_string(&value, "diagnosis")
+                .contains("per-lane admission limit was triggered on compact")
+        );
+        assert!(
+            fields
+                .get("Lane next step")
+                .expect("lane next step should be rendered")
+                .contains("trim bursty compact traffic")
+        );
+        assert_eq!(
+            fields
+                .get("Failure classes")
+                .expect("failure classes should be rendered"),
+            "admission=2"
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_fixture_route_health_stays_profile_route_scoped() {
+        let summary = runtime_doctor_fixture_summary(ROUTE_SCOPED_PROFILE_HEALTH_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(value["marker_counts"]["profile_health"], 1);
+        assert_eq!(value["marker_counts"]["stream_read_error"], 1);
+        assert_eq!(
+            value["marker_last_fields"]["profile_health"]["profile"],
+            "alpha"
+        );
+        assert_eq!(
+            value["marker_last_fields"]["profile_health"]["route"],
+            "responses"
+        );
+        assert_eq!(value["marker_last_fields"]["profile_health"]["score"], "43");
+        assert_eq!(value["transport_pressure"], "elevated");
+        assert!(runtime_doctor_json_string(&value, "diagnosis").contains("alpha/responses"));
+        assert!(
+            fields
+                .get("Health next step")
+                .expect("health next step should be rendered")
+                .contains("for alpha/responses")
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_fixture_persistence_backpressure_surfaces_queue_details() {
+        let summary = runtime_doctor_fixture_summary(PERSISTENCE_BACKPRESSURE_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(value["marker_counts"]["state_save_queue_backpressure"], 1);
+        assert_eq!(
+            value["marker_counts"]["continuation_journal_queue_backpressure"],
+            1
+        );
+        assert_eq!(value["state_save_queue_backlog"], 12);
+        assert_eq!(value["continuation_journal_save_backlog"], 9);
+        assert_eq!(value["continuation_journal_save_lag_ms"], 215);
+        assert_eq!(value["persistence_pressure"], "elevated");
+        assert_eq!(value["failure_class_counts"]["persistence"], 2);
+        assert!(
+            runtime_doctor_json_string(&value, "diagnosis")
+                .contains("background persistence queue backpressure")
+        );
+        assert!(
+            fields
+                .get("Persistence next step")
+                .expect("persistence next step should be rendered")
+                .contains("Latest backlog: state=12 journal=9")
+        );
+        assert_eq!(
+            fields
+                .get("State pressure reason")
+                .expect("state pressure reason should be rendered"),
+            "channel_full"
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_fixture_previous_response_fail_closed_surfaces_guard() {
+        let summary = runtime_doctor_fixture_summary(PREVIOUS_RESPONSE_FAIL_CLOSED_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(value["marker_counts"]["previous_response_not_found"], 1);
+        assert_eq!(
+            value["marker_counts"]["previous_response_fresh_fallback_blocked"],
+            1
+        );
+        assert_eq!(
+            value["previous_response_not_found_by_route"]["responses"],
+            1
+        );
+        assert_eq!(value["previous_response_not_found_by_transport"]["http"], 1);
+        assert_eq!(
+            value["marker_last_fields"]["previous_response_fresh_fallback_blocked"]["request_shape"],
+            "continuation_only"
+        );
+        assert_eq!(
+            value["facet_counts"]["request_shape"]["continuation_only"],
+            1
+        );
+        assert!(
+            runtime_doctor_json_string(&value, "diagnosis")
+                .contains("context-dependent previous_response_id continuation failed closed")
+        );
+        assert_eq!(
+            fields
+                .get("Fail-closed shapes")
+                .expect("fail-closed shapes should be rendered"),
+            "continuation_only=1"
+        );
+        assert!(
+            fields
+                .get("Continuation next step")
+                .expect("continuation next step should be rendered")
+                .contains("cannot be replayed safely")
+        );
     }
 
     #[test]

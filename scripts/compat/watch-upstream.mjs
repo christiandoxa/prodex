@@ -236,8 +236,9 @@ function buildDiffs(baseline, current) {
   return diffs;
 }
 
-function baselineSnapshotFromCurrent(current) {
+function baselineSnapshotFromCurrent(baseline, current) {
   return {
+    ...(baseline.codex ? { codex: baseline.codex } : {}),
     claude: {
       latestRelease: current.claude.latestRelease,
       docs: current.claude.docs.map(
@@ -280,7 +281,7 @@ async function main() {
   const diffs = buildDiffs(baseline, current);
 
   if (args.writeBaseline) {
-    await fs.writeFile(args.baseline, `${JSON.stringify(baselineSnapshotFromCurrent(current), null, 2)}\n`);
+    await fs.writeFile(args.baseline, `${JSON.stringify(baselineSnapshotFromCurrent(baseline, current), null, 2)}\n`);
   }
 
   const report = {

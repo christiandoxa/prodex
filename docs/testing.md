@@ -37,6 +37,7 @@ npm run test:fast
 npm run test:serial
 npm run docs:lint
 npm run ci:runtime-manifest
+node scripts/compat/check-upstream-baseline.mjs
 node scripts/ci/runtime-proxy-shard.mjs
 npm run ci:runtime-stress -- --suite stress
 npm run ci:runtime-stress -- --suite serialized
@@ -46,3 +47,9 @@ cargo test -q --all-features -- --test-threads=1
 ```
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
+
+Use `node scripts/compat/check-upstream-baseline.mjs` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces.
+
+`npm run test:fast` prebuilds cargo test binaries with `cargo test --no-run` before starting parallel cargo test shards when `CI` is not set. This local warmup reduces misleading cargo build lock waits from many child processes trying to compile the same test binaries at once. CI defaults are preserved: when `CI=true`, prebuild is off unless explicitly enabled with `npm run test:fast -- --prebuild`.
+
+Use `npm run test:fast -- --no-prebuild` when measuring cold parallel behavior or debugging cargo scheduling itself. Seeing Cargo print `Blocking waiting for file lock` during local parallel shards usually means another cargo process is compiling or writing the shared target/cache directory, not that a test has deadlocked.

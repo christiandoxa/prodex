@@ -1,4 +1,97 @@
 {
+  "codex": {
+    "compatibility": {
+      "upstream_repository": "https://github.com/openai/codex",
+      "baseline_source": "openai/codex main branch",
+      "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
+      "critical_files": [
+        {
+          "path": "codex-rs/core/src/client.rs",
+          "reason": "Owns Responses route constants, compact route constants, conversation headers, turn-state replay, previous-response continuations, and websocket enablement.",
+          "required_contains": [
+            "RESPONSES_ENDPOINT",
+            "/responses",
+            "RESPONSES_COMPACT_ENDPOINT",
+            "/responses/compact",
+            "build_conversation_headers",
+            "previous_response_id",
+            "X_CODEX_TURN_STATE_HEADER",
+            "x-codex-turn-state",
+            "X_CODEX_TURN_METADATA_HEADER",
+            "x-codex-turn-metadata",
+            "X_OPENAI_SUBAGENT_HEADER",
+            "x-openai-subagent",
+            "x-codex-beta-features",
+            "OPENAI_BETA_HEADER",
+            "responses_websockets=2026-02-06",
+            "stream_responses_websocket"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/compact_remote.rs",
+          "reason": "Owns remote compaction flow that reaches the unary Responses compact endpoint through ModelClient.",
+          "required_contains": [
+            "run_remote_compact_task",
+            "compact_conversation_history",
+            "CompactionImplementation::ResponsesCompact",
+            "ContextCompactionItem"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Owns SSE Responses stream parsing, turn-state capture, completion boundary, and quota/error event interpretation.",
+          "required_contains": [
+            "spawn_response_stream",
+            "process_sse",
+            "process_responses_event",
+            "x-codex-turn-state",
+            "response.completed",
+            "response.failed",
+            "insufficient_quota",
+            "rate_limit_exceeded"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Owns websocket Responses connection setup, request header merging, stream completion boundary, rate limit events, and wrapped websocket errors.",
+          "required_contains": [
+            "ResponsesWebsocketConnection",
+            "websocket_url_for_path(\"responses\")",
+            "merge_request_headers",
+            "add_auth_headers",
+            "x-codex-turn-state",
+            "response.completed",
+            "codex.rate_limits",
+            "parse_wrapped_websocket_error_event",
+            "websocket_connection_limit_reached"
+          ]
+        }
+      ],
+      "expected_headers": [
+        "session_id",
+        "x-openai-subagent",
+        "x-codex-turn-state",
+        "x-codex-turn-metadata",
+        "x-codex-beta-features",
+        "OpenAI-Beta",
+        "User-Agent"
+      ],
+      "proxy_replaced_headers": [
+        "Authorization",
+        "ChatGPT-Account-Id"
+      ],
+      "expected_routes": [
+        "/responses",
+        "/responses/compact",
+        "websocket_url_for_path(\"responses\")"
+      ],
+      "expected_stream_events": [
+        "response.completed",
+        "response.failed",
+        "codex.rate_limits"
+      ]
+    }
+  },
   "claude": {
     "latestRelease": {
       "tag_name": "v2.1.118",

@@ -27,6 +27,19 @@ const CARGO_CHECK_STEP = {
   args: ["check", "--locked", "--all-targets", "--all-features"],
 };
 
+const PREBUILD_STEPS = [
+  {
+    label: "prebuild:lib-tests",
+    command: "cargo",
+    args: ["test", "--lib", "--no-run"],
+  },
+  {
+    label: "prebuild:test:auto-rotate",
+    command: "cargo",
+    args: ["test", "--test", "auto_rotate", "--no-run"],
+  },
+];
+
 const SAFE_CARGO_TEST_STEPS = [
   cargoTestStep("lib:app-commands", "app_commands::"),
   cargoTestStep("lib:audit-log", "audit_log::"),
@@ -46,11 +59,17 @@ const SAFE_CARGO_TEST_STEPS = [
   cargoIntegrationTestStep("test:auto-rotate", "auto_rotate"),
 ];
 
+function isCiEnv() {
+  const value = process.env.CI;
+  return Boolean(value && value !== "0" && value.toLowerCase() !== "false");
+}
+
 function parseArgs(argv) {
   const args = {
     jobs: defaultJobCount(),
     checks: true,
     cargoCheck: true,
+    prebuild: !isCiEnv(),
     tests: true,
     dryRun: false,
   };
@@ -78,6 +97,14 @@ function parseArgs(argv) {
       args.cargoCheck = false;
       continue;
     }
+    if (value === "--prebuild") {
+      args.prebuild = true;
+      continue;
+    }
+    if (value === "--no-prebuild") {
+      args.prebuild = false;
+      continue;
+    }
     if (value === "--dry-run") {
       args.dryRun = true;
       continue;
@@ -95,15 +122,21 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/test-fast.mjs [--jobs <n>] [--checks-only|--tests-only] [--no-cargo-check] [--dry-run]",
+      "Usage: node scripts/ci/test-fast.mjs [--jobs <n>] [--checks-only|--tests-only] [--no-cargo-check] [--prebuild|--no-prebuild] [--dry-run]",
       "",
       "Runs local fast checks plus independent safe cargo test shards.",
+      "Prebuild is enabled by default outside CI to warm cargo test binaries once before parallel shards.",
       "",
       "Includes:",
       "  - cargo fmt --check",
       "  - docs markdown lint",
       "  - cargo check --locked --all-targets --all-features",
+      "  - optional cargo test --no-run prebuild for cargo test shards",
       "  - safe lib/integration cargo test shards as separate child processes",
+      "",
+      "Options:",
+      "  --prebuild     force prebuild even when CI=true",
+      "  --no-prebuild  skip prebuild when measuring cold parallel behavior",
       "",
       "Quarantined runtime, profile, env-sensitive, continuation-heavy, and global-state shards stay in test:serial.",
     ].join("\n") + "\n",
@@ -122,6 +155,10 @@ async function main() {
   }
   if (args.cargoCheck) {
     await runStepsSerial([CARGO_CHECK_STEP], { dryRun: args.dryRun });
+  }
+  if (args.tests && args.prebuild) {
+    process.stdout.write("test-fast: prebuilding cargo test binaries before parallel shards\n");
+    await runStepsSerial(PREBUILD_STEPS, { dryRun: args.dryRun });
   }
   if (args.tests) {
     await runStepsParallel(SAFE_CARGO_TEST_STEPS, { jobs: args.jobs, dryRun: args.dryRun });
