@@ -1,5 +1,8 @@
 use super::*;
 
+const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
+const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
+
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     ChildProcessPlan::new(codex_bin(), codex_home)
         .with_args(args)
@@ -55,14 +58,46 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
-pub(crate) fn prepare_codex_launch_args(codex_args: &[OsString]) -> (Vec<OsString>, bool) {
-    let codex_args = normalize_run_codex_args(codex_args);
+pub(crate) fn prepare_codex_launch_args(
+    codex_args: &[OsString],
+    full_access_requested: bool,
+) -> (Vec<OsString>, bool) {
+    let (passthrough_full_access, codex_args) = extract_prodex_full_access_flag(codex_args);
+    let codex_args = normalize_run_codex_args(&codex_args);
     let include_code_review = is_review_invocation(&codex_args);
+    let codex_args = codex_launch_args_with_full_access(
+        &codex_args,
+        full_access_requested || passthrough_full_access,
+    );
     (codex_args, include_code_review)
 }
 
 pub(crate) fn is_review_invocation(args: &[OsString]) -> bool {
     args.iter().any(|arg| arg == "review")
+}
+
+fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
+    let mut full_access = false;
+    let mut filtered = Vec::with_capacity(codex_args.len());
+    for arg in codex_args {
+        if arg == PRODEX_CODEX_FULL_ACCESS_ARG {
+            full_access = true;
+            continue;
+        }
+        filtered.push(arg.clone());
+    }
+    (full_access, filtered)
+}
+
+fn codex_launch_args_with_full_access(codex_args: &[OsString], full_access: bool) -> Vec<OsString> {
+    if !full_access {
+        return codex_args.to_vec();
+    }
+
+    let mut args = Vec::with_capacity(codex_args.len() + 1);
+    args.push(OsString::from(CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG));
+    args.extend(codex_args.iter().cloned());
+    args
 }
 
 #[cfg(test)]
@@ -112,5 +147,49 @@ mod tests {
                 .iter()
                 .any(|key| key == "CODEX_SANDBOX_PROFILE")
         );
+    }
+
+    #[test]
+    fn prepare_codex_launch_args_extracts_prodex_full_access_passthrough_marker() {
+        let (args, include_code_review) = prepare_codex_launch_args(
+            &[
+                OsString::from("exec"),
+                OsString::from("--full-access"),
+                OsString::from("review"),
+            ],
+            false,
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+                OsString::from("exec"),
+                OsString::from("review"),
+            ]
+        );
+        assert!(include_code_review);
+    }
+
+    #[test]
+    fn prepare_codex_launch_args_full_access_keeps_resume_normalization_and_review_detection() {
+        let (args, include_code_review) = prepare_codex_launch_args(
+            &[
+                OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+                OsString::from("review"),
+            ],
+            true,
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+                OsString::from("resume"),
+                OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+                OsString::from("review"),
+            ]
+        );
+        assert!(include_code_review);
     }
 }

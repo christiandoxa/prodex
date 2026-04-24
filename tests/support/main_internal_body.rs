@@ -589,10 +589,13 @@ fn normalize_run_codex_args_rewrites_session_id_to_resume() {
 
 #[test]
 fn prepare_codex_launch_args_preserves_review_detection_after_normalization() {
-    let (args, include_code_review) = prepare_codex_launch_args(&[
-        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
-        OsString::from("review"),
-    ]);
+    let (args, include_code_review) = prepare_codex_launch_args(
+        &[
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("review"),
+        ],
+        false,
+    );
 
     assert_eq!(
         args,
@@ -1633,6 +1636,7 @@ fn runtime_broker_command_is_the_only_command_without_update_notice() {
         auto_rotate: false,
         no_auto_rotate: false,
         skip_quota_check: false,
+        full_access: false,
         base_url: None,
         codex_args: vec![OsString::from("hello")],
     });

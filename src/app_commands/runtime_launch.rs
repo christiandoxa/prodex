@@ -11,7 +11,8 @@ struct RunCommandStrategy {
 impl RunCommandStrategy {
     fn new(args: RunArgs) -> Self {
         let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
-        let (codex_args, include_code_review) = prepare_codex_launch_args(&codex_args);
+        let (codex_args, include_code_review) =
+            prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
         Self {

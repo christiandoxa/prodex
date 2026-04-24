@@ -1751,6 +1751,45 @@ fn caveman_command_accepts_passthrough_args() {
 }
 
 #[test]
+fn caveman_command_accepts_full_access_shortcut_after_mem_prefix() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "caveman",
+        "mem",
+        "--full-access",
+        "exec",
+        "review this repo",
+    ])
+    .expect("caveman full-access shortcut should parse");
+    let Commands::Caveman(args) = command else {
+        panic!("expected caveman command");
+    };
+    assert!(!args.full_access);
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("mem"),
+            OsString::from("--full-access"),
+            OsString::from("exec"),
+            OsString::from("review this repo")
+        ]
+    );
+
+    let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+    assert!(mem_mode);
+    let (launch_args, include_code_review) = prepare_codex_launch_args(&codex_args, args.full_access);
+    assert_eq!(
+        launch_args,
+        vec![
+            OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+            OsString::from("exec"),
+            OsString::from("review this repo")
+        ]
+    );
+    assert!(!include_code_review);
+}
+
+#[test]
 fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
     let output = render_profile_quota_watch_output(
         "main",
