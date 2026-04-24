@@ -399,6 +399,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "quota"
             | "run"
             | "caveman"
+            | "super"
             | "claude"
             | "help"
             | "__runtime-broker"

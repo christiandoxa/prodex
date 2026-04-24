@@ -36,6 +36,7 @@ impl_command_action!(
     RemoveProfileArgs,
     RunArgs,
     RuntimeBrokerArgs,
+    SuperArgs,
 );
 
 impl Commands {
@@ -61,6 +62,7 @@ impl Commands {
             Commands::Quota(command) => RoutedCommand::new(command),
             Commands::Run(command) => RoutedCommand::new(command),
             Commands::Caveman(command) => RoutedCommand::new(command),
+            Commands::Super(command) => RoutedCommand::new(command),
             Commands::Claude(command) => RoutedCommand::new(command),
             Commands::RuntimeBroker(command) => RoutedCommand::new(command),
         }

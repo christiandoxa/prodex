@@ -74,6 +74,12 @@ pub(crate) enum Commands {
     Caveman(CavemanArgs),
     #[command(
         trailing_var_arg = true,
+        about = "Alias for `prodex caveman mem --full-access`.",
+        after_help = CLI_SUPER_AFTER_HELP
+    )]
+    Super(SuperArgs),
+    #[command(
+        trailing_var_arg = true,
         about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
         after_help = CLI_CLAUDE_AFTER_HELP
     )]
@@ -336,6 +342,45 @@ pub(crate) struct CavemanArgs {
 }
 
 #[derive(Args, Debug)]
+pub(crate) struct SuperArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub(crate) auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub(crate) no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    pub(crate) skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub(crate) base_url: Option<String>,
+    /// Arguments passed through to `codex` after the implied `mem` prefix.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub(crate) codex_args: Vec<OsString>,
+}
+
+impl SuperArgs {
+    pub(crate) fn into_caveman_args(self) -> CavemanArgs {
+        let mut codex_args = Vec::with_capacity(self.codex_args.len() + 1);
+        codex_args.push(OsString::from("mem"));
+        codex_args.extend(self.codex_args);
+        CavemanArgs {
+            profile: self.profile,
+            auto_rotate: self.auto_rotate,
+            no_auto_rotate: self.no_auto_rotate,
+            skip_quota_check: self.skip_quota_check,
+            full_access: true,
+            base_url: self.base_url,
+            codex_args,
+        }
+    }
+}
+
+#[derive(Args, Debug)]
 pub(crate) struct RuntimeBrokerArgs {
     #[arg(long)]
     pub(crate) current_profile: String,
@@ -461,6 +506,12 @@ impl RunArgs {
 impl CavemanArgs {
     pub(crate) fn execute(self) -> Result<()> {
         handle_caveman(self)
+    }
+}
+
+impl SuperArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_super(self)
     }
 }
 

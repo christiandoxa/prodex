@@ -27,6 +27,10 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
     runtime_launch::handle_run(args)
 }
 
+pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
+    handle_caveman(args.into_caveman_args())
+}
+
 pub(super) fn prepare_runtime_launch(
     request: RuntimeLaunchRequest<'_>,
 ) -> Result<PreparedRuntimeLaunch> {

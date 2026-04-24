@@ -1790,6 +1790,39 @@ fn caveman_command_accepts_full_access_shortcut_after_mem_prefix() {
 }
 
 #[test]
+fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_access() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--profile",
+        "main",
+        "exec",
+        "review this repo",
+    ])
+    .expect("super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(
+        args.codex_args,
+        vec![OsString::from("exec"), OsString::from("review this repo")]
+    );
+
+    let args = args.into_caveman_args();
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert!(args.full_access);
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("mem"),
+            OsString::from("exec"),
+            OsString::from("review this repo")
+        ]
+    );
+}
+
+#[test]
 fn profile_quota_watch_output_renders_snapshot_body_without_watch_header() {
     let output = render_profile_quota_watch_output(
         "main",
