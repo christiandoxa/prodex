@@ -1858,6 +1858,8 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     ));
     assert!(rendered.contains(&"model_providers.prodex-local.wire_api=\"responses\"".to_string()));
     assert!(rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string()));
+    assert!(rendered.contains(&"model_context_window=16384".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=14000".to_string()));
     assert!(rendered.contains(&"web_search=\"disabled\"".to_string()));
     assert!(rendered.contains(&"features.js_repl=false".to_string()));
     assert!(rendered.contains(&"features.image_generation=false".to_string()));
@@ -1872,6 +1874,35 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
         Some("prodex-local")
     );
+}
+
+#[test]
+fn super_command_url_accepts_local_context_overrides() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--url",
+        "http://127.0.0.1:8131",
+        "--context-window",
+        "32768",
+        "--auto-compact-token-limit",
+        "30000",
+        "exec",
+        "review this repo",
+    ])
+    .expect("super local provider command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    let args = args.into_caveman_args();
+    let rendered = args
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(rendered.contains(&"model_context_window=32768".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=30000".to_string()));
 }
 
 #[test]

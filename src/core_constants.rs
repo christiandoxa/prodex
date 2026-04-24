@@ -292,6 +292,7 @@ Notes:
   It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, and launch-time full access.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider and skips quota/proxy routing.
+  Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied `mem` prefix.";
 pub(crate) const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:

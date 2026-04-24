@@ -369,6 +369,22 @@ pub(crate) struct SuperArgs {
         requires = "url"
     )]
     pub(crate) local_model: Option<String>,
+    /// Context window advertised to Codex when using --url.
+    #[arg(
+        long = "context-window",
+        visible_alias = "local-context-window",
+        value_name = "TOKENS",
+        requires = "url"
+    )]
+    pub(crate) local_context_window: Option<usize>,
+    /// Auto-compact threshold advertised to Codex when using --url.
+    #[arg(
+        long = "auto-compact-token-limit",
+        visible_alias = "local-auto-compact-token-limit",
+        value_name = "TOKENS",
+        requires = "url"
+    )]
+    pub(crate) local_auto_compact_token_limit: Option<usize>,
     /// Arguments passed through to `codex` after the implied `mem` prefix.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub(crate) codex_args: Vec<OsString>,
@@ -379,7 +395,14 @@ impl SuperArgs {
         let local_provider_args = self
             .url
             .as_deref()
-            .map(|url| super_local_provider_codex_args(url, self.local_model.as_deref()))
+            .map(|url| {
+                super_local_provider_codex_args(
+                    url,
+                    self.local_model.as_deref(),
+                    self.local_context_window,
+                    self.local_auto_compact_token_limit,
+                )
+            })
             .unwrap_or_default();
         let skip_quota_check = self.skip_quota_check || self.url.is_some();
 
@@ -403,14 +426,26 @@ impl SuperArgs {
 const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
 const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
 const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
-const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 131_072;
-const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 120_000;
+const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
+const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 14_000;
 
-fn super_local_provider_codex_args(url: &str, model: Option<&str>) -> Vec<OsString> {
+fn super_local_provider_codex_args(
+    url: &str,
+    model: Option<&str>,
+    context_window: Option<usize>,
+    auto_compact_token_limit: Option<usize>,
+) -> Vec<OsString> {
     let base_url = super_local_provider_base_url(url);
     let model = model
         .filter(|model| !model.trim().is_empty())
         .unwrap_or(SUPER_DEFAULT_LOCAL_MODEL);
+    let context_window = context_window
+        .filter(|value| *value > 1)
+        .unwrap_or(SUPER_DEFAULT_CONTEXT_WINDOW);
+    let auto_compact_token_limit = auto_compact_token_limit
+        .filter(|value| *value > 0)
+        .unwrap_or(SUPER_DEFAULT_AUTO_COMPACT_LIMIT)
+        .min(context_window.saturating_sub(1));
     let overrides = [
         format!(
             "model_provider={}",
@@ -427,8 +462,8 @@ fn super_local_provider_codex_args(url: &str, model: Option<&str>) -> Vec<OsStri
         ),
         format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.wire_api=\"responses\""),
         format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.supports_websockets=false"),
-        format!("model_context_window={SUPER_DEFAULT_CONTEXT_WINDOW}"),
-        format!("model_auto_compact_token_limit={SUPER_DEFAULT_AUTO_COMPACT_LIMIT}"),
+        format!("model_context_window={context_window}"),
+        format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
         "model_reasoning_summary=\"none\"".to_string(),
         "model_supports_reasoning_summaries=false".to_string(),
         "web_search=\"disabled\"".to_string(),

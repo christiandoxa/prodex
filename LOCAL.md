@@ -51,14 +51,15 @@ llama-server \
   --host 127.0.0.1 \
   --port 8131 \
   --alias "unsloth/qwen3.5-35b-a3b" \
-  -ngl 28 \
+  -ngl 20 \
   -t 8 \
-  -c 32768 \
-  -b 512 \
-  -ub 1024 \
+  -c 16384 \
+  -b 256 \
+  -ub 256 \
   --parallel 1 \
   -fa on \
   --jinja \
+  --chat-template chatml \
   --keep 1024 \
   --cache-type-k q8_0 \
   --cache-type-v q8_0 \
@@ -73,8 +74,9 @@ Adjust these values for your machine:
 - `-c`: context size
 - `-t`: CPU threads
 - `--port`: local server port
+- `--chat-template chatml`: avoids strict Qwen templates that reject Codex's message ordering
 
-For an RTX 3060 12 GB with about 32 GB system RAM, `Qwen3.5-35B-A3B-UD-Q3_K_XL.gguf`, `-ngl 28`, and `-c 32768` is a workable mixed GPU/CPU starting point. If VRAM is tight, lower `-ngl` first. If memory is still tight, lower `-c` to `16384` or `8192`.
+For an RTX 3060 12 GB with about 32 GB system RAM, `Qwen3.5-35B-A3B-UD-Q3_K_XL.gguf`, `-ngl 20`, `-c 16384`, `-b 256`, and `-ub 256` is a conservative mixed GPU/CPU starting point. The first Codex/Super prompt can be about 9,000 tokens before user context, so `-c 8192` is usually too small for this mode. If VRAM is tight, lower `-ngl` first. If compute buffers are still tight, lower `-b` and `-ub` before lowering context.
 
 ## Optional Wrapper Scripts
 
@@ -90,9 +92,12 @@ MODEL_PATH="${PRODEX_LOCAL_MODEL_PATH:-$HOME/.local/share/prodex/models/model.gg
 HOST="${PRODEX_LOCAL_HOST:-127.0.0.1}"
 PORT="${PRODEX_LOCAL_PORT:-8131}"
 MODEL_ALIAS="${PRODEX_LOCAL_MODEL_ALIAS:-local/model}"
-GPU_LAYERS="${PRODEX_LOCAL_GPU_LAYERS:-28}"
+GPU_LAYERS="${PRODEX_LOCAL_GPU_LAYERS:-20}"
 THREADS="${PRODEX_LOCAL_THREADS:-8}"
-CTX="${PRODEX_LOCAL_CONTEXT:-32768}"
+CTX="${PRODEX_LOCAL_CONTEXT:-16384}"
+BATCH="${PRODEX_LOCAL_BATCH:-256}"
+UBATCH="${PRODEX_LOCAL_UBATCH:-256}"
+CHAT_TEMPLATE="${PRODEX_LOCAL_CHAT_TEMPLATE:-chatml}"
 
 exec llama-server \
   -m "$MODEL_PATH" \
@@ -102,11 +107,12 @@ exec llama-server \
   -ngl "$GPU_LAYERS" \
   -t "$THREADS" \
   -c "$CTX" \
-  -b 512 \
-  -ub 1024 \
+  -b "$BATCH" \
+  -ub "$UBATCH" \
   --parallel 1 \
   -fa on \
   --jinja \
+  --chat-template "$CHAT_TEMPLATE" \
   --keep 1024 \
   --cache-type-k q8_0 \
   --cache-type-v q8_0 \
@@ -122,7 +128,12 @@ set -euo pipefail
 PORT="${PRODEX_LOCAL_PORT:-8131}"
 MODEL_ALIAS="${PRODEX_LOCAL_MODEL_ALIAS:-local/model}"
 
-exec prodex super --url "http://127.0.0.1:${PORT}" --model "$MODEL_ALIAS" "$@"
+exec prodex super \
+  --url "http://127.0.0.1:${PORT}" \
+  --model "$MODEL_ALIAS" \
+  --context-window "${PRODEX_LOCAL_CONTEXT:-16384}" \
+  --auto-compact-token-limit "${PRODEX_LOCAL_AUTO_COMPACT_LIMIT:-14000}" \
+  "$@"
 ```
 
 ## Required Tests
@@ -171,7 +182,7 @@ One common Qwen failure looks like this in the server log:
 Jinja Exception: System message must be at the beginning.
 ```
 
-This means the model template rejected Codex's message order. Fix by using a compatible custom Jinja template or a newer model/server template that accepts later system/developer messages.
+This means the model template rejected Codex's message order. Fix by starting `llama-server` with `--chat-template chatml`, a compatible custom Jinja template, or a newer model/server template that accepts later system/developer messages.
 
 Another common failure:
 
@@ -191,6 +202,12 @@ If VRAM is exhausted:
 
 ```bash
 PRODEX_LOCAL_GPU_LAYERS=20 ./your-local-server-wrapper
+```
+
+If Vulkan still fails while computing the first prompt:
+
+```bash
+PRODEX_LOCAL_BATCH=128 PRODEX_LOCAL_UBATCH=128 ./your-local-server-wrapper
 ```
 
 If RAM or context memory is exhausted:
