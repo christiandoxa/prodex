@@ -17,6 +17,7 @@ const DEFAULT_TIMEOUT_MINUTES = 25;
 const DEFAULT_TEST_THREADS = 1;
 const RUNTIME_LOG_POINTER = "prodex-runtime-latest.path";
 const RUNTIME_LOG_PREFIX = "prodex-runtime";
+const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
 
 function parseArgs(argv) {
   const args = {
@@ -181,6 +182,24 @@ function statExists(targetPath) {
   }
 }
 
+function createZeroTestProbe() {
+  let sawZeroTests = false;
+  let tail = "";
+
+  return {
+    inspect(chunk) {
+      const text = tail + chunk;
+      if (ZERO_TESTS_PATTERN.test(text)) {
+        sawZeroTests = true;
+      }
+      tail = text.slice(-64);
+    },
+    sawZeroTests() {
+      return sawZeroTests || ZERO_TESTS_PATTERN.test(tail);
+    },
+  };
+}
+
 async function runShard(args) {
   const artifactDir = args.artifactDir;
   const logDir = path.join(artifactDir, "runtime-logs");
@@ -227,6 +246,7 @@ async function runShard(args) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   const cargoLog = createWriteStream(cargoLogPath, { flags: "a" });
+  const zeroTestProbe = createZeroTestProbe();
 
   const forward = (stream, writer) =>
     new Promise((resolve, reject) => {
@@ -234,7 +254,9 @@ async function runShard(args) {
         resolve();
         return;
       }
+      stream.setEncoding("utf8");
       stream.on("data", (chunk) => {
+        zeroTestProbe.inspect(chunk);
         writer.write(chunk);
         cargoLog.write(chunk);
       });
@@ -303,9 +325,13 @@ async function runShard(args) {
     ].join("\n") + "\n",
   );
 
-  if (result.code === 0 && !timedOut) {
+  if (result.code === 0 && !timedOut && !zeroTestProbe.sawZeroTests()) {
     process.stdout.write(`runtime proxy shard: passed in ${elapsedMs} ms\n`);
     return;
+  }
+
+  if (zeroTestProbe.sawZeroTests()) {
+    process.stderr.write('runtime proxy shard: matched no tests (cargo reported "running 0 tests")\n');
   }
 
   await collectFailureDiagnostics({
@@ -325,7 +351,7 @@ async function runShard(args) {
     process.exitCode = 124;
     return;
   }
-  process.exitCode = result.code ?? 1;
+  process.exitCode = zeroTestProbe.sawZeroTests() ? 1 : (result.code ?? 1);
 }
 
 async function main() {

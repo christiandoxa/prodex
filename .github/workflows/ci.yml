@@ -221,8 +221,25 @@ jobs:
           cargo test --lib profile_commands_internal_tests:: -- --test-threads=1
 
   main-internal-core:
+    name: Main internal core (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 0
+            shard_count: 4
+            label: shard 1 of 4
+          - shard: 1
+            shard_count: 4
+            label: shard 2 of 4
+          - shard: 2
+            shard_count: 4
+            label: shard 3 of 4
+          - shard: 3
+            shard_count: 4
+            label: shard 4 of 4
 
     steps:
       - name: Check out repository
@@ -234,10 +251,46 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run main internal tests without runtime proxy shard
+      - name: Run main internal core tests ${{ matrix.label }}
+        shell: bash
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ matrix.shard_count }}
+          RUST_BACKTRACE: "1"
+          CARGO_TERM_COLOR: always
         run: |
           set -euo pipefail
-          cargo test --lib main_internal_tests:: -- --skip runtime_proxy_ --test-threads=1
+          mapfile -t core_tests < <(
+            cargo test --lib main_internal_tests:: -- --list \
+              | awk '/^main_internal_tests::.*: test$/ { sub(/: test$/, ""); if ($0 !~ /runtime_proxy_/) print }'
+          )
+
+          if [ "${#core_tests[@]}" -eq 0 ]; then
+            echo "No main internal core tests found"
+            exit 1
+          fi
+
+          selected_tests=()
+          for index in "${!core_tests[@]}"; do
+            if [ "$((index % SHARD_COUNT))" -eq "${SHARD_INDEX}" ]; then
+              selected_tests+=("${core_tests[$index]}")
+            fi
+          done
+
+          if [ "${#selected_tests[@]}" -eq 0 ]; then
+            echo "No tests selected for main internal core ${SHARD_INDEX}/${SHARD_COUNT}"
+            exit 1
+          fi
+
+          printf 'Running %s of %s main internal core tests in shard %s/%s\n' \
+            "${#selected_tests[@]}" \
+            "${#core_tests[@]}" \
+            "${SHARD_INDEX}" \
+            "${SHARD_COUNT}"
+
+          for test_name in "${selected_tests[@]}"; do
+            cargo test --lib "${test_name}" -- --exact --test-threads=1
+          done
 
   env-sensitive-parallel-guard:
     runs-on: ubuntu-latest
@@ -257,8 +310,76 @@ jobs:
         run: node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 
   main-internal-runtime-proxy:
+    name: Main internal runtime proxy (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: root
+            label: root proxy helpers
+            filters: |
+              broker|main_internal_tests::runtime_proxy_broker_
+              log-paths|main_internal_tests::runtime_proxy_log_paths_
+              worker-count|main_internal_tests::runtime_proxy_worker_count_
+              endpoint-child|main_internal_tests::runtime_proxy_endpoint_child_
+              claude-launch-root|main_internal_tests::runtime_proxy_claude_launch_
+              claude-caveman-root|main_internal_tests::prepare_runtime_proxy_claude_
+          - suite: selection
+            label: selection and quota
+            filters: |
+              selection|main_internal_tests::runtime_proxy_selection_and_pressure::selection::
+          - suite: rotation
+            label: rotation and affinity
+            filters: |
+              rotation|main_internal_tests::runtime_proxy_selection_and_pressure::rotation::
+          - suite: state
+            label: state persistence
+            filters: |
+              state|main_internal_tests::runtime_proxy_selection_and_pressure::state::
+          - suite: admission
+            label: admission and request paths
+            filters: |
+              admission|main_internal_tests::runtime_proxy_selection_and_pressure::admission::
+          - suite: health
+            label: health and pressure
+            filters: |
+              health|main_internal_tests::runtime_proxy_selection_and_pressure::health::
+              pressure|main_internal_tests::runtime_proxy_selection_and_pressure::pressure::
+          - suite: persistence
+            label: persisted backoff selection
+            filters: |
+              persistence|main_internal_tests::runtime_proxy_selection_and_pressure::persistence::
+          - suite: doctor
+            label: doctor and incidents
+            filters: |
+              doctor|main_internal_tests::runtime_proxy_selection_and_pressure::doctor::
+              incidents|main_internal_tests::runtime_proxy_selection_and_pressure::incidents::
+          - suite: continuations
+            label: continuation behavior
+            filters: |
+              continuations|main_internal_tests::runtime_proxy_continuations::
+          - suite: anthropic-launch
+            label: anthropic launch
+            filters: |
+              lane-and-launch|main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::
+          - suite: anthropic-request
+            label: anthropic request translation
+            filters: |
+              request-translation|main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::
+          - suite: anthropic-response
+            label: anthropic response translation
+            filters: |
+              response-translation|main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::
+          - suite: anthropic-runtime
+            label: anthropic runtime behavior
+            filters: |
+              runtime-behavior|main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::
+    env:
+      RUNTIME_PROXY_ARTIFACT_DIR: target/ci/runtime-proxy/${{ matrix.suite }}
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
 
     steps:
       - name: Check out repository
@@ -271,17 +392,35 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Validate runtime CI manifest
+        if: matrix.suite == 'root'
         run: npm run ci:runtime-manifest
 
-      - name: Run runtime proxy internal test shard
-        run: node scripts/ci/runtime-proxy-shard.mjs
+      - name: Run runtime proxy internal test shard ${{ matrix.label }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r shard; do
+            if [ -z "${shard}" ]; then
+              continue
+            fi
+            shard_label="${shard%%|*}"
+            filter="${shard#*|}"
+            if [ -z "${shard_label}" ] || [ -z "${filter}" ] || [ "${shard_label}" = "${filter}" ]; then
+              echo "Invalid runtime proxy shard entry: ${shard}"
+              exit 1
+            fi
+            node scripts/ci/runtime-proxy-shard.mjs \
+              --filter "${filter}" \
+              --test-threads 1 \
+              --artifact-dir "${RUNTIME_PROXY_ARTIFACT_DIR}/${shard_label}"
+          done <<< "${{ matrix.filters }}"
 
       - name: Upload runtime proxy shard diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: runtime-proxy-shard-diagnostics
-          path: target/ci/runtime-proxy
+          name: runtime-proxy-${{ matrix.suite }}-diagnostics
+          path: ${{ env.RUNTIME_PROXY_ARTIFACT_DIR }}
           if-no-files-found: ignore
 
   runtime-proxy-bench-smoke:

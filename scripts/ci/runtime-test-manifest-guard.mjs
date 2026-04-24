@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { RUNTIME_CI_TEST_CASES } from "./runtime-test-manifest.mjs";
+import { RUNTIME_CI_TEST_CASES, RUNTIME_TEST_TAGS } from "./runtime-test-manifest.mjs";
 
 const CARGO_LIST_ARGS = ["test", "--lib", "main_internal_tests::", "--", "--list"];
+const KNOWN_RUNTIME_TAGS = new Set(Object.values(RUNTIME_TEST_TAGS));
+const SERIAL_OR_QUARANTINE_TAGS = new Set([RUNTIME_TEST_TAGS.serial, RUNTIME_TEST_TAGS.quarantine]);
+const LEGACY_QUARANTINE_EVIDENCE_TAGS = new Set([
+  RUNTIME_TEST_TAGS.stressSerialized,
+  RUNTIME_TEST_TAGS.stressContinuation,
+  RUNTIME_TEST_TAGS.envParallel,
+]);
 
 function parseArgs(argv) {
   const args = {};
@@ -40,6 +47,68 @@ function collectDuplicates(values) {
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim() === value && value.length > 0;
+}
+
+function formatTagList(tags) {
+  return tags.map((tag) => `"${tag}"`).join(", ");
+}
+
+function validateCaseTags(testCase, label, issues) {
+  const hasTags = Object.hasOwn(testCase, "tags");
+  if (!hasTags) {
+    issues.push(`${label}: expected tags array`);
+    return;
+  }
+
+  if (!Array.isArray(testCase.tags)) {
+    issues.push(`${label}: tags must be an array`);
+    return;
+  }
+
+  if (testCase.tags.length === 0) {
+    issues.push(`${label}: tags must not be empty`);
+    return;
+  }
+
+  const tags = [];
+  testCase.tags.forEach((tag, tagIndex) => {
+    if (!isNonEmptyString(tag)) {
+      issues.push(`${label}: tags[${tagIndex}] must be a non-empty trimmed string`);
+      return;
+    }
+
+    tags.push({ value: tag, index: tagIndex });
+    if (!KNOWN_RUNTIME_TAGS.has(tag)) {
+      issues.push(`${label}: unknown tag "${tag}"; expected one of ${formatTagList([...KNOWN_RUNTIME_TAGS])}`);
+    }
+  });
+
+  for (const duplicate of collectDuplicates(tags)) {
+    issues.push(`${label}: duplicate tag "${duplicate.value}" at indexes ${duplicate.indexes.join(", ")}`);
+  }
+
+  const tagSet = new Set(tags.map(({ value }) => value));
+  const hasParallelSafe = tagSet.has(RUNTIME_TEST_TAGS.parallelSafe);
+  const serialOrQuarantineTags = [...SERIAL_OR_QUARANTINE_TAGS].filter((tag) => tagSet.has(tag));
+  const legacyEvidenceTags = [...LEGACY_QUARANTINE_EVIDENCE_TAGS].filter((tag) => tagSet.has(tag));
+
+  if (hasParallelSafe && serialOrQuarantineTags.length > 0) {
+    issues.push(
+      `${label}: tag "${RUNTIME_TEST_TAGS.parallelSafe}" conflicts with ${formatTagList(serialOrQuarantineTags)}`,
+    );
+  }
+
+  if (hasParallelSafe && legacyEvidenceTags.length > 0) {
+    issues.push(
+      `${label}: tag "${RUNTIME_TEST_TAGS.parallelSafe}" conflicts with legacy quarantine evidence ${formatTagList(legacyEvidenceTags)}`,
+    );
+  }
+
+  if (legacyEvidenceTags.length > 0 && serialOrQuarantineTags.length === 0) {
+    issues.push(
+      `${label}: legacy quarantine evidence ${formatTagList(legacyEvidenceTags)} requires "${RUNTIME_TEST_TAGS.serial}" or "${RUNTIME_TEST_TAGS.quarantine}"`,
+    );
+  }
 }
 
 function parseCargoTestList(output) {
@@ -117,6 +186,8 @@ function validateManifest(testCases, cargoTestNames) {
     const hasFilter = Object.hasOwn(testCase, "filter");
     const hasId = Object.hasOwn(testCase, "id");
 
+    validateCaseTags(testCase, label, issues);
+
     if (!hasName && !hasFilter) {
       issues.push(`${label}: expected "name" or "filter"`);
     }
@@ -183,6 +254,7 @@ function printHelp() {
       "  - manifest name entries resolve to one Cargo test leaf name",
       "  - manifest filter entries match one or more full Cargo test paths",
       "  - manifest ids and names are not duplicated",
+      "  - manifest tags are known, non-duplicated, and not contradictory",
       "",
       "This catches renamed tests and filter typos that would otherwise run zero tests in CI.",
     ].join("\n") + "\n",

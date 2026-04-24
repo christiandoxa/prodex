@@ -6,6 +6,8 @@ Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex cla
 
 For contributors: the crate is split across focused modules now. `src/main.rs` is the entrypoint, command handling lives under `src/app_commands/` and `src/command_dispatch.rs`, profile/quota flows live under `src/profile_commands/` and `src/quota_support/`, and runtime proxy code lives under `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, and `src/runtime_broker/`.
 
+Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), including the fast/serial split and runtime parallel-safety assumptions.
+
 ## Requirements
 
 - An OpenAI account and at least one logged-in Prodex profile for quota-aware routing and auto-rotate

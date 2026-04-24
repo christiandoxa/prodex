@@ -184,3 +184,5 @@ prodex doctor --runtime
 ## More
 
 See [QUICKSTART.md](./QUICKSTART.md) for a longer walkthrough.
+
+Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), including the fast/serial split and runtime parallel-safety assumptions.
