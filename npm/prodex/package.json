@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex",
-  "version": "0.52.0",
+  "version": "0.53.0",
   "description": "OpenAI profile pooling and safe auto-rotate for Codex CLI and Claude Code",
   "license": "MIT",
   "bin": {
@@ -13,12 +13,12 @@
     "@openai/codex": "latest"
   },
   "optionalDependencies": {
-    "@christiandoxa/prodex-linux-x64": "0.52.0",
-    "@christiandoxa/prodex-linux-arm64": "0.52.0",
-    "@christiandoxa/prodex-darwin-x64": "0.52.0",
-    "@christiandoxa/prodex-darwin-arm64": "0.52.0",
-    "@christiandoxa/prodex-win32-x64": "0.52.0",
-    "@christiandoxa/prodex-win32-arm64": "0.52.0"
+    "@christiandoxa/prodex-linux-x64": "0.53.0",
+    "@christiandoxa/prodex-linux-arm64": "0.53.0",
+    "@christiandoxa/prodex-darwin-x64": "0.53.0",
+    "@christiandoxa/prodex-darwin-arm64": "0.53.0",
+    "@christiandoxa/prodex-win32-x64": "0.53.0",
+    "@christiandoxa/prodex-win32-arm64": "0.53.0"
   },
   "publishConfig": {
     "access": "public"

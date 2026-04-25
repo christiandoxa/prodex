@@ -1161,6 +1161,16 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
         "model = \"gpt-5.4\"\nmodel_reasoning_effort = \"xhigh\"\n",
     )
     .expect("failed to seed config");
+    fs::write(
+        fixture.main_home.join("AGENTS.md"),
+        "# Main profile global instructions\n",
+    )
+    .expect("failed to seed AGENTS.md");
+    fs::write(
+        fixture.main_home.join("AGENTS.override.md"),
+        "# Main profile global override instructions\n",
+    )
+    .expect("failed to seed AGENTS.override.md");
     fs::create_dir_all(fixture.main_home.join("rules")).expect("failed to create main rules dir");
     fs::write(
         fixture.main_home.join("rules/default.rules"),
@@ -1174,6 +1184,12 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
         "# Main Skill\n",
     )
     .expect("failed to seed main skill");
+    fs::create_dir_all(fixture.main_home.join("agents")).expect("failed to create main agents dir");
+    fs::write(
+        fixture.main_home.join("agents/reviewer.md"),
+        "# Reviewer Agent\n",
+    )
+    .expect("failed to seed main agent");
 
     let first_output = run_prodex(
         &fixture,
@@ -1199,6 +1215,13 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
         "# Second Skill\n",
     )
     .expect("failed to seed second skill");
+    fs::create_dir_all(fixture.second_home.join("agents"))
+        .expect("failed to create second agents dir");
+    fs::write(
+        fixture.second_home.join("agents/triage.md"),
+        "# Triage Agent\n",
+    )
+    .expect("failed to seed second agent");
 
     let second_output = run_prodex(
         &fixture,
@@ -1214,10 +1237,18 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
         let config = fs::read_to_string(home.join("config.toml"))
             .expect("shared config.toml should be readable");
         assert!(config.contains("model_reasoning_effort = \"xhigh\""));
+        let agents = fs::read_to_string(home.join("AGENTS.md"))
+            .expect("shared AGENTS.md should be readable");
+        assert!(agents.contains("Main profile global instructions"));
+        let agents_override = fs::read_to_string(home.join("AGENTS.override.md"))
+            .expect("shared AGENTS.override.md should be readable");
+        assert!(agents_override.contains("Main profile global override instructions"));
         assert!(home.join("rules/default.rules").is_file());
         assert!(home.join("rules/team.rules").is_file());
         assert!(home.join("skills/main-skill/SKILL.md").is_file());
         assert!(home.join("skills/second-skill/SKILL.md").is_file());
+        assert!(home.join("agents/reviewer.md").is_file());
+        assert!(home.join("agents/triage.md").is_file());
     }
 
     #[cfg(unix)]
@@ -1231,6 +1262,26 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
             fs::read_link(fixture.second_home.join("config.toml"))
                 .expect("failed to read second config link"),
             fixture.shared_codex_home.join("config.toml")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("AGENTS.md"))
+                .expect("failed to read main AGENTS.md link"),
+            fixture.shared_codex_home.join("AGENTS.md")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("AGENTS.md"))
+                .expect("failed to read second AGENTS.md link"),
+            fixture.shared_codex_home.join("AGENTS.md")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("AGENTS.override.md"))
+                .expect("failed to read main AGENTS.override.md link"),
+            fixture.shared_codex_home.join("AGENTS.override.md")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("AGENTS.override.md"))
+                .expect("failed to read second AGENTS.override.md link"),
+            fixture.shared_codex_home.join("AGENTS.override.md")
         );
         assert_eq!(
             fs::read_link(fixture.main_home.join("rules")).expect("failed to read main rules link"),
@@ -1251,11 +1302,21 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
                 .expect("failed to read second skills link"),
             fixture.shared_codex_home.join("skills")
         );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("agents"))
+                .expect("failed to read main agents link"),
+            fixture.shared_codex_home.join("agents")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("agents"))
+                .expect("failed to read second agents link"),
+            fixture.shared_codex_home.join("agents")
+        );
     }
 }
 
 #[test]
-fn run_shares_codex_v121_marketplaces_plugins_and_memory_extensions_across_managed_profiles() {
+fn run_shares_codex_plugin_and_memory_extension_state_across_managed_profiles() {
     let fixture = setup_fixture();
     fs::write(
         fixture.main_home.join("config.toml"),
@@ -1346,6 +1407,40 @@ enabled = true
     )
     .expect("failed to seed main plugin marker");
 
+    fs::create_dir_all(
+        fixture
+            .main_home
+            .join(".tmp/plugins/app-server/debug/sample-plugin"),
+    )
+    .expect("failed to create main app-server plugin cache dir");
+    fs::write(
+        fixture
+            .main_home
+            .join(".tmp/plugins/app-server/debug/sample-plugin/plugin-main.txt"),
+        "main app-server plugin marker\n",
+    )
+    .expect("failed to seed main app-server plugin marker");
+    fs::write(
+        fixture.main_home.join(".tmp/plugins.sha"),
+        "main-plugin-sha\n",
+    )
+    .expect("failed to seed plugins sha");
+    write_json(
+        &fixture.main_home.join(".tmp/known_marketplaces.json"),
+        &json!({
+            "debug": {
+                "source": "https://github.com/example/debug-marketplace.git"
+            }
+        }),
+    );
+    fs::write(
+        fixture
+            .main_home
+            .join(".tmp/app-server-remote-plugin-sync-v1"),
+        "synced\n",
+    )
+    .expect("failed to seed app-server remote plugin sync marker");
+
     fs::create_dir_all(fixture.main_home.join("memories_extensions/team/resources"))
         .expect("failed to create main memories extension dir");
     fs::write(
@@ -1399,6 +1494,20 @@ enabled = true
     fs::create_dir_all(
         fixture
             .second_home
+            .join(".tmp/plugins/app-server/debug/sample-plugin"),
+    )
+    .expect("failed to create second app-server plugin cache dir");
+    fs::write(
+        fixture
+            .second_home
+            .join(".tmp/plugins/app-server/debug/sample-plugin/plugin-second.txt"),
+        "second app-server plugin marker\n",
+    )
+    .expect("failed to seed second app-server plugin marker");
+
+    fs::create_dir_all(
+        fixture
+            .second_home
             .join("memories_extensions/team/resources"),
     )
     .expect("failed to create second memories extension dir");
@@ -1441,6 +1550,24 @@ enabled = true
             home.join("plugins/cache/debug/sample-plugin/1.2.3/plugin-second.txt")
                 .is_file()
         );
+        assert!(
+            home.join(".tmp/plugins/app-server/debug/sample-plugin/plugin-main.txt")
+                .is_file()
+        );
+        assert!(
+            home.join(".tmp/plugins/app-server/debug/sample-plugin/plugin-second.txt")
+                .is_file()
+        );
+        let plugins_sha = fs::read_to_string(home.join(".tmp/plugins.sha"))
+            .expect("plugins sha should be readable");
+        assert!(plugins_sha.contains("main-plugin-sha"));
+        let known_marketplaces = fs::read_to_string(home.join(".tmp/known_marketplaces.json"))
+            .expect("known marketplaces should be readable");
+        assert!(known_marketplaces.contains("debug-marketplace.git"));
+        let app_server_sync =
+            fs::read_to_string(home.join(".tmp/app-server-remote-plugin-sync-v1"))
+                .expect("app-server remote plugin sync marker should be readable");
+        assert!(app_server_sync.contains("synced"));
         assert!(
             home.join("memories_extensions/team/instructions.md")
                 .is_file()
@@ -1486,6 +1613,62 @@ enabled = true
             fs::read_link(fixture.second_home.join(".tmp/marketplaces"))
                 .expect("failed to read second marketplaces link"),
             fixture.shared_codex_home.join(".tmp/marketplaces")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join(".tmp/plugins"))
+                .expect("failed to read main .tmp plugins link"),
+            fixture.shared_codex_home.join(".tmp/plugins")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join(".tmp/plugins"))
+                .expect("failed to read second .tmp plugins link"),
+            fixture.shared_codex_home.join(".tmp/plugins")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join(".tmp/plugins.sha"))
+                .expect("failed to read main plugins sha link"),
+            fixture.shared_codex_home.join(".tmp/plugins.sha")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join(".tmp/plugins.sha"))
+                .expect("failed to read second plugins sha link"),
+            fixture.shared_codex_home.join(".tmp/plugins.sha")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join(".tmp/known_marketplaces.json"))
+                .expect("failed to read main known marketplaces link"),
+            fixture
+                .shared_codex_home
+                .join(".tmp/known_marketplaces.json")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join(".tmp/known_marketplaces.json"))
+                .expect("failed to read second known marketplaces link"),
+            fixture
+                .shared_codex_home
+                .join(".tmp/known_marketplaces.json")
+        );
+        assert_eq!(
+            fs::read_link(
+                fixture
+                    .main_home
+                    .join(".tmp/app-server-remote-plugin-sync-v1")
+            )
+            .expect("failed to read main app-server sync link"),
+            fixture
+                .shared_codex_home
+                .join(".tmp/app-server-remote-plugin-sync-v1")
+        );
+        assert_eq!(
+            fs::read_link(
+                fixture
+                    .second_home
+                    .join(".tmp/app-server-remote-plugin-sync-v1")
+            )
+            .expect("failed to read second app-server sync link"),
+            fixture
+                .shared_codex_home
+                .join(".tmp/app-server-remote-plugin-sync-v1")
         );
     }
 }

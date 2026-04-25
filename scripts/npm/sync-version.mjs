@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import {
   mainPackageName,
+  openaiCodexDependencySpecifier,
   platformPackages,
   readCargoVersion,
   readJsonFile,
@@ -55,6 +56,14 @@ async function updatePackageJson(filePath, version) {
         packageJson.optionalDependencies[spec.packageName] = version;
         changed = true;
       }
+    }
+  }
+
+  if (packageJson.name === mainPackageName) {
+    packageJson.dependencies ??= {};
+    if (packageJson.dependencies["@openai/codex"] !== openaiCodexDependencySpecifier) {
+      packageJson.dependencies["@openai/codex"] = openaiCodexDependencySpecifier;
+      changed = true;
     }
   }
 

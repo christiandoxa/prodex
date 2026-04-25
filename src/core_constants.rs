@@ -320,10 +320,20 @@ pub(crate) const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "memories_extensions",
     "rules",
     "skills",
+    "agents",
     "plugins",
+    ".tmp/plugins",
     ".tmp/marketplaces",
 ];
-pub(crate) const SHARED_CODEX_FILE_NAMES: &[&str] = &["history.jsonl", "config.toml"];
+pub(crate) const SHARED_CODEX_FILE_NAMES: &[&str] = &[
+    "history.jsonl",
+    "config.toml",
+    "AGENTS.md",
+    "AGENTS.override.md",
+    ".tmp/plugins.sha",
+    ".tmp/known_marketplaces.json",
+    ".tmp/app-server-remote-plugin-sync-v1",
+];
 pub(crate) const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 pub(crate) const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 pub(crate) static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);

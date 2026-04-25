@@ -20,15 +20,26 @@ const REQUIRED_FILE_CONTAINS = {
     "/responses/compact",
     "build_conversation_headers",
     "previous_response_id",
+    "X_CODEX_INSTALLATION_ID_HEADER",
+    "x-codex-installation-id",
     "X_CODEX_TURN_STATE_HEADER",
     "x-codex-turn-state",
     "X_CODEX_TURN_METADATA_HEADER",
     "x-codex-turn-metadata",
+    "X_CODEX_PARENT_THREAD_ID_HEADER",
+    "x-codex-parent-thread-id",
+    "X_CODEX_WINDOW_ID_HEADER",
+    "x-codex-window-id",
+    "X_OPENAI_MEMGEN_REQUEST_HEADER",
+    "x-openai-memgen-request",
     "X_OPENAI_SUBAGENT_HEADER",
     "x-openai-subagent",
+    "X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER",
+    "x-responsesapi-include-timing-metrics",
     "x-codex-beta-features",
     "OPENAI_BETA_HEADER",
     "responses_websockets=2026-02-06",
+    "x-client-request-id",
     "stream_responses_websocket",
   ],
   "codex-rs/core/src/compact_remote.rs": [
@@ -44,6 +55,10 @@ const REQUIRED_FILE_CONTAINS = {
     "x-codex-turn-state",
     "response.completed",
     "response.failed",
+    "response.metadata",
+    "openai-model",
+    "x-reasoning-included",
+    "X-Models-Etag",
     "insufficient_quota",
     "rate_limit_exceeded",
   ],
@@ -54,7 +69,11 @@ const REQUIRED_FILE_CONTAINS = {
     "add_auth_headers",
     "x-codex-turn-state",
     "response.completed",
+    "response.metadata",
     "codex.rate_limits",
+    "openai-model",
+    "x-reasoning-included",
+    "x-models-etag",
     "parse_wrapped_websocket_error_event",
     "websocket_connection_limit_reached",
   ],
@@ -63,9 +82,15 @@ const REQUIRED_FILE_CONTAINS = {
 const REQUIRED_EXPECTED_HEADERS = [
   "session_id",
   "x-openai-subagent",
+  "x-openai-memgen-request",
+  "x-codex-installation-id",
   "x-codex-turn-state",
   "x-codex-turn-metadata",
+  "x-codex-parent-thread-id",
+  "x-codex-window-id",
+  "x-client-request-id",
   "x-codex-beta-features",
+  "x-responsesapi-include-timing-metrics",
   "OpenAI-Beta",
   "User-Agent",
 ];
@@ -75,10 +100,16 @@ const REQUIRED_PROXY_REPLACED_HEADERS = ["Authorization", "ChatGPT-Account-Id"];
 const REQUIRED_EXPECTED_ROUTES = [
   "/responses",
   "/responses/compact",
+  "/memories/trace_summarize",
   "websocket_url_for_path(\"responses\")",
 ];
 
-const REQUIRED_STREAM_EVENTS = ["response.completed", "response.failed", "codex.rate_limits"];
+const REQUIRED_STREAM_EVENTS = [
+  "response.completed",
+  "response.failed",
+  "response.metadata",
+  "codex.rate_limits",
+];
 
 function parseArgs(argv) {
   const args = {

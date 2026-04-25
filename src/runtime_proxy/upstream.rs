@@ -305,3 +305,52 @@ pub(super) fn runtime_proxy_effective_user_agent(headers: &[(String, String)]) -
             .filter(|value| !value.is_empty())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_proxy_header_skip_list_preserves_codex_metadata_headers() {
+        for header in [
+            "session_id",
+            "x-openai-subagent",
+            "x-openai-memgen-request",
+            "x-codex-installation-id",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-codex-window-id",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-responsesapi-include-timing-metrics",
+            "OpenAI-Beta",
+            "User-Agent",
+        ] {
+            assert!(
+                !should_skip_runtime_request_header(header),
+                "runtime proxy should preserve upstream Codex metadata header {header}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_proxy_header_skip_list_replaces_auth_and_transport_headers() {
+        for header in [
+            "Authorization",
+            "ChatGPT-Account-Id",
+            "Connection",
+            "Content-Length",
+            "Host",
+            "Transfer-Encoding",
+            "Upgrade",
+            "sec-websocket-key",
+            "x-prodex-internal-request-origin",
+        ] {
+            assert!(
+                should_skip_runtime_request_header(header),
+                "runtime proxy should not forward local/auth header {header}"
+            );
+        }
+    }
+}

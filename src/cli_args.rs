@@ -283,7 +283,7 @@ pub(crate) struct RunArgs {
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub(crate) skip_quota_check: bool,
-    /// Start Codex with launch-time full access as a workaround for the upstream `/permissions` regression in Codex 0.124.0.
+    /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
     #[arg(long)]
     pub(crate) full_access: bool,
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
@@ -330,7 +330,7 @@ pub(crate) struct CavemanArgs {
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub(crate) skip_quota_check: bool,
-    /// Start Codex with launch-time full access as a workaround for the upstream `/permissions` regression in Codex 0.124.0.
+    /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
     #[arg(long)]
     pub(crate) full_access: bool,
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
