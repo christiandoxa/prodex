@@ -289,6 +289,9 @@ pub(crate) struct RunArgs {
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL")]
     pub(crate) base_url: Option<String>,
+    /// Print resolved launch diagnostics without starting Codex.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub(crate) codex_args: Vec<OsString>,
@@ -333,6 +336,9 @@ pub(crate) struct CavemanArgs {
     /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
     #[arg(long)]
     pub(crate) full_access: bool,
+    /// Print resolved launch diagnostics without starting Codex.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL")]
     pub(crate) base_url: Option<String>,
@@ -355,6 +361,9 @@ pub(crate) struct SuperArgs {
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub(crate) skip_quota_check: bool,
+    /// Print resolved launch diagnostics without starting Codex.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL", conflicts_with = "url")]
     pub(crate) base_url: Option<String>,
@@ -417,6 +426,7 @@ impl SuperArgs {
             no_auto_rotate: self.no_auto_rotate,
             skip_quota_check,
             full_access: true,
+            dry_run: self.dry_run,
             base_url: self.base_url,
             codex_args,
         }
@@ -616,12 +626,18 @@ impl RunArgs {
 
 impl CavemanArgs {
     pub(crate) fn execute(self) -> Result<()> {
+        if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
+            return handle_caveman_dry_run(self);
+        }
         handle_caveman(self)
     }
 }
 
 impl SuperArgs {
     pub(crate) fn execute(self) -> Result<()> {
+        if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
+            return handle_caveman_dry_run(self.into_caveman_args());
+        }
         handle_super(self)
     }
 }

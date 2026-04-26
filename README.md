@@ -91,6 +91,7 @@ prodex claude mem -- -p "recall past work on this repo"
 prodex
 prodex run
 prodex run --profile main
+prodex run --dry-run
 prodex exec "review this repo"
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
@@ -101,6 +102,7 @@ printf 'context from stdin' | prodex run exec "summarize this"
 ```bash
 prodex caveman
 prodex caveman mem
+prodex caveman --dry-run
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
 prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -115,6 +117,7 @@ If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup t
 ```bash
 prodex super
 prodex super --url http://127.0.0.1:8131
+prodex super --url http://127.0.0.1:8131 --dry-run
 prodex super --profile main
 prodex super exec "review this repo in super mode"
 prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -125,6 +128,8 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 Use this when you want Caveman mode, Claude-Mem transcript watching, and launch-time full access together. Full access maps to Codex's sandbox-bypass launch flag, so use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
 Use `prodex super --url http://127.0.0.1:8131` when you want the same Super mode front end to talk directly to a local OpenAI-compatible server such as `llama-server`. Prodex injects a temporary `prodex-local` Codex provider, appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and skips quota/proxy routing for that launch. The default local model id is `unsloth/qwen3.5-35b-a3b`; override it with `--model`, for example `prodex super --url http://127.0.0.1:8131 --model local/qwen`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
+
+Add `--dry-run` to run, Caveman, or Super launches to print the resolved provider, model, `CODEX_HOME`, proxy args, and launch env with secret-looking values redacted. Dry-run output is prelaunch only and does not start Codex or the TUI.
 
 ### Run Claude Code
 

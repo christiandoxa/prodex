@@ -12,6 +12,7 @@
     "npm:sync-docs-version": "node scripts/npm/sync-docs-version.mjs",
     "npm:stage": "node scripts/npm/stage.mjs",
     "npm:publish": "node scripts/npm/publish.mjs",
+    "release:prepare": "node scripts/npm/release-prepare.mjs",
     "docs:lint": "node scripts/docs/lint-markdown.mjs",
     "test:fast": "node scripts/ci/test-fast.mjs",
     "test:serial": "node scripts/ci/test-serial.mjs",

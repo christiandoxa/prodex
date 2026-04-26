@@ -1,8 +1,9 @@
 use criterion::{Criterion, black_box, criterion_group};
 use prodex::bench_support::{
-    RuntimeProxyHotPathBenchCheckConfig, RuntimeProxyLineageCleanupBenchCase,
-    RuntimeProxyMixedPoolSelectionBenchCase, RuntimeProxyPreviousResponseBenchCase,
-    RuntimeProxyQuotaFallbackBenchCase, RuntimeProxySseInspectBenchCase,
+    RuntimeProxyCompactSessionSelectionBenchCase, RuntimeProxyHotPathBenchCheckConfig,
+    RuntimeProxyLineageCleanupBenchCase, RuntimeProxyMixedPoolSelectionBenchCase,
+    RuntimeProxyPreviousResponseBenchCase, RuntimeProxyQuotaFallbackBenchCase,
+    RuntimeProxySseInspectBenchCase, RuntimeProxyWebsocketStaleReuseBenchCase,
     run_runtime_proxy_hot_path_bench_check,
 };
 use serde::Deserialize;
@@ -29,6 +30,16 @@ fn runtime_proxy_hot_paths(c: &mut Criterion) {
     let mixed_pool_selection = RuntimeProxyMixedPoolSelectionBenchCase::new(96);
     c.bench_function("runtime_mixed_pool_response_selection", |b| {
         b.iter(|| black_box(mixed_pool_selection.select_fresh_response_candidate()))
+    });
+
+    let compact_session_selection = RuntimeProxyCompactSessionSelectionBenchCase::new(64);
+    c.bench_function("runtime_compact_session_affinity_selection", |b| {
+        b.iter(|| black_box(compact_session_selection.select_compact_session_candidate()))
+    });
+
+    let websocket_stale_reuse = RuntimeProxyWebsocketStaleReuseBenchCase::new(64);
+    c.bench_function("runtime_websocket_stale_reuse_affinity", |b| {
+        b.iter(|| black_box(websocket_stale_reuse.evaluate_stale_reuse_affinity()))
     });
 
     let sse_inspect = RuntimeProxySseInspectBenchCase::new(128);

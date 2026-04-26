@@ -35,6 +35,7 @@ Current CI building blocks include:
 ```bash
 npm run test:fast
 npm run test:serial
+npm run release:prepare
 npm run docs:lint
 npm run ci:runtime-manifest
 node scripts/compat/check-upstream-baseline.mjs
@@ -48,7 +49,9 @@ cargo test -q --all-features -- --test-threads=1
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 
-Use `node scripts/compat/check-upstream-baseline.mjs` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces.
+Use `npm run release:prepare` before release work. It checks version/doc sync, available lockfile consistency, docs lint, upstream compatibility baseline, runtime manifest, and lightweight cargo fmt/check/test-compile guards without publishing.
+
+Use `node scripts/compat/check-upstream-baseline.mjs` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces. Baseline format version 2 also records semantic check groups that tie route, header, event, and co-occurrence expectations back to specific upstream files instead of relying only on flat `required_contains` tokens.
 
 `npm run test:fast` prebuilds cargo test binaries with `cargo test --no-run` before starting parallel cargo test shards when `CI` is not set. This local warmup reduces misleading cargo build lock waits from many child processes trying to compile the same test binaries at once. CI defaults are preserved: when `CI=true`, prebuild is off unless explicitly enabled with `npm run test:fast -- --prebuild`.
 

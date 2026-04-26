@@ -37,6 +37,12 @@ pub(super) fn prepare_runtime_launch(
     runtime_launch::prepare_runtime_launch(request)
 }
 
+pub(super) fn prepare_runtime_launch_dry_run(
+    request: RuntimeLaunchRequest<'_>,
+) -> Result<PreparedRuntimeLaunch> {
+    runtime_launch::prepare_runtime_launch_dry_run(request)
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn resolve_runtime_launch_profile_name(
     state: &AppState,

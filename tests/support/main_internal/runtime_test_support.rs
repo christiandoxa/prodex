@@ -244,6 +244,60 @@ pub(super) fn runtime_rotation_proxy_shared(
     }
 }
 
+#[derive(Default)]
+pub(super) struct RuntimeProxyFixtureBuilder {
+    profile_inflight: BTreeMap<String, usize>,
+    profile_health: BTreeMap<String, RuntimeProfileHealth>,
+}
+
+impl RuntimeProxyFixtureBuilder {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(super) fn profile_inflight(mut self, profile: &str, count: usize) -> Self {
+        self.profile_inflight.insert(profile.to_string(), count);
+        self
+    }
+
+    pub(super) fn profile_health(mut self, key: impl Into<String>, score: u32, updated_at: i64) -> Self {
+        self.profile_health
+            .insert(key.into(), RuntimeProfileHealth { score, updated_at });
+        self
+    }
+
+    pub(super) fn build_shared(self, temp_dir: &TestDir) -> RuntimeRotationProxyShared {
+        runtime_rotation_proxy_shared(temp_dir, self.build_runtime(temp_dir), usize::MAX)
+    }
+
+    pub(super) fn build_runtime(self, temp_dir: &TestDir) -> RuntimeRotationState {
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: self.profile_inflight,
+            profile_health: self.profile_health,
+        }
+    }
+}
+
 pub(super) fn runtime_shared_for_cold_start_probe_selection(
     temp_dir: &TestDir,
     upstream_base_url: String,

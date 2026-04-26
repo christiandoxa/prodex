@@ -92,6 +92,23 @@ fn bench_ready_probe_entry(now: i64) -> RuntimeProfileProbeCacheEntry {
     }
 }
 
+fn bench_verified_continuation_status(
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> RuntimeContinuationBindingStatus {
+    RuntimeContinuationBindingStatus {
+        state: RuntimeContinuationBindingLifecycle::Verified,
+        confidence: RUNTIME_CONTINUATION_CONFIDENCE_MAX,
+        last_touched_at: Some(now),
+        last_verified_at: Some(now),
+        last_verified_route: Some(runtime_route_kind_label(route_kind).to_string()),
+        last_not_found_at: None,
+        not_found_streak: 0,
+        success_count: 1,
+        failure_count: 0,
+    }
+}
+
 fn bench_runtime_shared(
     name: &str,
     state: RuntimeRotationState,
@@ -275,6 +292,16 @@ const RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshol
         name: "runtime_mixed_pool_response_selection",
         max_median_ns_per_iteration: 2_400_000,
     };
+const RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_compact_session_affinity_selection",
+        max_median_ns_per_iteration: 160_000,
+    };
+const RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
+    RuntimeProxyHotPathBenchThreshold {
+        name: "runtime_websocket_stale_reuse_affinity",
+        max_median_ns_per_iteration: 220_000,
+    };
 const RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
     RuntimeProxyHotPathBenchThreshold {
         name: "runtime_sse_lookahead_inspection",
@@ -404,6 +431,8 @@ pub fn run_runtime_proxy_hot_path_bench_check(
     let quota_fallback = RuntimeProxyQuotaFallbackBenchCase::new(64);
     let previous_response = RuntimeProxyPreviousResponseBenchCase::new(64);
     let mixed_pool_selection = RuntimeProxyMixedPoolSelectionBenchCase::new(96);
+    let compact_session_selection = RuntimeProxyCompactSessionSelectionBenchCase::new(64);
+    let websocket_stale_reuse = RuntimeProxyWebsocketStaleReuseBenchCase::new(64);
     let sse_inspect = RuntimeProxySseInspectBenchCase::new(128);
     let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(128);
 
@@ -422,6 +451,16 @@ pub fn run_runtime_proxy_hot_path_bench_check(
             config.clone(),
             RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD,
             || mixed_pool_selection.select_fresh_response_candidate(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_THRESHOLD,
+            || compact_session_selection.select_compact_session_candidate(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_THRESHOLD,
+            || websocket_stale_reuse.evaluate_stale_reuse_affinity(),
         ),
         run_runtime_proxy_hot_path_case(
             config.clone(),
@@ -714,6 +753,235 @@ impl RuntimeProxyMixedPoolSelectionBenchCase {
             RuntimeRouteKind::Responses,
         )
         .expect("benchmark mixed-pool selection should succeed")
+    }
+}
+
+#[doc(hidden)]
+pub struct RuntimeProxyCompactSessionSelectionBenchCase {
+    shared: RuntimeRotationProxyShared,
+    excluded_profiles: BTreeSet<String>,
+    session_id: String,
+}
+
+impl RuntimeProxyCompactSessionSelectionBenchCase {
+    pub fn new(profile_count: usize) -> Self {
+        let profile_count = profile_count.max(16);
+        let paths = bench_paths("compact-session-selection");
+        let now = Local::now().timestamp();
+        let mut profiles = BTreeMap::new();
+        let mut probe_cache = BTreeMap::new();
+        let mut last_run_selected_at = BTreeMap::new();
+        let mut profile_inflight = BTreeMap::new();
+        let session_id = "session-bench".to_string();
+        let session_profile = format!("profile-{:03}", profile_count / 2);
+
+        for index in 0..profile_count {
+            let name = format!("profile-{index:03}");
+            profiles.insert(name.clone(), bench_profile_entry(&paths, &name));
+            probe_cache.insert(name.clone(), bench_ready_probe_entry(now));
+            last_run_selected_at.insert(name.clone(), now - index as i64);
+            if name == session_profile {
+                profile_inflight.insert(name, usize::MAX / 4);
+            }
+        }
+
+        let binding = ResponseProfileBinding {
+            profile_name: session_profile,
+            bound_at: now,
+        };
+        let mut session_id_bindings = BTreeMap::new();
+        session_id_bindings.insert(session_id.clone(), binding.clone());
+        let mut session_profile_bindings = BTreeMap::new();
+        session_profile_bindings.insert(session_id.clone(), binding);
+        let mut continuation_statuses = RuntimeContinuationStatuses::default();
+        continuation_statuses.session_id.insert(
+            session_id.clone(),
+            bench_verified_continuation_status(now, RuntimeRouteKind::Compact),
+        );
+
+        let current_profile = "profile-000".to_string();
+        let state = RuntimeRotationState {
+            paths,
+            state: AppState {
+                active_profile: Some(current_profile.clone()),
+                profiles,
+                last_run_selected_at,
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings,
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile,
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings,
+            continuation_statuses,
+            profile_probe_cache: probe_cache,
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight,
+            profile_health: BTreeMap::new(),
+        };
+
+        Self {
+            shared: bench_runtime_shared("compact-session-selection", state, 32),
+            excluded_profiles: BTreeSet::new(),
+            session_id,
+        }
+    }
+
+    pub fn select_compact_session_candidate(&self) -> Option<String> {
+        let session_profile = runtime_session_bound_profile(&self.shared, &self.session_id)
+            .expect("benchmark compact session lookup should succeed");
+        select_runtime_response_candidate_for_route(
+            &self.shared,
+            &self.excluded_profiles,
+            None,
+            None,
+            None,
+            session_profile.as_deref(),
+            false,
+            None,
+            RuntimeRouteKind::Compact,
+        )
+        .expect("benchmark compact session selection should succeed")
+    }
+}
+
+#[doc(hidden)]
+pub struct RuntimeProxyWebsocketStaleReuseBenchCase {
+    shared: RuntimeRotationProxyShared,
+    excluded_profiles: BTreeSet<String>,
+    previous_response_id: String,
+    stale_elapsed: Duration,
+}
+
+impl RuntimeProxyWebsocketStaleReuseBenchCase {
+    pub fn new(profile_count: usize) -> Self {
+        let profile_count = profile_count.max(16);
+        let paths = bench_paths("websocket-stale-reuse");
+        let now = Local::now().timestamp();
+        let mut profiles = BTreeMap::new();
+        let mut probe_cache = BTreeMap::new();
+        let mut last_run_selected_at = BTreeMap::new();
+        let previous_response_id = "resp-websocket-bench".to_string();
+        let owner_profile = format!("profile-{:03}", profile_count / 3);
+
+        for index in 0..profile_count {
+            let name = format!("profile-{index:03}");
+            profiles.insert(name.clone(), bench_profile_entry(&paths, &name));
+            probe_cache.insert(name.clone(), bench_ready_probe_entry(now));
+            last_run_selected_at.insert(name, now - index as i64);
+        }
+
+        let mut response_profile_bindings = BTreeMap::new();
+        response_profile_bindings.insert(
+            previous_response_id.clone(),
+            ResponseProfileBinding {
+                profile_name: owner_profile,
+                bound_at: now,
+            },
+        );
+        let mut continuation_statuses = RuntimeContinuationStatuses::default();
+        continuation_statuses.response.insert(
+            previous_response_id.clone(),
+            bench_verified_continuation_status(now, RuntimeRouteKind::Websocket),
+        );
+
+        let current_profile = "profile-000".to_string();
+        let state = RuntimeRotationState {
+            paths,
+            state: AppState {
+                active_profile: Some(current_profile.clone()),
+                profiles,
+                last_run_selected_at,
+                response_profile_bindings,
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile,
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses,
+            profile_probe_cache: probe_cache,
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+
+        Self {
+            shared: bench_runtime_shared("websocket-stale-reuse", state, 32),
+            excluded_profiles: BTreeSet::new(),
+            previous_response_id,
+            stale_elapsed: Duration::from_millis(
+                RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS.saturating_add(1),
+            ),
+        }
+    }
+
+    pub fn evaluate_stale_reuse_affinity(&self) -> usize {
+        let bound_profile = runtime_response_bound_profile(
+            &self.shared,
+            &self.previous_response_id,
+            RuntimeRouteKind::Websocket,
+        )
+        .expect("benchmark websocket response binding lookup should succeed");
+        let trusted = runtime_previous_response_affinity_is_trusted(
+            &self.shared,
+            Some(&self.previous_response_id),
+            bound_profile.as_deref(),
+        )
+        .expect("benchmark websocket affinity trust lookup should succeed");
+        let nonreplayable = runtime_websocket_previous_response_reuse_is_nonreplayable(
+            Some(&self.previous_response_id),
+            false,
+            None,
+        );
+        let stale = runtime_websocket_previous_response_reuse_is_stale(
+            nonreplayable,
+            Some(self.stale_elapsed),
+        );
+        let fallback_allowed =
+            runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed(
+                RuntimeWebsocketReuseWatchdogPreviousResponseFallback {
+                    profile_name: bound_profile.as_deref().unwrap_or(""),
+                    previous_response_id: Some(&self.previous_response_id),
+                    previous_response_fresh_fallback_used: false,
+                    bound_profile: bound_profile.as_deref(),
+                    pinned_profile: bound_profile.as_deref(),
+                    request_requires_previous_response_affinity: false,
+                    trusted_previous_response_affinity: trusted,
+                    request_turn_state: None,
+                    fresh_fallback_shape: Some(
+                        RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
+                    ),
+                },
+            );
+        let candidate = select_runtime_response_candidate_for_route(
+            &self.shared,
+            &self.excluded_profiles,
+            None,
+            bound_profile.as_deref(),
+            None,
+            None,
+            true,
+            Some(&self.previous_response_id),
+            RuntimeRouteKind::Websocket,
+        )
+        .expect("benchmark websocket stale reuse selection should succeed");
+
+        usize::from(trusted)
+            + usize::from(nonreplayable)
+            + usize::from(stale)
+            + usize::from(!fallback_allowed)
+            + usize::from(candidate.as_deref() == bound_profile.as_deref())
     }
 }
 

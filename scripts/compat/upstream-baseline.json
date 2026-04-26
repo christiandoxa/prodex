@@ -4,6 +4,7 @@
       "upstream_repository": "https://github.com/openai/codex",
       "baseline_source": "openai/codex main branch",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
+      "format_version": 2,
       "critical_files": [
         {
           "path": "codex-rs/core/src/client.rs",
@@ -116,6 +117,166 @@
         "response.failed",
         "response.metadata",
         "codex.rate_limits"
+      ],
+      "semantic_checks": [
+        {
+          "id": "client.responses-route",
+          "kind": "route",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Responses unary traffic must keep the upstream route constant and path together.",
+          "file_contains_all": [
+            "RESPONSES_ENDPOINT",
+            "/responses"
+          ],
+          "expected_routes_all": [
+            "/responses"
+          ]
+        },
+        {
+          "id": "client.responses-compact-route",
+          "kind": "route",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Remote compaction must keep using the upstream Responses compact route.",
+          "file_contains_all": [
+            "RESPONSES_COMPACT_ENDPOINT",
+            "/responses/compact"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ]
+        },
+        {
+          "id": "client.conversation-headers",
+          "kind": "header_group",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Conversation metadata headers are forwarded together for affinity and upstream Codex behavior.",
+          "file_contains_all": [
+            "build_conversation_headers",
+            "x-codex-installation-id",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-codex-window-id",
+            "x-openai-memgen-request",
+            "x-openai-subagent",
+            "x-responsesapi-include-timing-metrics",
+            "x-client-request-id"
+          ],
+          "expected_headers_all": [
+            "x-codex-installation-id",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-codex-window-id",
+            "x-openai-memgen-request",
+            "x-openai-subagent",
+            "x-responsesapi-include-timing-metrics",
+            "x-client-request-id"
+          ]
+        },
+        {
+          "id": "client.websocket-beta",
+          "kind": "co_occurrence",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Websocket transport remains gated by the upstream beta header and version token.",
+          "file_contains_all": [
+            "stream_responses_websocket",
+            "OPENAI_BETA_HEADER",
+            "responses_websockets=2026-02-06"
+          ],
+          "expected_headers_all": [
+            "OpenAI-Beta"
+          ]
+        },
+        {
+          "id": "compact.remote-responses-compact",
+          "kind": "route",
+          "file": "codex-rs/core/src/compact_remote.rs",
+          "reason": "Remote compaction is tied to the Responses compact implementation and item shape.",
+          "file_contains_all": [
+            "run_remote_compact_task",
+            "compact_conversation_history",
+            "CompactionImplementation::ResponsesCompact",
+            "ContextCompactionItem"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ]
+        },
+        {
+          "id": "sse.responses-events",
+          "kind": "event_group",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "SSE parsing must keep response lifecycle events grouped for stream compatibility.",
+          "file_contains_all": [
+            "process_responses_event",
+            "response.completed",
+            "response.failed",
+            "response.metadata"
+          ],
+          "expected_stream_events_all": [
+            "response.completed",
+            "response.failed",
+            "response.metadata"
+          ]
+        },
+        {
+          "id": "sse.quota-codes",
+          "kind": "co_occurrence",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Quota rotation must remain tied to explicit upstream quota and rate-limit codes.",
+          "file_contains_all": [
+            "insufficient_quota",
+            "rate_limit_exceeded"
+          ]
+        },
+        {
+          "id": "websocket.responses-route",
+          "kind": "route",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket sessions must keep the upstream Responses websocket route.",
+          "file_contains_all": [
+            "ResponsesWebsocketConnection",
+            "websocket_url_for_path(\"responses\")"
+          ],
+          "expected_routes_all": [
+            "websocket_url_for_path(\"responses\")"
+          ]
+        },
+        {
+          "id": "websocket.responses-events",
+          "kind": "event_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket stream parsing must preserve response lifecycle and rate-limit events.",
+          "file_contains_all": [
+            "response.completed",
+            "response.metadata",
+            "codex.rate_limits"
+          ],
+          "expected_stream_events_all": [
+            "response.completed",
+            "response.metadata",
+            "codex.rate_limits"
+          ]
+        },
+        {
+          "id": "websocket.header-auth-merge",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket request metadata should merge upstream headers while auth remains profile-owned.",
+          "file_contains_all": [
+            "merge_request_headers",
+            "add_auth_headers",
+            "x-codex-turn-state"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-state"
+          ],
+          "proxy_replaced_headers_all": [
+            "Authorization",
+            "ChatGPT-Account-Id"
+          ]
+        }
       ]
     }
   },

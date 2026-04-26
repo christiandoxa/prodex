@@ -4,48 +4,9 @@ use super::*;
 fn runtime_profile_inflight_hard_limit_detects_saturation() {
     let temp_dir = TestDir::isolated();
     let hard_limit = runtime_proxy_profile_inflight_hard_limit();
-    let runtime = RuntimeRotationState {
-        paths: AppPaths {
-            root: temp_dir.path.join("prodex"),
-            state_file: temp_dir.path.join("prodex/state.json"),
-            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-            shared_codex_root: temp_dir.path.join("shared"),
-            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-        },
-        state: AppState::default(),
-        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
-        include_code_review: false,
-        current_profile: "main".to_string(),
-        profile_usage_auth: BTreeMap::new(),
-        turn_state_bindings: BTreeMap::new(),
-        session_id_bindings: BTreeMap::new(),
-        continuation_statuses: RuntimeContinuationStatuses::default(),
-        profile_probe_cache: BTreeMap::new(),
-        profile_usage_snapshots: BTreeMap::new(),
-        profile_retry_backoff_until: BTreeMap::new(),
-        profile_transport_backoff_until: BTreeMap::new(),
-        profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([("main".to_string(), hard_limit)]),
-        profile_health: BTreeMap::new(),
-    };
-    let shared = RuntimeRotationProxyShared {
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = RuntimeProxyFixtureBuilder::new()
+        .profile_inflight("main", hard_limit)
+        .build_shared(&temp_dir);
 
     assert!(
         runtime_profile_inflight_hard_limited_for_context(&shared, "main", "standard_http")
@@ -61,48 +22,9 @@ fn runtime_profile_inflight_hard_limit_detects_saturation() {
 fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
     let temp_dir = TestDir::isolated();
     let hard_limit = runtime_proxy_profile_inflight_hard_limit();
-    let runtime = RuntimeRotationState {
-        paths: AppPaths {
-            root: temp_dir.path.join("prodex"),
-            state_file: temp_dir.path.join("prodex/state.json"),
-            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-            shared_codex_root: temp_dir.path.join("shared"),
-            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-        },
-        state: AppState::default(),
-        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
-        include_code_review: false,
-        current_profile: "main".to_string(),
-        profile_usage_auth: BTreeMap::new(),
-        turn_state_bindings: BTreeMap::new(),
-        session_id_bindings: BTreeMap::new(),
-        continuation_statuses: RuntimeContinuationStatuses::default(),
-        profile_probe_cache: BTreeMap::new(),
-        profile_usage_snapshots: BTreeMap::new(),
-        profile_retry_backoff_until: BTreeMap::new(),
-        profile_transport_backoff_until: BTreeMap::new(),
-        profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([("main".to_string(), hard_limit.saturating_sub(1))]),
-        profile_health: BTreeMap::new(),
-    };
-    let shared = RuntimeRotationProxyShared {
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = RuntimeProxyFixtureBuilder::new()
+        .profile_inflight("main", hard_limit.saturating_sub(1))
+        .build_shared(&temp_dir);
 
     assert!(
         runtime_profile_inflight_hard_limited_for_context(&shared, "main", "responses_http")
@@ -142,48 +64,9 @@ fn runtime_profile_inflight_limits_use_configured_overrides() {
     );
 
     let temp_dir = TestDir::isolated();
-    let runtime = RuntimeRotationState {
-        paths: AppPaths {
-            root: temp_dir.path.join("prodex"),
-            state_file: temp_dir.path.join("prodex/state.json"),
-            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-            shared_codex_root: temp_dir.path.join("shared"),
-            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-        },
-        state: AppState::default(),
-        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
-        include_code_review: false,
-        current_profile: "main".to_string(),
-        profile_usage_auth: BTreeMap::new(),
-        turn_state_bindings: BTreeMap::new(),
-        session_id_bindings: BTreeMap::new(),
-        continuation_statuses: RuntimeContinuationStatuses::default(),
-        profile_probe_cache: BTreeMap::new(),
-        profile_usage_snapshots: BTreeMap::new(),
-        profile_retry_backoff_until: BTreeMap::new(),
-        profile_transport_backoff_until: BTreeMap::new(),
-        profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([("main".to_string(), 9)]),
-        profile_health: BTreeMap::new(),
-    };
-    let shared = RuntimeRotationProxyShared {
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = RuntimeProxyFixtureBuilder::new()
+        .profile_inflight("main", 9)
+        .build_shared(&temp_dir);
 
     assert!(
         runtime_profile_inflight_hard_limited_for_context(&shared, "main", "responses_http")
@@ -198,48 +81,7 @@ fn runtime_profile_inflight_limits_use_configured_overrides() {
 #[test]
 fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
     let temp_dir = TestDir::isolated();
-    let runtime = RuntimeRotationState {
-        paths: AppPaths {
-            root: temp_dir.path.join("prodex"),
-            state_file: temp_dir.path.join("prodex/state.json"),
-            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-            shared_codex_root: temp_dir.path.join("shared"),
-            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-        },
-        state: AppState::default(),
-        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
-        include_code_review: false,
-        current_profile: "main".to_string(),
-        profile_usage_auth: BTreeMap::new(),
-        turn_state_bindings: BTreeMap::new(),
-        session_id_bindings: BTreeMap::new(),
-        continuation_statuses: RuntimeContinuationStatuses::default(),
-        profile_probe_cache: BTreeMap::new(),
-        profile_usage_snapshots: BTreeMap::new(),
-        profile_retry_backoff_until: BTreeMap::new(),
-        profile_transport_backoff_until: BTreeMap::new(),
-        profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
-        profile_health: BTreeMap::new(),
-    };
-    let shared = RuntimeRotationProxyShared {
-        async_client: reqwest::Client::builder().build().expect("async client"),
-        async_runtime: Arc::new(
-            TokioRuntimeBuilder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("async runtime"),
-        ),
-        log_path: temp_dir.path.join("runtime-proxy.log"),
-        request_sequence: Arc::new(AtomicU64::new(1)),
-        state_save_revision: Arc::new(AtomicU64::new(0)),
-        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
-        active_request_count: Arc::new(AtomicUsize::new(0)),
-        active_request_limit: usize::MAX,
-        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
-        runtime: Arc::new(Mutex::new(runtime)),
-    };
+    let shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
 
     let standard = acquire_runtime_profile_inflight_guard(&shared, "main", "standard_http")
         .expect("standard inflight guard should succeed");

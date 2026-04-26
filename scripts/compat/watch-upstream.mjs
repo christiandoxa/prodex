@@ -238,6 +238,7 @@ function buildDiffs(baseline, current) {
 
 function baselineSnapshotFromCurrent(baseline, current) {
   return {
+    ...baseline,
     ...(baseline.codex ? { codex: baseline.codex } : {}),
     claude: {
       latestRelease: current.claude.latestRelease,

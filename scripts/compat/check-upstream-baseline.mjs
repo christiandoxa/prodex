@@ -111,6 +111,115 @@ const REQUIRED_STREAM_EVENTS = [
   "codex.rate_limits",
 ];
 
+const COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS = 2;
+
+const REQUIRED_SEMANTIC_CHECKS = [
+  {
+    id: "client.responses-route",
+    kind: "route",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: ["RESPONSES_ENDPOINT", "/responses"],
+    expected_routes_all: ["/responses"],
+  },
+  {
+    id: "client.responses-compact-route",
+    kind: "route",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: ["RESPONSES_COMPACT_ENDPOINT", "/responses/compact"],
+    expected_routes_all: ["/responses/compact"],
+  },
+  {
+    id: "client.conversation-headers",
+    kind: "header_group",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: [
+      "build_conversation_headers",
+      "x-codex-installation-id",
+      "x-codex-turn-state",
+      "x-codex-turn-metadata",
+      "x-codex-parent-thread-id",
+      "x-codex-window-id",
+      "x-openai-memgen-request",
+      "x-openai-subagent",
+      "x-responsesapi-include-timing-metrics",
+      "x-client-request-id",
+    ],
+    expected_headers_all: [
+      "x-codex-installation-id",
+      "x-codex-turn-state",
+      "x-codex-turn-metadata",
+      "x-codex-parent-thread-id",
+      "x-codex-window-id",
+      "x-openai-memgen-request",
+      "x-openai-subagent",
+      "x-responsesapi-include-timing-metrics",
+      "x-client-request-id",
+    ],
+  },
+  {
+    id: "client.websocket-beta",
+    kind: "co_occurrence",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: ["stream_responses_websocket", "OPENAI_BETA_HEADER", "responses_websockets=2026-02-06"],
+    expected_headers_all: ["OpenAI-Beta"],
+  },
+  {
+    id: "compact.remote-responses-compact",
+    kind: "route",
+    file: "codex-rs/core/src/compact_remote.rs",
+    file_contains_all: [
+      "run_remote_compact_task",
+      "compact_conversation_history",
+      "CompactionImplementation::ResponsesCompact",
+      "ContextCompactionItem",
+    ],
+    expected_routes_all: ["/responses/compact"],
+  },
+  {
+    id: "sse.responses-events",
+    kind: "event_group",
+    file: "codex-rs/codex-api/src/sse/responses.rs",
+    file_contains_all: ["process_responses_event", "response.completed", "response.failed", "response.metadata"],
+    expected_stream_events_all: ["response.completed", "response.failed", "response.metadata"],
+  },
+  {
+    id: "sse.quota-codes",
+    kind: "co_occurrence",
+    file: "codex-rs/codex-api/src/sse/responses.rs",
+    file_contains_all: ["insufficient_quota", "rate_limit_exceeded"],
+  },
+  {
+    id: "websocket.responses-route",
+    kind: "route",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(\"responses\")"],
+    expected_routes_all: ["websocket_url_for_path(\"responses\")"],
+  },
+  {
+    id: "websocket.responses-events",
+    kind: "event_group",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: ["response.completed", "response.metadata", "codex.rate_limits"],
+    expected_stream_events_all: ["response.completed", "response.metadata", "codex.rate_limits"],
+  },
+  {
+    id: "websocket.header-auth-merge",
+    kind: "header_group",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: ["merge_request_headers", "add_auth_headers", "x-codex-turn-state"],
+    expected_headers_all: ["x-codex-turn-state"],
+    proxy_replaced_headers_all: ["Authorization", "ChatGPT-Account-Id"],
+  },
+];
+
+const SEMANTIC_LIST_FIELDS = [
+  "file_contains_all",
+  "expected_headers_all",
+  "proxy_replaced_headers_all",
+  "expected_routes_all",
+  "expected_stream_events_all",
+];
+
 function parseArgs(argv) {
   const args = {
     baseline: DEFAULT_BASELINE_PATH,
@@ -183,6 +292,186 @@ function criticalFileMap(compat) {
     }
   }
   return mapped;
+}
+
+function semanticCheckMap(compat) {
+  const checks = Array.isArray(compat?.semantic_checks) ? compat.semantic_checks : [];
+  const mapped = new Map();
+  for (const check of checks) {
+    if (check && typeof check.id === "string") {
+      mapped.set(check.id, check);
+    }
+  }
+  return mapped;
+}
+
+function validateSemanticListField({ check, field, label, allowedValues, errors, warnings }) {
+  if (!(field in check)) {
+    return [];
+  }
+  if (!Array.isArray(check[field])) {
+    errors.push(`codex.compatibility.semantic_checks.${check.id}.${field} must be an array`);
+    return [];
+  }
+
+  const values = check[field];
+  for (const [index, value] of values.entries()) {
+    if (typeof value !== "string") {
+      errors.push(`codex.compatibility.semantic_checks.${check.id}.${field}[${index}] must be a string`);
+    }
+  }
+  for (const duplicate of duplicateValues(stringArray(values))) {
+    warnings.push(`codex.compatibility.semantic_checks.${check.id}.${field} contains duplicate ${JSON.stringify(duplicate)}`);
+  }
+
+  if (allowedValues) {
+    for (const value of missingValues(stringArray(values), allowedValues)) {
+      errors.push(`codex.compatibility.semantic_checks.${check.id}.${field} references ${label} missing ${JSON.stringify(value)}`);
+    }
+  }
+
+  return stringArray(values);
+}
+
+function validateRequiredSemanticCheck({ required, check, errors }) {
+  if (check.file !== required.file) {
+    errors.push(`codex.compatibility.semantic_checks.${required.id}.file must be ${required.file}`);
+  }
+  if (check.kind !== required.kind) {
+    errors.push(`codex.compatibility.semantic_checks.${required.id}.kind must be ${required.kind}`);
+  }
+  for (const field of SEMANTIC_LIST_FIELDS) {
+    const requiredValues = stringArray(required[field]);
+    if (requiredValues.length === 0) {
+      continue;
+    }
+    const actualValues = stringArray(check[field]);
+    for (const value of missingValues(requiredValues, actualValues)) {
+      errors.push(`codex.compatibility.semantic_checks.${required.id}.${field} missing ${JSON.stringify(value)}`);
+    }
+  }
+}
+
+function validateSemanticChecks({ compat, files, errors, warnings }) {
+  const formatVersion = compat.format_version;
+  let semanticChecksRequired = false;
+  if (formatVersion !== undefined) {
+    if (!Number.isInteger(formatVersion)) {
+      errors.push("codex.compatibility.format_version must be an integer when set");
+    } else {
+      semanticChecksRequired = formatVersion >= COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS;
+    }
+  }
+
+  if (!Array.isArray(compat.semantic_checks)) {
+    const message = `codex.compatibility.semantic_checks must be an array for format_version ${COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS}`;
+    if (semanticChecksRequired) {
+      errors.push(message);
+    } else {
+      warnings.push("codex.compatibility.semantic_checks should be an array for grouped compatibility guards");
+    }
+    return;
+  }
+
+  const checks = semanticCheckMap(compat);
+  const duplicatedIds = duplicateValues(
+    compat.semantic_checks
+      .filter((check) => check && typeof check.id === "string")
+      .map((check) => check.id),
+  );
+  for (const duplicate of duplicatedIds) {
+    warnings.push(`codex.compatibility.semantic_checks contains duplicate id ${JSON.stringify(duplicate)}`);
+  }
+
+  if (semanticChecksRequired) {
+    for (const required of REQUIRED_SEMANTIC_CHECKS) {
+      const check = checks.get(required.id);
+      if (!check) {
+        errors.push(`codex.compatibility.semantic_checks missing ${required.id}`);
+        continue;
+      }
+      validateRequiredSemanticCheck({ required, check, errors });
+    }
+  }
+
+  const expectedHeaders = stringArray(compat.expected_headers);
+  const proxyReplacedHeaders = stringArray(compat.proxy_replaced_headers);
+  const expectedRoutes = stringArray(compat.expected_routes);
+  const expectedStreamEvents = stringArray(compat.expected_stream_events);
+
+  for (const [index, check] of compat.semantic_checks.entries()) {
+    if (!check || typeof check !== "object" || Array.isArray(check)) {
+      errors.push(`codex.compatibility.semantic_checks[${index}] must be an object`);
+      continue;
+    }
+    if (typeof check.id !== "string" || check.id.length === 0) {
+      errors.push(`codex.compatibility.semantic_checks[${index}].id must be a non-empty string`);
+      continue;
+    }
+    if (typeof check.kind !== "string" || check.kind.length === 0) {
+      warnings.push(`codex.compatibility.semantic_checks.${check.id}.kind should describe the grouped assumption`);
+    }
+    if (typeof check.file !== "string" || check.file.length === 0) {
+      errors.push(`codex.compatibility.semantic_checks.${check.id}.file must be a non-empty string`);
+      continue;
+    }
+    if (typeof check.reason !== "string" || check.reason.length === 0) {
+      warnings.push(`codex.compatibility.semantic_checks.${check.id}.reason should explain why the grouped assumption matters`);
+    }
+
+    const file = files.get(check.file);
+    if (!file) {
+      errors.push(`codex.compatibility.semantic_checks.${check.id}.file is not listed in critical_files`);
+      continue;
+    }
+    const fileContains = stringArray(file.required_contains);
+    let checkedFieldCount = 0;
+
+    checkedFieldCount += validateSemanticListField({
+      check,
+      field: "file_contains_all",
+      label: `${check.file}.required_contains`,
+      allowedValues: fileContains,
+      errors,
+      warnings,
+    }).length;
+    checkedFieldCount += validateSemanticListField({
+      check,
+      field: "expected_headers_all",
+      label: "codex.compatibility.expected_headers",
+      allowedValues: expectedHeaders,
+      errors,
+      warnings,
+    }).length;
+    checkedFieldCount += validateSemanticListField({
+      check,
+      field: "proxy_replaced_headers_all",
+      label: "codex.compatibility.proxy_replaced_headers",
+      allowedValues: proxyReplacedHeaders,
+      errors,
+      warnings,
+    }).length;
+    checkedFieldCount += validateSemanticListField({
+      check,
+      field: "expected_routes_all",
+      label: "codex.compatibility.expected_routes",
+      allowedValues: expectedRoutes,
+      errors,
+      warnings,
+    }).length;
+    checkedFieldCount += validateSemanticListField({
+      check,
+      field: "expected_stream_events_all",
+      label: "codex.compatibility.expected_stream_events",
+      allowedValues: expectedStreamEvents,
+      errors,
+      warnings,
+    }).length;
+
+    if (checkedFieldCount === 0) {
+      warnings.push(`codex.compatibility.semantic_checks.${check.id} should include at least one grouped expectation`);
+    }
+  }
 }
 
 function validateBaseline(baseline) {
@@ -263,6 +552,8 @@ function validateBaseline(baseline) {
     warnings.push("codex.compatibility.guard_command should document the offline guard command");
   }
 
+  validateSemanticChecks({ compat, files, errors, warnings });
+
   return { errors, warnings };
 }
 
@@ -325,6 +616,7 @@ async function main() {
       proxy_replaced_headers: REQUIRED_PROXY_REPLACED_HEADERS,
       expected_routes: REQUIRED_EXPECTED_ROUTES,
       expected_stream_events: REQUIRED_STREAM_EVENTS,
+      semantic_checks: REQUIRED_SEMANTIC_CHECKS.map((check) => check.id),
     },
   };
 

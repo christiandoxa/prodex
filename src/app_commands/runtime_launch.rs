@@ -5,21 +5,25 @@ struct RunCommandStrategy {
     codex_args: Vec<OsString>,
     include_code_review: bool,
     mem_mode: bool,
+    dry_run: bool,
     model_provider_override: Option<String>,
 }
 
 impl RunCommandStrategy {
     fn new(args: RunArgs) -> Self {
         let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+        let (dry_run_arg, codex_args) = extract_prodex_dry_run_flag(&codex_args);
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
+        let dry_run = args.dry_run || dry_run_arg;
         Self {
             args,
             codex_args,
             include_code_review,
             mem_mode,
+            dry_run,
             model_provider_override,
         }
     }
@@ -56,7 +60,17 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
-    execute_runtime_launch(RunCommandStrategy::new(args))
+    let strategy = RunCommandStrategy::new(args);
+    if strategy.dry_run {
+        return print_runtime_launch_dry_run(
+            "run",
+            strategy.runtime_request(),
+            RuntimeLaunchDryRunChild::Codex {
+                codex_args: strategy.codex_args.clone(),
+            },
+        );
+    }
+    execute_runtime_launch(strategy)
 }
 
 #[derive(Debug, Clone)]
@@ -262,12 +276,68 @@ impl RuntimeProxyStartupFactory {
 
         Ok(None)
     }
+
+    fn preview(
+        paths: &AppPaths,
+        state: &AppState,
+        selection: &RuntimeLaunchSelection,
+        request: &RuntimeLaunchRequest<'_>,
+    ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if selection.non_openai_model_provider.is_some() {
+            return Ok(None);
+        }
+
+        if request.force_runtime_proxy
+            || should_enable_runtime_rotation_proxy(
+                state,
+                &selection.selected_profile_name,
+                request.allow_auto_rotate,
+            )
+        {
+            return Ok(Some(runtime_proxy_dry_run_endpoint(paths)?));
+        }
+
+        Ok(None)
+    }
 }
 
 pub(super) fn prepare_runtime_launch(
     request: RuntimeLaunchRequest<'_>,
 ) -> Result<PreparedRuntimeLaunch> {
     RuntimeLaunchPreparationBuilder::from_request(request)?.build()
+}
+
+pub(super) fn prepare_runtime_launch_dry_run(
+    request: RuntimeLaunchRequest<'_>,
+) -> Result<PreparedRuntimeLaunch> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let selection =
+        RuntimeLaunchSelection::resolve(&state, request.profile, request.model_provider_override)?;
+    let managed = state
+        .profiles
+        .get(&selection.selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
+        .managed;
+    let runtime_proxy = RuntimeProxyStartupFactory::preview(&paths, &state, &selection, &request)?;
+
+    Ok(PreparedRuntimeLaunch {
+        paths,
+        codex_home: selection.codex_home,
+        managed,
+        runtime_proxy,
+    })
+}
+
+fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoint> {
+    Ok(RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:0"
+            .parse()
+            .context("failed to build dry-run runtime proxy address")?,
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        lease_dir: paths.root.join("runtime-broker-dry-run-leases"),
+        _lease: None,
+    })
 }
 
 fn select_runtime_launch_profile(
@@ -670,6 +740,81 @@ mod tests {
         let message = format!("{err:#}");
         assert!(message.contains("amazon-bedrock"));
         assert!(message.contains("prodex claude"));
+    }
+
+    #[test]
+    fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection() {
+        let root = temp_dir("dry-run-preview-no-selection-save");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let main_home = root.join("main-home");
+        let second_home = root.join("second-home");
+        fs::create_dir_all(&main_home).unwrap();
+        fs::create_dir_all(&second_home).unwrap();
+        fs::write(
+            secret_store::auth_json_path(&main_home),
+            r#"{"tokens":{"access_token":"main-token"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            secret_store::auth_json_path(&second_home),
+            r#"{"tokens":{"access_token":"second-token"}}"#,
+        )
+        .unwrap();
+        write_state(
+            &root,
+            AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home.clone(),
+                            managed: false,
+                            email: None,
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: false,
+                            email: None,
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                ]),
+                ..AppState::default()
+            },
+        );
+
+        let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
+            profile: None,
+            allow_auto_rotate: true,
+            skip_quota_check: false,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: false,
+            model_provider_override: None,
+        })
+        .unwrap();
+
+        assert_eq!(prepared.codex_home, main_home);
+        assert_eq!(
+            prepared
+                .runtime_proxy
+                .as_ref()
+                .expect("runtime proxy preview should exist")
+                .listen_addr
+                .port(),
+            0
+        );
+        let paths = AppPaths::discover().unwrap();
+        let state = AppState::load(&paths).unwrap();
+        assert!(
+            state.last_run_selected_at.is_empty(),
+            "dry-run must not record launch selection"
+        );
     }
 
     fn write_state(root: &Path, state: AppState) {
