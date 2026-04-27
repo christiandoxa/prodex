@@ -657,6 +657,29 @@ pub(super) fn stage_imported_profiles(
             }
             let resolved_email = resolved_exported_profile_email(exported);
 
+            if let Some(existing_profile) = state.profiles.get(&exported.name) {
+                if !provider.supports_codex_runtime()
+                    || !existing_profile.provider.supports_codex_runtime()
+                {
+                    bail!("profile '{}' already exists", exported.name);
+                }
+
+                queue_existing_profile_auth_update(
+                    &mut auth_updates,
+                    &exported.name,
+                    resolved_email.clone(),
+                    exported.auth_json.clone(),
+                );
+                resolved_profile_names.insert(exported.name.clone(), exported.name.clone());
+                if let Some(email) = resolved_email.as_deref() {
+                    email_targets.insert(
+                        normalize_email(email),
+                        ImportEmailTarget::Existing(exported.name.clone()),
+                    );
+                }
+                continue;
+            }
+
             if provider.supports_codex_runtime()
                 && let Some(email) = resolved_email.as_deref()
             {
@@ -708,10 +731,6 @@ pub(super) fn stage_imported_profiles(
                     resolved_profile_names.insert(exported.name.clone(), existing_profile_name);
                     continue;
                 }
-            }
-
-            if state.profiles.contains_key(&exported.name) {
-                bail!("profile '{}' already exists", exported.name);
             }
 
             let final_home = managed_profile_home_path(paths, &exported.name)?;

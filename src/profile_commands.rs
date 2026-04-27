@@ -21,7 +21,7 @@ pub(crate) use self::copilot::{
 use self::import_export::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, build_profile_export_payload,
     decode_profile_export_envelope, derive_profile_export_key, import_profile_export_payload,
-    serialize_profile_export_payload, stage_imported_profiles, validate_profile_export_header,
+    serialize_profile_export_payload, validate_profile_export_header,
 };
 pub(crate) use self::import_export::{
     handle_export_profiles, handle_import_current_profile, handle_import_profiles,

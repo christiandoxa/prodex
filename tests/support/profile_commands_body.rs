@@ -491,20 +491,25 @@ fn profile_export_round_trip_preserves_copilot_provider_metadata() {
 }
 
 #[test]
-fn profile_import_rejects_existing_profile_names() {
+fn profile_import_updates_existing_profile_when_name_matches() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
     let target_dir = ProfileCommandsTestDir::new("import-collision");
     let target_paths = profile_commands_test_paths(&target_dir.path);
     let existing_home = target_paths.managed_profiles_root.join("main");
-    profile_commands_write_profile_auth(&existing_home, "main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
 
     let mut existing_state = AppState {
-        active_profile: Some("main".to_string()),
+        active_profile: None,
         profiles: BTreeMap::from([(
             "main".to_string(),
             ProfileEntry {
-                codex_home: existing_home,
+                codex_home: existing_home.clone(),
                 managed: true,
                 email: Some("main@example.com".to_string()),
                 provider: ProfileProvider::Openai,
@@ -521,13 +526,39 @@ fn profile_import_rejects_existing_profile_names() {
             email: Some("imported@example.com".to_string()),
             source_managed: true,
             provider: ProfileProvider::Openai,
-            auth_json: profile_commands_sample_auth_json("main"),
+            auth_json: profile_commands_auth_json_with_email(
+                "imported@example.com",
+                "fresh-token",
+                "imported-account",
+            ),
         }],
     };
 
-    let err = stage_imported_profiles(&target_paths, &mut existing_state, &payload)
-        .expect_err("import should reject duplicate profile names");
-    assert!(err.to_string().contains("already exists"));
+    let commit = import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("import should update same-name profile");
+
+    assert!(commit.imported_names.is_empty());
+    assert_eq!(commit.updated_existing_names, vec!["main".to_string()]);
+    assert_eq!(existing_state.active_profile.as_deref(), Some("main"));
+    assert_eq!(existing_state.profiles.len(), 1);
+    assert_eq!(
+        existing_state
+            .profiles
+            .get("main")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("imported@example.com")
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "fresh-token".to_string()
+    );
+    assert_eq!(
+        fs::read_dir(&target_paths.managed_profiles_root)
+            .expect("managed root should be readable")
+            .count(),
+        1,
+        "same-name import should not create a new managed home"
+    );
 }
 
 #[test]
