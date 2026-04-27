@@ -249,6 +249,80 @@ pub(crate) fn runtime_doctor_route_health_next_step(summary: &RuntimeDoctorSumma
     )
 }
 
+fn runtime_doctor_websocket_connect_overflow_marker(
+    summary: &RuntimeDoctorSummary,
+) -> &'static str {
+    if runtime_doctor_marker_count(summary, "websocket_connect_overflow_rejected") > 0 {
+        "websocket_connect_overflow_rejected"
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_reject") > 0 {
+        "websocket_connect_overflow_reject"
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_enqueue") > 0 {
+        "websocket_connect_overflow_enqueue"
+    } else {
+        "websocket_connect_overflow_dispatch"
+    }
+}
+
+pub(crate) fn runtime_doctor_websocket_connect_overflow_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let marker = runtime_doctor_websocket_connect_overflow_marker(summary);
+    let reason =
+        runtime_doctor_marker_last_field(summary, marker, "reason").unwrap_or("unknown_reason");
+    let pending =
+        runtime_doctor_marker_last_field(summary, marker, "overflow_pending").unwrap_or("-");
+    let max_pending =
+        runtime_doctor_marker_last_field(summary, marker, "overflow_max_pending").unwrap_or("-");
+    let worker_count =
+        runtime_doctor_marker_last_field(summary, marker, "worker_count").unwrap_or("-");
+    let queue_capacity =
+        runtime_doctor_marker_last_field(summary, marker, "queue_capacity").unwrap_or("-");
+    if marker == "websocket_connect_overflow_rejected"
+        || marker == "websocket_connect_overflow_reject"
+    {
+        format!(
+            "Reduce concurrent websocket session starts or wait for websocket connect workers to drain before retrying. Latest reason: {reason}; pending={pending}/{max_pending}, workers={worker_count}, queue_capacity={queue_capacity}."
+        )
+    } else if marker == "websocket_connect_overflow_dispatch" {
+        format!(
+            "Overflow queued websocket connect work drained back into the bounded workers; inspect earlier enqueue/reject markers if dispatch repeats. Latest reason: {reason}; pending={pending}/{max_pending}, workers={worker_count}, queue_capacity={queue_capacity}."
+        )
+    } else {
+        format!(
+            "Watch for matching dispatch or rejected markers; repeated enqueue means websocket connect workers are saturated. Latest reason: {reason}; pending={pending}/{max_pending}, workers={worker_count}, queue_capacity={queue_capacity}."
+        )
+    }
+}
+
+fn runtime_doctor_profile_auth_marker(summary: &RuntimeDoctorSummary) -> &'static str {
+    if runtime_doctor_marker_count(summary, "profile_auth_recovery_failed") > 0 {
+        "profile_auth_recovery_failed"
+    } else {
+        "profile_auth_recovered"
+    }
+}
+
+pub(crate) fn runtime_doctor_profile_auth_recovery_next_step(
+    summary: &RuntimeDoctorSummary,
+) -> String {
+    let marker = runtime_doctor_profile_auth_marker(summary);
+    let profile = runtime_doctor_marker_last_field(summary, marker, "profile").unwrap_or("-");
+    let route = runtime_doctor_marker_last_field(summary, marker, "route").unwrap_or("-");
+    if marker == "profile_auth_recovery_failed" {
+        let error =
+            runtime_doctor_marker_last_field(summary, marker, "error").unwrap_or("unknown_error");
+        format!(
+            "Refresh credentials for profile {profile} with `prodex login --profile {profile}` and retry route {route}; latest recovery error: {error}."
+        )
+    } else {
+        let source = runtime_doctor_marker_last_field(summary, marker, "source").unwrap_or("-");
+        let changed = runtime_doctor_marker_last_field(summary, marker, "changed").unwrap_or("-");
+        format!(
+            "Auth recovered for profile {profile} on route {route} via {source} (changed={changed}); if this repeats, restart active sessions after login refresh."
+        )
+    }
+}
+
 pub(crate) fn runtime_doctor_persistence_backpressure_next_step(
     summary: &RuntimeDoctorSummary,
 ) -> String {
@@ -337,7 +411,7 @@ pub(crate) fn runtime_doctor_count_breakdown(counts: &BTreeMap<String, usize>) -
 }
 
 fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
-    let classes: [(&str, &[&str]); 5] = [
+    let classes: [(&str, &[&str]); 6] = [
         (
             "admission",
             &[
@@ -350,8 +424,17 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "runtime_proxy_queue_wait_started",
                 "runtime_proxy_queue_wait_exhausted",
                 "profile_inflight_saturated",
+                "websocket_connect_overflow_reject",
+                "websocket_connect_overflow_rejected",
                 "compact_precommit_budget_exhausted",
                 "compact_candidate_exhausted",
+            ],
+        ),
+        (
+            "auth",
+            &[
+                "profile_auth_recovery_failed",
+                "profile_auth_proactive_sync_failed",
             ],
         ),
         (
@@ -388,13 +471,21 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "profile_health",
                 "profile_latency",
                 "profile_bad_pairing",
+                "profile_quota_quarantine",
+                "profile_auth_backoff",
                 "profile_probe_refresh_error",
+                "profile_probe_refresh_panic",
                 "profile_probe_refresh_backpressure",
                 "selection_skip_sync_probe",
+                "runtime_proxy_sync_probe_pressure_pause",
+                "local_selection_blocked",
                 "responses_pre_send_skip",
                 "websocket_pre_send_skip",
+                "quota_blocked",
                 "quota_critical_floor_before_send",
                 "upstream_usage_limit_passthrough",
+                "upstream_overload_passthrough",
+                "upstream_overloaded",
                 "compact_retryable_failure",
                 "compact_overload_conservative_retry",
                 "compact_quota_unclassified",
@@ -407,9 +498,24 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "upstream_connect_dns_error",
                 "upstream_tls_handshake_error",
                 "upstream_connect_error",
+                "upstream_connect_http",
+                "upstream_close_before_completed",
+                "upstream_connection_closed",
+                "upstream_read_error",
+                "upstream_send_error",
+                "upstream_stream_error",
+                "profile_transport_failure",
                 "stream_read_error",
                 "local_writer_error",
                 "websocket_precommit_frame_timeout",
+                "websocket_precommit_hold_timeout",
+                "websocket_dns_resolve_timeout",
+                "websocket_dns_overflow_enqueue",
+                "websocket_dns_overflow_dispatch",
+                "websocket_dns_overflow_reject",
+                "websocket_connect_local_pressure",
+                "websocket_connect_overflow_enqueue",
+                "websocket_connect_overflow_dispatch",
             ],
         ),
     ];
@@ -739,6 +845,37 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         "Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it.".to_string()
     } else if runtime_doctor_marker_count(summary, "websocket_precommit_frame_timeout") > 0 {
         "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_precommit_hold_timeout") > 0 {
+        "Recent websocket pre-commit hold timed out before an upstream terminal frame arrived."
+            .to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_dns_resolve_timeout") > 0 {
+        "Recent websocket DNS resolution timed out before upstream connect completed.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_dns_overflow_reject") > 0 {
+        "Recent websocket DNS resolution work was rejected after the overflow queue saturated."
+            .to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_dns_overflow_enqueue") > 0
+        || runtime_doctor_marker_count(summary, "websocket_dns_overflow_dispatch") > 0
+    {
+        "Recent websocket DNS resolution overflow queueing was observed.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_local_pressure") > 0 {
+        "Recent websocket connect failed due local pressure before upstream commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_rejected") > 0
+        || runtime_doctor_marker_count(summary, "websocket_connect_overflow_reject") > 0
+    {
+        format!(
+            "Recent websocket connect work was rejected after the overflow queue saturated. Next step: {}",
+            runtime_doctor_websocket_connect_overflow_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_enqueue") > 0 {
+        format!(
+            "Recent websocket connect overflow queueing was observed. Next step: {}",
+            runtime_doctor_websocket_connect_overflow_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_dispatch") > 0 {
+        format!(
+            "Recent websocket connect overflow dispatch was observed. Next step: {}",
+            runtime_doctor_websocket_connect_overflow_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0 {
         let profile =
             runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "profile")
@@ -764,6 +901,11 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         )
     } else if runtime_doctor_marker_count(summary, "profile_bad_pairing") > 0 {
         "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_auth_recovery_failed") > 0 {
+        format!(
+            "Recent profile auth recovery failed after an upstream unauthorized response. Next step: {}",
+            runtime_doctor_profile_auth_recovery_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked") > 0 {
         "Recent compact lineage guard failed closed so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
     } else if runtime_doctor_marker_count(summary, "compact_pressure_shed") > 0 {
@@ -860,6 +1002,11 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
         )
     } else if runtime_doctor_marker_count(summary, "websocket_reuse_watchdog") > 0 {
         "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_auth_recovered") > 0 {
+        format!(
+            "Recent profile auth recovered after an upstream unauthorized response. Next step: {}",
+            runtime_doctor_profile_auth_recovery_next_step(summary)
+        )
     } else if runtime_doctor_marker_count(summary, "selection_pick") > 0
         || runtime_doctor_marker_count(summary, "selection_skip_current") > 0
     {

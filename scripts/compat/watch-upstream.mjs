@@ -4,6 +4,28 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
+const CODEX_RAW_ROOT = "https://raw.githubusercontent.com/openai/codex";
+const CODEX_FALLBACK_REF = "main";
+
+const SEMANTIC_FILE_CONTAINS_FIELD = "file_contains_all";
+const SEMANTIC_DIFF_FIELDS = [
+  {
+    field: SEMANTIC_FILE_CONTAINS_FIELD,
+    found: "file_contains_found",
+    missing: "file_contains_missing",
+    source: "file",
+  },
+];
+
+class FetchResponseError extends Error {
+  constructor(url, response) {
+    super(`failed to fetch ${url}: ${response.status} ${response.statusText}`);
+    this.name = "FetchResponseError";
+    this.url = url;
+    this.status = response.status;
+    this.statusText = response.statusText;
+  }
+}
 
 function parseArgs(argv) {
   const args = {
@@ -73,29 +95,39 @@ function parseTitle(html) {
 }
 
 async function fetchText(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "prodex-compat-watchdog",
-      Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
-      ...headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": "prodex-compat-watchdog",
+        Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
+        ...headers,
+      },
+    });
+  } catch (error) {
+    throw new Error(`failed to fetch ${url}: ${error.message}`);
+  }
   if (!response.ok) {
-    throw new Error(`failed to fetch ${url}: ${response.status} ${response.statusText}`);
+    throw new FetchResponseError(url, response);
   }
   return response.text();
 }
 
 async function fetchJson(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "prodex-compat-watchdog",
-      Accept: "application/vnd.github+json",
-      ...headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": "prodex-compat-watchdog",
+        Accept: "application/vnd.github+json",
+        ...headers,
+      },
+    });
+  } catch (error) {
+    throw new Error(`failed to fetch ${url}: ${error.message}`);
+  }
   if (!response.ok) {
-    throw new Error(`failed to fetch ${url}: ${response.status} ${response.statusText}`);
+    throw new FetchResponseError(url, response);
   }
   return response.json();
 }
@@ -145,6 +177,135 @@ async function fetchClaudeDoc(page) {
   };
 }
 
+function stringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item) => typeof item === "string");
+}
+
+function rawCodexFileUrl(ref, filePath) {
+  return `${CODEX_RAW_ROOT}/${encodeURIComponent(ref)}/${filePath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/")}`;
+}
+
+function fetchAttemptSummary(attempts) {
+  return attempts
+    .map((attempt) => {
+      const status = attempt.status ? ` status=${attempt.status}` : "";
+      return `${attempt.ref}${status}: ${attempt.error}`;
+    })
+    .join("; ");
+}
+
+async function fetchCodexRawFile(filePath, releaseTag) {
+  const primaryRef = releaseTag || CODEX_FALLBACK_REF;
+  const refs = primaryRef === CODEX_FALLBACK_REF ? [CODEX_FALLBACK_REF] : [primaryRef, CODEX_FALLBACK_REF];
+  const attempts = [];
+
+  for (const [index, ref] of refs.entries()) {
+    const url = rawCodexFileUrl(ref, filePath);
+    try {
+      const contents = await fetchText(url, { Accept: "text/plain,*/*;q=0.8" });
+      return {
+        ref,
+        url,
+        contents,
+        attempts: [...attempts, { ref, url, ok: true }],
+      };
+    } catch (error) {
+      const attempt = {
+        ref,
+        url,
+        error: error.message,
+        status: error.status ?? null,
+      };
+      attempts.push(attempt);
+      const canFallbackToMain =
+        index === 0 &&
+        ref !== CODEX_FALLBACK_REF &&
+        error instanceof FetchResponseError &&
+        error.status === 404;
+      if (canFallbackToMain) {
+        continue;
+      }
+      throw new Error(
+        `failed to fetch upstream Codex critical file ${filePath}; attempts: ${fetchAttemptSummary(attempts)}`,
+      );
+    }
+  }
+
+  throw new Error(`failed to fetch upstream Codex critical file ${filePath}; no refs attempted`);
+}
+
+function containsAllResult(tokens, contents) {
+  const required = stringArray(tokens);
+  return {
+    required,
+    found: required.filter((token) => contents.includes(token)),
+    missing: required.filter((token) => !contents.includes(token)),
+  };
+}
+
+function semanticChecksForFile(compat, filePath) {
+  return (Array.isArray(compat?.semantic_checks) ? compat.semantic_checks : []).filter(
+    (check) => check && typeof check === "object" && check.file === filePath,
+  );
+}
+
+function buildCodexCriticalFileReport(file, compat, source, releaseTag) {
+  const filePath = file.path;
+  const requiredContains = containsAllResult(file.required_contains, source.contents);
+  const semanticChecks = semanticChecksForFile(compat, filePath).map((check) => {
+    const fileContains = containsAllResult(check[SEMANTIC_FILE_CONTAINS_FIELD], source.contents);
+    return {
+      id: check.id,
+      kind: check.kind,
+      reason: check.reason,
+      [SEMANTIC_FILE_CONTAINS_FIELD]: fileContains.required,
+      file_contains_found: fileContains.found,
+      file_contains_missing: fileContains.missing,
+    };
+  });
+
+  return {
+    path: filePath,
+    reason: file.reason,
+    source_ref: source.ref,
+    source_url: source.url,
+    fallback_used: Boolean(releaseTag) && source.ref !== releaseTag,
+    fetch_attempts: source.attempts.map(({ ref, url, ok, status, error }) => ({ ref, url, ok, status, error })),
+    required_contains: requiredContains.required,
+    required_contains_found: requiredContains.found,
+    required_contains_missing: requiredContains.missing,
+    semantic_checks: semanticChecks,
+  };
+}
+
+async function fetchCodexCompatibility(compat, releaseTag) {
+  const criticalFiles = Array.isArray(compat?.critical_files) ? compat.critical_files : [];
+  const fetchableFiles = criticalFiles.filter((file) => file && typeof file.path === "string");
+  const fetchedFiles = await Promise.all(
+    fetchableFiles.map(async (file) => ({
+      file,
+      source: await fetchCodexRawFile(file.path, releaseTag),
+    })),
+  );
+  const files = fetchedFiles.map(({ file, source }) =>
+    buildCodexCriticalFileReport(file, compat, source, releaseTag),
+  );
+
+  return {
+    upstream_repository: compat?.upstream_repository,
+    baseline_source: compat?.baseline_source,
+    source_ref_preferred: releaseTag || CODEX_FALLBACK_REF,
+    source_ref_fallback: CODEX_FALLBACK_REF,
+    critical_files: files,
+  };
+}
+
 function diffField(pathLabel, baselineValue, currentValue) {
   if (JSON.stringify(baselineValue) === JSON.stringify(currentValue)) {
     return null;
@@ -174,6 +335,13 @@ function renderReport(snapshot, diffs) {
   lines.push(`Generated at: ${snapshot.generated_at}`);
   lines.push("");
   lines.push(`Codex latest release: ${snapshot.codex.latestRelease.tag_name} (${snapshot.codex.latestRelease.name})`);
+  if (snapshot.codex.compatibility?.critical_files?.length > 0) {
+    lines.push("Codex critical files:");
+    for (const file of snapshot.codex.compatibility.critical_files) {
+      const fallback = file.fallback_used ? ` (fallback from ${snapshot.codex.compatibility.source_ref_preferred})` : "";
+      lines.push(`- ${file.path}: ${file.source_ref}${fallback}`);
+    }
+  }
   lines.push(`Claude latest release: ${snapshot.claude.latestRelease.tag_name} (${snapshot.claude.latestRelease.name})`);
   lines.push("");
   if (diffs.length === 0) {
@@ -192,6 +360,91 @@ function renderReport(snapshot, diffs) {
 
 function buildDiffs(baseline, current) {
   const diffs = [];
+
+  if (baseline.codex?.latestRelease) {
+    const codexPaths = ["tag_name", "name", "published_at", "html_url"];
+    for (const key of codexPaths) {
+      if (!(key in baseline.codex.latestRelease)) {
+        continue;
+      }
+      const diff = diffField(
+        `codex.latestRelease.${key}`,
+        baseline.codex.latestRelease[key],
+        current.codex.latestRelease[key],
+      );
+      if (diff) {
+        diffs.push(diff);
+      }
+    }
+  }
+
+  for (const baselineFile of baseline.codex?.compatibility?.critical_files ?? []) {
+    const currentFile = current.codex.compatibility.critical_files.find((file) => file.path === baselineFile.path);
+    if (!currentFile) {
+      diffs.push({
+        path: `codex.compatibility.critical_files.${baselineFile.path}`,
+        baseline: "file present",
+        current: "file missing from watchdog fetch set",
+      });
+      continue;
+    }
+    if (currentFile.required_contains_missing.length > 0) {
+      diffs.push({
+        path: `codex.compatibility.critical_files.${baselineFile.path}.required_contains`,
+        baseline: baselineFile.required_contains,
+        current: {
+          source_ref: currentFile.source_ref,
+          source_url: currentFile.source_url,
+          missing: currentFile.required_contains_missing,
+          found: currentFile.required_contains_found,
+        },
+      });
+    }
+  }
+
+  for (const baselineCheck of baseline.codex?.compatibility?.semantic_checks ?? []) {
+    if (!baselineCheck?.id || !baselineCheck?.file) {
+      continue;
+    }
+    const currentFile = current.codex.compatibility.critical_files.find((file) => file.path === baselineCheck.file);
+    const currentCheck = currentFile?.semantic_checks.find((check) => check.id === baselineCheck.id);
+    if (!currentCheck) {
+      diffs.push({
+        path: `codex.compatibility.semantic_checks.${baselineCheck.id}`,
+        baseline: "semantic check present",
+        current: "semantic check missing from watchdog fetch set",
+      });
+      continue;
+    }
+    for (const field of SEMANTIC_DIFF_FIELDS) {
+      const missing = currentCheck[field.missing] ?? [];
+      if (missing.length === 0) {
+        continue;
+      }
+      const currentDetails =
+        field.source === "file"
+          ? {
+              file: baselineCheck.file,
+              source_ref: currentFile.source_ref,
+              source_url: currentFile.source_url,
+              missing,
+              found: currentCheck[field.found],
+            }
+          : {
+              source_files: current.codex.compatibility.critical_files.map((file) => ({
+                path: file.path,
+                source_ref: file.source_ref,
+              })),
+              missing,
+              found: currentCheck[field.found],
+            };
+      diffs.push({
+        path: `codex.compatibility.semantic_checks.${baselineCheck.id}.${field.field}`,
+        baseline: baselineCheck[field.field],
+        current: currentDetails,
+      });
+    }
+  }
 
   const claudePaths = ["tag_name", "name", "published_at", "html_url"];
   for (const key of claudePaths) {
@@ -239,7 +492,10 @@ function buildDiffs(baseline, current) {
 function baselineSnapshotFromCurrent(baseline, current) {
   return {
     ...baseline,
-    ...(baseline.codex ? { codex: baseline.codex } : {}),
+    codex: {
+      ...(baseline.codex ?? {}),
+      latestRelease: current.codex.latestRelease,
+    },
     claude: {
       latestRelease: current.claude.latestRelease,
       docs: current.claude.docs.map(
@@ -261,7 +517,7 @@ async function main() {
       [
         "Usage: node scripts/compat/watch-upstream.mjs [--baseline <path>] [--report <path>] [--write-baseline] [--json]",
         "",
-        "Checks Claude Code releases/docs against a saved baseline and reports the current Codex release.",
+        "Checks Codex and Claude Code upstream state against a saved compatibility baseline.",
       ].join("\n") + "\n",
     );
     return;
@@ -269,10 +525,12 @@ async function main() {
 
   const baselineText = await fs.readFile(args.baseline, "utf8");
   const baseline = JSON.parse(baselineText);
+  const codexRelease = await fetchCodexRelease();
   const current = {
     generated_at: new Date().toISOString(),
     codex: {
-      latestRelease: await fetchCodexRelease(),
+      latestRelease: codexRelease,
+      compatibility: await fetchCodexCompatibility(baseline.codex?.compatibility, codexRelease.tag_name),
     },
     claude: {
       latestRelease: await fetchClaudeRelease(),
@@ -308,4 +566,9 @@ async function main() {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  process.stderr.write(`Upstream compatibility watchdog failed: ${error.message}\n`);
+  process.exitCode = 1;
+}

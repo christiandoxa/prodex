@@ -72,7 +72,9 @@ function printHelp() {
       "  - docs markdown lint",
       "  - upstream Codex compatibility baseline",
       "  - runtime test manifest",
-      "  - cargo fmt/check plus cargo test --no-run",
+      "  - cargo fmt plus full cargo test all-target compile",
+      "",
+      "--no-cargo-test skips test binary compilation and runs cargo check instead.",
     ].join("\n") + "\n",
   );
 }
@@ -280,9 +282,16 @@ async function main() {
   await runStep("upstream-compat", "node", ["scripts/compat/check-upstream-baseline.mjs"], args);
   await runStep("runtime-manifest", "npm", ["run", "ci:runtime-manifest"], args);
   await runStep("cargo-fmt", "cargo", ["fmt", "--check"], args);
-  await runStep("cargo-check", "cargo", ["check", "--locked", "--all-targets", "--all-features"], args);
   if (args.cargoTest) {
-    await runStep("cargo-test-compile", "cargo", ["test", "--locked", "--lib", "--all-features", "--no-run"], args);
+    await runStep("cargo-test-compile:all-targets", "cargo", [
+      "test",
+      "--locked",
+      "--all-targets",
+      "--all-features",
+      "--no-run",
+    ], args);
+  } else {
+    await runStep("cargo-check", "cargo", ["check", "--locked", "--all-targets", "--all-features"], args);
   }
 }
 

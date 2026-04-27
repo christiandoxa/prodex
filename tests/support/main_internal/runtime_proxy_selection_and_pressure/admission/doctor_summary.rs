@@ -27,6 +27,13 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.094 +07:00] profile_circuit_open profile=main route=responses until=123 reason=stream_read_error score=4
 [2026-03-20 12:00:00.095 +07:00] profile_circuit_half_open_probe profile=main route=responses until=128 health=3
 [2026-03-20 12:00:00.096 +07:00] websocket_reuse_watchdog profile=main event=read_error elapsed_ms=33 committed=true
+[2026-03-20 12:00:00.096 +07:00] request=4 transport=websocket websocket_connect_overflow_enqueue reason=queue_full overflow_pending=1 overflow_max_pending=1 overflow_total_enqueued=1 overflow_total_dispatched=0 worker_count=1 queue_capacity=1
+[2026-03-20 12:00:00.096 +07:00] request=4 transport=websocket websocket_connect_overflow_dispatch reason=queue_available overflow_pending=0 overflow_max_pending=1 overflow_total_enqueued=1 overflow_total_dispatched=1 worker_count=1 queue_capacity=1
+[2026-03-20 12:00:00.096 +07:00] request=5 transport=websocket websocket_connect_overflow_reject reason=overflow_capacity_reached overflow_pending=2 overflow_max_pending=2 overflow_total_enqueued=3 overflow_total_dispatched=1 worker_count=1 queue_capacity=1
+[2026-03-20 12:00:00.096 +07:00] request=5 transport=websocket websocket_connect_overflow_rejected reason=queue_full overflow_pending=3 overflow_max_pending=3 overflow_total_enqueued=4 overflow_total_dispatched=1 worker_count=1 queue_capacity=1
+[2026-03-20 12:00:00.096 +07:00] request=8 transport=websocket websocket_dns_resolve_timeout host=slow.example.test port=443 timeout_ms=25
+[2026-03-20 12:00:00.096 +07:00] request=6 profile_auth_recovered profile=main route=responses source=refresh changed=true
+[2026-03-20 12:00:00.096 +07:00] request=7 profile_auth_recovery_failed profile=second route=websocket error=refresh_failed
 [2026-03-20 12:00:00.097 +07:00] request=2 transport=http route=responses previous_response_not_found profile=second response_id=resp-second retry_index=0
 [2026-03-20 12:00:00.098 +07:00] request=3 transport=websocket route=websocket previous_response_not_found profile=second response_id=resp-second retry_index=0
 [2026-03-20 12:00:00.099 +07:00] request=3 transport=websocket route=websocket websocket_session=sess-1 chain_retried_owner profile=second previous_response_id=resp-second delay_ms=20 reason=previous_response_not_found_locked_affinity via=-
@@ -37,7 +44,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 "#,
         );
 
-    assert!((30..=31).contains(&summary.line_count));
+    assert!((37..=38).contains(&summary.line_count));
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -128,6 +135,34 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         1
     );
     assert_eq!(
+        runtime_doctor_marker_count(&summary, "websocket_connect_overflow_enqueue"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "websocket_connect_overflow_dispatch"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "websocket_connect_overflow_reject"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "websocket_connect_overflow_rejected"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "websocket_dns_resolve_timeout"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_auth_recovered"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "profile_auth_recovery_failed"),
+        1
+    );
+    assert_eq!(
         runtime_doctor_marker_count(&summary, "previous_response_not_found"),
         2
     );
@@ -164,11 +199,12 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     assert_eq!(
         summary.failure_class_counts,
         BTreeMap::from([
-            ("admission".to_string(), 6),
+            ("admission".to_string(), 8),
+            ("auth".to_string(), 1),
             ("continuation".to_string(), 5),
             ("persistence".to_string(), 1),
             ("quota".to_string(), 5),
-            ("transport".to_string(), 1),
+            ("transport".to_string(), 4),
         ])
     );
     assert_eq!(
@@ -223,6 +259,22 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
             .and_then(|fields| fields.get("lag_ms"))
             .map(String::as_str),
         Some("8")
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("websocket_connect_overflow_rejected")
+            .and_then(|fields| fields.get("overflow_pending"))
+            .map(String::as_str),
+        Some("3")
+    );
+    assert_eq!(
+        summary
+            .marker_last_fields
+            .get("profile_auth_recovery_failed")
+            .and_then(|fields| fields.get("error"))
+            .map(String::as_str),
+        Some("refresh_failed")
     );
     assert_eq!(
         summary

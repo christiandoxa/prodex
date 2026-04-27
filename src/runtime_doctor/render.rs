@@ -320,6 +320,103 @@ fn runtime_doctor_push_marker_detail_rows(
             .to_string(),
         );
     }
+    let has_ws_overflow_rejected =
+        diagnosis::runtime_doctor_marker_count(summary, "websocket_connect_overflow_rejected") > 0;
+    let has_ws_overflow_reject =
+        diagnosis::runtime_doctor_marker_count(summary, "websocket_connect_overflow_reject") > 0;
+    let has_ws_overflow_enqueue =
+        diagnosis::runtime_doctor_marker_count(summary, "websocket_connect_overflow_enqueue") > 0;
+    let should_render_ws_overflow_detail = marker == "websocket_connect_overflow_rejected"
+        || marker == "websocket_connect_overflow_reject" && !has_ws_overflow_rejected
+        || marker == "websocket_connect_overflow_enqueue"
+            && !has_ws_overflow_rejected
+            && !has_ws_overflow_reject
+        || marker == "websocket_connect_overflow_dispatch"
+            && !has_ws_overflow_rejected
+            && !has_ws_overflow_reject
+            && !has_ws_overflow_enqueue;
+    if should_render_ws_overflow_detail {
+        fields
+            .push(
+                "WS overflow reason",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("reason"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "WS overflow pending",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .map(|fields| {
+                        format!(
+                            "{}/{}",
+                            fields
+                                .get("overflow_pending")
+                                .map(String::as_str)
+                                .unwrap_or("-"),
+                            fields
+                                .get("overflow_max_pending")
+                                .map(String::as_str)
+                                .unwrap_or("-")
+                        )
+                    })
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "WS overflow next step",
+                diagnosis::runtime_doctor_websocket_connect_overflow_next_step(summary),
+            );
+    }
+    if marker == "profile_auth_recovery_failed"
+        || marker == "profile_auth_recovered"
+            && diagnosis::runtime_doctor_marker_count(summary, "profile_auth_recovery_failed") == 0
+    {
+        fields
+            .push(
+                "Auth recovery profile",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("profile"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Auth recovery route",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("route"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Auth recovery source",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("source"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Auth recovery error",
+                summary
+                    .marker_last_fields
+                    .get(marker)
+                    .and_then(|fields| fields.get("error"))
+                    .cloned()
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+            .push(
+                "Auth recovery next step",
+                diagnosis::runtime_doctor_profile_auth_recovery_next_step(summary),
+            );
+    }
     if marker == "previous_response_not_found" {
         fields
             .push(
@@ -925,6 +1022,10 @@ mod tests {
         include_bytes!("../../tests/fixtures/runtime_doctor/previous_response_fail_closed.log");
     const ROUTE_SCOPED_PROFILE_HEALTH_LOG: &[u8] =
         include_bytes!("../../tests/fixtures/runtime_doctor/route_scoped_profile_health.log");
+    const WEBSOCKET_CONNECT_OVERFLOW_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/websocket_connect_overflow.log");
+    const PROFILE_AUTH_RECOVERY_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/profile_auth_recovery.log");
 
     fn json_object_keys(value: &serde_json::Value) -> BTreeSet<String> {
         value
@@ -1095,6 +1196,82 @@ mod tests {
                 .get("Continuation next step")
                 .expect("continuation next step should be rendered")
                 .contains("cannot be replayed safely")
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_fixture_websocket_connect_overflow_surfaces_guidance() {
+        let summary = runtime_doctor_fixture_summary(WEBSOCKET_CONNECT_OVERFLOW_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(
+            value["marker_counts"]["websocket_connect_overflow_enqueue"],
+            1
+        );
+        assert_eq!(
+            value["marker_counts"]["websocket_connect_overflow_dispatch"],
+            1
+        );
+        assert_eq!(
+            value["marker_counts"]["websocket_connect_overflow_reject"],
+            1
+        );
+        assert_eq!(
+            value["marker_counts"]["websocket_connect_overflow_rejected"],
+            1
+        );
+        assert_eq!(value["transport_pressure"], "elevated");
+        assert_eq!(value["failure_class_counts"]["admission"], 2);
+        assert_eq!(value["failure_class_counts"]["transport"], 2);
+        assert!(
+            runtime_doctor_json_string(&value, "diagnosis")
+                .contains("websocket connect work was rejected")
+        );
+        assert_eq!(
+            fields
+                .get("WS overflow pending")
+                .expect("overflow pending should be rendered"),
+            "3/3"
+        );
+        assert!(
+            fields
+                .get("WS overflow next step")
+                .expect("overflow next step should be rendered")
+                .contains("Reduce concurrent websocket session starts")
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_fixture_profile_auth_recovery_surfaces_guidance() {
+        let summary = runtime_doctor_fixture_summary(PROFILE_AUTH_RECOVERY_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(value["marker_counts"]["profile_auth_recovered"], 1);
+        assert_eq!(value["marker_counts"]["profile_auth_recovery_failed"], 1);
+        assert_eq!(value["failure_class_counts"]["auth"], 1);
+        assert!(
+            runtime_doctor_json_string(&value, "diagnosis")
+                .contains("profile auth recovery failed")
+        );
+        assert_eq!(
+            fields
+                .get("Auth recovery profile")
+                .expect("auth profile should be rendered"),
+            "second"
+        );
+        assert_eq!(
+            fields
+                .get("Auth recovery error")
+                .expect("auth error should be rendered"),
+            "refresh_failed"
+        );
+        assert!(
+            fields
+                .get("Auth recovery next step")
+                .expect("auth next step should be rendered")
+                .contains("prodex login --profile second")
         );
     }
 

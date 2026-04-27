@@ -278,6 +278,22 @@
           ]
         }
       ]
+    },
+    "latestRelease": {
+      "tag_name": "rust-v0.125.0",
+      "name": "0.125.0",
+      "published_at": "2026-04-24T18:00:38Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.125.0",
+      "body_head": [
+        "## New Features",
+        "- App-server integrations now support Unix socket transport, pagination-friendly resume/fork, sticky environments, and remote thread config/store plumbing. (#18255, #18892, #18897, #18908, #19008, #19014)",
+        "- App-server plugin management can install remote plugins and upgrade configured marketplaces. (#18917, #19074)",
+        "- Permission profiles now round-trip across TUI sessions, user turns, MCP sandbox state, shell escalation, and app-server APIs. (#18284, #18285, #18286, #18287, #19231)",
+        "- Model providers now own model discovery, with AWS/Bedrock account state exposed to app clients. (#18950, #19048)",
+        "- `codex exec --json` now reports reasoning-token usage for programmatic consumers. (#19308)",
+        "- Rollout tracing now records tool, code-mode, session, and multi-agent relationships, with a debug reducer command for inspection. (#18878, #18879, #18880)",
+        "## Bug Fixes"
+      ]
     }
   },
   "claude": {

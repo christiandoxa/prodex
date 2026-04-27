@@ -29,6 +29,109 @@ const CONTINUATION_TAGS = Object.freeze([
 
 export const RUNTIME_TEST_TAGS = TAGS;
 
+export const RUNTIME_CI_BROAD_SHARD_FILTERS = [
+  {
+    id: "root-broker",
+    filter: "main_internal_tests::runtime_proxy_broker_",
+    label: "broker",
+  },
+  {
+    id: "root-log-paths",
+    filter: "main_internal_tests::runtime_proxy_log_paths_",
+    label: "log-paths",
+  },
+  {
+    id: "root-worker-count",
+    filter: "main_internal_tests::runtime_proxy_worker_count_",
+    label: "worker-count",
+  },
+  {
+    id: "root-endpoint-child",
+    filter: "main_internal_tests::runtime_proxy_endpoint_child_",
+    label: "endpoint-child",
+  },
+  {
+    id: "root-claude-launch",
+    filter: "main_internal_tests::runtime_proxy_claude_launch_",
+    label: "claude-launch-root",
+  },
+  {
+    id: "root-claude-caveman",
+    filter: "main_internal_tests::prepare_runtime_proxy_claude_",
+    label: "claude-caveman-root",
+  },
+  {
+    id: "selection",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::selection::",
+    label: "selection",
+  },
+  {
+    id: "rotation",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::rotation::",
+    label: "rotation",
+  },
+  {
+    id: "state",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::state::",
+    label: "state",
+  },
+  {
+    id: "admission",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::admission::",
+    label: "admission",
+  },
+  {
+    id: "health",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::health::",
+    label: "health",
+  },
+  {
+    id: "pressure",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::pressure::",
+    label: "pressure",
+  },
+  {
+    id: "persistence",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::persistence::",
+    label: "persistence",
+  },
+  {
+    id: "doctor",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::",
+    label: "doctor",
+  },
+  {
+    id: "incidents",
+    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::incidents::",
+    label: "incidents",
+  },
+  {
+    id: "continuations",
+    filter: "main_internal_tests::runtime_proxy_continuations::",
+    label: "continuations",
+  },
+  {
+    id: "anthropic-lane-and-launch",
+    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::",
+    label: "lane-and-launch",
+  },
+  {
+    id: "anthropic-request-translation",
+    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
+    label: "request-translation",
+  },
+  {
+    id: "anthropic-response-translation",
+    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::",
+    label: "response-translation",
+  },
+  {
+    id: "anthropic-runtime-behavior",
+    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::",
+    label: "runtime-behavior",
+  },
+];
+
 export const RUNTIME_CI_TEST_CASES = [
   {
     id: "anthropic-request-translation",

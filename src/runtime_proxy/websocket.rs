@@ -376,27 +376,60 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
             }
             Err(err) => {
-                let failure_kind = runtime_transport_failure_kind_from_ws(&err);
-                log_runtime_upstream_connect_failure(
+                return Err(runtime_websocket_connect_transport_error(
                     shared,
                     request_id,
-                    "websocket",
                     profile_name,
-                    failure_kind,
                     &err,
-                );
-                let transport_error =
-                    anyhow::anyhow!("failed to connect runtime websocket upstream: {err}");
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    "websocket_connect",
-                    &transport_error,
-                );
-                return Err(transport_error);
+                ));
             }
         }
+    }
+}
+
+fn runtime_websocket_connect_transport_error(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    profile_name: &str,
+    err: &WsError,
+) -> anyhow::Error {
+    let transport_error = anyhow::anyhow!("failed to connect runtime websocket upstream: {err}");
+    if let Some(local_pressure_kind) = runtime_websocket_local_pressure_kind_from_ws_error(err) {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=websocket websocket_connect_local_pressure profile={profile_name} class={} error={err}",
+                local_pressure_kind.as_str(),
+            ),
+        );
+        return transport_error;
+    }
+
+    let failure_kind = runtime_transport_failure_kind_from_ws(err);
+    log_runtime_upstream_connect_failure(
+        shared,
+        request_id,
+        "websocket",
+        profile_name,
+        failure_kind,
+        err,
+    );
+    note_runtime_profile_transport_failure(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Websocket,
+        "websocket_connect",
+        &transport_error,
+    );
+    transport_error
+}
+
+fn runtime_websocket_local_pressure_kind_from_ws_error(
+    err: &WsError,
+) -> Option<RuntimeWebsocketLocalPressureKind> {
+    match err {
+        WsError::Io(err) => runtime_websocket_local_pressure_kind_from_io_error(err),
+        _ => None,
     }
 }
 
@@ -482,6 +515,28 @@ pub(super) fn runtime_configure_upstream_tcp_stream(
     Ok(())
 }
 
+fn runtime_resolve_websocket_tcp_addrs(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> io::Result<Vec<SocketAddr>> {
+    runtime_resolve_websocket_tcp_addrs_with_executor(
+        RuntimeWebsocketDnsResolveExecutor::global(),
+        Some(shared.log_path.as_path()),
+        Some(request_id),
+        host.to_string(),
+        port,
+        timeout,
+        |host, port| {
+            (host.as_str(), port)
+                .to_socket_addrs()
+                .map(Iterator::collect)
+        },
+    )
+}
+
 pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
@@ -502,10 +557,8 @@ pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
     let happy_eyeballs_delay =
         Duration::from_millis(runtime_proxy_websocket_happy_eyeballs_delay_ms());
     let addrs = runtime_interleave_socket_addrs(
-        (host, port)
-            .to_socket_addrs()
-            .map_err(WsError::Io)?
-            .collect(),
+        runtime_resolve_websocket_tcp_addrs(request_id, shared, host, port, connect_timeout)
+            .map_err(WsError::Io)?,
     );
     if addrs.is_empty() {
         return Err(WsError::Url(WsUrlError::UnableToConnect(uri.to_string())));
@@ -1587,6 +1640,58 @@ mod tests {
         ))
     }
 
+    fn websocket_test_shared(name: &str) -> RuntimeRotationProxyShared {
+        let root =
+            std::env::temp_dir().join(format!("prodex-websocket-{name}-{}", std::process::id()));
+        let paths = AppPaths {
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared-codex"),
+            legacy_shared_codex_root: root.join("shared"),
+            root,
+        };
+
+        RuntimeRotationProxyShared {
+            async_client: reqwest::Client::new(),
+            async_runtime: Arc::new(
+                TokioRuntimeBuilder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime"),
+            ),
+            runtime: Arc::new(Mutex::new(RuntimeRotationState {
+                paths,
+                state: AppState::default(),
+                upstream_base_url: "http://127.0.0.1".to_string(),
+                include_code_review: false,
+                current_profile: "main".to_string(),
+                profile_usage_auth: BTreeMap::new(),
+                turn_state_bindings: BTreeMap::new(),
+                session_id_bindings: BTreeMap::new(),
+                continuation_statuses: RuntimeContinuationStatuses::default(),
+                profile_probe_cache: BTreeMap::new(),
+                profile_usage_snapshots: BTreeMap::new(),
+                profile_retry_backoff_until: BTreeMap::new(),
+                profile_transport_backoff_until: BTreeMap::new(),
+                profile_route_circuit_open_until: BTreeMap::new(),
+                profile_inflight: BTreeMap::new(),
+                profile_health: BTreeMap::new(),
+            })),
+            log_path: websocket_test_log_path(name),
+            request_sequence: Arc::new(AtomicU64::new(1)),
+            state_save_revision: Arc::new(AtomicU64::new(0)),
+            local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+            active_request_count: Arc::new(AtomicUsize::new(0)),
+            active_request_limit: 8,
+            lane_admission: RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+                responses: 8,
+                compact: 8,
+                websocket: 8,
+                standard: 8,
+            }),
+        }
+    }
+
     #[test]
     fn websocket_tcp_connect_executor_bounds_concurrent_jobs() {
         let executor = RuntimeWebsocketTcpConnectExecutor::new(2, 8);
@@ -1844,6 +1949,382 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn websocket_tcp_connect_executor_rejects_overflow_past_capacity() {
+        let executor = RuntimeWebsocketTcpConnectExecutor::new_with_overflow_capacity(1, 1, 1);
+        let log_path = websocket_test_log_path("overflow-reject");
+        let _ = std::fs::remove_file(&log_path);
+        let started = Arc::new(AtomicUsize::new(0));
+        let (start_tx, start_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let addr = "127.0.0.1:443"
+            .parse::<SocketAddr>()
+            .expect("socket addr should parse");
+
+        let mut accepted_jobs = 0usize;
+        let mut rejected_jobs = 0usize;
+        for _ in 0..8 {
+            let started = Arc::clone(&started);
+            let start_tx = start_tx.clone();
+            let done_tx = done_tx.clone();
+            let gate = Arc::clone(&gate);
+            if executor.spawn_observed(Some(log_path.as_path()), Some(42), Some(addr), move || {
+                started.fetch_add(1, Ordering::SeqCst);
+                start_tx.send(()).expect("start signal should send");
+
+                let (released, ready) = &*gate;
+                let mut released = released
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                while !*released {
+                    released = ready
+                        .wait(released)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+
+                done_tx.send(()).expect("done signal should send");
+            }) {
+                accepted_jobs += 1;
+            } else {
+                rejected_jobs += 1;
+            }
+        }
+
+        start_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first websocket connect job should start");
+        assert!(
+            matches!(
+                start_rx.recv_timeout(Duration::from_millis(100)),
+                Err(RecvTimeoutError::Timeout)
+            ),
+            "rejected overflow work should not start inline"
+        );
+        assert!(
+            rejected_jobs > 0,
+            "overflow cap should reject at least one job"
+        );
+
+        let overflow_snapshot = executor
+            .overflow_snapshot()
+            .expect("bounded websocket executor should expose overflow state");
+        assert!(
+            overflow_snapshot.total_rejected >= rejected_jobs,
+            "overflow snapshot should record rejected jobs: {overflow_snapshot:?}"
+        );
+
+        let (released, ready) = &*gate;
+        *released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        ready.notify_all();
+
+        for _ in 0..accepted_jobs {
+            done_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("accepted websocket connect job should complete after release");
+        }
+
+        runtime_proxy_flush_logs_for_path(&log_path);
+        let log = std::fs::read_to_string(&log_path).expect("overflow runtime log should exist");
+        assert!(
+            log.contains(
+                "request=42 transport=websocket websocket_connect_overflow_reject reason=overflow_capacity_reached"
+            ),
+            "overflow rejection log marker missing: {log}"
+        );
+        assert!(
+            log.contains("overflow_capacity=1") && log.contains("overflow_total_rejected="),
+            "overflow rejection log should include cap and rejection counters: {log}"
+        );
+
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn websocket_dns_resolution_times_out_on_bounded_executor() {
+        let executor = RuntimeWebsocketDnsResolveExecutor::new_with_overflow_capacity(1, 1, 0);
+        let log_path = websocket_test_log_path("dns-timeout");
+        let _ = std::fs::remove_file(&log_path);
+        let started = Arc::new(AtomicUsize::new(0));
+        let started_for_resolver = Arc::clone(&started);
+        let started_at = Instant::now();
+
+        let err = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &executor,
+            Some(log_path.as_path()),
+            Some(77),
+            "slow.example.test".to_string(),
+            443,
+            Duration::from_millis(25),
+            move |_host, _port| {
+                started_for_resolver.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(150));
+                Ok(Vec::new())
+            },
+        )
+        .expect_err("slow websocket DNS resolution should time out");
+
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::WouldBlock,
+            "bounded DNS timeout should fail as local pressure, not account quota"
+        );
+        assert!(
+            started_at.elapsed() < Duration::from_millis(125),
+            "DNS helper should return on its bounded timeout"
+        );
+
+        runtime_proxy_flush_logs_for_path(&log_path);
+        let log = std::fs::read_to_string(&log_path).expect("DNS timeout log should exist");
+        assert!(
+            log.contains(
+                "request=77 transport=websocket websocket_dns_resolve_timeout host=slow.example.test port=443 timeout_ms=25"
+            ),
+            "DNS timeout log marker missing: {log}"
+        );
+
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn websocket_dns_overflow_is_local_pressure() {
+        let executor = RuntimeWebsocketDnsResolveExecutor::new_with_overflow_capacity(1, 1, 0);
+        let log_path = websocket_test_log_path("dns-overflow");
+        let _ = std::fs::remove_file(&log_path);
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+
+        let first = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &executor,
+            Some(log_path.as_path()),
+            Some(78),
+            "blocked.example.test".to_string(),
+            443,
+            Duration::from_millis(25),
+            move |_host, _port| {
+                started_tx.send(()).expect("DNS resolver should start");
+                let _ = release_rx.recv_timeout(Duration::from_secs(1));
+                Ok(Vec::new())
+            },
+        );
+
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first DNS resolver should occupy worker");
+        let queued_err = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &executor,
+            Some(log_path.as_path()),
+            Some(79),
+            "queued.example.test".to_string(),
+            443,
+            Duration::from_millis(1),
+            |_host, _port| Ok(Vec::new()),
+        )
+        .expect_err("queued DNS work should time out while worker is blocked");
+        assert_eq!(
+            runtime_websocket_local_pressure_kind_from_io_error(&queued_err),
+            Some(RuntimeWebsocketLocalPressureKind::DnsResolveTimeout),
+            "queued DNS timeout should remain local pressure"
+        );
+
+        let err = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &executor,
+            Some(log_path.as_path()),
+            Some(80),
+            "overflow.example.test".to_string(),
+            443,
+            Duration::from_millis(25),
+            |_host, _port| Ok(Vec::new()),
+        )
+        .expect_err("saturated DNS executor should reject overflow work");
+
+        assert_eq!(
+            runtime_websocket_local_pressure_kind_from_io_error(&err),
+            Some(RuntimeWebsocketLocalPressureKind::DnsResolveExecutorOverflow),
+            "DNS executor overflow should be classified as local pressure"
+        );
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::WouldBlock,
+            "DNS executor overflow should fail fast"
+        );
+        let overflow_snapshot = executor
+            .overflow_snapshot()
+            .expect("bounded DNS executor should expose overflow state");
+        assert!(
+            overflow_snapshot.total_rejected >= 1,
+            "DNS overflow snapshot should record rejection: {overflow_snapshot:?}"
+        );
+
+        release_tx
+            .send(())
+            .expect("first DNS resolver release should send");
+        let _ = first.expect_err("first DNS resolver should have timed out locally");
+
+        runtime_proxy_flush_logs_for_path(&log_path);
+        let log = std::fs::read_to_string(&log_path).expect("DNS overflow log should exist");
+        assert!(
+            log.contains(
+                "request=80 transport=websocket websocket_dns_overflow_reject reason=overflow_capacity_reached"
+            ),
+            "DNS overflow rejection log marker missing: {log}"
+        );
+        assert!(
+            log.contains("task=dns_resolve host=overflow.example.test port=443"),
+            "DNS overflow log should include DNS task metadata: {log}"
+        );
+
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn websocket_dns_executor_is_distinct_from_tcp_connect_executor() {
+        let tcp_executor = RuntimeWebsocketTcpConnectExecutor::new_with_overflow_capacity(1, 1, 0);
+        let dns_executor = RuntimeWebsocketDnsResolveExecutor::new_with_overflow_capacity(1, 1, 0);
+        let tcp_started = Arc::new(AtomicUsize::new(0));
+        let (tcp_start_tx, tcp_start_rx) = mpsc::channel::<()>();
+        let (tcp_done_tx, tcp_done_rx) = mpsc::channel::<()>();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+
+        let tcp_started_for_job = Arc::clone(&tcp_started);
+        let gate_for_job = Arc::clone(&gate);
+        assert!(
+            tcp_executor.spawn(move || {
+                tcp_started_for_job.fetch_add(1, Ordering::SeqCst);
+                tcp_start_tx.send(()).expect("TCP start signal should send");
+
+                let (released, ready) = &*gate_for_job;
+                let mut released = released
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                while !*released {
+                    released = ready
+                        .wait(released)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+
+                tcp_done_tx.send(()).expect("TCP done signal should send");
+            }),
+            "first TCP connect job should be accepted"
+        );
+        tcp_start_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("TCP connect worker should be occupied");
+
+        let dns_started = Arc::new(AtomicUsize::new(0));
+        let dns_started_for_resolver = Arc::clone(&dns_started);
+        let started_at = Instant::now();
+        let addrs = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &dns_executor,
+            None,
+            Some(80),
+            "fast.example.test".to_string(),
+            443,
+            Duration::from_secs(1),
+            move |_host, port| {
+                dns_started_for_resolver.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![SocketAddr::from(([127, 0, 0, 1], port))])
+            },
+        )
+        .expect("DNS executor should not be blocked by occupied TCP executor");
+
+        assert_eq!(
+            dns_started.load(Ordering::SeqCst),
+            1,
+            "DNS resolver should run on its dedicated executor"
+        );
+        assert_eq!(addrs, vec![SocketAddr::from(([127, 0, 0, 1], 443))]);
+        assert!(
+            started_at.elapsed() < Duration::from_millis(250),
+            "DNS resolver should not wait for TCP connect worker release"
+        );
+        assert_eq!(
+            tcp_started.load(Ordering::SeqCst),
+            1,
+            "TCP connect worker should remain independently occupied"
+        );
+
+        let (released, ready) = &*gate;
+        *released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        ready.notify_all();
+        tcp_done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("TCP connect job should finish after release");
+    }
+
+    #[test]
+    fn websocket_local_pressure_connect_error_does_not_mark_profile_transport_failure() {
+        let shared = websocket_test_shared("local-pressure");
+        let _ = std::fs::remove_file(&shared.log_path);
+        let cases = [
+            (
+                RuntimeWebsocketLocalPressureKind::DnsResolveTimeout,
+                "websocket DNS resolution timed out after 25ms for slow.example.test:443",
+            ),
+            (
+                RuntimeWebsocketLocalPressureKind::DnsResolveExecutorOverflow,
+                "websocket DNS resolution executor overflow for slow.example.test:443",
+            ),
+            (
+                RuntimeWebsocketLocalPressureKind::TcpConnectExecutorOverflow,
+                "websocket TCP connect executor overflow for 127.0.0.1:443",
+            ),
+        ];
+
+        for (index, (kind, message)) in cases.into_iter().enumerate() {
+            let err = WsError::Io(runtime_websocket_local_pressure_io_error(kind, message));
+            let request_id = 81 + index as u64;
+            let transport_error =
+                runtime_websocket_connect_transport_error(&shared, request_id, "main", &err);
+
+            assert!(
+                transport_error
+                    .to_string()
+                    .contains("failed to connect runtime websocket upstream"),
+                "connect helper should preserve websocket failure for caller"
+            );
+        }
+        {
+            let runtime = shared
+                .runtime
+                .lock()
+                .expect("runtime state should not be poisoned");
+            assert!(
+                runtime.profile_transport_backoff_until.is_empty(),
+                "local websocket pressure should not mark profile transport backoff"
+            );
+            assert!(
+                runtime.profile_health.is_empty(),
+                "local websocket pressure should not penalize profile health"
+            );
+        }
+
+        runtime_proxy_flush_logs_for_path(&shared.log_path);
+        let log =
+            std::fs::read_to_string(&shared.log_path).expect("local-pressure log should exist");
+        for (index, (kind, _message)) in cases.into_iter().enumerate() {
+            let request_id = 81 + index as u64;
+            assert!(
+                log.contains(&format!(
+                    "request={request_id} transport=websocket websocket_connect_local_pressure profile=main class={}",
+                    kind.as_str()
+                )),
+                "local pressure log marker missing: {log}"
+            );
+        }
+        assert!(
+            !log.contains("profile_transport_failure")
+                && !log.contains("profile_transport_backoff"),
+            "local pressure should not emit profile transport health markers: {log}"
+        );
+
+        let _ = std::fs::remove_file(&shared.log_path);
     }
 
     #[test]

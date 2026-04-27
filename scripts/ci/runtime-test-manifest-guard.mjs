@@ -1,8 +1,20 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { RUNTIME_CI_TEST_CASES, RUNTIME_TEST_TAGS } from "./runtime-test-manifest.mjs";
+import {
+  RUNTIME_CI_BROAD_SHARD_FILTERS,
+  RUNTIME_CI_TEST_CASES,
+  RUNTIME_TEST_TAGS,
+} from "./runtime-test-manifest.mjs";
 
 const CARGO_LIST_ARGS = ["test", "--lib", "main_internal_tests::", "--", "--list"];
+const CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
+const MAIN_INTERNAL_RUNTIME_PROXY_PREFIX = "main_internal_tests::runtime_proxy_";
+const MAIN_INTERNAL_RUNTIME_CI_PREFIXES = Object.freeze([
+  MAIN_INTERNAL_RUNTIME_PROXY_PREFIX,
+  "main_internal_tests::prepare_runtime_proxy_claude_",
+]);
+const RUNTIME_PROXY_WORKFLOW_JOB = "main-internal-runtime-proxy";
 const KNOWN_RUNTIME_TAGS = new Set(Object.values(RUNTIME_TEST_TAGS));
 const SERIAL_OR_QUARANTINE_TAGS = new Set([RUNTIME_TEST_TAGS.serial, RUNTIME_TEST_TAGS.quarantine]);
 const LEGACY_QUARANTINE_EVIDENCE_TAGS = new Set([
@@ -31,6 +43,16 @@ function formatCommand(command, args) {
 function formatCase(testCase, index) {
   const identity = testCase.id ?? testCase.name ?? testCase.filter ?? testCase.label;
   return identity ? `case[${index}] ${identity}` : `case[${index}]`;
+}
+
+function formatBroadShard(shard, index) {
+  const identity = shard?.id ?? shard?.filter ?? shard?.label;
+  return identity ? `broadShard[${index}] ${identity}` : `broadShard[${index}]`;
+}
+
+function formatWorkflowShard(shard) {
+  const location = shard.lineNumber ? ` (${CI_WORKFLOW_PATH}:${shard.lineNumber})` : "";
+  return `"${shard.label}|${shard.filter}"${location}`;
 }
 
 function collectDuplicates(values) {
@@ -174,7 +196,276 @@ function testsByLeafName(testNames) {
   return result;
 }
 
-function validateManifest(testCases, cargoTestNames) {
+function testLeafName(testName) {
+  return testName.split("::").at(-1);
+}
+
+function isMainInternalRuntimeProxyTest(testName) {
+  return testName.startsWith(MAIN_INTERNAL_RUNTIME_PROXY_PREFIX);
+}
+
+function isMainInternalRuntimeCiTest(testName) {
+  return MAIN_INTERNAL_RUNTIME_CI_PREFIXES.some((prefix) => testName.startsWith(prefix));
+}
+
+function manifestCaseMatchesTest(testCase, testName) {
+  return (
+    (typeof testCase.name === "string" && testLeafName(testName) === testCase.name) ||
+    (typeof testCase.filter === "string" && testName.includes(testCase.filter))
+  );
+}
+
+function broadShardMatchesTest(shard, testName) {
+  return typeof shard.filter === "string" && testName.includes(shard.filter);
+}
+
+function lineIndent(line) {
+  const match = line.match(/^ */);
+  return match ? match[0].length : 0;
+}
+
+function parseRuntimeProxyWorkflowShardFilters(workflowText) {
+  const lines = workflowText.split(/\r?\n/);
+  const issues = [];
+  const filters = [];
+  const jobHeader = `  ${RUNTIME_PROXY_WORKFLOW_JOB}:`;
+  const jobStartIndex = lines.findIndex((line) => line === jobHeader);
+
+  if (jobStartIndex === -1) {
+    return {
+      filters,
+      issues: [`${CI_WORKFLOW_PATH}: missing ${RUNTIME_PROXY_WORKFLOW_JOB} job`],
+    };
+  }
+
+  const jobIndent = lineIndent(lines[jobStartIndex]);
+  let jobEndIndex = lines.length;
+  for (let index = jobStartIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() !== "" && lineIndent(line) === jobIndent && /^\s{2}[-\w]+:/.test(line)) {
+      jobEndIndex = index;
+      break;
+    }
+  }
+
+  for (let index = jobStartIndex + 1; index < jobEndIndex; index += 1) {
+    const line = lines[index];
+    if (line.trim() !== "filters: |") {
+      continue;
+    }
+
+    const filtersIndent = lineIndent(line);
+    for (let blockIndex = index + 1; blockIndex < jobEndIndex; blockIndex += 1) {
+      const blockLine = lines[blockIndex];
+      if (blockLine.trim() === "") {
+        continue;
+      }
+
+      if (lineIndent(blockLine) <= filtersIndent) {
+        index = blockIndex - 1;
+        break;
+      }
+
+      const entry = blockLine.trim();
+      const separatorIndex = entry.indexOf("|");
+      const lineNumber = blockIndex + 1;
+      if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
+        issues.push(`${CI_WORKFLOW_PATH}:${lineNumber}: invalid runtime proxy shard filter entry "${entry}"`);
+        continue;
+      }
+
+      const label = entry.slice(0, separatorIndex).trim();
+      const filter = entry.slice(separatorIndex + 1).trim();
+      if (!isNonEmptyString(label) || !isNonEmptyString(filter)) {
+        issues.push(`${CI_WORKFLOW_PATH}:${lineNumber}: runtime proxy shard label and filter must be non-empty`);
+        continue;
+      }
+
+      filters.push({ label, filter, lineNumber });
+    }
+  }
+
+  if (filters.length === 0 && issues.length === 0) {
+    issues.push(`${CI_WORKFLOW_PATH}: ${RUNTIME_PROXY_WORKFLOW_JOB} job has no matrix filters blocks`);
+  }
+
+  return { filters, issues };
+}
+
+function validateWorkflowBroadShardFilters(broadShardFilters, workflowShardFilters, issues) {
+  if (!Array.isArray(broadShardFilters) || !Array.isArray(workflowShardFilters)) {
+    return;
+  }
+
+  const workflowLabels = workflowShardFilters.map((shard, index) => ({ value: shard.label, index }));
+  const workflowFilters = workflowShardFilters.map((shard, index) => ({ value: shard.filter, index }));
+  const broadLabels = broadShardFilters
+    .filter((shard) => shard && typeof shard === "object" && !Array.isArray(shard))
+    .map((shard, index) => ({ value: shard.label, index }));
+
+  for (const duplicate of collectDuplicates(workflowLabels)) {
+    issues.push(`duplicate workflow runtime proxy shard label "${duplicate.value}" in entries ${duplicate.indexes.join(", ")}`);
+  }
+  for (const duplicate of collectDuplicates(workflowFilters)) {
+    issues.push(`duplicate workflow runtime proxy shard filter "${duplicate.value}" in entries ${duplicate.indexes.join(", ")}`);
+  }
+  for (const duplicate of collectDuplicates(broadLabels)) {
+    issues.push(`duplicate broad shard label "${duplicate.value}" in indexes ${duplicate.indexes.join(", ")}`);
+  }
+
+  const manifestByLabel = new Map();
+  const manifestByFilter = new Map();
+  for (const shard of broadShardFilters) {
+    if (!shard || typeof shard !== "object" || Array.isArray(shard)) {
+      continue;
+    }
+    if (typeof shard.label === "string" && typeof shard.filter === "string") {
+      manifestByLabel.set(shard.label, shard);
+      manifestByFilter.set(shard.filter, shard);
+    }
+  }
+
+  const workflowByLabel = new Map(workflowShardFilters.map((shard) => [shard.label, shard]));
+  const workflowByFilter = new Map(workflowShardFilters.map((shard) => [shard.filter, shard]));
+
+  for (const workflowShard of workflowShardFilters) {
+    const manifestShard = manifestByLabel.get(workflowShard.label);
+    if (manifestShard) {
+      if (manifestShard.filter !== workflowShard.filter) {
+        issues.push(
+          [
+            `runtime CI broad shard filter mismatch for label "${workflowShard.label}":`,
+            `workflow has "${workflowShard.filter}"`,
+            `RUNTIME_CI_BROAD_SHARD_FILTERS has "${manifestShard.filter}"`,
+          ].join(" "),
+        );
+      }
+      continue;
+    }
+
+    const sameFilterShard = manifestByFilter.get(workflowShard.filter);
+    if (sameFilterShard) {
+      issues.push(
+        [
+          `runtime CI broad shard label mismatch for filter "${workflowShard.filter}":`,
+          `workflow has "${workflowShard.label}"`,
+          `RUNTIME_CI_BROAD_SHARD_FILTERS has "${sameFilterShard.label}"`,
+        ].join(" "),
+      );
+      continue;
+    }
+
+    issues.push(`workflow runtime proxy shard ${formatWorkflowShard(workflowShard)} is missing from RUNTIME_CI_BROAD_SHARD_FILTERS`);
+  }
+
+  for (const manifestShard of broadShardFilters) {
+    if (!manifestShard || typeof manifestShard !== "object" || Array.isArray(manifestShard)) {
+      continue;
+    }
+    if (workflowByLabel.has(manifestShard.label)) {
+      continue;
+    }
+    if (workflowByFilter.has(manifestShard.filter)) {
+      continue;
+    }
+    issues.push(
+      `RUNTIME_CI_BROAD_SHARD_FILTERS broad shard "${manifestShard.label}|${manifestShard.filter}" is missing from ${CI_WORKFLOW_PATH}`,
+    );
+  }
+}
+
+function validateBroadShardFilters(broadShardFilters, cargoTestNames, issues) {
+  if (!Array.isArray(broadShardFilters)) {
+    issues.push("RUNTIME_CI_BROAD_SHARD_FILTERS must be an array");
+    return [];
+  }
+
+  const ids = [];
+  const filters = [];
+  const validShards = [];
+
+  broadShardFilters.forEach((shard, index) => {
+    const label = formatBroadShard(shard, index);
+    if (!shard || typeof shard !== "object" || Array.isArray(shard)) {
+      issues.push(`${label}: expected object with id, filter, and label`);
+      return;
+    }
+
+    if (!isNonEmptyString(shard.id)) {
+      issues.push(`${label}: id must be a non-empty trimmed string`);
+    } else {
+      ids.push({ value: shard.id, index });
+    }
+
+    if (!isNonEmptyString(shard.label)) {
+      issues.push(`${label}: label must be a non-empty trimmed string`);
+    }
+
+    if (!isNonEmptyString(shard.filter)) {
+      issues.push(`${label}: filter must be a non-empty trimmed string`);
+      return;
+    }
+
+    filters.push({ value: shard.filter, index });
+    const matches = cargoTestNames.filter((testName) => testName.includes(shard.filter));
+    if (matches.length === 0) {
+      issues.push(
+        `${label}: filter "${shard.filter}" matched zero tests; broad shard filters should mirror active CI shard filters`,
+      );
+      return;
+    }
+
+    const nonRuntimeCiMatches = matches.filter((testName) => !isMainInternalRuntimeCiTest(testName));
+    if (nonRuntimeCiMatches.length > 0) {
+      issues.push(
+        `${label}: filter "${shard.filter}" matched tests outside runtime CI ownership: ${nonRuntimeCiMatches.join(", ")}`,
+      );
+      return;
+    }
+
+    validShards.push(shard);
+  });
+
+  for (const duplicate of collectDuplicates(ids)) {
+    issues.push(`duplicate broad shard id "${duplicate.value}" in indexes ${duplicate.indexes.join(", ")}`);
+  }
+  for (const duplicate of collectDuplicates(filters)) {
+    issues.push(`duplicate broad shard filter "${duplicate.value}" in indexes ${duplicate.indexes.join(", ")}`);
+  }
+
+  return validShards;
+}
+
+function validateRuntimeProxyCoverage(testCases, broadShardFilters, cargoTestNames, issues) {
+  const runtimeProxyTests = cargoTestNames.filter(isMainInternalRuntimeProxyTest);
+  const uncovered = runtimeProxyTests.filter(
+    (testName) =>
+      !testCases.some((testCase) => manifestCaseMatchesTest(testCase, testName)) &&
+      !broadShardFilters.some((shard) => broadShardMatchesTest(shard, testName)),
+  );
+
+  if (uncovered.length > 0) {
+    issues.push(
+      [
+        `${uncovered.length} main_internal_tests::runtime_proxy_ test(s) are not covered by manifest cases or broad CI shard filters:`,
+        ...uncovered.map((testName) => `    ${testName}`),
+        `  Add a manifest case in RUNTIME_CI_TEST_CASES or an intentional broad shard filter in RUNTIME_CI_BROAD_SHARD_FILTERS.`,
+      ].join("\n"),
+    );
+  }
+
+  return {
+    broadShardCoveredCount: runtimeProxyTests.filter((testName) =>
+      broadShardFilters.some((shard) => broadShardMatchesTest(shard, testName)),
+    ).length,
+    manifestCoveredCount: runtimeProxyTests.filter((testName) =>
+      testCases.some((testCase) => manifestCaseMatchesTest(testCase, testName)),
+    ).length,
+    runtimeProxyTestCount: runtimeProxyTests.length,
+  };
+}
+
+function validateManifest(testCases, broadShardFilters, workflowShardFilters, cargoTestNames) {
   const issues = [];
   const ids = [];
   const names = [];
@@ -239,7 +530,11 @@ function validateManifest(testCases, cargoTestNames) {
     issues.push(`duplicate name "${duplicate.value}" in manifest cases ${duplicate.indexes.join(", ")}`);
   }
 
-  return issues;
+  const validBroadShardFilters = validateBroadShardFilters(broadShardFilters, cargoTestNames, issues);
+  validateWorkflowBroadShardFilters(broadShardFilters, workflowShardFilters, issues);
+  const coverage = validateRuntimeProxyCoverage(testCases, validBroadShardFilters, cargoTestNames, issues);
+
+  return { coverage, issues };
 }
 
 function printHelp() {
@@ -249,14 +544,19 @@ function printHelp() {
       "",
       "Validates scripts/ci/runtime-test-manifest.mjs against:",
       `  ${formatCommand("cargo", CARGO_LIST_ARGS)}`,
+      `  ${CI_WORKFLOW_PATH}`,
       "",
       "Checks:",
       "  - manifest name entries resolve to one Cargo test leaf name",
       "  - manifest filter entries match one or more full Cargo test paths",
       "  - manifest ids and names are not duplicated",
       "  - manifest tags are known, non-duplicated, and not contradictory",
+      "  - each main_internal_tests::runtime_proxy_ test is covered by a manifest case",
+      "    or by an intentional RUNTIME_CI_BROAD_SHARD_FILTERS entry",
+      "  - broad CI shard filters resolve and do not match tests outside runtime CI ownership",
+      "  - broad CI shard filter labels and filters exactly match the runtime proxy workflow matrix",
       "",
-      "This catches renamed tests and filter typos that would otherwise run zero tests in CI.",
+      "This catches renamed tests, filter typos, workflow drift, and unclassified runtime proxy tests that would otherwise drift out of manifest-owned CI coverage.",
     ].join("\n") + "\n",
   );
 }
@@ -269,13 +569,21 @@ async function main() {
   }
 
   process.stdout.write(`runtime manifest guard: ${formatCommand("cargo", CARGO_LIST_ARGS)}\n`);
+  const workflowText = await readFile(CI_WORKFLOW_PATH, "utf8");
+  const parsedWorkflowFilters = parseRuntimeProxyWorkflowShardFilters(workflowText);
   const { stdout } = await run("cargo", CARGO_LIST_ARGS);
   const cargoTestNames = parseCargoTestList(stdout);
   if (cargoTestNames.length === 0) {
     throw new Error("cargo test list returned zero parsed tests; expected main_internal_tests entries");
   }
 
-  const issues = validateManifest(RUNTIME_CI_TEST_CASES, cargoTestNames);
+  const { coverage, issues } = validateManifest(
+    RUNTIME_CI_TEST_CASES,
+    RUNTIME_CI_BROAD_SHARD_FILTERS,
+    parsedWorkflowFilters.issues.length === 0 ? parsedWorkflowFilters.filters : null,
+    cargoTestNames,
+  );
+  issues.unshift(...parsedWorkflowFilters.issues);
   if (issues.length > 0) {
     throw new Error(
       [
@@ -288,7 +596,14 @@ async function main() {
   }
 
   process.stdout.write(
-    `runtime manifest guard: validated ${RUNTIME_CI_TEST_CASES.length} manifest cases against ${cargoTestNames.length} cargo tests\n`,
+    [
+      `runtime manifest guard: validated ${RUNTIME_CI_TEST_CASES.length} manifest cases`,
+      `${RUNTIME_CI_BROAD_SHARD_FILTERS.length} broad shard filters`,
+      `${parsedWorkflowFilters.filters.length} workflow shard filters`,
+      `against ${cargoTestNames.length} cargo tests`,
+      `(${coverage.runtimeProxyTestCount} main_internal_tests::runtime_proxy_ tests;`,
+      `${coverage.manifestCoveredCount} matched manifest, ${coverage.broadShardCoveredCount} matched broad shard)`,
+    ].join(" ") + "\n",
   );
 }
 
