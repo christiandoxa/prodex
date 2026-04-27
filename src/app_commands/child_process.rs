@@ -3,11 +3,50 @@ use super::*;
 const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
 const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
 const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
+const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
+const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     ChildProcessPlan::new(codex_bin(), codex_home)
         .with_args(args)
+        .with_extra_env(local_proxy_bypass_env())
         .with_removed_env(codex_sandbox_removed_env())
+}
+
+pub(crate) fn local_proxy_bypass_env() -> Vec<(&'static str, OsString)> {
+    let mut parts = Vec::<String>::new();
+    for key in LOCAL_PROXY_BYPASS_ENV_KEYS {
+        if let Some(value) = env::var_os(key) {
+            push_proxy_bypass_parts(&mut parts, &value.to_string_lossy());
+        }
+    }
+    for host in LOCAL_PROXY_BYPASS_HOSTS {
+        push_proxy_bypass_part(&mut parts, host);
+    }
+    let merged = OsString::from(parts.join(","));
+    LOCAL_PROXY_BYPASS_ENV_KEYS
+        .into_iter()
+        .map(|key| (key, merged.clone()))
+        .collect()
+}
+
+fn push_proxy_bypass_parts(parts: &mut Vec<String>, value: &str) {
+    for part in value.split(',') {
+        push_proxy_bypass_part(parts, part);
+    }
+}
+
+fn push_proxy_bypass_part(parts: &mut Vec<String>, value: &str) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !parts
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
+        parts.push(trimmed.to_string());
+    }
 }
 
 pub(crate) fn codex_sandbox_removed_env() -> Vec<OsString> {
@@ -324,6 +363,8 @@ mod tests {
     fn codex_child_plan_applies_codex_sandbox_removed_env() {
         let _env_guard = TestEnvVarGuard::lock();
         let _custom_guard = TestEnvVarGuard::set("CODEX_SANDBOX_PROFILE", "danger-full-access");
+        let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
+        let _lower_no_proxy_guard = TestEnvVarGuard::set("no_proxy", "internal.local");
         let codex_home = PathBuf::from("/tmp/prodex-codex-home");
         let args = vec![OsString::from("login")];
 
@@ -342,6 +383,43 @@ mod tests {
             plan.removed_env
                 .iter()
                 .any(|key| key == "CODEX_SANDBOX_PROFILE")
+        );
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "NO_PROXY")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("example.com,internal.local,127.0.0.1,localhost,::1".to_string())
+        );
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "no_proxy")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("example.com,internal.local,127.0.0.1,localhost,::1".to_string())
+        );
+    }
+
+    #[test]
+    fn local_proxy_bypass_env_deduplicates_existing_values() {
+        let _env_guard = TestEnvVarGuard::lock();
+        let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", " example.com,127.0.0.1 ");
+        let _lower_no_proxy_guard = TestEnvVarGuard::set("no_proxy", "LOCALHOST,internal.local");
+
+        let env = local_proxy_bypass_env();
+
+        assert_eq!(
+            env,
+            vec![
+                (
+                    "NO_PROXY",
+                    OsString::from("example.com,127.0.0.1,LOCALHOST,internal.local,::1")
+                ),
+                (
+                    "no_proxy",
+                    OsString::from("example.com,127.0.0.1,LOCALHOST,internal.local,::1")
+                )
+            ]
         );
     }
 

@@ -43,6 +43,100 @@ fn wait_for_runtime_child_exit(child: &mut Child) {
 }
 
 #[test]
+fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
+    let _env_guard = TestEnvVarGuard::lock();
+    let _request_method_guard = TestEnvVarGuard::unset("REQUEST_METHOD");
+    let _no_proxy_guard = TestEnvVarGuard::unset("NO_PROXY");
+    let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
+
+    let target = TinyServer::http("127.0.0.1:0").expect("target server should bind");
+    let target_addr = target
+        .server_addr()
+        .to_ip()
+        .expect("target server should expose TCP address");
+    let target_thread = thread::spawn(move || {
+        let request = target
+            .recv_timeout(Duration::from_secs(2))
+            .expect("target health receive should not fail")
+            .expect("target health request should arrive");
+        assert_eq!(request.url(), "/__prodex/runtime/health");
+        let body = serde_json::to_string(&RuntimeBrokerHealth {
+            pid: std::process::id(),
+            started_at: Local::now().timestamp(),
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            active_requests: 0,
+            instance_token: "instance".to_string(),
+            persistence_role: "owner".to_string(),
+            prodex_version: Some(runtime_current_prodex_version().to_string()),
+            executable_path: None,
+            executable_sha256: None,
+        })
+        .expect("health body should serialize");
+        let mut response = TinyResponse::from_string(body).with_status_code(200);
+        response.add_header(
+            TinyHeader::from_bytes("Content-Type", "application/json")
+                .expect("content type header should build"),
+        );
+        request
+            .respond(response)
+            .expect("target health response should send");
+    });
+
+    let proxy = TinyServer::http("127.0.0.1:0").expect("proxy trap should bind");
+    let proxy_addr = proxy
+        .server_addr()
+        .to_ip()
+        .expect("proxy trap should expose TCP address");
+    let proxy_hit = Arc::new(AtomicBool::new(false));
+    let proxy_hit_for_thread = Arc::clone(&proxy_hit);
+    let proxy_thread = thread::spawn(move || {
+        if let Ok(Some(request)) = proxy.recv_timeout(Duration::from_millis(300)) {
+            proxy_hit_for_thread.store(true, Ordering::SeqCst);
+            let _ = request.respond(TinyResponse::from_string("proxy trap").with_status_code(502));
+        }
+    });
+
+    let proxy_url = format!("http://{proxy_addr}");
+    let _http_proxy_guard = TestEnvVarGuard::set("HTTP_PROXY", &proxy_url);
+    let _lower_http_proxy_guard = TestEnvVarGuard::set("http_proxy", &proxy_url);
+    let _all_proxy_guard = TestEnvVarGuard::set("ALL_PROXY", &proxy_url);
+    let _lower_all_proxy_guard = TestEnvVarGuard::set("all_proxy", &proxy_url);
+
+    let client = runtime_broker_client().expect("broker client should build");
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        listen_addr: target_addr.to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        instance_token: "instance".to_string(),
+        admin_token: "secret".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+    };
+
+    let health = probe_runtime_broker_health(&client, &registry)
+        .expect("broker health probe should succeed through direct local connection");
+
+    target_thread
+        .join()
+        .expect("target health thread should finish");
+    proxy_thread.join().expect("proxy trap thread should finish");
+    assert_eq!(
+        health.as_ref().map(|health| health.instance_token.as_str()),
+        Some("instance")
+    );
+    assert!(
+        !proxy_hit.load(Ordering::SeqCst),
+        "local runtime broker control request should not use http_proxy"
+    );
+}
+
+#[test]
 fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version() {
     let temp_dir = TestDir::isolated();
     let script_path = temp_dir.path.join("legacy-prodex.sh");

@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) fn runtime_broker_client() -> Result<Client> {
     Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_millis(
             runtime_broker_health_connect_timeout_ms(),
         ))

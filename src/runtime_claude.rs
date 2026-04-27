@@ -248,6 +248,7 @@ pub(super) fn runtime_proxy_claude_launch_env(
             OsString::from(PRODEX_CLAUDE_PROXY_API_KEY),
         ));
     }
+    env.extend(local_proxy_bypass_env());
     env.extend(runtime_proxy_claude_pinned_alias_env());
     env.extend(runtime_proxy_claude_custom_model_option_env(&target_model));
     env
