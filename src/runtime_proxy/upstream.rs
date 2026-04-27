@@ -1,5 +1,11 @@
 use super::*;
 
+struct RuntimeProxyUpstreamRequestEvents {
+    route_kind: RuntimeRouteKind,
+    start: &'static str,
+    response: &'static str,
+}
+
 pub(super) fn send_runtime_proxy_upstream_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -13,9 +19,11 @@ pub(super) fn send_runtime_proxy_upstream_request(
         shared,
         profile_name,
         turn_state_override,
-        runtime_proxy_request_lane(&request.path_and_query, false),
-        "upstream_start",
-        "upstream_response",
+        RuntimeProxyUpstreamRequestEvents {
+            route_kind: runtime_proxy_request_lane(&request.path_and_query, false),
+            start: "upstream_start",
+            response: "upstream_response",
+        },
     )
 }
 
@@ -32,9 +40,11 @@ pub(crate) fn send_runtime_proxy_upstream_responses_request(
         shared,
         profile_name,
         turn_state_override,
-        RuntimeRouteKind::Responses,
-        "upstream_async_start",
-        "upstream_async_response",
+        RuntimeProxyUpstreamRequestEvents {
+            route_kind: RuntimeRouteKind::Responses,
+            start: "upstream_async_start",
+            response: "upstream_async_response",
+        },
     )
 }
 
@@ -44,9 +54,7 @@ fn send_runtime_proxy_upstream_request_with_events(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
-    route_kind: RuntimeRouteKind,
-    start_event: &str,
-    response_event: &str,
+    events: RuntimeProxyUpstreamRequestEvents,
 ) -> Result<reqwest::Response> {
     let started_at = Instant::now();
     let runtime = shared
@@ -108,7 +116,8 @@ fn send_runtime_proxy_upstream_request_with_events(
     runtime_proxy_log(
         shared,
         format!(
-            "request={request_id} transport=http {start_event} profile={profile_name} method={} url={} turn_state_override={:?} previous_response_id={:?}",
+            "request={request_id} transport=http {} profile={profile_name} method={} url={} turn_state_override={:?} previous_response_id={:?}",
+            events.start,
             request.method,
             upstream_url,
             turn_state_override,
@@ -142,7 +151,8 @@ fn send_runtime_proxy_upstream_request_with_events(
     runtime_proxy_log(
         shared,
         format!(
-            "request={request_id} transport=http {response_event} profile={profile_name} status={} content_type={:?} turn_state={:?}",
+            "request={request_id} transport=http {} profile={profile_name} status={} content_type={:?} turn_state={:?}",
+            events.response,
             response.status().as_u16(),
             response
                 .headers()
@@ -154,7 +164,7 @@ fn send_runtime_proxy_upstream_request_with_events(
     note_runtime_profile_latency_observation(
         shared,
         profile_name,
-        route_kind,
+        events.route_kind,
         "connect",
         started_at.elapsed().as_millis() as u64,
     );
