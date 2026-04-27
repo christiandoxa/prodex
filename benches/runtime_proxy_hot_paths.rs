@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group};
+use criterion::{Criterion, criterion_group};
 use prodex::bench_support::{
     RuntimeProxyCompactSessionSelectionBenchCase, RuntimeProxyHotPathBenchCheckConfig,
     RuntimeProxyLineageCleanupBenchCase, RuntimeProxyMixedPoolSelectionBenchCase,
@@ -9,6 +9,7 @@ use prodex::bench_support::{
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::hint::black_box;
 use std::path::Path;
 
 const RUNTIME_PROXY_BENCH_CHECK_ENV: &str = "PRODEX_RUNTIME_PROXY_BENCH_CHECK";
