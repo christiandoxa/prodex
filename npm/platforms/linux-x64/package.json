@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex-linux-x64",
-  "version": "0.54.0",
+  "version": "0.55.0",
   "description": "Native prodex binary for x86_64-unknown-linux-gnu",
   "license": "MIT",
   "os": [
