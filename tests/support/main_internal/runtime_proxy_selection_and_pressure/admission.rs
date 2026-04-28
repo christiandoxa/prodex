@@ -8,6 +8,8 @@ mod compact;
 mod continuation_store;
 #[path = "admission/doctor_summary.rs"]
 mod doctor_summary;
+#[path = "admission/helpers.rs"]
+mod helpers;
 #[path = "admission/pre_send.rs"]
 mod pre_send;
 #[path = "admission/pressure_budget.rs"]

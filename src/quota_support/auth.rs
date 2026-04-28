@@ -328,13 +328,6 @@ pub(crate) fn usage_auth_sync_source_label(source: UsageAuthSyncSource) -> &'sta
     }
 }
 
-pub(crate) fn sync_usage_auth_from_disk_or_refresh(
-    codex_home: &Path,
-    expected_current: Option<&UsageAuth>,
-) -> Result<UsageAuthSyncOutcome> {
-    sync_usage_auth_from_disk_or_refresh_with_proxy_policy(codex_home, expected_current, false)
-}
-
 pub(crate) fn sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
     codex_home: &Path,
     expected_current: Option<&UsageAuth>,

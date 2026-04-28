@@ -827,6 +827,7 @@ mod tests {
         };
 
         RuntimeRotationProxyShared {
+            upstream_no_proxy: false,
             async_client: reqwest::Client::new(),
             async_runtime: Arc::new(
                 TokioRuntimeBuilder::new_current_thread()

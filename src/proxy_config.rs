@@ -1,13 +1,7 @@
 use super::*;
 
-static RUNTIME_UPSTREAM_NO_PROXY_OVERRIDE: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn set_runtime_upstream_no_proxy_override(upstream_no_proxy: bool) {
-    RUNTIME_UPSTREAM_NO_PROXY_OVERRIDE.store(upstream_no_proxy, Ordering::Relaxed);
-}
-
 pub(crate) fn runtime_upstream_no_proxy(explicit_no_proxy: bool) -> bool {
-    explicit_no_proxy || RUNTIME_UPSTREAM_NO_PROXY_OVERRIDE.load(Ordering::Relaxed)
+    explicit_no_proxy
 }
 
 pub(crate) fn runtime_upstream_proxy_mode_label(explicit_no_proxy: bool) -> &'static str {

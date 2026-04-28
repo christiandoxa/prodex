@@ -13,6 +13,7 @@ use tokio::runtime::Runtime as TokioRuntime;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeRotationProxyShared {
+    pub(crate) upstream_no_proxy: bool,
     pub(crate) async_client: reqwest::Client,
     pub(crate) async_runtime: Arc<TokioRuntime>,
     pub(crate) runtime: Arc<Mutex<RuntimeRotationState>>,

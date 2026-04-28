@@ -200,7 +200,11 @@ fn runtime_profile_usage_auth_from_fresh_cache_entry(
         return Ok(entry.auth);
     }
 
-    match sync_usage_auth_from_disk_or_refresh(codex_home, Some(&entry.auth)) {
+    match sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
+        codex_home,
+        Some(&entry.auth),
+        shared.upstream_no_proxy,
+    ) {
         Ok(outcome) => {
             log_runtime_profile_proactive_sync(shared, profile_name, &outcome);
             reload_runtime_profile_usage_auth_after_sync(

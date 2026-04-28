@@ -946,6 +946,56 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
 }
 
 #[test]
+fn runtime_no_proxy_policy_does_not_leak_into_default_proxy_mode() {
+    let _runtime_lock = acquire_test_runtime_lock();
+    let backend = RuntimeProxyBackend::start();
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+
+    let _proxy = start_runtime_rotation_proxy_with_listen_addr(
+        &paths,
+        &state,
+        "main",
+        backend.base_url(),
+        false,
+        true,
+        None,
+    )
+    .expect("runtime proxy should start");
+
+    assert_eq!(
+        runtime_upstream_proxy_mode_label(false),
+        "system",
+        "no-proxy runtime policy must not become process-global"
+    );
+    assert_eq!(runtime_upstream_proxy_mode_label(true), "disabled");
+}
+
+#[test]
 fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     let backend = RuntimeProxyBackend::start();
     let temp_dir = TestDir::new();

@@ -73,6 +73,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
 fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
     let temp_dir = TestDir::isolated();
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -1196,6 +1197,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         ),
     ]);
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

@@ -115,6 +115,7 @@ fn bench_runtime_shared(
     active_request_limit: usize,
 ) -> RuntimeRotationProxyShared {
     RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder()
             .build()
             .expect("benchmark async client should build"),

@@ -60,6 +60,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
         .expect("initial state save should succeed");
 
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -107,12 +108,10 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             .get("resp-main")
             .is_some_and(|binding| binding.bound_at > stale_touch)
     });
-    assert!(
-        persisted
-            .response_profile_bindings
-            .get("resp-main")
-            .is_some_and(|binding| binding.bound_at > stale_touch)
-    );
+    assert!(persisted
+        .response_profile_bindings
+        .get("resp-main")
+        .is_some_and(|binding| binding.bound_at > stale_touch));
 }
 
 #[test]
@@ -151,6 +150,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -239,6 +239,7 @@ fn response_affinity_skips_dead_continuation_status() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -334,6 +335,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -440,6 +442,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

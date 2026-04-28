@@ -688,6 +688,18 @@ mod tests {
             .collect()
     }
 
+    fn fake_secret(parts: &[&str]) -> String {
+        parts.concat()
+    }
+
+    fn fake_named_secret(name: &str) -> String {
+        fake_secret(&["fixture_", name, "_notreal_", "12345"])
+    }
+
+    fn fake_api_key(prefix: &str, name: &str) -> String {
+        fake_secret(&[prefix, "fixture-", name, "-notreal-", "123456789"])
+    }
+
     #[test]
     fn runtime_sse_helpers_ignore_comments_and_handle_crlf_boundaries() {
         let mut line = Vec::new();
@@ -783,26 +795,22 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
 
     #[test]
     fn redacted_headers_debug_removes_sensitive_header_values() {
+        let authorization_token = fake_named_secret("authorization");
+        let api_key = fake_api_key("sk-ant-", "header");
+        let cookie_value = fake_named_secret("cookie");
+        let forwarded_token = fake_named_secret("forwarded");
+        let nested_bearer_token = fake_named_secret("nested_bearer");
         let headers = vec![
             (
                 "authorization".to_string(),
-                "Bearer live_authorization_secret_12345".to_string(),
+                format!("Bearer {authorization_token}"),
             ),
-            (
-                "x-api-key".to_string(),
-                "sk-ant-api-key-secret-12345".to_string(),
-            ),
-            (
-                "cookie".to_string(),
-                "session=secret-cookie-value".to_string(),
-            ),
-            (
-                "x-forwarded-token".to_string(),
-                "forwarded-token-secret".to_string(),
-            ),
+            ("x-api-key".to_string(), api_key.clone()),
+            ("cookie".to_string(), format!("session={cookie_value}")),
+            ("x-forwarded-token".to_string(), forwarded_token.clone()),
             (
                 "x-observed-value".to_string(),
-                "Bearer nested_bearer_secret_12345".to_string(),
+                format!("Bearer {nested_bearer_token}"),
             ),
             ("anthropic-version".to_string(), "2023-06-01".to_string()),
         ];
@@ -813,34 +821,42 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
         assert!(redacted.contains("Bearer <redacted>"));
         assert!(redacted.contains("anthropic-version"));
         assert!(redacted.contains("2023-06-01"));
-        assert!(!redacted.contains("live_authorization_secret_12345"));
-        assert!(!redacted.contains("sk-ant-api-key-secret-12345"));
-        assert!(!redacted.contains("secret-cookie-value"));
-        assert!(!redacted.contains("forwarded-token-secret"));
-        assert!(!redacted.contains("nested_bearer_secret_12345"));
+        assert!(!redacted.contains(authorization_token.as_str()));
+        assert!(!redacted.contains(api_key.as_str()));
+        assert!(!redacted.contains(cookie_value.as_str()));
+        assert!(!redacted.contains(forwarded_token.as_str()));
+        assert!(!redacted.contains(nested_bearer_token.as_str()));
     }
 
     #[test]
     fn redacted_body_snippet_removes_json_secret_fields_and_token_values() {
-        let body = br#"{
+        let api_key = fake_api_key("sk-ant-", "json");
+        let access_token = fake_named_secret("access_token");
+        let refresh_token = fake_named_secret("refresh_token");
+        let client_secret = fake_named_secret("client_secret");
+        let password = fake_named_secret("password");
+        let bearer_token = fake_named_secret("body_bearer");
+        let free_text_key = fake_api_key("sk-proj-", "free_text");
+        let body = serde_json::to_vec(&serde_json::json!({
             "model": "claude-sonnet-4-6",
             "max_tokens": 1024,
-            "api_key": "sk-ant-json-secret-123456789",
+            "api_key": api_key.clone(),
             "auth": {
-                "access_token": "access-token-secret",
-                "refreshToken": "refresh-token-secret",
-                "client_secret": "client-secret-value",
-                "password": "password-secret"
+                "access_token": access_token.clone(),
+                "refreshToken": refresh_token.clone(),
+                "client_secret": client_secret.clone(),
+                "password": password.clone()
             },
             "messages": [
                 {
                     "role": "user",
-                    "content": "Use Bearer free_text_bearer_secret_12345 and sk-proj-free-text-secret-12345"
+                    "content": format!("Use Bearer {bearer_token} and {free_text_key}")
                 }
             ]
-        }"#;
+        }))
+        .expect("test body should serialize");
 
-        let redacted = runtime_proxy_redacted_body_snippet(body, 4096);
+        let redacted = runtime_proxy_redacted_body_snippet(&body, 4096);
 
         assert!(redacted.contains("claude-sonnet-4-6"));
         assert!(redacted.contains("max_tokens"));
@@ -851,37 +867,36 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
         assert!(redacted.contains("\"password\":\"<redacted>\""));
         assert!(redacted.contains("Bearer <redacted>"));
         assert!(redacted.contains("sk-proj-<redacted>"));
-        assert!(!redacted.contains("sk-ant-json-secret-123456789"));
-        assert!(!redacted.contains("access-token-secret"));
-        assert!(!redacted.contains("refresh-token-secret"));
-        assert!(!redacted.contains("client-secret-value"));
-        assert!(!redacted.contains("password-secret"));
-        assert!(!redacted.contains("free_text_bearer_secret_12345"));
-        assert!(!redacted.contains("free-text-secret-12345"));
+        assert!(!redacted.contains(api_key.as_str()));
+        assert!(!redacted.contains(access_token.as_str()));
+        assert!(!redacted.contains(refresh_token.as_str()));
+        assert!(!redacted.contains(client_secret.as_str()));
+        assert!(!redacted.contains(password.as_str()));
+        assert!(!redacted.contains(bearer_token.as_str()));
+        assert!(!redacted.contains(free_text_key.as_str()));
     }
 
     #[test]
     fn redacted_body_snippet_removes_plain_text_secret_assignments() {
-        let body = concat!(
-            "api_",
-            "key",
-            "=",
-            "plain-api-key-secret-12345 access_token: plain-access-token-secret ",
-            "Bearer plain-bearer-secret-12345 x=sk-live-",
-            "plain-secret-12345"
-        )
-        .as_bytes();
+        let api_key = fake_named_secret("plain_api_key");
+        let access_token = fake_named_secret("plain_access_token");
+        let bearer_token = fake_named_secret("plain_bearer");
+        let prefixed_key = fake_api_key("sk-live-", "plain");
+        let body = format!(
+            "api_key={api_key} access_token: {access_token} \
+             Bearer {bearer_token} x={prefixed_key}"
+        );
 
-        let redacted = runtime_proxy_redacted_body_snippet(body, 4096);
+        let redacted = runtime_proxy_redacted_body_snippet(body.as_bytes(), 4096);
 
         assert!(redacted.contains("api_key=<redacted>"));
         assert!(redacted.contains("access_token: <redacted>"));
         assert!(redacted.contains("Bearer <redacted>"));
         assert!(redacted.contains("sk-live-<redacted>"));
-        assert!(!redacted.contains("plain-api-key-secret-12345"));
-        assert!(!redacted.contains("plain-access-token-secret"));
-        assert!(!redacted.contains("plain-bearer-secret-12345"));
-        assert!(!redacted.contains("plain-secret-12345"));
+        assert!(!redacted.contains(api_key.as_str()));
+        assert!(!redacted.contains(access_token.as_str()));
+        assert!(!redacted.contains(bearer_token.as_str()));
+        assert!(!redacted.contains(prefixed_key.as_str()));
     }
 
     #[test]

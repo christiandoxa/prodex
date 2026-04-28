@@ -2,12 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.62.0 - Unreleased
+## 0.63.0 - 2026-04-28
 
-Changes after `0.61.0`.
+### Runtime
+
+- Support proxies and native Codex history (`63ef05a`)
+
+## 0.62.0 - 2026-04-28
+
+### Runtime
+
+- Improve diagnostics and release readiness (`cf19a7e`)
 
 ### CI
 
+- Avoid synthetic secret scan matches (`68e0398`)
 - Refresh upstream watchdog baseline (`4bccb9f`)
 
 ## 0.61.0 - 2026-04-28
@@ -80,19 +89,3 @@ Changes after `0.61.0`.
 ## 0.52.0 - 2026-04-24
 
 - No grouped changes.
-
-## 0.51.0 - 2026-04-24
-
-### CLI
-
-- Add local model support for super mode (`f36c98d`)
-
-## 0.50.0 - 2026-04-24
-
-### Runtime
-
-- Improve audit and runtime hygiene (`3a52219`)
-
-### CI
-
-- Parallelize test shards (`84e729e`)

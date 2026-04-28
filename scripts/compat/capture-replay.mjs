@@ -495,7 +495,29 @@ function outputPathForArgs(args) {
   return path.resolve(args.outDir, `${name}_capture_replay.json`);
 }
 
+function fakeSecret(...parts) {
+  return parts.join("");
+}
+
+function fakeNamedSecret(name) {
+  return fakeSecret("fixture_", name, "_notreal_", "12345");
+}
+
+function fakeApiKey(prefix, name) {
+  return fakeSecret(prefix, "fixture-", name, "-notreal-", "123456789");
+}
+
+function sampleFakeValues() {
+  return {
+    authorizationToken: fakeNamedSecret("authorization"),
+    headerApiKey: fakeApiKey("sk-live-", "header"),
+    bodyApiKey: fakeNamedSecret("body_api_key"),
+    sseToken: fakeNamedSecret("sse_token"),
+  };
+}
+
 function sampleRecords() {
+  const fakeValues = sampleFakeValues();
   return [
     {
       type: "request",
@@ -503,9 +525,9 @@ function sampleRecords() {
       method: "POST",
       url: "https://chatgpt.com/backend-api/codex/responses",
       headers: {
-        Authorization: "Bearer live_authorization_secret_12345",
+        Authorization: `Bearer ${fakeValues.authorizationToken}`,
         "ChatGPT-Account-Id": "acct_live_12345",
-        ["x-" + "api-key"]: "sk-live-" + "secret-123456789",
+        ["x-" + "api-key"]: fakeValues.headerApiKey,
         "x-codex-turn-state": "turn_live_20260428",
         session_id: "sess_live_20260428",
         "User-Agent": "codex-cli/fixture",
@@ -516,7 +538,7 @@ function sampleRecords() {
         previous_response_id: "resp_parent_live_20260428",
         client_metadata: {
           session_id: "sess_body_live_20260428",
-          ["api_" + "key"]: "body_api_" + "key_secret_12345",
+          ["api_" + "key"]: fakeValues.bodyApiKey,
         },
       },
     },
@@ -525,7 +547,7 @@ function sampleRecords() {
       name: "codex_live_sse",
       stream:
         'event: response.created\n' +
-        'data: {"created_at":"2026-04-28T01:02:03Z","response_id":"resp_child_live_20260428","response":{"id":"resp_child_live_20260428"},"authorization_token":"sse_secret_token_12345"}\n\n',
+        `data: {"created_at":"2026-04-28T01:02:03Z","response_id":"resp_child_live_20260428","response":{"id":"resp_child_live_20260428"},"authorization_token":"${fakeValues.sseToken}"}\n\n`,
     },
     {
       type: "websocket_message",
@@ -541,11 +563,12 @@ function sampleRecords() {
 }
 
 function assertNoSampleSecrets(rendered) {
+  const fakeValues = sampleFakeValues();
   for (const needle of [
-    "live_authorization_secret",
-    "sk-live-secret",
-    "body_api_key_secret",
-    "sse_secret_token",
+    fakeValues.authorizationToken,
+    fakeValues.headerApiKey,
+    fakeValues.bodyApiKey,
+    fakeValues.sseToken,
     "resp_parent_live",
     "sess_body_live",
     "turn_live_20260428",

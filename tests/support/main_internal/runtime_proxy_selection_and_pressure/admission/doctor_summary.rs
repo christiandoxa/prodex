@@ -234,13 +234,11 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
         summary.stale_continuation_by_reason,
         BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1)])
     );
-    assert!(
-        summary
-            .latest_chain_event
-            .as_deref()
-            .is_some_and(|event| event.contains("chain_dead_upstream_confirmed")
-                && event.contains("previous_response_id=resp-second"))
-    );
+    assert!(summary
+        .latest_chain_event
+        .as_deref()
+        .is_some_and(|event| event.contains("chain_dead_upstream_confirmed")
+            && event.contains("previous_response_id=resp-second")));
     assert_eq!(
         summary
             .marker_last_fields
@@ -289,10 +287,8 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
             .map(String::as_str),
         Some("session")
     );
-    assert!(
-        summary
-            .last_marker_line
-            .as_deref()
-            .is_some_and(|line| line.contains("runtime_proxy_startup_audit"))
-    );
+    assert!(summary
+        .last_marker_line
+        .as_deref()
+        .is_some_and(|line| line.contains("runtime_proxy_startup_audit")));
 }

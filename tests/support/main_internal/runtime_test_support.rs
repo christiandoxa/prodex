@@ -231,6 +231,7 @@ pub(super) fn runtime_rotation_proxy_shared(
 ) -> RuntimeRotationProxyShared {
     let active_request_limit = active_request_limit.max(1);
     RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

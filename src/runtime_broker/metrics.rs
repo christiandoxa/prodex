@@ -781,6 +781,7 @@ mod tests {
         };
 
         RuntimeRotationProxyShared {
+            upstream_no_proxy: false,
             async_client: reqwest::Client::builder()
                 .build()
                 .expect("test async client"),

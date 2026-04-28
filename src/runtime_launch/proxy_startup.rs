@@ -28,7 +28,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
     upstream_no_proxy: bool,
     preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeRotationProxy> {
-    set_runtime_upstream_no_proxy_override(upstream_no_proxy);
     let log_path = initialize_runtime_proxy_log_path();
     let (server, listen_addr) = match preferred_listen_addr {
         Some(preferred) => match TinyServer::http(preferred) {
@@ -202,6 +201,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
         .filter(|key| key.starts_with("__route_success__"))
         .count();
     let shared = RuntimeRotationProxyShared {
+        upstream_no_proxy,
         async_client: build_runtime_upstream_async_http_client(upstream_no_proxy)?,
         async_runtime,
         log_path: log_path.clone(),

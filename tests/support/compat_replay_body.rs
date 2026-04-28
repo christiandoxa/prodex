@@ -291,6 +291,27 @@ fn compat_replay_translated_request_value(request: &RuntimeProxyRequest) -> Valu
     })
 }
 
+fn compat_replay_fake_secret(parts: &[&str]) -> String {
+    parts.concat()
+}
+
+fn compat_replay_fake_named_secret(name: &str) -> String {
+    compat_replay_fake_secret(&["fixture_", name, "_notreal_", "12345"])
+}
+
+fn compat_replay_fake_api_key(prefix: &str, name: &str) -> String {
+    compat_replay_fake_secret(&[prefix, "fixture-", name, "-notreal-", "123456789"])
+}
+
+fn compat_replay_sample_fake_secrets() -> Vec<String> {
+    vec![
+        compat_replay_fake_named_secret("authorization"),
+        compat_replay_fake_api_key("sk-live-", "header"),
+        compat_replay_fake_named_secret("body_api_key"),
+        compat_replay_fake_named_secret("sse_token"),
+    ]
+}
+
 fn compat_replay_anthropic_request(headers: Vec<(&str, &str)>, body: Value) -> RuntimeProxyRequest {
     RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -470,19 +491,20 @@ fn compat_replay_capture_sample_fixture_is_scrubbed() {
     let text = compat_replay_fixture_text("sample_capture_replay.json");
     serde_json::from_str::<Value>(text).expect("sample capture replay fixture should be JSON");
 
-    for needle in [
-        "live_authorization_secret",
-        "sk-live-secret",
-        "body_api_key_secret",
-        "sse_secret_token",
-        "resp_parent_live",
-        "sess_body_live",
-        "turn_live_20260428",
-        "call_ws_live",
-        "2026-04-28T01:02:03Z",
-    ] {
+    let mut needles = compat_replay_sample_fake_secrets();
+    needles.extend(
+        [
+            "resp_parent_live",
+            "sess_body_live",
+            "turn_live_20260428",
+            "call_ws_live",
+            "2026-04-28T01:02:03Z",
+        ]
+        .map(str::to_string),
+    );
+    for needle in needles {
         assert!(
-            !text.contains(needle),
+            !text.contains(&needle),
             "sample replay fixture should not contain raw capture value {needle}"
         );
     }

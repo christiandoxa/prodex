@@ -38,6 +38,9 @@ Current CI building blocks include:
 npm run test:fast
 npm run test:serial
 npm run ci:preflight
+npm run ci:release-metadata-guard
+npm run ci:runtime-hotpath-guard
+npm run ci:churn-hygiene
 npm run release:prepare
 npm run changelog:check
 npm run docs:lint
@@ -58,7 +61,13 @@ Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as indepen
 
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
 
-Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release metadata/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan.
+Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release metadata-only, runtime hot-path, churn hygiene report, version/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan.
+
+Use `npm run ci:release-metadata-guard` to keep release/chore release commits metadata-only. By default it checks `HEAD`; use `-- --range main..HEAD` for a branch range, or `-- --staged --assume-release` before committing a release bump. The guard fails only when a release-like commit changes both version metadata files such as `Cargo.toml`, `Cargo.lock`, npm package manifests, `README.md`, or `QUICKSTART.md`, and non-metadata files.
+
+Use `npm run ci:runtime-hotpath-guard` after proxy hot-path work. It strips `#[cfg(test)]` Rust items, scans runtime proxy hot-path targets for blocking `std::fs`/`fs::` disk operations, file opens, `spawn_blocking`, and OS `thread::spawn`, then permits only narrow allowlisted existing cases with rationale.
+
+Use `npm run ci:churn-hygiene` for a lightweight churn report. It is report-only by default and checks `HEAD~1..HEAD` when available; add `-- --check` to fail on thresholds, or pass `-- --range main..HEAD`, `-- --staged`, custom `--max-files`, `--max-lines`, `--max-behavior-files`, or `--max-file-lines` values for stricter local review.
 
 Use `npm run release:prepare` before release work. It checks version/doc sync, available lockfile consistency, generated changelog freshness, docs lint, upstream compatibility baseline, runtime manifest, cargo fmt, and full Rust test binary compilation without publishing.
 The default test-compile guard runs `cargo test --locked --all-targets --all-features --no-run` so lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --all-targets --all-features` instead.

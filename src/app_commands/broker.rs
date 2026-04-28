@@ -1,7 +1,6 @@
 use super::*;
 
 pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
-    set_runtime_upstream_no_proxy_override(args.upstream_no_proxy);
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let proxy = start_runtime_rotation_proxy_with_listen_addr(

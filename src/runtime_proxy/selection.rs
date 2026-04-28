@@ -1018,6 +1018,7 @@ pub(crate) fn next_runtime_response_candidate_for_route(
     let mut ready_candidates = probe_plan.ready_candidates;
     if probe_plan.should_sync_probe_cold_start {
         let base_url = Some(selection_state.upstream_base_url.clone());
+        let upstream_no_proxy = shared.upstream_no_proxy;
         let sync_jobs = probe_plan
             .sync_probe_jobs
             .iter()
@@ -1031,7 +1032,12 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         let fresh_reports = map_parallel(sync_jobs, |job| {
             let auth = job.provider.auth_summary(&job.codex_home);
             let result = if auth.quota_compatible {
-                fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
+                fetch_usage_with_proxy_policy(
+                    &job.codex_home,
+                    base_url.as_deref(),
+                    upstream_no_proxy,
+                )
+                .map_err(|err| err.to_string())
             } else {
                 Err("auth mode is not quota-compatible".to_string())
             };

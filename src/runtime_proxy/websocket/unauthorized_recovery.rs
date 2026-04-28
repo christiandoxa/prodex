@@ -62,9 +62,10 @@ impl RuntimeProfileUnauthorizedRecoveryStep {
                 }))
             }
             RuntimeProfileUnauthorizedRecoveryStep::Refresh => {
-                let outcome = sync_usage_auth_from_disk_or_refresh(
+                let outcome = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
                     &codex_home,
                     cached_entry.as_ref().map(|entry| &entry.auth),
+                    shared.upstream_no_proxy,
                 )?;
                 let entry = load_runtime_profile_usage_auth_cache_entry(&codex_home)?;
                 update_runtime_profile_usage_auth_cache_entry(

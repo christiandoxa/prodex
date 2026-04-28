@@ -38,6 +38,7 @@ fn previous_response_affinity_test_shared(
     };
 
     RuntimeRotationProxyShared {
+        upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -83,47 +84,39 @@ fn previous_response_affinity_release_requires_repeated_not_found() {
     let shared =
         previous_response_affinity_test_shared(&temp_dir, "resp-main", now, BTreeMap::new());
 
-    assert!(
-        !release_runtime_previous_response_affinity(
-            &shared,
-            "main",
-            Some("resp-main"),
-            None,
-            None,
-            RuntimeRouteKind::Responses,
-        )
-        .expect("first not-found should defer hard release")
-    );
-    assert!(
-        shared
-            .runtime
-            .lock()
-            .expect("runtime lock")
-            .state
-            .response_profile_bindings
-            .contains_key("resp-main")
-    );
+    assert!(!release_runtime_previous_response_affinity(
+        &shared,
+        "main",
+        Some("resp-main"),
+        None,
+        None,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("first not-found should defer hard release"));
+    assert!(shared
+        .runtime
+        .lock()
+        .expect("runtime lock")
+        .state
+        .response_profile_bindings
+        .contains_key("resp-main"));
 
-    assert!(
-        release_runtime_previous_response_affinity(
-            &shared,
-            "main",
-            Some("resp-main"),
-            None,
-            None,
-            RuntimeRouteKind::Responses,
-        )
-        .expect("second not-found should release affinity")
-    );
-    assert!(
-        !shared
-            .runtime
-            .lock()
-            .expect("runtime lock")
-            .state
-            .response_profile_bindings
-            .contains_key("resp-main")
-    );
+    assert!(release_runtime_previous_response_affinity(
+        &shared,
+        "main",
+        Some("resp-main"),
+        None,
+        None,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("second not-found should release affinity"));
+    assert!(!shared
+        .runtime
+        .lock()
+        .expect("runtime lock")
+        .state
+        .response_profile_bindings
+        .contains_key("resp-main"));
     assert_eq!(
         shared
             .runtime
@@ -161,17 +154,15 @@ fn previous_response_affinity_release_triggers_at_negative_cache_threshold() {
         )]),
     );
 
-    assert!(
-        release_runtime_previous_response_affinity(
-            &shared,
-            "main",
-            Some(response_id),
-            None,
-            None,
-            RuntimeRouteKind::Responses,
-        )
-        .expect("threshold-reaching not-found should release affinity")
-    );
+    assert!(release_runtime_previous_response_affinity(
+        &shared,
+        "main",
+        Some(response_id),
+        None,
+        None,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("threshold-reaching not-found should release affinity"));
 
     let runtime = shared.runtime.lock().expect("runtime lock");
     assert!(
@@ -221,17 +212,15 @@ fn previous_response_affinity_ignores_expired_negative_cache_until_threshold_reb
         )]),
     );
 
-    assert!(
-        !release_runtime_previous_response_affinity(
-            &shared,
-            "main",
-            Some(response_id),
-            None,
-            None,
-            RuntimeRouteKind::Responses,
-        )
-        .expect("expired negative cache should not force early release")
-    );
+    assert!(!release_runtime_previous_response_affinity(
+        &shared,
+        "main",
+        Some(response_id),
+        None,
+        None,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("expired negative cache should not force early release"));
 
     {
         let runtime = shared.runtime.lock().expect("runtime lock");
@@ -251,17 +240,15 @@ fn previous_response_affinity_ignores_expired_negative_cache_until_threshold_reb
         );
     }
 
-    assert!(
-        release_runtime_previous_response_affinity(
-            &shared,
-            "main",
-            Some(response_id),
-            None,
-            None,
-            RuntimeRouteKind::Responses,
-        )
-        .expect("freshly rebuilt threshold should still release on second miss")
-    );
+    assert!(release_runtime_previous_response_affinity(
+        &shared,
+        "main",
+        Some(response_id),
+        None,
+        None,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("freshly rebuilt threshold should still release on second miss"));
 
     let runtime = shared.runtime.lock().expect("runtime lock");
     assert!(

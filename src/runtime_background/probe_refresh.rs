@@ -167,10 +167,15 @@ pub(crate) fn run_runtime_probe_jobs_inline(
         Ok(runtime) => runtime.upstream_base_url.clone(),
         Err(_) => return,
     };
+    let upstream_no_proxy = shared.upstream_no_proxy;
     let probe_reports = map_parallel(jobs, |(profile_name, codex_home)| {
         (
             profile_name,
-            RuntimeProbeRefreshAttempt::collect(&codex_home, upstream_base_url.as_str()),
+            RuntimeProbeRefreshAttempt::collect(
+                &codex_home,
+                upstream_base_url.as_str(),
+                upstream_no_proxy,
+            ),
         )
     });
     for (profile_name, attempt) in probe_reports {
@@ -640,10 +645,11 @@ struct RuntimeProbeRefreshAttempt {
 }
 
 impl RuntimeProbeRefreshAttempt {
-    fn collect(codex_home: &Path, upstream_base_url: &str) -> Self {
+    fn collect(codex_home: &Path, upstream_base_url: &str, upstream_no_proxy: bool) -> Self {
         let auth = read_auth_summary(codex_home);
         let result = if auth.quota_compatible {
-            fetch_usage(codex_home, Some(upstream_base_url)).map_err(|err| err.to_string())
+            fetch_usage_with_proxy_policy(codex_home, Some(upstream_base_url), upstream_no_proxy)
+                .map_err(|err| err.to_string())
         } else {
             Err("auth mode is not quota-compatible".to_string())
         };
@@ -719,15 +725,19 @@ impl RuntimeProbeRefreshJob {
                 )],
             ),
         );
-        RuntimeProbeRefreshAttempt::collect(&self.codex_home, self.upstream_base_url.as_str())
-            .execute(
-                RuntimeProbeExecutionMode::Queued {
-                    apply_timeout: runtime_probe_refresh_apply_wait_timeout(),
-                },
-                &self.shared,
-                &self.profile_name,
-                self.queued_at,
-            );
+        RuntimeProbeRefreshAttempt::collect(
+            &self.codex_home,
+            self.upstream_base_url.as_str(),
+            self.shared.upstream_no_proxy,
+        )
+        .execute(
+            RuntimeProbeExecutionMode::Queued {
+                apply_timeout: runtime_probe_refresh_apply_wait_timeout(),
+            },
+            &self.shared,
+            &self.profile_name,
+            self.queued_at,
+        );
     }
 }
 
@@ -749,6 +759,7 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("prodex-probe-refresh-unit-{}", std::process::id()));
         RuntimeRotationProxyShared {
+            upstream_no_proxy: false,
             async_client: reqwest::Client::builder().build().expect("async client"),
             async_runtime: Arc::new(
                 TokioRuntimeBuilder::new_current_thread()
