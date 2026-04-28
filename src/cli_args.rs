@@ -74,6 +74,7 @@ pub(crate) enum Commands {
     Caveman(CavemanArgs),
     #[command(
         trailing_var_arg = true,
+        visible_alias = "s",
         about = "Alias for `prodex caveman mem --full-access`.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
@@ -368,7 +369,7 @@ pub(crate) struct SuperArgs {
     #[arg(long, value_name = "URL", conflicts_with = "url")]
     pub(crate) base_url: Option<String>,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
-    #[arg(long, value_name = "URL")]
+    #[arg(long, value_name = "URL", value_parser = parse_super_local_url)]
     pub(crate) url: Option<String>,
     /// Model id to use with --url.
     #[arg(
@@ -413,7 +414,8 @@ impl SuperArgs {
                 )
             })
             .unwrap_or_default();
-        let skip_quota_check = self.skip_quota_check || self.url.is_some();
+        let local_mode = self.url.is_some();
+        let skip_quota_check = self.skip_quota_check || local_mode;
 
         let mut codex_args =
             Vec::with_capacity(self.codex_args.len() + 1 + local_provider_args.len());
@@ -433,7 +435,7 @@ impl SuperArgs {
     }
 }
 
-const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
+pub(crate) const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
 const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
 const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
 const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
@@ -499,6 +501,31 @@ fn super_local_provider_base_url(url: &str) -> String {
         }
     }
     trimmed.trim_end_matches('/').to_string()
+}
+
+fn parse_super_local_url(url: &str) -> std::result::Result<String, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("invalid --url: value cannot be empty".to_string());
+    }
+    if trimmed.starts_with("http:///") || trimmed.starts_with("https:///") {
+        return Err("invalid --url: expected a URL host".to_string());
+    }
+    let parsed = reqwest::Url::parse(trimmed).map_err(|err| {
+        format!(
+            "invalid --url: expected an absolute http(s) URL such as http://127.0.0.1:11434 ({err})"
+        )
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "invalid --url: expected http or https scheme, got {}",
+            parsed.scheme()
+        ));
+    }
+    if parsed.host_str().is_none() {
+        return Err("invalid --url: expected a URL host".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 #[derive(Args, Debug)]

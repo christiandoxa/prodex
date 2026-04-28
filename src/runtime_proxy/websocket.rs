@@ -1640,6 +1640,18 @@ mod tests {
         ))
     }
 
+    fn read_websocket_test_log_after_marker(log_path: &Path, marker: &str) -> String {
+        let started_at = Instant::now();
+        loop {
+            runtime_proxy_flush_logs_for_path(log_path);
+            let log = std::fs::read_to_string(log_path).unwrap_or_default();
+            if log.contains(marker) || started_at.elapsed() >= Duration::from_secs(1) {
+                return log;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn websocket_test_shared(name: &str) -> RuntimeRotationProxyShared {
         let root =
             std::env::temp_dir().join(format!("prodex-websocket-{name}-{}", std::process::id()));
@@ -1921,8 +1933,10 @@ mod tests {
             "overflow dispatcher should hand work back to the bounded queue: {overflow_snapshot:?}"
         );
 
-        runtime_proxy_flush_logs_for_path(&log_path);
-        let log = std::fs::read_to_string(&log_path).expect("overflow runtime log should exist");
+        let log = read_websocket_test_log_after_marker(
+            &log_path,
+            "request=41 transport=websocket websocket_connect_overflow_dispatch reason=queue_available",
+        );
         assert!(
             log.contains(
                 "request=41 transport=websocket websocket_connect_overflow_enqueue reason=queue_full"
@@ -1949,6 +1963,142 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn websocket_tcp_connect_executor_logs_actual_started_worker_count() {
+        let executor =
+            RuntimeWebsocketTcpConnectExecutor::new_with_spawn_outcome_for_test(4, 4, 1, 1, true);
+        let log_path = websocket_test_log_path("partial-worker-count");
+        let _ = std::fs::remove_file(&log_path);
+        let started = Arc::new(AtomicUsize::new(0));
+        let (start_tx, start_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let addr = "127.0.0.1:443"
+            .parse::<SocketAddr>()
+            .expect("socket addr should parse");
+
+        for _ in 0..6 {
+            let started = Arc::clone(&started);
+            let start_tx = start_tx.clone();
+            let done_tx = done_tx.clone();
+            let gate = Arc::clone(&gate);
+            assert!(
+                executor.spawn_observed(
+                    Some(log_path.as_path()),
+                    Some(43),
+                    Some(addr),
+                    move || {
+                        started.fetch_add(1, Ordering::SeqCst);
+                        start_tx.send(()).expect("start signal should send");
+
+                        let (released, ready) = &*gate;
+                        let mut released = released
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        while !*released {
+                            released = ready
+                                .wait(released)
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        }
+
+                        done_tx.send(()).expect("done signal should send");
+                    }
+                ),
+                "overflow job should be accepted while overflow capacity remains available"
+            );
+        }
+
+        start_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first websocket connect job should start");
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            1,
+            "only the single started worker should run before release"
+        );
+        assert!(
+            matches!(
+                start_rx.recv_timeout(Duration::from_millis(100)),
+                Err(RecvTimeoutError::Timeout)
+            ),
+            "queued websocket connect jobs should not start before release"
+        );
+
+        runtime_proxy_flush_logs_for_path(&log_path);
+        let log = std::fs::read_to_string(&log_path).expect("overflow runtime log should exist");
+        assert!(
+            log.contains(
+                "request=43 transport=websocket websocket_connect_overflow_enqueue reason=queue_full"
+            ),
+            "overflow enqueue log marker missing: {log}"
+        );
+        assert!(
+            log.contains("worker_count=1 queue_capacity=4"),
+            "overflow log should report actual started workers, not requested workers: {log}"
+        );
+        assert!(
+            !log.contains("worker_count=4 queue_capacity=4"),
+            "overflow log should not report optimistic requested workers after partial spawn: {log}"
+        );
+
+        let (released, ready) = &*gate;
+        *released
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        ready.notify_all();
+
+        for _ in 0..6 {
+            done_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("websocket connect job should complete after release");
+        }
+
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn websocket_tcp_connect_executor_keeps_inline_fallback_when_workers_unavailable() {
+        let zero_worker_executor =
+            RuntimeWebsocketTcpConnectExecutor::new_with_spawn_outcome_for_test(2, 2, 1, 0, true);
+        let ran = Arc::new(AtomicUsize::new(0));
+        let ran_for_job = Arc::clone(&ran);
+        assert!(
+            zero_worker_executor.spawn(move || {
+                ran_for_job.fetch_add(1, Ordering::SeqCst);
+            }),
+            "inline fallback should accept work when no worker starts"
+        );
+        assert_eq!(
+            ran.load(Ordering::SeqCst),
+            1,
+            "no-worker fallback should run work inline"
+        );
+        assert!(
+            zero_worker_executor.overflow_snapshot().is_none(),
+            "no-worker fallback should not expose bounded overflow state"
+        );
+
+        let dispatcher_failed_executor =
+            RuntimeWebsocketTcpConnectExecutor::new_with_spawn_outcome_for_test(2, 2, 1, 1, false);
+        let ran = Arc::new(AtomicUsize::new(0));
+        let ran_for_job = Arc::clone(&ran);
+        assert!(
+            dispatcher_failed_executor.spawn(move || {
+                ran_for_job.fetch_add(1, Ordering::SeqCst);
+            }),
+            "inline fallback should accept work when dispatcher fails"
+        );
+        assert_eq!(
+            ran.load(Ordering::SeqCst),
+            1,
+            "dispatcher-failure fallback should run work inline"
+        );
+        assert!(
+            dispatcher_failed_executor.overflow_snapshot().is_none(),
+            "dispatcher-failure fallback should not expose bounded overflow state"
+        );
     }
 
     #[test]

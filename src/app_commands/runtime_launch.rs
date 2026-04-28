@@ -80,14 +80,35 @@ struct RuntimeLaunchSelection {
     codex_home: PathBuf,
     explicit_profile_requested: bool,
     non_openai_model_provider: Option<CodexModelProviderSetting>,
+    profileless_local_home: bool,
 }
 
 impl RuntimeLaunchSelection {
     fn resolve(
+        paths: &AppPaths,
         state: &AppState,
         requested: Option<&str>,
         model_provider_override: Option<&str>,
     ) -> Result<Self> {
+        if allow_profileless_local_home(requested, model_provider_override)
+            && state.profiles.is_empty()
+        {
+            let codex_home = paths.shared_codex_root.clone();
+            return Ok(Self {
+                initial_profile_name: "local".to_string(),
+                selected_profile_name: "local".to_string(),
+                codex_home,
+                explicit_profile_requested: false,
+                non_openai_model_provider: model_provider_override.map(|provider_id| {
+                    CodexModelProviderSetting {
+                        provider_id: provider_id.to_string(),
+                        source: CodexModelProviderSource::CliOverride,
+                    }
+                }),
+                profileless_local_home: true,
+            });
+        }
+
         let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
         let codex_home = runtime_launch_profile_home(state, &profile_name)?;
         let non_openai_model_provider =
@@ -99,6 +120,7 @@ impl RuntimeLaunchSelection {
             codex_home,
             explicit_profile_requested: requested.is_some(),
             non_openai_model_provider,
+            profileless_local_home: false,
         })
     }
 
@@ -153,6 +175,15 @@ pub(crate) fn resolve_runtime_launch_profile_name(
         })
 }
 
+fn allow_profileless_local_home(
+    requested: Option<&str>,
+    model_provider_override: Option<&str>,
+) -> bool {
+    requested.is_none()
+        && model_provider_override
+            .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID))
+}
+
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,
     paths: AppPaths,
@@ -177,6 +208,10 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
     fn build(mut self) -> Result<PreparedRuntimeLaunch> {
         self.record_selection()?;
         self.handle_non_openai_model_provider()?;
+
+        if self.selection.profileless_local_home {
+            create_codex_home_if_missing(&self.selection.codex_home)?;
+        }
 
         let managed = self.selected_profile_is_managed()?;
         if managed {
@@ -225,12 +260,20 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
     }
 
     fn record_selection(&mut self) -> Result<()> {
+        if self.selection.profileless_local_home {
+            return Ok(());
+        }
+
         record_run_selection(&mut self.state, &self.selection.selected_profile_name);
         self.state.save(&self.paths)?;
         Ok(())
     }
 
     fn selected_profile_is_managed(&self) -> Result<bool> {
+        if self.selection.profileless_local_home {
+            return Ok(false);
+        }
+
         Ok(self
             .state
             .profiles
@@ -312,13 +355,21 @@ pub(super) fn prepare_runtime_launch_dry_run(
 ) -> Result<PreparedRuntimeLaunch> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let selection =
-        RuntimeLaunchSelection::resolve(&state, request.profile, request.model_provider_override)?;
-    let managed = state
-        .profiles
-        .get(&selection.selected_profile_name)
-        .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
-        .managed;
+    let selection = RuntimeLaunchSelection::resolve(
+        &paths,
+        &state,
+        request.profile,
+        request.model_provider_override,
+    )?;
+    let managed = if selection.profileless_local_home {
+        false
+    } else {
+        state
+            .profiles
+            .get(&selection.selected_profile_name)
+            .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
+            .managed
+    };
     let runtime_proxy = RuntimeProxyStartupFactory::preview(&paths, &state, &selection, &request)?;
 
     Ok(PreparedRuntimeLaunch {
@@ -345,8 +396,12 @@ fn select_runtime_launch_profile(
     state: &mut AppState,
     request: &RuntimeLaunchRequest<'_>,
 ) -> Result<RuntimeLaunchSelection> {
-    let mut selection =
-        RuntimeLaunchSelection::resolve(state, request.profile, request.model_provider_override)?;
+    let mut selection = RuntimeLaunchSelection::resolve(
+        paths,
+        state,
+        request.profile,
+        request.model_provider_override,
+    )?;
     if selection.non_openai_model_provider.is_some() {
         return Ok(selection);
     }
@@ -815,6 +870,72 @@ mod tests {
             state.last_run_selected_at.is_empty(),
             "dry-run must not record launch selection"
         );
+    }
+
+    #[test]
+    fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist() {
+        let root = temp_dir("profileless-local-home");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let paths = AppPaths::discover().unwrap();
+
+        let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+            profile: None,
+            allow_auto_rotate: true,
+            skip_quota_check: true,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: false,
+            model_provider_override: Some("prodex-local"),
+        })
+        .unwrap();
+
+        assert_eq!(prepared.codex_home, paths.shared_codex_root);
+        assert!(prepared.codex_home.is_dir());
+        assert!(!prepared.managed);
+        assert!(prepared.runtime_proxy.is_none());
+        assert!(
+            !paths.state_file.exists(),
+            "profileless local launch should not persist synthetic profile selection"
+        );
+    }
+
+    #[test]
+    fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
+        let root = temp_dir("profileless-local-preserve-profile");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let main_home = root.join("main-home");
+        fs::create_dir_all(&main_home).unwrap();
+        write_state(
+            &root,
+            AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home.clone(),
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                ..AppState::default()
+            },
+        );
+
+        let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
+            profile: None,
+            allow_auto_rotate: true,
+            skip_quota_check: true,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: false,
+            model_provider_override: Some("prodex-local"),
+        })
+        .unwrap();
+
+        assert_eq!(prepared.codex_home, main_home);
+        assert!(!prepared.managed);
+        assert!(prepared.runtime_proxy.is_none());
     }
 
     fn write_state(root: &Path, state: AppState) {

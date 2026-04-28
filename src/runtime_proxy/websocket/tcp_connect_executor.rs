@@ -323,6 +323,25 @@ impl RuntimeWebsocketTcpConnectExecutor {
         queue_capacity: usize,
         overflow_capacity: usize,
     ) -> Self {
+        Self::new_for_kind_with_spawner(
+            task_kind,
+            worker_count,
+            queue_capacity,
+            overflow_capacity,
+            |name, job| thread::Builder::new().name(name).spawn(job).is_ok(),
+        )
+    }
+
+    fn new_for_kind_with_spawner<F>(
+        task_kind: RuntimeWebsocketTcpConnectTaskKind,
+        worker_count: usize,
+        queue_capacity: usize,
+        overflow_capacity: usize,
+        mut spawn_thread: F,
+    ) -> Self
+    where
+        F: FnMut(String, Box<dyn FnOnce() + Send + 'static>) -> bool,
+    {
         let worker_count = worker_count.max(1);
         let queue_capacity = queue_capacity.max(worker_count).max(1);
         let (sender, receiver) =
@@ -333,12 +352,11 @@ impl RuntimeWebsocketTcpConnectExecutor {
 
         for index in 0..worker_count {
             let receiver = Arc::clone(&receiver);
-            let builder = thread::Builder::new()
-                .name(format!("{}-{index}", task_kind.worker_thread_prefix()));
-            if builder
-                .spawn(move || runtime_websocket_tcp_connect_worker_loop(receiver))
-                .is_ok()
-            {
+            let name = format!("{}-{index}", task_kind.worker_thread_prefix());
+            if spawn_thread(
+                name,
+                Box::new(move || runtime_websocket_tcp_connect_worker_loop(receiver)),
+            ) {
                 started_workers += 1;
             }
         }
@@ -352,20 +370,21 @@ impl RuntimeWebsocketTcpConnectExecutor {
             };
         }
 
+        let actual_worker_count = started_workers;
         let overflow_sender = sender.clone();
         let overflow_queue = Arc::clone(&overflow);
-        let dispatcher_started = thread::Builder::new()
-            .name(task_kind.dispatcher_thread_name().to_string())
-            .spawn(move || {
+        let dispatcher_started = spawn_thread(
+            task_kind.dispatcher_thread_name().to_string(),
+            Box::new(move || {
                 runtime_websocket_tcp_connect_dispatcher_loop(
                     overflow_queue,
                     overflow_sender,
-                    worker_count,
+                    actual_worker_count,
                     queue_capacity,
                     overflow_capacity,
                 )
-            })
-            .is_ok();
+            }),
+        );
         if !dispatcher_started {
             return Self {
                 mode: RuntimeWebsocketTcpConnectExecutorMode::Inline,
@@ -377,10 +396,43 @@ impl RuntimeWebsocketTcpConnectExecutor {
 
         Self {
             mode: RuntimeWebsocketTcpConnectExecutorMode::Bounded { sender, overflow },
-            worker_count,
+            worker_count: actual_worker_count,
             queue_capacity,
             overflow_capacity,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_with_spawn_outcome_for_test(
+        worker_count: usize,
+        queue_capacity: usize,
+        overflow_capacity: usize,
+        started_worker_count: usize,
+        dispatcher_started: bool,
+    ) -> Self {
+        let worker_prefix = RuntimeWebsocketTcpConnectTaskKind::TcpConnect.worker_thread_prefix();
+        let dispatcher_name =
+            RuntimeWebsocketTcpConnectTaskKind::TcpConnect.dispatcher_thread_name();
+        Self::new_for_kind_with_spawner(
+            RuntimeWebsocketTcpConnectTaskKind::TcpConnect,
+            worker_count,
+            queue_capacity,
+            overflow_capacity,
+            |name, job| {
+                let accepted = if name == dispatcher_name {
+                    dispatcher_started
+                } else {
+                    name.strip_prefix(worker_prefix)
+                        .and_then(|suffix| suffix.strip_prefix('-'))
+                        .and_then(|index| index.parse::<usize>().ok())
+                        .is_some_and(|index| index < started_worker_count)
+                };
+                if !accepted {
+                    return false;
+                }
+                thread::Builder::new().name(name).spawn(job).is_ok()
+            },
+        )
     }
 
     #[cfg(test)]

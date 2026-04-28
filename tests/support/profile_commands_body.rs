@@ -301,6 +301,26 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn profile_export_bundle_is_written_with_private_permissions() {
+    use super::import_export::write_profile_export_bundle;
+    use std::os::unix::fs::PermissionsExt;
+
+    let target_dir = ProfileCommandsTestDir::new("export-bundle-permissions");
+    let output_path = target_dir.path.join("bundle.json");
+
+    write_profile_export_bundle(&output_path, b"{\"secret\":true}")
+        .expect("profile export bundle should be written");
+
+    let mode = fs::metadata(&output_path)
+        .expect("profile export bundle should exist")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
 #[test]
 fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");

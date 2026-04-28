@@ -6,6 +6,9 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
 const CODEX_RAW_ROOT = "https://raw.githubusercontent.com/openai/codex";
 const CODEX_FALLBACK_REF = "main";
+const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_RETRY_BACKOFF_MS = [500, 1_500];
+const GITHUB_API_ROOT = "https://api.github.com/";
 
 const SEMANTIC_FILE_CONTAINS_FIELD = "file_contains_all";
 const SEMANTIC_DIFF_FIELDS = [
@@ -25,6 +28,76 @@ class FetchResponseError extends Error {
     this.status = response.status;
     this.statusText = response.statusText;
   }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function githubApiAuthHeaders(url) {
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (!token || !url.startsWith(GITHUB_API_ROOT)) {
+    return {};
+  }
+  return { Authorization: `Bearer ${token}` };
+}
+
+function isTransientStatus(status) {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+function isTransientFetchError(error) {
+  if (error instanceof FetchResponseError) {
+    return isTransientStatus(error.status);
+  }
+  return error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
+}
+
+function fetchErrorMessage(url, error) {
+  if (error?.name === "AbortError") {
+    return `failed to fetch ${url}: timed out after ${FETCH_TIMEOUT_MS}ms`;
+  }
+  return `failed to fetch ${url}: ${error.message}`;
+}
+
+async function fetchWithRetries(url, headers, parser) {
+  let lastError = null;
+  const attempts = FETCH_RETRY_BACKOFF_MS.length + 1;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "prodex-compat-watchdog",
+          ...githubApiAuthHeaders(url),
+          ...headers,
+        },
+      });
+      if (!response.ok) {
+        throw new FetchResponseError(url, response);
+      }
+      return await parser(response);
+    } catch (error) {
+      lastError = error;
+      clearTimeout(timeout);
+      if (attempt >= FETCH_RETRY_BACKOFF_MS.length || !isTransientFetchError(error)) {
+        if (error instanceof FetchResponseError) {
+          throw error;
+        }
+        throw new Error(fetchErrorMessage(url, error));
+      }
+      await delay(FETCH_RETRY_BACKOFF_MS[attempt]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw new Error(fetchErrorMessage(url, lastError));
 }
 
 function parseArgs(argv) {
@@ -95,41 +168,25 @@ function parseTitle(html) {
 }
 
 async function fetchText(url, headers = {}) {
-  let response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        "User-Agent": "prodex-compat-watchdog",
-        Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
-        ...headers,
-      },
-    });
-  } catch (error) {
-    throw new Error(`failed to fetch ${url}: ${error.message}`);
-  }
-  if (!response.ok) {
-    throw new FetchResponseError(url, response);
-  }
-  return response.text();
+  return fetchWithRetries(
+    url,
+    {
+      Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
+      ...headers,
+    },
+    (response) => response.text(),
+  );
 }
 
 async function fetchJson(url, headers = {}) {
-  let response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        "User-Agent": "prodex-compat-watchdog",
-        Accept: "application/vnd.github+json",
-        ...headers,
-      },
-    });
-  } catch (error) {
-    throw new Error(`failed to fetch ${url}: ${error.message}`);
-  }
-  if (!response.ok) {
-    throw new FetchResponseError(url, response);
-  }
-  return response.json();
+  return fetchWithRetries(
+    url,
+    {
+      Accept: "application/vnd.github+json",
+      ...headers,
+    },
+    (response) => response.json(),
+  );
 }
 
 async function fetchCodexRelease() {

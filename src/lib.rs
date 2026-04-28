@@ -400,6 +400,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "run"
             | "caveman"
             | "super"
+            | "s"
             | "claude"
             | "help"
             | "__runtime-broker"

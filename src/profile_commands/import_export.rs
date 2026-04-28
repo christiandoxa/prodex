@@ -5,7 +5,9 @@ use aes_gcm_siv::{
 use base64::Engine;
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
+use std::fs::OpenOptions;
 use std::io::IsTerminal;
+use std::io::Write as _;
 
 use super::*;
 
@@ -448,14 +450,13 @@ pub(super) fn validate_profile_export_header(format: &str, version: u32) -> Resu
     Ok(())
 }
 
-fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
+pub(super) fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     let temp_path = unique_state_temp_file_path(path);
-    fs::write(&temp_path, content)
-        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+    write_profile_export_temp_file(&temp_path, content)?;
     fs::rename(&temp_path, path)
         .with_context(|| format!("failed to replace {}", path.display()))?;
     #[cfg(unix)]
@@ -465,6 +466,24 @@ fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
         fs::set_permissions(path, permissions)
             .with_context(|| format!("failed to secure {}", path.display()))?;
     }
+    Ok(())
+}
+
+fn write_profile_export_temp_file(path: &Path, content: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    file.write_all(content)
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 

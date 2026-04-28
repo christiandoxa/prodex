@@ -2,7 +2,9 @@ use crate::secret_store::{
     SecretBackend, SecretError, SecretLocation, SecretRevision, SecretRevisionBackend, SecretValue,
 };
 use std::fs;
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,7 +41,7 @@ impl SecretBackend for FileSecretBackend {
 
         let bytes = value.into_bytes();
         let temp_path = unique_temp_path(path);
-        fs::write(&temp_path, bytes).map_err(|err| SecretError::io(&temp_path, err))?;
+        write_secure_temp_file(&temp_path, &bytes)?;
         replace_file(&temp_path, path)?;
         secure_file(path)?;
         Ok(())
@@ -106,6 +108,24 @@ fn replace_file(temp_path: &Path, path: &Path) -> Result<(), SecretError> {
         }
         Err(err) => Err(SecretError::io(path, err)),
     }
+}
+
+fn write_secure_temp_file(path: &Path, bytes: &[u8]) -> Result<(), SecretError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options
+        .open(path)
+        .map_err(|err| SecretError::io(path, err))?;
+    file.write_all(bytes)
+        .map_err(|err| SecretError::io(path, err))?;
+    Ok(())
 }
 
 fn secure_file(path: &Path) -> Result<(), SecretError> {

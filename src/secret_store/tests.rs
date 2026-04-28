@@ -68,6 +68,26 @@ fn file_backend_preserves_binary_values() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn file_backend_writes_secret_files_with_private_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_dir("private-permissions");
+    let path = root.join("nested/auth.json");
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+
+    store
+        .write_text(&location, "{\"access_token\":\"abc\"}")
+        .unwrap();
+
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn file_backend_rejects_keyring_locations() {
     let store = SecretManager::new(FileSecretBackend::new());

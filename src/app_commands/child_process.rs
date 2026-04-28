@@ -7,13 +7,24 @@ const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
+    let local_provider_hosts = local_provider_proxy_bypass_hosts(&args);
     ChildProcessPlan::new(codex_bin(), codex_home)
         .with_args(args)
-        .with_extra_env(local_proxy_bypass_env())
+        .with_extra_env(local_proxy_bypass_env_for_hosts(&local_provider_hosts))
         .with_removed_env(codex_sandbox_removed_env())
 }
 
 pub(crate) fn local_proxy_bypass_env() -> Vec<(&'static str, OsString)> {
+    local_proxy_bypass_env_for_hosts(std::iter::empty::<&str>())
+}
+
+pub(crate) fn local_proxy_bypass_env_for_hosts<I, S>(
+    extra_hosts: I,
+) -> Vec<(&'static str, OsString)>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let mut parts = Vec::<String>::new();
     for key in LOCAL_PROXY_BYPASS_ENV_KEYS {
         if let Some(value) = env::var_os(key) {
@@ -23,11 +34,25 @@ pub(crate) fn local_proxy_bypass_env() -> Vec<(&'static str, OsString)> {
     for host in LOCAL_PROXY_BYPASS_HOSTS {
         push_proxy_bypass_part(&mut parts, host);
     }
+    for host in extra_hosts {
+        push_proxy_bypass_part(&mut parts, host.as_ref());
+    }
     let merged = OsString::from(parts.join(","));
     LOCAL_PROXY_BYPASS_ENV_KEYS
         .into_iter()
         .map(|key| (key, merged.clone()))
         .collect()
+}
+
+fn local_provider_proxy_bypass_hosts(args: &[OsString]) -> Vec<String> {
+    codex_cli_config_override_value(
+        args,
+        &format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url"),
+    )
+    .and_then(|base_url| reqwest::Url::parse(&base_url).ok())
+    .and_then(|parsed| parsed.host_str().map(str::to_string))
+    .into_iter()
+    .collect()
 }
 
 fn push_proxy_bypass_parts(parts: &mut Vec<String>, value: &str) {
@@ -420,6 +445,36 @@ mod tests {
                     OsString::from("example.com,127.0.0.1,LOCALHOST,internal.local,::1")
                 )
             ]
+        );
+    }
+
+    #[test]
+    fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
+        let _env_guard = TestEnvVarGuard::lock();
+        let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
+        let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
+        let args = vec![
+            OsString::from("-c"),
+            OsString::from(format!(
+                "model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url=\"http://host.docker.internal:11434/v1\""
+            )),
+        ];
+
+        let plan = codex_child_plan(PathBuf::from("/tmp/prodex-codex-home"), args);
+
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "NO_PROXY")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("example.com,127.0.0.1,localhost,::1,host.docker.internal".to_string())
+        );
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "no_proxy")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("example.com,127.0.0.1,localhost,::1,host.docker.internal".to_string())
         );
     }
 

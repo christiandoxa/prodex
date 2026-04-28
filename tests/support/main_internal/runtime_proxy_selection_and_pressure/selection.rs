@@ -1823,6 +1823,27 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_a
 }
 
 #[test]
+fn super_command_accepts_s_alias() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--profile",
+        "main",
+        "exec",
+        "review this repo",
+    ])
+    .expect("super alias command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(
+        args.codex_args,
+        vec![OsString::from("exec"), OsString::from("review this repo")]
+    );
+}
+
+#[test]
 fn super_command_url_expands_to_local_openai_provider_config() {
     let command = parse_cli_command_from([
         "prodex",
@@ -1874,6 +1895,46 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
         Some("prodex-local")
     );
+}
+
+#[test]
+fn super_command_url_keeps_v1_path_when_provided() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--url",
+        "http://host.docker.internal:11434/v1/",
+        "exec",
+        "review this repo",
+    ])
+    .expect("super local provider command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    let args = args.into_caveman_args();
+    let rendered = args
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(rendered.contains(
+        &"model_providers.prodex-local.base_url=\"http://host.docker.internal:11434/v1\""
+            .to_string()
+    ));
+}
+
+#[test]
+fn super_command_url_rejects_invalid_or_empty_values() {
+    for url in ["", "not-a-url", "file:///tmp/model.sock", "http:///v1"] {
+        let err = parse_cli_command_from(["prodex", "super", "--url", url, "exec", "hello"])
+            .expect_err("invalid super local provider URL should fail");
+        let message = err.to_string();
+        assert!(
+            message.contains("invalid --url"),
+            "expected clear --url error for {url:?}, got {message}"
+        );
+    }
 }
 
 #[test]
