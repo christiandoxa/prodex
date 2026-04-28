@@ -148,6 +148,7 @@ impl RuntimeResponsesAffinityState {
         &'a self,
         excluded_profiles: &'a BTreeSet<String>,
         previous_response_id: Option<&'a str>,
+        prompt_cache_key: Option<&'a str>,
     ) -> RuntimeResponseCandidateSelection<'a> {
         RuntimeResponseCandidateSelection {
             excluded_profiles,
@@ -155,6 +156,7 @@ impl RuntimeResponsesAffinityState {
             pinned_profile: self.pinned_profile(),
             turn_state_profile: self.turn_state_profile(),
             session_profile: self.session_profile(),
+            prompt_cache_key,
             discover_previous_response_owner: previous_response_id.is_some(),
             previous_response_id,
             route_kind: RuntimeRouteKind::Responses,
@@ -526,6 +528,7 @@ pub(crate) fn proxy_runtime_responses_request(
     let previous_response_fresh_fallback_shape =
         runtime_request_previous_response_fresh_fallback_shape(&request);
     let previous_response_id = runtime_request_previous_response_id(&request);
+    let prompt_cache_key = runtime_request_prompt_cache_key(&request);
     let mut request_turn_state = runtime_request_turn_state(&request);
     let explicit_request_session_id = runtime_request_explicit_session_id(&request);
     let request_session_id = runtime_request_session_id(&request);
@@ -646,7 +649,11 @@ pub(crate) fn proxy_runtime_responses_request(
 
         let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
             shared,
-            affinity_state.candidate_selection(&excluded_profiles, previous_response_id.as_deref()),
+            affinity_state.candidate_selection(
+                &excluded_profiles,
+                previous_response_id.as_deref(),
+                prompt_cache_key.as_deref(),
+            ),
         )?
         else {
             runtime_proxy_log(

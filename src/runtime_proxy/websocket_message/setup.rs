@@ -146,6 +146,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 pinned_profile: self.pinned_profile.as_deref(),
                 turn_state_profile: self.turn_state_profile.as_deref(),
                 session_profile: self.session_profile.as_deref(),
+                prompt_cache_key: None,
                 discover_previous_response_owner: self.previous_response_id.is_some(),
                 previous_response_id: self.previous_response_id.as_deref(),
                 route_kind: RuntimeRouteKind::Websocket,

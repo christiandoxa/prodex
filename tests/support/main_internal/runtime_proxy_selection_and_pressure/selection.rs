@@ -83,6 +83,25 @@ fn tool_output_only_request() -> RuntimeResponsesRequestBuilder {
     ]))
 }
 
+#[test]
+fn response_request_prompt_cache_key_is_trimmed_from_body() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: serde_json::to_vec(&serde_json::json!({
+            "prompt_cache_key": " workspace-cache:abc ",
+            "input": []
+        }))
+        .expect("request body should serialize"),
+    };
+
+    assert_eq!(
+        runtime_request_prompt_cache_key(&request).as_deref(),
+        Some("workspace-cache:abc")
+    );
+}
+
 fn replayable_function_call_transcript_request() -> RuntimeResponsesRequestBuilder {
     RuntimeResponsesRequestBuilder::new(serde_json::json!([
         {
@@ -1411,6 +1430,54 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
         false,
         Some("resp_unbound"),
         RuntimeRouteKind::Responses,
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
+}
+
+#[test]
+fn response_selection_uses_prompt_cache_affinity_for_fresh_ties() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        for profile_name in ["main", "second"] {
+            runtime.profile_probe_cache.insert(
+                profile_name.to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(95, 18_000, 95, 604_800)),
+                },
+            );
+        }
+    }
+    let prompt_cache_key = (0..256)
+        .map(|index| format!("workspace-cache-{index}"))
+        .find(|key| {
+            runtime_prompt_cache_affinity_sort_key(Some(key.as_str()), "second")
+                < runtime_prompt_cache_affinity_sort_key(Some(key.as_str()), "main")
+        })
+        .expect("test should find a key that prefers second");
+
+    let selected = select_runtime_response_candidate_for_route_with_selection(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            excluded_profiles: &BTreeSet::new(),
+            strict_affinity_profile: None,
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: None,
+            prompt_cache_key: Some(prompt_cache_key.as_str()),
+            discover_previous_response_owner: false,
+            previous_response_id: None,
+            route_kind: RuntimeRouteKind::Responses,
+        },
     )
     .expect("selection should succeed");
 

@@ -181,6 +181,7 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     provider_priority: usize,
     quota_sort_key: RuntimeQuotaPressureSortKey,
     in_selection_backoff: bool,
+    prompt_cache_affinity_sort_key: u64,
     jitter: u64,
 }
 
@@ -211,6 +212,7 @@ pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
     route_kind: RuntimeRouteKind,
     inflight_soft_limit: usize,
     ready_profile_candidates: Vec<ReadyProfileCandidate>,
+    prompt_cache_key: Option<&str>,
     jitter_for: F,
 ) -> RuntimeResponseCandidateExecutionPlan
 where
@@ -246,6 +248,10 @@ where
                     route_kind,
                 ),
                 in_selection_backoff: entry.in_selection_backoff,
+                prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key(
+                    prompt_cache_key,
+                    &candidate.name,
+                ),
                 jitter: jitter_for(&candidate.name),
             })
         })
@@ -263,6 +269,7 @@ where
             runtime_quota_source_sort_key(route_kind, candidate.quota_source),
             candidate.inflight_count,
             candidate.health_sort_key,
+            candidate.prompt_cache_affinity_sort_key,
             candidate.order_index,
             candidate.jitter,
         )
@@ -277,6 +284,7 @@ where
             runtime_quota_source_sort_key(route_kind, candidate.quota_source),
             candidate.inflight_count,
             candidate.health_sort_key,
+            candidate.prompt_cache_affinity_sort_key,
             candidate.order_index,
             candidate.jitter,
         )
@@ -286,6 +294,40 @@ where
         ready_candidates,
         fallback_candidates,
     }
+}
+
+pub(crate) fn runtime_prompt_cache_affinity_sort_key(
+    prompt_cache_key: Option<&str>,
+    profile_name: &str,
+) -> u64 {
+    let Some(prompt_cache_key) = prompt_cache_key
+        .map(str::trim)
+        .filter(|prompt_cache_key| !prompt_cache_key.is_empty())
+    else {
+        return 0;
+    };
+
+    u64::MAX - runtime_prompt_cache_affinity_score(prompt_cache_key, profile_name)
+}
+
+fn runtime_prompt_cache_affinity_score(prompt_cache_key: &str, profile_name: &str) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for bytes in [
+        b"prodex-prompt-cache-affinity-v1".as_slice(),
+        b"\0".as_slice(),
+        prompt_cache_key.as_bytes(),
+        b"\0".as_slice(),
+        profile_name.as_bytes(),
+    ] {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+    hash
 }
 
 fn runtime_response_ready_candidates(
@@ -421,6 +463,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
+            None,
             |_| 0,
         );
 
@@ -483,6 +526,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
+            None,
             |_| 0,
         );
 
@@ -604,6 +648,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
+            None,
             |_| 0,
         );
 
@@ -624,6 +669,103 @@ mod tests {
             plan.ready_candidates
                 .iter()
                 .all(|candidate| candidate.ready_skip_reason().is_none())
+        );
+    }
+
+    #[test]
+    fn candidate_plan_uses_prompt_cache_affinity_as_tie_breaker() {
+        let state = RuntimeRouteSelectionCatalog {
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            entries: vec![
+                selection_entry("main", SelectionEntryFixture::default()),
+                selection_entry("second", SelectionEntryFixture::default()),
+                selection_entry("third", SelectionEntryFixture::default()),
+            ],
+        };
+        let usage = test_usage_with_unbounded_main_windows(80, 85);
+        let prompt_cache_key = "workspace-cache:abc123";
+        let ready_candidates = vec![
+            ready_candidate("main", usage.clone(), 0, RuntimeQuotaSource::LiveProbe),
+            ready_candidate("second", usage.clone(), 0, RuntimeQuotaSource::LiveProbe),
+            ready_candidate("third", usage, 0, RuntimeQuotaSource::LiveProbe),
+        ];
+
+        let plan = build_runtime_response_candidate_execution_plan(
+            &state,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            3,
+            ready_candidates,
+            Some(prompt_cache_key),
+            |_| 0,
+        );
+
+        let mut expected = vec!["main", "second", "third"];
+        expected.sort_by_key(|profile_name| {
+            runtime_prompt_cache_affinity_sort_key(Some(prompt_cache_key), profile_name)
+        });
+        assert_eq!(
+            plan.ready_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn candidate_plan_keeps_health_ahead_of_prompt_cache_affinity() {
+        let prompt_cache_key = "workspace-cache:health";
+        let mut profiles = ["alpha", "beta"];
+        profiles.sort_by_key(|profile_name| {
+            runtime_prompt_cache_affinity_sort_key(Some(prompt_cache_key), profile_name)
+        });
+        let cache_preferred_profile = profiles[0];
+        let healthy_profile = profiles[1];
+        let state = RuntimeRouteSelectionCatalog {
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            entries: vec![
+                selection_entry(
+                    cache_preferred_profile,
+                    SelectionEntryFixture {
+                        health_sort_key: 5,
+                        ..SelectionEntryFixture::default()
+                    },
+                ),
+                selection_entry(healthy_profile, SelectionEntryFixture::default()),
+            ],
+        };
+        let usage = test_usage_with_unbounded_main_windows(80, 85);
+        let ready_candidates = vec![
+            ready_candidate(
+                cache_preferred_profile,
+                usage.clone(),
+                0,
+                RuntimeQuotaSource::LiveProbe,
+            ),
+            ready_candidate(healthy_profile, usage, 0, RuntimeQuotaSource::LiveProbe),
+        ];
+
+        let plan = build_runtime_response_candidate_execution_plan(
+            &state,
+            &BTreeSet::new(),
+            RuntimeRouteKind::Responses,
+            3,
+            ready_candidates,
+            Some(prompt_cache_key),
+            |_| 0,
+        );
+
+        assert_eq!(
+            plan.ready_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![healthy_profile, cache_preferred_profile]
         );
     }
 
@@ -699,6 +841,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
+            None,
             |_| 0,
         );
 

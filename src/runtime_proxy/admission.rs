@@ -41,7 +41,37 @@ pub(crate) fn reject_runtime_proxy_overloaded_request(
             "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
         )
     };
-    let _ = request.respond(response);
+    let _ = request.respond(runtime_proxy_response_with_retry_after(response));
+}
+
+fn runtime_proxy_response_with_retry_after(
+    mut response: tiny_http::ResponseBox,
+) -> tiny_http::ResponseBox {
+    let retry_after = RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS
+        .max(1)
+        .to_string();
+    if let Ok(header) = TinyHeader::from_bytes("Retry-After", retry_after.as_bytes()) {
+        response = response.with_header(header);
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_overload_response_includes_retry_after_hint() {
+        let response =
+            runtime_proxy_response_with_retry_after(build_runtime_proxy_text_response(503, "busy"));
+        let mut bytes = Vec::new();
+        response
+            .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+            .expect("response should serialize");
+        let text = String::from_utf8(bytes).expect("response should be utf8");
+
+        assert!(text.contains("\r\nRetry-After: 1\r\n"));
+    }
 }
 
 pub(crate) fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason: &str) {

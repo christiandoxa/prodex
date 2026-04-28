@@ -171,6 +171,7 @@ pub(super) fn proxy_runtime_noncompact_request(
                     pinned_profile: None,
                     turn_state_profile: None,
                     session_profile: None,
+                    prompt_cache_key: None,
                     discover_previous_response_owner: false,
                     previous_response_id: None,
                     route_kind: RuntimeRouteKind::Standard,

@@ -513,6 +513,7 @@ pub(crate) fn select_runtime_response_candidate_for_route(
             pinned_profile,
             turn_state_profile,
             session_profile,
+            prompt_cache_key: None,
             discover_previous_response_owner,
             previous_response_id,
             route_kind,
@@ -557,18 +558,20 @@ pub(crate) fn select_runtime_response_candidate_for_route_with_selection(
         RuntimeAffinitySelectionDecision::Exhausted => return Ok(None),
     }
 
-    if let Some(profile_name) = runtime_proxy_optimistic_current_candidate_for_route(
+    if let Some(profile_name) = runtime_proxy_optimistic_current_candidate_for_route_with_selection(
         shared,
         selection.excluded_profiles,
         selection.route_kind,
+        selection.prompt_cache_key,
     )? {
         return Ok(Some(profile_name));
     }
 
-    next_runtime_response_candidate_for_route(
+    next_runtime_response_candidate_for_route_with_prompt_cache_key(
         shared,
         selection.excluded_profiles,
         selection.route_kind,
+        selection.prompt_cache_key,
     )
 }
 
@@ -735,10 +738,25 @@ pub(crate) fn next_runtime_previous_response_candidate(
     Ok(None)
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
+) -> Result<Option<String>> {
+    runtime_proxy_optimistic_current_candidate_for_route_with_selection(
+        shared,
+        excluded_profiles,
+        route_kind,
+        None,
+    )
+}
+
+fn runtime_proxy_optimistic_current_candidate_for_route_with_selection(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    prompt_cache_key: Option<&str>,
 ) -> Result<Option<String>> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
     let (
@@ -920,6 +938,35 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
         );
         return Ok(None);
     }
+    if prompt_cache_key
+        .map(str::trim)
+        .is_some_and(|prompt_cache_key| !prompt_cache_key.is_empty())
+        && matches!(route_kind, RuntimeRouteKind::Responses)
+        && has_alternative_quota_compatible_profile
+    {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "selection_skip_current",
+                runtime_selection_log_fields_with_quota(
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", current_profile.as_str()),
+                        runtime_proxy_log_field("reason", "prompt_cache_affinity"),
+                        runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                        runtime_proxy_log_field("health", health_score.to_string()),
+                        runtime_proxy_log_field("performance", performance_score.to_string()),
+                        runtime_proxy_log_field(
+                            "quota_source",
+                            runtime_selection_quota_source_label(quota_source),
+                        ),
+                    ],
+                    quota_summary,
+                ),
+            ),
+        );
+        return Ok(None);
+    }
 
     runtime_proxy_log(
         shared,
@@ -969,10 +1016,25 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
     Ok(Some(current_profile))
 }
 
+#[allow(dead_code)]
 pub(crate) fn next_runtime_response_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
+) -> Result<Option<String>> {
+    next_runtime_response_candidate_for_route_with_prompt_cache_key(
+        shared,
+        excluded_profiles,
+        route_kind,
+        None,
+    )
+}
+
+fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    prompt_cache_key: Option<&str>,
 ) -> Result<Option<String>> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
@@ -1115,6 +1177,7 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         route_kind,
         inflight_soft_limit,
         ready_candidates,
+        prompt_cache_key,
         |name| runtime_profile_selection_jitter(shared, name, route_kind),
     );
 

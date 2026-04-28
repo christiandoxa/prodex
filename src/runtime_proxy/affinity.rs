@@ -6,6 +6,26 @@ pub(crate) fn runtime_request_previous_response_id(
     runtime_request_previous_response_id_from_bytes(&request.body)
 }
 
+pub(crate) fn runtime_request_prompt_cache_key(request: &RuntimeProxyRequest) -> Option<String> {
+    if request.body.is_empty() {
+        return None;
+    }
+
+    let value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
+    runtime_request_prompt_cache_key_from_value(&value)
+}
+
+pub(crate) fn runtime_request_prompt_cache_key_from_value(
+    value: &serde_json::Value,
+) -> Option<String> {
+    value
+        .get("prompt_cache_key")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct RuntimeWebsocketRequestMetadata {
     pub(crate) previous_response_id: Option<String>,

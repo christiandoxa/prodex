@@ -336,6 +336,7 @@ pub(crate) struct RuntimeResponseCandidateSelection<'a> {
     pub(crate) pinned_profile: Option<&'a str>,
     pub(crate) turn_state_profile: Option<&'a str>,
     pub(crate) session_profile: Option<&'a str>,
+    pub(crate) prompt_cache_key: Option<&'a str>,
     pub(crate) discover_previous_response_owner: bool,
     pub(crate) previous_response_id: Option<&'a str>,
     pub(crate) route_kind: RuntimeRouteKind,

@@ -276,6 +276,7 @@ pub(super) fn proxy_runtime_compact_request(
                 pinned_profile: None,
                 turn_state_profile: None,
                 session_profile: session_profile.as_deref(),
+                prompt_cache_key: None,
                 discover_previous_response_owner: false,
                 previous_response_id: None,
                 route_kind: RuntimeRouteKind::Compact,
