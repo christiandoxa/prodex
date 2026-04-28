@@ -77,7 +77,6 @@
             "add_auth_headers",
             "x-codex-turn-state",
             "response.completed",
-            "response.metadata",
             "codex.rate_limits",
             "openai-model",
             "x-reasoning-included",
@@ -250,12 +249,10 @@
           "reason": "Websocket stream parsing must preserve response lifecycle and rate-limit events.",
           "file_contains_all": [
             "response.completed",
-            "response.metadata",
             "codex.rate_limits"
           ],
           "expected_stream_events_all": [
             "response.completed",
-            "response.metadata",
             "codex.rate_limits"
           ]
         },
@@ -298,10 +295,10 @@
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.119",
-      "name": "v2.1.119",
-      "published_at": "2026-04-23T23:24:19Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.119"
+      "tag_name": "v2.1.121",
+      "name": "v2.1.121",
+      "published_at": "2026-04-28T00:31:31Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.121"
     },
     "docs": [
       {

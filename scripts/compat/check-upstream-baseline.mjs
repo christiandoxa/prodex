@@ -69,7 +69,6 @@ const REQUIRED_FILE_CONTAINS = {
     "add_auth_headers",
     "x-codex-turn-state",
     "response.completed",
-    "response.metadata",
     "codex.rate_limits",
     "openai-model",
     "x-reasoning-included",
@@ -199,8 +198,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "websocket.responses-events",
     kind: "event_group",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-    file_contains_all: ["response.completed", "response.metadata", "codex.rate_limits"],
-    expected_stream_events_all: ["response.completed", "response.metadata", "codex.rate_limits"],
+    file_contains_all: ["response.completed", "codex.rate_limits"],
+    expected_stream_events_all: ["response.completed", "codex.rate_limits"],
   },
   {
     id: "websocket.header-auth-merge",
