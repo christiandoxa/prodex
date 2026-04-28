@@ -7,7 +7,7 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_pause(
     if !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind) {
         return;
     }
-    let pause_ms = RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS;
+    let pause_ms = runtime_proxy_sync_probe_pressure_pause_ms();
     let observed_revision = runtime_probe_refresh_revision();
     let started_at = Instant::now();
     let wait_outcome = runtime_probe_refresh_wait_outcome_since(

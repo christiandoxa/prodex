@@ -109,6 +109,7 @@ pub(super) struct ImportedExistingProfileAuthUpdate {
     codex_home: PathBuf,
     previous_auth_json: Option<String>,
     previous_email: Option<String>,
+    journal_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]

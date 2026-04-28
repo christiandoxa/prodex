@@ -98,10 +98,11 @@ struct RuntimeDoctorCollector {
     pointer_path: PathBuf,
     pointed_log_path: Option<PathBuf>,
     newest_log_path: Option<PathBuf>,
+    tail_bytes: usize,
 }
 
 impl RuntimeDoctorCollector {
-    fn discover() -> Self {
+    fn discover(tail_bytes: usize) -> Self {
         let pointer_path = runtime_proxy_latest_log_pointer_path();
         let pointed_log_path = fs::read_to_string(&pointer_path)
             .ok()
@@ -114,6 +115,7 @@ impl RuntimeDoctorCollector {
             pointer_path,
             pointed_log_path,
             newest_log_path: newest_runtime_proxy_log_in_dir(&runtime_proxy_log_dir()),
+            tail_bytes,
         }
     }
 
@@ -163,7 +165,7 @@ impl RuntimeDoctorCollector {
 
     fn collect(self) -> RuntimeDoctorSummary {
         let log_path = self.log_path();
-        let mut summary = runtime_doctor_summary_from_log(log_path.as_deref());
+        let mut summary = runtime_doctor_summary_from_log(log_path.as_deref(), self.tail_bytes);
         summary.pointer_exists = self.pointer_exists();
         summary.log_exists = log_path.as_ref().is_some_and(|path| path.exists());
         summary.log_path = log_path;
@@ -650,12 +652,21 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
 }
 
 pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
-    RuntimeDoctorCollector::discover().collect()
+    collect_runtime_doctor_summary_with_tail_bytes(RUNTIME_PROXY_DOCTOR_TAIL_BYTES)
 }
 
-fn runtime_doctor_summary_from_log(log_path: Option<&Path>) -> RuntimeDoctorSummary {
+pub(crate) fn collect_runtime_doctor_summary_with_tail_bytes(
+    tail_bytes: usize,
+) -> RuntimeDoctorSummary {
+    RuntimeDoctorCollector::discover(tail_bytes).collect()
+}
+
+fn runtime_doctor_summary_from_log(
+    log_path: Option<&Path>,
+    tail_bytes: usize,
+) -> RuntimeDoctorSummary {
     if let Some(log_path) = log_path.filter(|path| path.exists()) {
-        match parsing::read_runtime_log_tail(log_path, RUNTIME_PROXY_DOCTOR_TAIL_BYTES) {
+        match parsing::read_runtime_log_tail(log_path, tail_bytes) {
             Ok(tail) => parsing::summarize_runtime_log_tail(&tail),
             Err(err) => RuntimeDoctorSummary {
                 diagnosis: format!("Failed to read the latest runtime log tail: {err}"),

@@ -112,6 +112,20 @@ fn profile_commands_read_access_token(codex_home: &Path) -> String {
         .to_string()
 }
 
+fn profile_commands_import_auth_journal_paths(paths: &AppPaths) -> Vec<PathBuf> {
+    let journal_root = super::import_export::imported_auth_update_journal_root(paths);
+    let entries = match fs::read_dir(&journal_root) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(err) => panic!("journal root should be readable: {err}"),
+    };
+    let mut paths = entries
+        .map(|entry| entry.expect("journal entry should be readable").path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
 struct ProfileCommandsOneShotHttpServer {
     base_url: String,
     handle: Option<JoinHandle<()>>,
@@ -437,7 +451,10 @@ fn copilot_quota_lookup_reads_provider_quota_for_the_selected_account() {
 
     assert_eq!(info.login.as_deref(), Some("copilot-user"));
     assert_eq!(info.copilot_plan.as_deref(), Some("individual"));
-    assert_eq!(info.access_type_sku.as_deref(), Some("free_limited_copilot"));
+    assert_eq!(
+        info.access_type_sku.as_deref(),
+        Some("free_limited_copilot")
+    );
     assert_eq!(info.limited_user_quotas.get("chat").copied(), Some(450));
     assert_eq!(info.monthly_quotas.get("chat").copied(), Some(500));
     assert_eq!(info.limited_user_reset_date.as_deref(), Some("2026-05-09"));
@@ -582,6 +599,72 @@ fn profile_import_updates_existing_profile_when_name_matches() {
 }
 
 #[test]
+fn profile_import_auth_update_journal_is_removed_after_successful_state_save() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-journal-cleanup");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
+
+    let mut existing_state = AppState {
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("main@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email(
+                "main@example.com",
+                "fresh-token",
+                "main-account",
+            ),
+        }],
+    };
+
+    let commit = import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("import should update same-name profile");
+
+    let journals = profile_commands_import_auth_journal_paths(&target_paths);
+    assert_eq!(journals.len(), 1, "auth overwrite journal should be staged");
+    assert!(
+        fs::read_to_string(&journals[0])
+            .expect("auth overwrite journal should be readable")
+            .contains("old-token"),
+        "journal should preserve the replaced token"
+    );
+
+    existing_state
+        .save(&target_paths)
+        .expect("state should save after import");
+    super::import_export::cleanup_imported_auth_update_journals(&commit);
+
+    assert!(
+        profile_commands_import_auth_journal_paths(&target_paths).is_empty(),
+        "successful state save should clean auth overwrite journals"
+    );
+}
+
+#[test]
 fn profile_import_updates_existing_profile_when_email_matches() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
@@ -649,6 +732,103 @@ fn profile_import_updates_existing_profile_when_email_matches() {
             .exists(),
         "duplicate import should not create a new managed home"
     );
+}
+
+#[test]
+fn profile_import_save_failure_rolls_back_auth_and_keeps_recoverable_journal() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let paths = AppPaths::discover().expect("app paths should resolve");
+    let existing_home = paths.managed_profiles_root.join("primary");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
+
+    AppState {
+        active_profile: None,
+        profiles: BTreeMap::from([(
+            "primary".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("initial state should save");
+
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("backup-main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "backup-main".to_string(),
+            email: Some("main@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email(
+                "main@example.com",
+                "fresh-token",
+                "main-account",
+            ),
+        }],
+    };
+    let bundle_path = sandbox_dir.path.join("duplicate-import.json");
+    let bundle = serialize_profile_export_payload(&payload, None)
+        .expect("profile export payload should serialize");
+    super::import_export::write_profile_export_bundle(&bundle_path, &bundle)
+        .expect("profile export bundle should be written");
+
+    let fault_count = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .rem_euclid(100_000)
+        .saturating_add(10)
+        .to_string();
+    let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", &fault_count);
+    let err = handle_import_profiles(ImportProfileArgs {
+        path: bundle_path,
+        name: None,
+        activate: false,
+    })
+    .expect_err("state save failure should fail import");
+
+    assert!(
+        err.to_string()
+            .contains("injected runtime state save failure"),
+        "unexpected import error: {err:#}"
+    );
+    let state = AppState::load(&paths).expect("state should load after failed import");
+    assert_eq!(state.active_profile, None);
+    assert_eq!(
+        state
+            .profiles
+            .get("primary")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("main@example.com")
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "old-token".to_string(),
+        "save failure should keep normal auth rollback behavior"
+    );
+
+    let journals = profile_commands_import_auth_journal_paths(&paths);
+    assert_eq!(
+        journals.len(),
+        1,
+        "failed save should preserve a recoverable auth overwrite journal"
+    );
+    let journal = fs::read_to_string(&journals[0]).expect("auth overwrite journal should exist");
+    assert!(journal.contains("primary"));
+    assert!(journal.contains("old-token"));
 }
 
 #[test]

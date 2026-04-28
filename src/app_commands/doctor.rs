@@ -8,7 +8,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
 
     if args.runtime && args.json {
-        let summary = collect_runtime_doctor_summary();
+        let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
         let mut value = runtime_doctor_json_value(&summary);
         if let Some(object) = value.as_object_mut() {
             object.insert(
@@ -97,7 +97,13 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 
     if args.runtime {
         print_blank_line();
-        print_panel("Runtime Proxy", &runtime_doctor_fields());
+        let fields = if args.tail_bytes == RUNTIME_PROXY_DOCTOR_TAIL_BYTES {
+            runtime_doctor_fields()
+        } else {
+            let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
+            runtime_doctor_fields_for_summary(&summary, &runtime_proxy_latest_log_pointer_path())
+        };
+        print_panel("Runtime Proxy", &fields);
     }
 
     if state.profiles.is_empty() {

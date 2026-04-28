@@ -48,11 +48,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.59.0`:
+The current local version in this repo is `0.60.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.59.0
-cargo install prodex --force --version 0.59.0
+npm install -g @christiandoxa/prodex@0.60.0
+cargo install prodex --force --version 0.60.0
 ```
 
 Dependency status in this repo:
@@ -115,6 +115,7 @@ prodex quota --all --once
 ```
 
 `prodex info` includes the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
+For the full policy key reference, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
 Backup or move profiles:
 
@@ -232,10 +233,12 @@ If a runtime session looks stalled, inspect the latest proxy log:
 
 ```bash
 prodex doctor --runtime
-tail -n 200 "$(cat /tmp/prodex-runtime-latest.path)"
+prodex doctor --runtime --json
+tail -n 200 "$(prodex doctor --runtime --json | jq -r '.log_path')"
 ```
 
-That pointer path stays in `/tmp` only when the runtime log directory is still on the default setting. If you override the log directory, use `prodex doctor --runtime --json` to find the active `log_path` and live broker metrics.
+The default runtime log directory is the OS temp directory, usually `/tmp` on Linux, but `PRODEX_RUNTIME_LOG_DIR` or `runtime.log_dir` in `policy.toml` can override it.
+Use `prodex doctor --runtime --json` to find the active `log_path`, resolved `runtime_logs.directory`, and live broker metrics before tailing files.
 
 Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, transient runtime cache files and stale root temp files inside `.prodex`, prune Codex and Claude chat history older than one week, collapse duplicate profiles with the same account email into one surviving profile, clear dead broker artifacts, and remove old orphaned managed profile homes that are no longer tracked.
 
@@ -262,6 +265,7 @@ responses_active_limit = 96
 
 Environment variables still override `policy.toml`.
 Use `prodex info` to inspect the resulting effective runtime tuning values.
+See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime` and `runtime_proxy` keys, env overrides, defaults, and meanings.
 
 ## Enterprise Notes
 

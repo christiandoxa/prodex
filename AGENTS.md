@@ -173,14 +173,16 @@ Headers that may be skipped as transport-local:
 
 ## Observability
 
-Runtime proxy diagnostics are written to `/tmp`.
+Runtime proxy diagnostics are written to the resolved runtime log directory.
+The default is the OS temp directory, which is usually `/tmp` on Linux, but `PRODEX_RUNTIME_LOG_DIR` or `runtime.log_dir` in `policy.toml` can override it.
 
 Useful files:
 
-- `/tmp/prodex-runtime-latest.path`: pointer to the latest runtime log
-- `/tmp/prodex-runtime-*.log`: per-run proxy logs
+- `<runtime-log-dir>/prodex-runtime-latest.path`: pointer to the latest runtime log
+- `<runtime-log-dir>/prodex-runtime-*.log`: per-run proxy logs
 
 If a user reports a stall, inspect the latest runtime log before changing behavior blindly.
+Use `prodex doctor --runtime --json` when the effective directory is not known; its `log_path` field points at the sampled log.
 Look for:
 
 - `runtime_proxy_queue_overloaded`

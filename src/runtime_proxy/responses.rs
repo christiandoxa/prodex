@@ -299,6 +299,222 @@ fn runtime_responses_previous_response_not_found_context<'a>(
     }
 }
 
+#[derive(Clone, Copy)]
+enum RuntimeResponsesDirectCurrentFallbackReason {
+    PrecommitBudgetExhausted,
+    CandidateExhausted,
+}
+
+impl RuntimeResponsesDirectCurrentFallbackReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PrecommitBudgetExhausted => "precommit_budget_exhausted",
+            Self::CandidateExhausted => "candidate_exhausted",
+        }
+    }
+}
+
+struct RuntimeResponsesDirectCurrentFallback<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    reason: RuntimeResponsesDirectCurrentFallbackReason,
+    previous_response_id: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_requires_previous_response_affinity: bool,
+    previous_response_fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    saw_inflight_saturation: bool,
+}
+
+enum RuntimeResponsesDirectCurrentFallbackAction {
+    Continue,
+    Return(Box<RuntimeResponsesReply>),
+}
+
+fn try_runtime_responses_direct_current_profile_fallback(
+    fallback: RuntimeResponsesDirectCurrentFallback<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    excluded_profiles: &mut BTreeSet<String>,
+    last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
+) -> Result<Option<RuntimeResponsesDirectCurrentFallbackAction>> {
+    if !affinity_state.allows_direct_current_profile_fallback(
+        fallback.previous_response_id,
+        fallback.request_turn_state,
+        fallback.saw_inflight_saturation,
+        last_failure.is_some(),
+    ) {
+        return Ok(None);
+    }
+    let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
+        fallback.shared,
+        excluded_profiles,
+        RuntimeRouteKind::Responses,
+    )?
+    else {
+        return Ok(None);
+    };
+    runtime_proxy_log(
+        fallback.shared,
+        format!(
+            "request={} transport=http direct_current_profile_fallback profile={} reason={}",
+            fallback.request_id,
+            current_profile,
+            fallback.reason.as_str(),
+        ),
+    );
+    match attempt_runtime_responses_request(
+        fallback.request_id,
+        fallback.request,
+        fallback.shared,
+        &current_profile,
+        fallback.request_turn_state,
+    )? {
+        RuntimeResponsesAttempt::Success {
+            profile_name,
+            response,
+        } => {
+            affinity_state.remember_successful_previous_response_owner(
+                fallback.shared,
+                &profile_name,
+                fallback.previous_response_id,
+            )?;
+            commit_runtime_proxy_profile_selection_with_notice(
+                fallback.shared,
+                &profile_name,
+                RuntimeRouteKind::Responses,
+            )?;
+            runtime_proxy_log(
+                fallback.shared,
+                format!(
+                    "request={} transport=http committed profile={} via=direct_current_profile_fallback",
+                    fallback.request_id, profile_name
+                ),
+            );
+            Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                Box::new(response),
+            )))
+        }
+        RuntimeResponsesAttempt::QuotaBlocked {
+            profile_name,
+            response,
+        } => {
+            mark_runtime_profile_retry_backoff(fallback.shared, &profile_name)?;
+            if !affinity_state.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                fallback.request_requires_previous_response_affinity,
+                fallback.previous_response_fresh_fallback_shape,
+            ) {
+                return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                    Box::new(response),
+                )));
+            }
+            let released_affinity = release_runtime_quota_blocked_affinity(
+                fallback.shared,
+                &profile_name,
+                fallback.previous_response_id,
+                fallback.request_turn_state,
+                fallback.request_session_id,
+            )?;
+            affinity_state.clear_profile_affinity(&profile_name, true);
+            if released_affinity {
+                runtime_proxy_log(
+                    fallback.shared,
+                    format!(
+                        "request={} transport=http quota_blocked_affinity_released profile={} via=direct_current_profile_fallback",
+                        fallback.request_id, profile_name
+                    ),
+                );
+            }
+            if !runtime_has_route_eligible_quota_fallback(
+                fallback.shared,
+                &profile_name,
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )? {
+                return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                    Box::new(response),
+                )));
+            }
+            excluded_profiles.insert(profile_name);
+            *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+            Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+        }
+        RuntimeResponsesAttempt::PreviousResponseNotFound {
+            profile_name,
+            response,
+            turn_state,
+        } => {
+            match handle_runtime_previous_response_not_found(
+                runtime_responses_previous_response_not_found_context(
+                    fallback.shared,
+                    fallback.request_id,
+                    &profile_name,
+                    turn_state,
+                    Some("direct_current_profile_fallback"),
+                    fallback.previous_response_id,
+                    fallback.request_turn_state,
+                    fallback.request_session_id,
+                    fallback.request_requires_previous_response_affinity,
+                    affinity_state.trusted_previous_response_affinity(),
+                    fallback.previous_response_fresh_fallback_shape,
+                    RuntimePreviousResponseNotFoundPolicy::responses(false),
+                ),
+                affinity_state.previous_response_not_found_state(excluded_profiles, false),
+            )? {
+                RuntimePreviousResponseNotFoundAction::RetryOwner
+                | RuntimePreviousResponseNotFoundAction::Rotate => {
+                    *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
+                    Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+                }
+                RuntimePreviousResponseNotFoundAction::StaleContinuation => {
+                    unreachable!("responses previous_response policy cannot return this action")
+                }
+            }
+        }
+        RuntimeResponsesAttempt::LocalSelectionBlocked {
+            profile_name,
+            reason,
+        } => {
+            mark_runtime_profile_retry_backoff(fallback.shared, &profile_name)?;
+            match runtime_responses_local_selection_action(
+                affinity_state.quota_blocked_affinity_is_releasable(
+                    &profile_name,
+                    fallback.request_requires_previous_response_affinity,
+                    fallback.previous_response_fresh_fallback_shape,
+                ),
+            ) {
+                RuntimeResponsesLocalSelectionAction::ReturnServiceUnavailable => {
+                    Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                        Box::new(runtime_responses_local_selection_failure_reply()),
+                    )))
+                }
+                RuntimeResponsesLocalSelectionAction::Rotate => {
+                    let released_affinity = release_runtime_quota_blocked_affinity(
+                        fallback.shared,
+                        &profile_name,
+                        fallback.previous_response_id,
+                        fallback.request_turn_state,
+                        fallback.request_session_id,
+                    )?;
+                    affinity_state.clear_profile_affinity(&profile_name, true);
+                    if released_affinity {
+                        runtime_proxy_log(
+                            fallback.shared,
+                            format!(
+                                "request={} transport=http quota_blocked_affinity_released profile={} reason={} via=direct_current_profile_fallback",
+                                fallback.request_id, profile_name, reason
+                            ),
+                        );
+                    }
+                    excluded_profiles.insert(profile_name);
+                    Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn proxy_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -398,162 +614,27 @@ pub(crate) fn proxy_runtime_responses_request(
                     saw_inflight_saturation,
                 ));
             }
-            if affinity_state.allows_direct_current_profile_fallback(
-                previous_response_id.as_deref(),
-                request_turn_state.as_deref(),
-                saw_inflight_saturation,
-                last_failure.is_some(),
-            ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
-                shared,
-                &excluded_profiles,
-                RuntimeRouteKind::Responses,
-            )? {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http direct_current_profile_fallback profile={current_profile} reason=precommit_budget_exhausted"
-                    ),
-                );
-                match attempt_runtime_responses_request(
+            if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
+                RuntimeResponsesDirectCurrentFallback {
                     request_id,
-                    &request,
+                    request: &request,
                     shared,
-                    &current_profile,
-                    request_turn_state.as_deref(),
-                )? {
-                    RuntimeResponsesAttempt::Success {
-                        profile_name,
-                        response,
-                    } => {
-                        affinity_state.remember_successful_previous_response_owner(
-                            shared,
-                            &profile_name,
-                            previous_response_id.as_deref(),
-                        )?;
-                        commit_runtime_proxy_profile_selection_with_notice(
-                            shared,
-                            &profile_name,
-                            RuntimeRouteKind::Responses,
-                        )?;
-                        runtime_proxy_log(
-                            shared,
-                            format!(
-                                "request={request_id} transport=http committed profile={profile_name} via=direct_current_profile_fallback"
-                            ),
-                        );
-                        return Ok(response);
-                    }
-                    RuntimeResponsesAttempt::QuotaBlocked {
-                        profile_name,
-                        response,
-                    } => {
-                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                        if !affinity_state.quota_blocked_affinity_is_releasable(
-                            &profile_name,
-                            request_requires_previous_response_affinity,
-                            previous_response_fresh_fallback_shape,
-                        ) {
-                            return Ok(response);
-                        }
-                        let released_affinity = release_runtime_quota_blocked_affinity(
-                            shared,
-                            &profile_name,
-                            previous_response_id.as_deref(),
-                            request_turn_state.as_deref(),
-                            request_session_id.as_deref(),
-                        )?;
-                        affinity_state.clear_profile_affinity(&profile_name, true);
-                        if released_affinity {
-                            runtime_proxy_log(
-                                shared,
-                                format!(
-                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                ),
-                            );
-                        }
-                        if !runtime_has_route_eligible_quota_fallback(
-                            shared,
-                            &profile_name,
-                            &BTreeSet::new(),
-                            RuntimeRouteKind::Responses,
-                        )? {
-                            return Ok(response);
-                        }
-                        excluded_profiles.insert(profile_name);
-                        last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
-                        continue;
-                    }
-                    RuntimeResponsesAttempt::PreviousResponseNotFound {
-                        profile_name,
-                        response,
-                        turn_state,
-                    } => {
-                        match handle_runtime_previous_response_not_found(
-                            runtime_responses_previous_response_not_found_context(
-                                shared,
-                                request_id,
-                                &profile_name,
-                                turn_state,
-                                Some("direct_current_profile_fallback"),
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                                request_requires_previous_response_affinity,
-                                affinity_state.trusted_previous_response_affinity(),
-                                previous_response_fresh_fallback_shape,
-                                RuntimePreviousResponseNotFoundPolicy::responses(false),
-                            ),
-                            affinity_state
-                                .previous_response_not_found_state(&mut excluded_profiles, false),
-                        )? {
-                            RuntimePreviousResponseNotFoundAction::RetryOwner
-                            | RuntimePreviousResponseNotFoundAction::Rotate => {
-                                last_failure =
-                                    Some((RuntimeUpstreamFailureResponse::Http(response), false));
-                                continue;
-                            }
-                            RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-                                unreachable!(
-                                    "responses previous_response policy cannot return this action"
-                                )
-                            }
-                        }
-                    }
-                    RuntimeResponsesAttempt::LocalSelectionBlocked {
-                        profile_name,
-                        reason,
-                    } => {
-                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                        match runtime_responses_local_selection_action(
-                            affinity_state.quota_blocked_affinity_is_releasable(
-                                &profile_name,
-                                request_requires_previous_response_affinity,
-                                previous_response_fresh_fallback_shape,
-                            ),
-                        ) {
-                            RuntimeResponsesLocalSelectionAction::ReturnServiceUnavailable => {
-                                return Ok(runtime_responses_local_selection_failure_reply());
-                            }
-                            RuntimeResponsesLocalSelectionAction::Rotate => {}
-                        }
-                        let released_affinity = release_runtime_quota_blocked_affinity(
-                            shared,
-                            &profile_name,
-                            previous_response_id.as_deref(),
-                            request_turn_state.as_deref(),
-                            request_session_id.as_deref(),
-                        )?;
-                        affinity_state.clear_profile_affinity(&profile_name, true);
-                        if released_affinity {
-                            runtime_proxy_log(
-                                shared,
-                                format!(
-                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
-                                ),
-                            );
-                        }
-                        excluded_profiles.insert(profile_name);
-                        continue;
+                    reason: RuntimeResponsesDirectCurrentFallbackReason::PrecommitBudgetExhausted,
+                    previous_response_id: previous_response_id.as_deref(),
+                    request_turn_state: request_turn_state.as_deref(),
+                    request_session_id: request_session_id.as_deref(),
+                    request_requires_previous_response_affinity,
+                    previous_response_fresh_fallback_shape,
+                    saw_inflight_saturation,
+                },
+                &mut affinity_state,
+                &mut excluded_profiles,
+                &mut last_failure,
+            )? {
+                match action {
+                    RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
+                    RuntimeResponsesDirectCurrentFallbackAction::Return(response) => {
+                        return Ok(*response);
                     }
                 }
             }
@@ -624,162 +705,27 @@ pub(crate) fn proxy_runtime_responses_request(
                 runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Responses);
                 continue;
             }
-            if affinity_state.allows_direct_current_profile_fallback(
-                previous_response_id.as_deref(),
-                request_turn_state.as_deref(),
-                saw_inflight_saturation,
-                last_failure.is_some(),
-            ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
-                shared,
-                &excluded_profiles,
-                RuntimeRouteKind::Responses,
-            )? {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http direct_current_profile_fallback profile={current_profile} reason=candidate_exhausted"
-                    ),
-                );
-                match attempt_runtime_responses_request(
+            if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
+                RuntimeResponsesDirectCurrentFallback {
                     request_id,
-                    &request,
+                    request: &request,
                     shared,
-                    &current_profile,
-                    request_turn_state.as_deref(),
-                )? {
-                    RuntimeResponsesAttempt::Success {
-                        profile_name,
-                        response,
-                    } => {
-                        affinity_state.remember_successful_previous_response_owner(
-                            shared,
-                            &profile_name,
-                            previous_response_id.as_deref(),
-                        )?;
-                        commit_runtime_proxy_profile_selection_with_notice(
-                            shared,
-                            &profile_name,
-                            RuntimeRouteKind::Responses,
-                        )?;
-                        runtime_proxy_log(
-                            shared,
-                            format!(
-                                "request={request_id} transport=http committed profile={profile_name} via=direct_current_profile_fallback"
-                            ),
-                        );
-                        return Ok(response);
-                    }
-                    RuntimeResponsesAttempt::QuotaBlocked {
-                        profile_name,
-                        response,
-                    } => {
-                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                        if !affinity_state.quota_blocked_affinity_is_releasable(
-                            &profile_name,
-                            request_requires_previous_response_affinity,
-                            previous_response_fresh_fallback_shape,
-                        ) {
-                            return Ok(response);
-                        }
-                        let released_affinity = release_runtime_quota_blocked_affinity(
-                            shared,
-                            &profile_name,
-                            previous_response_id.as_deref(),
-                            request_turn_state.as_deref(),
-                            request_session_id.as_deref(),
-                        )?;
-                        affinity_state.clear_profile_affinity(&profile_name, true);
-                        if released_affinity {
-                            runtime_proxy_log(
-                                shared,
-                                format!(
-                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} via=direct_current_profile_fallback"
-                                ),
-                            );
-                        }
-                        if !runtime_has_route_eligible_quota_fallback(
-                            shared,
-                            &profile_name,
-                            &BTreeSet::new(),
-                            RuntimeRouteKind::Responses,
-                        )? {
-                            return Ok(response);
-                        }
-                        excluded_profiles.insert(profile_name);
-                        last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
-                        continue;
-                    }
-                    RuntimeResponsesAttempt::PreviousResponseNotFound {
-                        profile_name,
-                        response,
-                        turn_state,
-                    } => {
-                        match handle_runtime_previous_response_not_found(
-                            runtime_responses_previous_response_not_found_context(
-                                shared,
-                                request_id,
-                                &profile_name,
-                                turn_state,
-                                Some("direct_current_profile_fallback"),
-                                previous_response_id.as_deref(),
-                                request_turn_state.as_deref(),
-                                request_session_id.as_deref(),
-                                request_requires_previous_response_affinity,
-                                affinity_state.trusted_previous_response_affinity(),
-                                previous_response_fresh_fallback_shape,
-                                RuntimePreviousResponseNotFoundPolicy::responses(false),
-                            ),
-                            affinity_state
-                                .previous_response_not_found_state(&mut excluded_profiles, false),
-                        )? {
-                            RuntimePreviousResponseNotFoundAction::RetryOwner
-                            | RuntimePreviousResponseNotFoundAction::Rotate => {
-                                last_failure =
-                                    Some((RuntimeUpstreamFailureResponse::Http(response), false));
-                                continue;
-                            }
-                            RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-                                unreachable!(
-                                    "responses previous_response policy cannot return this action"
-                                )
-                            }
-                        }
-                    }
-                    RuntimeResponsesAttempt::LocalSelectionBlocked {
-                        profile_name,
-                        reason,
-                    } => {
-                        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                        match runtime_responses_local_selection_action(
-                            affinity_state.quota_blocked_affinity_is_releasable(
-                                &profile_name,
-                                request_requires_previous_response_affinity,
-                                previous_response_fresh_fallback_shape,
-                            ),
-                        ) {
-                            RuntimeResponsesLocalSelectionAction::ReturnServiceUnavailable => {
-                                return Ok(runtime_responses_local_selection_failure_reply());
-                            }
-                            RuntimeResponsesLocalSelectionAction::Rotate => {}
-                        }
-                        let released_affinity = release_runtime_quota_blocked_affinity(
-                            shared,
-                            &profile_name,
-                            previous_response_id.as_deref(),
-                            request_turn_state.as_deref(),
-                            request_session_id.as_deref(),
-                        )?;
-                        affinity_state.clear_profile_affinity(&profile_name, true);
-                        if released_affinity {
-                            runtime_proxy_log(
-                                shared,
-                                format!(
-                                    "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason} via=direct_current_profile_fallback"
-                                ),
-                            );
-                        }
-                        excluded_profiles.insert(profile_name);
-                        continue;
+                    reason: RuntimeResponsesDirectCurrentFallbackReason::CandidateExhausted,
+                    previous_response_id: previous_response_id.as_deref(),
+                    request_turn_state: request_turn_state.as_deref(),
+                    request_session_id: request_session_id.as_deref(),
+                    request_requires_previous_response_affinity,
+                    previous_response_fresh_fallback_shape,
+                    saw_inflight_saturation,
+                },
+                &mut affinity_state,
+                &mut excluded_profiles,
+                &mut last_failure,
+            )? {
+                match action {
+                    RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
+                    RuntimeResponsesDirectCurrentFallbackAction::Return(response) => {
+                        return Ok(*response);
                     }
                 }
             }

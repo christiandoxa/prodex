@@ -22,7 +22,7 @@ Treat a test as serial or quarantined when it touches any of these:
 
 - `std::env` mutation, including model/provider overrides
 - current working directory changes
-- default runtime log paths, including `/tmp/prodex-runtime-latest.path`
+- default runtime log paths, including the OS temp directory pointer such as `/tmp/prodex-runtime-latest.path` on Linux
 - shared `.prodex`, `CODEX_HOME`, or `CLAUDE_CONFIG_DIR` state
 - policy files, secret backends, or active-profile state visible outside the test tempdir
 - runtime broker lifecycle, fixed ports, websocket state, or long-lived proxy tasks

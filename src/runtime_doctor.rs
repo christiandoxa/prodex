@@ -9,8 +9,10 @@ mod state;
 mod types;
 
 pub(crate) use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
-pub(crate) use render::{runtime_doctor_fields, runtime_doctor_json_value};
-pub(crate) use state::collect_runtime_doctor_summary;
+pub(crate) use render::{
+    runtime_doctor_fields, runtime_doctor_fields_for_summary, runtime_doctor_json_value,
+};
+pub(crate) use state::collect_runtime_doctor_summary_with_tail_bytes;
 pub(crate) use types::{
     RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteSummary,
     RuntimeDoctorSummary,
@@ -20,8 +22,6 @@ pub(crate) use types::{
 pub(crate) use diagnosis::{
     runtime_doctor_finalize_summary, runtime_doctor_marker_count, runtime_doctor_top_facet,
 };
-#[cfg(test)]
-pub(crate) use render::runtime_doctor_fields_for_summary;
 #[cfg(test)]
 pub(crate) use state::{collect_runtime_doctor_state, runtime_doctor_degraded_routes};
 

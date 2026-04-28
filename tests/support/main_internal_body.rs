@@ -476,6 +476,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
         quota: false,
         runtime: true,
+        tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
         json: true,
     })));
     assert!(!should_emit_update_notice(&Commands::Audit(AuditArgs {
@@ -495,6 +496,68 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         base_url: None,
     })));
     assert!(should_emit_update_notice(&Commands::Current));
+}
+
+#[test]
+fn doctor_tail_bytes_cli_defaults_and_overrides() {
+    let command =
+        parse_cli_command_from(["prodex", "doctor", "--runtime"]).expect("doctor should parse");
+    let Commands::Doctor(args) = command else {
+        panic!("expected doctor command");
+    };
+    assert_eq!(args.tail_bytes, RUNTIME_PROXY_DOCTOR_TAIL_BYTES);
+
+    let command = parse_cli_command_from(["prodex", "doctor", "--runtime", "--tail-bytes", "42"])
+        .expect("doctor tail override should parse");
+    let Commands::Doctor(args) = command else {
+        panic!("expected doctor command");
+    };
+    assert_eq!(args.tail_bytes, 42);
+}
+
+#[test]
+fn runtime_doctor_summary_uses_configured_tail_bytes() {
+    let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex-home");
+    let log_dir = temp_dir.path.join("logs");
+    fs::create_dir_all(&prodex_home).expect("prodex home should be created");
+    fs::create_dir_all(&log_dir).expect("runtime log dir should be created");
+    let _prodex_home_guard = TestEnvVarGuard::set("PRODEX_HOME", prodex_home.to_str().unwrap());
+    let _runtime_log_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", log_dir.to_str().unwrap());
+    let log_path = log_dir.join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-tail-test.log"));
+    let early_marker =
+        "[2026-04-28T00:00:00Z] runtime_proxy_queue_overloaded lane=responses\n";
+    let filler = "x".repeat(RUNTIME_PROXY_DOCTOR_TAIL_BYTES + 64);
+    let late_marker = "[2026-04-28T00:00:01Z] first_local_chunk route=responses\n";
+    let log_text = format!("{early_marker}{filler}\n{late_marker}");
+    fs::write(&log_path, &log_text).expect("runtime log should be written");
+    fs::write(
+        runtime_proxy_latest_log_pointer_path(),
+        format!("{}\n", log_path.display()),
+    )
+    .expect("runtime latest pointer should be written");
+
+    let default_summary =
+        collect_runtime_doctor_summary_with_tail_bytes(RUNTIME_PROXY_DOCTOR_TAIL_BYTES);
+    assert_eq!(
+        runtime_doctor_marker_count(&default_summary, "runtime_proxy_queue_overloaded"),
+        0
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&default_summary, "first_local_chunk"),
+        1
+    );
+
+    let override_summary = collect_runtime_doctor_summary_with_tail_bytes(log_text.len());
+    assert_eq!(
+        runtime_doctor_marker_count(&override_summary, "runtime_proxy_queue_overloaded"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&override_summary, "first_local_chunk"),
+        1
+    );
 }
 
 #[test]

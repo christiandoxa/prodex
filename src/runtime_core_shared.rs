@@ -702,25 +702,184 @@ pub(super) fn runtime_proxy_lane_limits(
     }
 }
 
-pub(super) fn runtime_proxy_log_fields(message: &str) -> BTreeMap<String, String> {
-    let mut fields = BTreeMap::new();
-    for token in message.split_whitespace() {
-        let Some((key, value)) = token.split_once('=') else {
-            continue;
-        };
-        if key.is_empty() || value.is_empty() {
+#[derive(Debug, Clone)]
+pub(super) struct RuntimeProxyLogField<'a> {
+    key: &'a str,
+    value: Cow<'a, str>,
+}
+
+pub(super) fn runtime_proxy_log_field<'a>(
+    key: &'a str,
+    value: impl Into<Cow<'a, str>>,
+) -> RuntimeProxyLogField<'a> {
+    RuntimeProxyLogField {
+        key,
+        value: value.into(),
+    }
+}
+
+pub(super) fn runtime_proxy_structured_log_message<'a>(
+    event: &str,
+    fields: impl IntoIterator<Item = RuntimeProxyLogField<'a>>,
+) -> String {
+    let mut message = runtime_proxy_sanitize_log_fragment(event).into_owned();
+    for field in fields {
+        if field.key.is_empty() || runtime_proxy_log_key_needs_skip(field.key) {
             continue;
         }
-        fields.insert(key.to_string(), value.trim_matches('"').to_string());
+        if !message.is_empty() {
+            message.push(' ');
+        }
+        message.push_str(field.key);
+        message.push('=');
+        message.push_str(&runtime_proxy_format_log_field_value(&field.value));
+    }
+    message
+}
+
+fn runtime_proxy_log_key_needs_skip(key: &str) -> bool {
+    key.bytes()
+        .any(|byte| byte == b'=' || byte.is_ascii_whitespace())
+}
+
+fn runtime_proxy_format_log_field_value(value: &str) -> String {
+    let sanitized = runtime_proxy_sanitize_log_fragment(value);
+    if runtime_proxy_log_field_value_needs_quotes(&sanitized) {
+        serde_json::to_string(sanitized.as_ref()).unwrap_or_else(|_| "\"\"".to_string())
+    } else {
+        sanitized.into_owned()
+    }
+}
+
+fn runtime_proxy_sanitize_log_fragment(value: &str) -> Cow<'_, str> {
+    if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
+        Cow::Owned(value.replace(['\r', '\n'], " "))
+    } else {
+        Cow::Borrowed(value)
+    }
+}
+
+fn runtime_proxy_log_field_value_needs_quotes(value: &str) -> bool {
+    value.is_empty()
+        || value.bytes().any(|byte| byte.is_ascii_whitespace())
+        || value.contains('"')
+        || value.contains('\\')
+}
+
+fn runtime_proxy_skip_log_whitespace(message: &str, mut index: usize) -> usize {
+    let bytes = message.as_bytes();
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    index
+}
+
+fn runtime_proxy_skip_log_field_value(message: &str, mut index: usize) -> usize {
+    let bytes = message.as_bytes();
+    if index >= bytes.len() {
+        return index;
+    }
+    if bytes[index] == b'"' {
+        index += 1;
+        let mut escaped = false;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            match byte {
+                b'\\' => {
+                    escaped = true;
+                    index += 1;
+                }
+                b'"' => {
+                    index += 1;
+                    break;
+                }
+                _ => index += 1,
+            }
+        }
+        return index;
+    }
+    while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    index
+}
+
+fn runtime_proxy_parse_log_field_value(raw_value: &str) -> String {
+    if raw_value.starts_with('"') {
+        serde_json::from_str::<String>(raw_value)
+            .unwrap_or_else(|_| raw_value.trim_matches('"').to_string())
+    } else {
+        raw_value.trim_matches('"').to_string()
+    }
+}
+
+pub(super) fn runtime_proxy_log_fields(message: &str) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    let bytes = message.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        index = runtime_proxy_skip_log_whitespace(message, index);
+        if index >= bytes.len() {
+            break;
+        }
+
+        let key_start = index;
+        while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'=' {
+            while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+                index += 1;
+            }
+            continue;
+        }
+
+        let key = &message[key_start..index];
+        index += 1;
+        let value_start = index;
+        let value_end = runtime_proxy_skip_log_field_value(message, index);
+        index = value_end;
+        let raw_value = &message[value_start..value_end];
+        if key.is_empty() || raw_value.is_empty() {
+            continue;
+        }
+        fields.insert(
+            key.to_string(),
+            runtime_proxy_parse_log_field_value(raw_value),
+        );
     }
     fields
 }
 
 pub(super) fn runtime_proxy_log_event(message: &str) -> Option<&str> {
-    message
-        .split_whitespace()
-        .find(|token| !token.contains('='))
-        .filter(|token| !token.is_empty())
+    let bytes = message.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        index = runtime_proxy_skip_log_whitespace(message, index);
+        if index >= bytes.len() {
+            break;
+        }
+        let token_start = index;
+        while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
+            index += 1;
+        }
+        if index < bytes.len() && bytes[index] == b'=' {
+            index = runtime_proxy_skip_log_field_value(message, index + 1);
+            continue;
+        }
+        if token_start < index {
+            return Some(&message[token_start..index]);
+        }
+        while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+    }
+    None
 }
 
 fn runtime_proxy_format_log_line(message: &str, format: RuntimeLogFormat) -> String {
@@ -928,7 +1087,15 @@ mod tests {
 
         runtime_proxy_log_to_path(
             &log_path,
-            "selection route=responses profile=main note=\"hello\"\nnext",
+            &runtime_proxy_structured_log_message(
+                "selection",
+                [
+                    runtime_proxy_log_field("route", "responses"),
+                    runtime_proxy_log_field("profile", "main"),
+                    runtime_proxy_log_field("note", "hello next"),
+                    runtime_proxy_log_field("payload", "{\"kind\":\"sample\"}"),
+                ],
+            ),
         );
         runtime_proxy_flush_logs_for_path(&log_path);
 
@@ -938,7 +1105,9 @@ mod tests {
 
         assert_eq!(
             value.get("message").and_then(|value| value.as_str()),
-            Some("selection route=responses profile=main note=\"hello\" next")
+            Some(
+                "selection route=responses profile=main note=\"hello next\" payload=\"{\\\"kind\\\":\\\"sample\\\"}\""
+            )
         );
         assert_eq!(
             value.get("event").and_then(|value| value.as_str()),
@@ -960,12 +1129,51 @@ mod tests {
             value
                 .pointer("/fields/note")
                 .and_then(|value| value.as_str()),
-            Some("hello")
+            Some("hello next")
+        );
+        assert_eq!(
+            value
+                .pointer("/fields/payload")
+                .and_then(|value| value.as_str()),
+            Some("{\"kind\":\"sample\"}")
         );
         assert_eq!(
             value.get("pid").and_then(|value| value.as_u64()),
             Some(std::process::id().into())
         );
+    }
+
+    #[test]
+    fn runtime_proxy_structured_log_message_quotes_spaced_field_values() {
+        let message = runtime_proxy_structured_log_message(
+            "dispatch_error",
+            [
+                runtime_proxy_log_field("request", "42"),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("error", "failed with \"quoted\" value"),
+                runtime_proxy_log_field("detail", "line1\nline2"),
+                runtime_proxy_log_field("empty", ""),
+            ],
+        );
+
+        assert_eq!(
+            message,
+            "dispatch_error request=42 transport=http error=\"failed with \\\"quoted\\\" value\" detail=\"line1 line2\" empty=\"\""
+        );
+        assert_eq!(runtime_proxy_log_event(&message), Some("dispatch_error"));
+
+        let fields = runtime_proxy_log_fields(&message);
+        assert_eq!(fields.get("request").map(String::as_str), Some("42"));
+        assert_eq!(fields.get("transport").map(String::as_str), Some("http"));
+        assert_eq!(
+            fields.get("error").map(String::as_str),
+            Some("failed with \"quoted\" value")
+        );
+        assert_eq!(
+            fields.get("detail").map(String::as_str),
+            Some("line1 line2")
+        );
+        assert_eq!(fields.get("empty").map(String::as_str), Some(""));
     }
 
     #[test]

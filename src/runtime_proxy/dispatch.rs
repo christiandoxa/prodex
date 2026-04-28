@@ -1,5 +1,24 @@
 use super::*;
 
+fn runtime_proxy_log_dispatch_error(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    event: &str,
+    error: String,
+) {
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            event,
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("error", error),
+            ],
+        ),
+    );
+}
+
 pub(crate) fn handle_runtime_rotation_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
@@ -61,10 +80,7 @@ fn dispatch_runtime_http_proxy_request(
     let captured = match capture_runtime_proxy_request(&mut request) {
         Ok(captured) => captured,
         Err(err) => {
-            runtime_proxy_log(
-                shared,
-                format!("request={request_id} transport=http capture_error={err}"),
-            );
+            runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
             let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
             return;
         }
@@ -101,17 +117,19 @@ fn dispatch_runtime_http_proxy_request(
             Ok(response) => response,
             Err(err) => {
                 if is_runtime_proxy_transport_failure(&err) {
-                    runtime_proxy_log(
+                    runtime_proxy_log_dispatch_error(
                         shared,
-                        format!(
-                            "request={request_id} transport=http anthropic_transport_failure={err:#}"
-                        ),
+                        request_id,
+                        "anthropic_transport_failure",
+                        format!("{err:#}"),
                     );
                     return;
                 } else {
-                    runtime_proxy_log(
+                    runtime_proxy_log_dispatch_error(
                         shared,
-                        format!("request={request_id} transport=http anthropic_error={err:#}"),
+                        request_id,
+                        "anthropic_error",
+                        format!("{err:#}"),
                     );
                     RuntimeResponsesReply::Buffered(build_runtime_anthropic_error_parts(
                         502,
@@ -130,17 +148,19 @@ fn dispatch_runtime_http_proxy_request(
             Ok(response) => response,
             Err(err) => {
                 if is_runtime_proxy_transport_failure(&err) {
-                    runtime_proxy_log(
+                    runtime_proxy_log_dispatch_error(
                         shared,
-                        format!(
-                            "request={request_id} transport=http responses_transport_failure={err:#}"
-                        ),
+                        request_id,
+                        "responses_transport_failure",
+                        format!("{err:#}"),
                     );
                     return;
                 } else {
-                    runtime_proxy_log(
+                    runtime_proxy_log_dispatch_error(
                         shared,
-                        format!("request={request_id} transport=http responses_error={err:#}"),
+                        request_id,
+                        "responses_error",
+                        format!("{err:#}"),
                     );
                     RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
                         502,
@@ -157,17 +177,19 @@ fn dispatch_runtime_http_proxy_request(
         Ok(response) => response,
         Err(err) => {
             if is_runtime_proxy_transport_failure(&err) {
-                runtime_proxy_log(
+                runtime_proxy_log_dispatch_error(
                     shared,
-                    format!(
-                        "request={request_id} transport=http standard_transport_failure={err:#}"
-                    ),
+                    request_id,
+                    "standard_transport_failure",
+                    format!("{err:#}"),
                 );
                 return;
             } else {
-                runtime_proxy_log(
+                runtime_proxy_log_dispatch_error(
                     shared,
-                    format!("request={request_id} transport=http standard_error={err:#}"),
+                    request_id,
+                    "standard_error",
+                    format!("{err:#}"),
                 );
                 build_runtime_proxy_text_response(502, &err.to_string())
             }

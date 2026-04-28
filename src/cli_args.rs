@@ -243,9 +243,12 @@ pub(crate) struct DoctorArgs {
     /// Also probe each profile's quota endpoint.
     #[arg(long)]
     pub(crate) quota: bool,
-    /// Also summarize runtime proxy state and recent logs from /tmp.
+    /// Also summarize runtime proxy state and recent logs from the configured log directory.
     #[arg(long)]
     pub(crate) runtime: bool,
+    /// Bytes of runtime log tail to inspect for --runtime/--json.
+    #[arg(long, default_value_t = RUNTIME_PROXY_DOCTOR_TAIL_BYTES, value_name = "BYTES")]
+    pub(crate) tail_bytes: usize,
     /// Emit machine-readable JSON output. Supported together with --runtime.
     #[arg(long)]
     pub(crate) json: bool,

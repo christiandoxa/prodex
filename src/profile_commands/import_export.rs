@@ -21,6 +21,18 @@ const PROFILE_EXPORT_KEY_BYTES: usize = 32;
 const PROFILE_EXPORT_PBKDF2_ITERATIONS: u32 = if cfg!(test) { 1_000 } else { 600_000 };
 const PROFILE_EXPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_EXPORT_PASSWORD";
 const PROFILE_IMPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_IMPORT_PASSWORD";
+const IMPORT_AUTH_UPDATE_JOURNAL_DIR: &str = "profile-import-auth-journal";
+const IMPORT_AUTH_UPDATE_JOURNAL_VERSION: u32 = 1;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ImportedExistingProfileAuthUpdateJournal {
+    version: u32,
+    profile_name: String,
+    codex_home: String,
+    previous_email: Option<String>,
+    previous_auth_json: Option<String>,
+    created_at: String,
+}
 
 pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -97,6 +109,7 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
         rollback_imported_profiles(&mut state, &commit);
         return Err(err);
     }
+    cleanup_imported_auth_update_journals(&commit);
     audit_log_event_best_effort(
         "profile",
         "import",
@@ -538,19 +551,43 @@ fn apply_imported_existing_auth_updates(
                 secret_store::auth_json_path(&previous.codex_home).display()
             )
         })?;
-        let updated = update_existing_profile_auth(
+        let previous_email = previous.email.clone();
+        let journal_path = write_imported_auth_update_journal(
+            paths,
+            &update.target_profile_name,
+            &previous.codex_home,
+            previous_email.clone(),
+            previous_auth_json.clone(),
+        )?;
+        let updated = match update_existing_profile_auth(
             paths,
             state,
             &update.target_profile_name,
             update.email.as_deref(),
             &update.auth_json,
             false,
-        )?;
+        ) {
+            Ok(updated) => updated,
+            Err(err) => {
+                rollback_imported_auth_updates(
+                    state,
+                    &[ImportedExistingProfileAuthUpdate {
+                        profile_name: update.target_profile_name.clone(),
+                        codex_home: previous.codex_home,
+                        previous_auth_json,
+                        previous_email,
+                        journal_path: Some(journal_path),
+                    }],
+                );
+                return Err(err);
+            }
+        };
         transaction.record_existing_auth_update(ImportedExistingProfileAuthUpdate {
             profile_name: updated.profile_name,
             codex_home: updated.codex_home,
             previous_auth_json,
-            previous_email: previous.email,
+            previous_email,
+            journal_path: Some(journal_path),
         });
     }
 
@@ -628,6 +665,18 @@ pub(super) fn rollback_imported_auth_updates(
             );
         } else {
             let _ = fs::remove_file(secret_store::auth_json_path(&update.codex_home));
+        }
+    }
+}
+
+pub(super) fn cleanup_imported_auth_update_journals(commit: &ImportedProfilesCommit) {
+    for update in &commit.auth_updates {
+        let Some(journal_path) = update.journal_path.as_deref() else {
+            continue;
+        };
+        let _ = fs::remove_file(journal_path);
+        if let Some(parent) = journal_path.parent() {
+            let _ = fs::remove_dir(parent);
         }
     }
 }
@@ -809,6 +858,58 @@ fn unique_import_staging_home(paths: &AppPaths, profile_name: &str) -> PathBuf {
         profile_name,
         runtime_random_token("profile")
     ))
+}
+
+fn write_imported_auth_update_journal(
+    paths: &AppPaths,
+    profile_name: &str,
+    codex_home: &Path,
+    previous_email: Option<String>,
+    previous_auth_json: Option<String>,
+) -> Result<PathBuf> {
+    let journal_path = unique_imported_auth_update_journal_path(paths, profile_name)?;
+    let journal = ImportedExistingProfileAuthUpdateJournal {
+        version: IMPORT_AUTH_UPDATE_JOURNAL_VERSION,
+        profile_name: profile_name.to_string(),
+        codex_home: codex_home.display().to_string(),
+        previous_email,
+        previous_auth_json,
+        created_at: Local::now().to_rfc3339(),
+    };
+    let json = serde_json::to_string_pretty(&journal)
+        .context("failed to serialize auth update journal")?;
+    write_secret_text_file(&journal_path, &json)?;
+    Ok(journal_path)
+}
+
+fn unique_imported_auth_update_journal_path(
+    paths: &AppPaths,
+    profile_name: &str,
+) -> Result<PathBuf> {
+    let journal_root = ensure_imported_auth_update_journal_root(paths)?;
+    Ok(journal_root.join(format!(
+        "{}-{}.json",
+        profile_name,
+        runtime_random_token("auth")
+    )))
+}
+
+fn ensure_imported_auth_update_journal_root(paths: &AppPaths) -> Result<PathBuf> {
+    let journal_root = imported_auth_update_journal_root(paths);
+    fs::create_dir_all(&journal_root)
+        .with_context(|| format!("failed to create {}", journal_root.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(&journal_root, permissions)
+            .with_context(|| format!("failed to secure {}", journal_root.display()))?;
+    }
+    Ok(journal_root)
+}
+
+pub(super) fn imported_auth_update_journal_root(paths: &AppPaths) -> PathBuf {
+    paths.root.join(IMPORT_AUTH_UPDATE_JOURNAL_DIR)
 }
 
 pub(super) fn write_secret_text_file(path: &Path, content: &str) -> Result<()> {
