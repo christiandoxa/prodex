@@ -1285,7 +1285,8 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
 
     assert_eq!(response.status().as_u16(), 200);
     let body = read_runtime_http_stream_until(response, |body| {
-        body.contains("previous_response_not_found") || body.contains("\"code\":\"stale_continuation\"")
+        body.contains("previous_response_not_found")
+            || body.contains("\"code\":\"stale_continuation\"")
     });
     assert!(
         body.contains("previous_response_not_found"),
@@ -1313,7 +1314,9 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
             && !continuations
                 .response_profile_bindings
                 .contains_key("resp-second-next")
-            && !continuations.turn_state_bindings.contains_key("turn-second")
+            && !continuations
+                .turn_state_bindings
+                .contains_key("turn-second")
             && continuations
                 .statuses
                 .turn_state
@@ -1337,7 +1340,9 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
         "response id emitted before the committed failure should be cleared back out"
     );
     assert!(
-        !continuations.turn_state_bindings.contains_key("turn-second"),
+        !continuations
+            .turn_state_bindings
+            .contains_key("turn-second"),
         "turn_state affinity derived from a dead committed chain should be cleared"
     );
     assert!(
@@ -1458,9 +1463,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| {
-            log.contains("stale_continuation reason=previous_response_not_found_locked_affinity")
-        },
+        |log| log.contains("stale_continuation reason=previous_response_not_found_locked_affinity"),
         500,
         2_000,
         20,
@@ -1488,7 +1491,9 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
             && !continuations
                 .response_profile_bindings
                 .contains_key("resp-second-next")
-            && !continuations.turn_state_bindings.contains_key("turn-second")
+            && !continuations
+                .turn_state_bindings
+                .contains_key("turn-second")
             && continuations
                 .statuses
                 .turn_state
@@ -1512,7 +1517,9 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
         "response id emitted before the committed websocket failure should be cleared back out"
     );
     assert!(
-        !continuations.turn_state_bindings.contains_key("turn-second"),
+        !continuations
+            .turn_state_bindings
+            .contains_key("turn-second"),
         "turn_state affinity derived from a dead committed websocket chain should be cleared"
     );
     assert!(

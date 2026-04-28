@@ -52,6 +52,7 @@ fn previous_response_affinity_test_shared(
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths,
@@ -333,11 +334,7 @@ fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expir
             );
             let negative_cache = case.seeded_score.map(|score| {
                 (
-                    runtime_previous_response_negative_cache_key(
-                        &response_id,
-                        "main",
-                        route_kind,
-                    ),
+                    runtime_previous_response_negative_cache_key(&response_id, "main", route_kind),
                     RuntimeProfileHealth {
                         score,
                         updated_at: case.updated_at,
@@ -460,7 +457,10 @@ fn previous_response_negative_cache_keys_stay_route_scoped() {
                 "route-scoped cache should not release affinity"
             );
             assert_eq!(
-                runtime.profile_health.get(&seeded_key).map(|health| health.score),
+                runtime
+                    .profile_health
+                    .get(&seeded_key)
+                    .map(|health| health.score),
                 Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD),
                 "seeded route score should stay untouched"
             );

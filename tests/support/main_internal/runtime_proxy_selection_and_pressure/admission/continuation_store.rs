@@ -162,7 +162,6 @@ fn continuation_dead_status_present(
     status.is_some_and(|status| status.state == RuntimeContinuationBindingLifecycle::Dead)
 }
 
-
 #[test]
 fn runtime_continuation_status_pruning_uses_evidence_over_age() {
     let temp_dir = TestDir::isolated();

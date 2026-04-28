@@ -122,7 +122,8 @@ pub(super) fn set_test_websocket_io_timeout(
     }
 }
 
-pub(super) fn runtime_test_local_websocket_pair() -> (RuntimeLocalWebSocket, RuntimeUpstreamWebSocket) {
+pub(super) fn runtime_test_local_websocket_pair()
+-> (RuntimeLocalWebSocket, RuntimeUpstreamWebSocket) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("test websocket listener should bind");
     let addr = listener
         .local_addr()

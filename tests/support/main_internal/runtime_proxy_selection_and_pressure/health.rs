@@ -175,6 +175,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -255,6 +256,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -370,6 +372,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -482,6 +485,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -609,6 +613,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -724,6 +729,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -839,6 +845,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -963,6 +970,7 @@ fn compact_bad_pairing_does_not_degrade_responses_selection() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1087,6 +1095,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1196,6 +1205,7 @@ fn next_runtime_response_candidate_prefers_less_loaded_profile() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1305,6 +1315,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1420,6 +1431,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1518,6 +1530,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1625,6 +1638,7 @@ fn commit_runtime_proxy_profile_selection_skips_persist_when_nothing_changed() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1713,6 +1727,7 @@ fn commit_runtime_proxy_profile_selection_switches_runtime_but_not_global_profil
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1804,6 +1819,7 @@ fn commit_runtime_proxy_profile_selection_can_skip_current_profile_tracking() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1907,6 +1923,7 @@ fn commit_runtime_proxy_profile_selection_recovers_only_matching_route_profile_h
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -2022,6 +2039,7 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -2124,6 +2142,7 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };

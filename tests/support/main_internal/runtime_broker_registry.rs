@@ -1,8 +1,8 @@
 #[path = "../test_wait.rs"]
 mod test_wait;
 
-use std::process::Child;
 use std::os::unix::fs::PermissionsExt;
+use std::process::Child;
 
 use super::*;
 use test_wait::wait_for_poll;
@@ -125,7 +125,9 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
     target_thread
         .join()
         .expect("target health thread should finish");
-    proxy_thread.join().expect("proxy trap thread should finish");
+    proxy_thread
+        .join()
+        .expect("proxy trap thread should finish");
     assert_eq!(
         health.as_ref().map(|health| health.instance_token.as_str()),
         Some("instance")
@@ -266,7 +268,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
 
 #[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_broker_with_active_requests()
-{
+ {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "2000");
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {
@@ -647,8 +649,7 @@ fn find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe() 
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     let broker_key = "dead-compatible-key";
-    let server =
-        TinyServer::http("127.0.0.1:0").expect("dead compatible probe server should bind");
+    let server = TinyServer::http("127.0.0.1:0").expect("dead compatible probe server should bind");
     let listen_addr = server
         .server_addr()
         .to_ip()

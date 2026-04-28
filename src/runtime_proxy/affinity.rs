@@ -861,6 +861,8 @@ mod tests {
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             active_request_count: Arc::new(AtomicUsize::new(0)),
             active_request_limit: 8,
+            runtime_state_lock_wait_counters:
+                RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
             lane_admission: RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
                 responses: 8,
                 compact: 8,

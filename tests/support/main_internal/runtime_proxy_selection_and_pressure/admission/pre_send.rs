@@ -72,6 +72,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -93,6 +94,110 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
             assert_eq!(reason, "quota_exhausted_before_send");
         }
         _ => panic!("expected exhausted pre-send responses skip"),
+    }
+}
+
+#[test]
+fn precommit_quota_gate_skips_websocket_continuation_from_persisted_snapshot() {
+    let temp_dir = TestDir::isolated();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let runtime = RuntimeRotationState {
+        paths: paths.clone(),
+        state,
+        upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::from([(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: Local::now().timestamp(),
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 81,
+                five_hour_reset_at: Local::now().timestamp() + 3600,
+                weekly_status: RuntimeQuotaWindowStatus::Exhausted,
+                weekly_remaining_percent: 0,
+                weekly_reset_at: Local::now().timestamp() + 300,
+            },
+        )]),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = RuntimeRotationProxyShared {
+        async_client: reqwest::Client::builder().build().expect("async client"),
+        async_runtime: Arc::new(
+            TokioRuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("async runtime"),
+        ),
+        log_path: temp_dir.path.join("runtime-proxy.log"),
+        request_sequence: Arc::new(AtomicU64::new(1)),
+        state_save_revision: Arc::new(AtomicU64::new(0)),
+        local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
+        active_request_count: Arc::new(AtomicUsize::new(0)),
+        active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
+        lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
+        runtime: Arc::new(Mutex::new(runtime)),
+    };
+
+    match runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
+        shared: &shared,
+        profile_name: "main",
+        route_kind: RuntimeRouteKind::Websocket,
+        has_continuation_context: true,
+        reprobe_context: "websocket_precommit_reprobe",
+    })
+    .expect("websocket quota gate should succeed")
+    {
+        RuntimePrecommitQuotaGateDecision::Block {
+            reason,
+            summary,
+            source,
+        } => {
+            assert_eq!(
+                reason,
+                RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend
+            );
+            assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted);
+            assert_eq!(source, Some(RuntimeQuotaSource::PersistedSnapshot));
+        }
+        RuntimePrecommitQuotaGateDecision::Proceed => {
+            panic!("expected websocket precommit gate to block exhausted snapshot")
+        }
     }
 }
 
@@ -168,6 +273,7 @@ fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };

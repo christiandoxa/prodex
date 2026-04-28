@@ -343,8 +343,13 @@ fn runtime_proxy_next_request_id(shared: &RuntimeRotationProxyShared) -> u64 {
 pub fn main_entry() {
     if let Err(err) = run() {
         eprintln!("Error: {err:#}");
-        std::process::exit(1);
+        std::process::exit(main_entry_exit_code(&err));
     }
+}
+
+fn main_entry_exit_code(err: &anyhow::Error) -> i32 {
+    err.downcast_ref::<command_dispatch::ProdexCommandExit>()
+        .map_or(1, command_dispatch::ProdexCommandExit::code)
 }
 
 fn run() -> Result<()> {

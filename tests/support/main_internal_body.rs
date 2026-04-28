@@ -1,4 +1,5 @@
 use super::*;
+use crate::TestEnvVarGuard;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -8,16 +9,15 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use crate::TestEnvVarGuard;
 
+#[path = "main_internal/runtime_proxy_backend.rs"]
+mod runtime_proxy_backend;
 #[path = "main_internal/runtime_test_auth.rs"]
 mod runtime_test_auth;
 #[path = "main_internal/runtime_test_support.rs"]
 mod runtime_test_support;
 #[path = "main_internal/runtime_test_websocket.rs"]
 mod runtime_test_websocket;
-#[path = "main_internal/runtime_proxy_backend.rs"]
-mod runtime_proxy_backend;
 
 use runtime_proxy_backend::*;
 use runtime_test_auth::*;
@@ -250,6 +250,21 @@ fn runtime_probe_cache_freshness_distinguishes_fresh_stale_and_expired() {
 }
 
 #[test]
+fn main_entry_exit_code_respects_command_exit_errors() {
+    let err = command_dispatch::command_exit_error(42, "command-specific failure");
+
+    assert_eq!(main_entry_exit_code(&err), 42);
+    assert_eq!(format!("{err:#}"), "command-specific failure");
+}
+
+#[test]
+fn main_entry_exit_code_defaults_to_one_for_generic_errors() {
+    let err = anyhow::anyhow!("generic failure");
+
+    assert_eq!(main_entry_exit_code(&err), 1);
+}
+
+#[test]
 fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
     let temp_dir = TestDir::new();
     let now = Local::now().timestamp();
@@ -404,7 +419,6 @@ fn startup_probe_refresh_warms_current_profiles_when_snapshots_are_empty() {
     );
 }
 
-
 #[path = "main_internal/runtime_proxy_selection_and_pressure.rs"]
 mod runtime_proxy_selection_and_pressure;
 
@@ -476,6 +490,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
         quota: false,
         runtime: true,
+        repair_import_auth_journals: false,
         tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
         json: true,
     })));
@@ -506,13 +521,22 @@ fn doctor_tail_bytes_cli_defaults_and_overrides() {
         panic!("expected doctor command");
     };
     assert_eq!(args.tail_bytes, RUNTIME_PROXY_DOCTOR_TAIL_BYTES);
+    assert!(!args.repair_import_auth_journals);
 
-    let command = parse_cli_command_from(["prodex", "doctor", "--runtime", "--tail-bytes", "42"])
-        .expect("doctor tail override should parse");
+    let command = parse_cli_command_from([
+        "prodex",
+        "doctor",
+        "--runtime",
+        "--repair-import-auth-journals",
+        "--tail-bytes",
+        "42",
+    ])
+    .expect("doctor tail override should parse");
     let Commands::Doctor(args) = command else {
         panic!("expected doctor command");
     };
     assert_eq!(args.tail_bytes, 42);
+    assert!(args.repair_import_auth_journals);
 }
 
 #[test]
@@ -526,8 +550,7 @@ fn runtime_doctor_summary_uses_configured_tail_bytes() {
     let _runtime_log_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", log_dir.to_str().unwrap());
     let log_path = log_dir.join(format!("{RUNTIME_PROXY_LOG_FILE_PREFIX}-tail-test.log"));
-    let early_marker =
-        "[2026-04-28T00:00:00Z] runtime_proxy_queue_overloaded lane=responses\n";
+    let early_marker = "[2026-04-28T00:00:00Z] runtime_proxy_queue_overloaded lane=responses\n";
     let filler = "x".repeat(RUNTIME_PROXY_DOCTOR_TAIL_BYTES + 64);
     let late_marker = "[2026-04-28T00:00:01Z] first_local_chunk route=responses\n";
     let log_text = format!("{early_marker}{filler}\n{late_marker}");
@@ -1012,10 +1035,7 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
         metrics
             .continuity_failure_reasons
             .chain_dead_upstream_confirmed,
-        BTreeMap::from([(
-            "previous_response_not_found_locked_affinity".to_string(),
-            1,
-        )])
+        BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1,)])
     );
 }
 
@@ -1113,12 +1133,8 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_runtime_broker_continuity_failures_total"));
     assert!(body.contains("binding_kind=\"response\""));
     assert!(body.contains("lifecycle=\"warm\""));
-    assert!(body.contains(
-        "event=\"chain_retried_owner\",listen_addr=\""
-    ));
-    assert!(body.contains(
-        "reason=\"websocket_reuse_watchdog_locked_affinity\""
-    ));
+    assert!(body.contains("event=\"chain_retried_owner\",listen_addr=\""));
+    assert!(body.contains("reason=\"websocket_reuse_watchdog_locked_affinity\""));
 }
 
 #[test]
@@ -1233,6 +1249,101 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
     assert_eq!(metrics.traffic.compact.admissions_total, 0);
     assert_eq!(metrics.traffic.compact.global_limit_rejections_total, 1);
     assert_eq!(metrics.traffic.compact.lane_limit_rejections_total, 0);
+}
+
+#[test]
+fn runtime_broker_metrics_snapshot_records_runtime_state_lock_wait() {
+    let temp_dir = TestDir::new();
+    let main_home = temp_dir.path.join("homes/main");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+
+    let runtime = RuntimeRotationState {
+        paths: AppPaths {
+            root: temp_dir.path.join("prodex"),
+            state_file: temp_dir.path.join("prodex/state.json"),
+            managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+            shared_codex_root: temp_dir.path.join("shared"),
+            legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+        },
+        state: AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        },
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        current_profile: "main".to_string(),
+        profile_usage_auth: BTreeMap::new(),
+        turn_state_bindings: BTreeMap::new(),
+        session_id_bindings: BTreeMap::new(),
+        continuation_statuses: RuntimeContinuationStatuses::default(),
+        profile_probe_cache: BTreeMap::new(),
+        profile_usage_snapshots: BTreeMap::new(),
+        profile_retry_backoff_until: BTreeMap::new(),
+        profile_transport_backoff_until: BTreeMap::new(),
+        profile_route_circuit_open_until: BTreeMap::new(),
+        profile_inflight: BTreeMap::new(),
+        profile_health: BTreeMap::new(),
+    };
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime.clone(), 2);
+    let isolated_shared = runtime_rotation_proxy_shared(&temp_dir, runtime, 2);
+    shared.reset_runtime_state_lock_wait_metrics_for_test();
+    isolated_shared.reset_runtime_state_lock_wait_metrics_for_test();
+
+    let runtime_guard = shared.runtime.lock().expect("runtime lock should succeed");
+    let worker_shared = shared.clone();
+    let (started_sender, started_receiver) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        started_sender.send(()).expect("snapshot start should send");
+        runtime_broker_metrics_snapshot(
+            &worker_shared,
+            &RuntimeBrokerMetadata {
+                broker_key: "broker".to_string(),
+                listen_addr: "127.0.0.1:12345".to_string(),
+                started_at: Local::now().timestamp(),
+                current_profile: "main".to_string(),
+                include_code_review: false,
+                instance_token: "instance".to_string(),
+                admin_token: "secret".to_string(),
+                prodex_version: None,
+                executable_path: None,
+                executable_sha256: None,
+            },
+        )
+        .expect("broker metrics snapshot should succeed");
+    });
+
+    started_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("snapshot thread should start");
+    thread::sleep(Duration::from_millis(25));
+    drop(runtime_guard);
+    worker.join().expect("snapshot thread should join");
+
+    let metrics = shared.runtime_state_lock_wait_metrics();
+    assert_eq!(metrics.wait_count, 1);
+    assert!(
+        metrics.wait_total_ns >= 1_000_000,
+        "lock wait total should include contention, got {metrics:?}"
+    );
+    assert!(
+        metrics.wait_max_ns >= 1_000_000,
+        "lock wait max should include contention, got {metrics:?}"
+    );
+    assert_eq!(
+        isolated_shared.runtime_state_lock_wait_metrics(),
+        RuntimeStateLockWaitMetrics::default()
+    );
 }
 
 #[test]
@@ -1455,8 +1566,14 @@ pressure_long_lived_queue_wait_budget_ms = 44
     assert_eq!(snapshot.lane_limits.compact, 5);
     assert_eq!(snapshot.lane_limits.websocket, 7);
     assert_eq!(snapshot.lane_limits.standard, 6);
-    assert_eq!(snapshot.precommit_attempt_limit, RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT);
-    assert_eq!(snapshot.precommit_budget_ms, RUNTIME_PROXY_PRECOMMIT_BUDGET_MS);
+    assert_eq!(
+        snapshot.precommit_attempt_limit,
+        RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT
+    );
+    assert_eq!(
+        snapshot.precommit_budget_ms,
+        RUNTIME_PROXY_PRECOMMIT_BUDGET_MS
+    );
     assert_eq!(
         snapshot.pressure_precommit_attempt_limit,
         RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT
@@ -2296,7 +2413,6 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
             .is_file()
     );
 }
-
 
 #[path = "main_internal/runtime_proxy_claude_and_anthropic.rs"]
 mod runtime_proxy_claude_and_anthropic;

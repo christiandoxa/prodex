@@ -60,9 +60,13 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
     if websocket {
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket upgrade path={}",
-                request.url()
+            runtime_proxy_structured_log_message(
+                "upgrade",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("path", request.url()),
+                ],
             ),
         );
         proxy_runtime_responses_websocket_request(request_id, request, shared);
@@ -88,12 +92,22 @@ fn dispatch_runtime_http_proxy_request(
 
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport=http path={} previous_response_id={:?} turn_state={:?} body_bytes={}",
-            captured.path_and_query,
-            runtime_request_previous_response_id(&captured),
-            runtime_request_turn_state(&captured),
-            captured.body.len()
+        runtime_proxy_structured_log_message(
+            "request_captured",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                runtime_proxy_log_field(
+                    "previous_response_id",
+                    format!("{:?}", runtime_request_previous_response_id(&captured)),
+                ),
+                runtime_proxy_log_field(
+                    "turn_state",
+                    format!("{:?}", runtime_request_turn_state(&captured)),
+                ),
+                runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
+            ],
         ),
     );
     let compat_surface = runtime_detect_request_compatibility_surface(&captured, "request", "http");
@@ -103,10 +117,17 @@ fn dispatch_runtime_http_proxy_request(
     {
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=http anthropic_compat headers={:?} body_snippet={}",
-                captured.headers,
-                runtime_proxy_body_snippet(&captured.body, 1024),
+            runtime_proxy_structured_log_message(
+                "anthropic_compat",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("headers", format!("{:?}", captured.headers)),
+                    runtime_proxy_log_field(
+                        "body_snippet",
+                        runtime_proxy_body_snippet(&captured.body, 1024),
+                    ),
+                ],
             ),
         );
     }
@@ -270,9 +291,13 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
     {
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket unsupported_path={}",
-                request.url()
+            runtime_proxy_structured_log_message(
+                "unsupported_path",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("unsupported_path", request.url()),
+                ],
             ),
         );
         let _ = request.respond(build_runtime_proxy_text_response(
@@ -286,9 +311,13 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
     let Some(websocket_key) = runtime_proxy_websocket_key(&handshake_request) else {
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket missing_sec_websocket_key path={}",
-                handshake_request.path_and_query
+            runtime_proxy_structured_log_message(
+                "missing_sec_websocket_key",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
+                ],
             ),
         );
         let _ = request.respond(build_runtime_proxy_text_response(
@@ -303,11 +332,24 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
     let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport=websocket upgraded path={} previous_response_id={:?} turn_state={:?}",
-            handshake_request.path_and_query,
-            runtime_request_previous_response_id(&handshake_request),
-            runtime_request_turn_state(&handshake_request)
+        runtime_proxy_structured_log_message(
+            "upgraded",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "websocket"),
+                runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
+                runtime_proxy_log_field(
+                    "previous_response_id",
+                    format!(
+                        "{:?}",
+                        runtime_request_previous_response_id(&handshake_request)
+                    ),
+                ),
+                runtime_proxy_log_field(
+                    "turn_state",
+                    format!("{:?}", runtime_request_turn_state(&handshake_request)),
+                ),
+            ],
         ),
     );
     let compat_surface =
@@ -321,7 +363,14 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
     ) {
         runtime_proxy_log(
             shared,
-            format!("request={request_id} transport=websocket session_error={err:#}"),
+            runtime_proxy_structured_log_message(
+                "session_error",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("session_error", format!("{err:#}")),
+                ],
+            ),
         );
         if !is_runtime_proxy_transport_failure(&err) {
             let _ = local_socket.close(None);
@@ -364,11 +413,30 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
     if std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some() {
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=http anthropic_translated path={} headers={:?} body_snippet={}",
-                translated_request.translated_request.path_and_query,
-                translated_request.translated_request.headers,
-                runtime_proxy_body_snippet(&translated_request.translated_request.body, 2048),
+            runtime_proxy_structured_log_message(
+                "anthropic_translated",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field(
+                        "path",
+                        translated_request
+                            .translated_request
+                            .path_and_query
+                            .as_str(),
+                    ),
+                    runtime_proxy_log_field(
+                        "headers",
+                        format!("{:?}", translated_request.translated_request.headers),
+                    ),
+                    runtime_proxy_log_field(
+                        "body_snippet",
+                        runtime_proxy_body_snippet(
+                            &translated_request.translated_request.body,
+                            2048,
+                        ),
+                    ),
+                ],
             ),
         );
     }
@@ -387,24 +455,54 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
     match &translated_response {
         RuntimeResponsesReply::Buffered(parts) => runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=http anthropic_translate_complete stream={} needs_buffered_translation={} status={} content_type={} body_bytes={} elapsed_ms={}",
-                translated_request.stream,
-                translated_request.server_tools.needs_buffered_translation(),
-                parts.status,
-                runtime_buffered_response_content_type(parts).unwrap_or("-"),
-                parts.body.len(),
-                translate_started_at.elapsed().as_millis(),
+            runtime_proxy_structured_log_message(
+                "anthropic_translate_complete",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("stream", translated_request.stream.to_string()),
+                    runtime_proxy_log_field(
+                        "needs_buffered_translation",
+                        translated_request
+                            .server_tools
+                            .needs_buffered_translation()
+                            .to_string(),
+                    ),
+                    runtime_proxy_log_field("status", parts.status.to_string()),
+                    runtime_proxy_log_field(
+                        "content_type",
+                        runtime_buffered_response_content_type(parts).unwrap_or("-"),
+                    ),
+                    runtime_proxy_log_field("body_bytes", parts.body.len().to_string()),
+                    runtime_proxy_log_field(
+                        "elapsed_ms",
+                        translate_started_at.elapsed().as_millis().to_string(),
+                    ),
+                ],
             ),
         ),
         RuntimeResponsesReply::Streaming(response) => runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=http anthropic_translate_complete stream={} needs_buffered_translation={} status={} body_streaming=true elapsed_ms={}",
-                translated_request.stream,
-                translated_request.server_tools.needs_buffered_translation(),
-                response.status,
-                translate_started_at.elapsed().as_millis(),
+            runtime_proxy_structured_log_message(
+                "anthropic_translate_complete",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("stream", translated_request.stream.to_string()),
+                    runtime_proxy_log_field(
+                        "needs_buffered_translation",
+                        translated_request
+                            .server_tools
+                            .needs_buffered_translation()
+                            .to_string(),
+                    ),
+                    runtime_proxy_log_field("status", response.status.to_string()),
+                    runtime_proxy_log_field("body_streaming", "true"),
+                    runtime_proxy_log_field(
+                        "elapsed_ms",
+                        translate_started_at.elapsed().as_millis().to_string(),
+                    ),
+                ],
             ),
         ),
     }

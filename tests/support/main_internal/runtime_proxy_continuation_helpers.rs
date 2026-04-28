@@ -167,8 +167,9 @@ pub(super) fn start_runtime_continuation_fixture(
     };
     state.save(&paths).expect("failed to save initial state");
 
-    let proxy = start_runtime_rotation_proxy(&paths, &state, active_profile, backend.base_url(), false)
-        .expect("runtime proxy should start");
+    let proxy =
+        start_runtime_rotation_proxy(&paths, &state, active_profile, backend.base_url(), false)
+            .expect("runtime proxy should start");
 
     RuntimeContinuationFixture {
         _temp_dir: temp_dir,
@@ -178,7 +179,11 @@ pub(super) fn start_runtime_continuation_fixture(
 }
 
 impl RuntimeContinuationFixture {
-    pub(super) fn post_json(&self, route: &str, body: serde_json::Value) -> reqwest::blocking::Response {
+    pub(super) fn post_json(
+        &self,
+        route: &str,
+        body: serde_json::Value,
+    ) -> reqwest::blocking::Response {
         self.post_json_with_headers(route, &[], body)
     }
 
@@ -225,7 +230,10 @@ impl RuntimeContinuationFixture {
     }
 }
 
-pub(super) fn assert_single_recorded_request<'a>(requests: &'a [String], len_message: &str) -> &'a str {
+pub(super) fn assert_single_recorded_request<'a>(
+    requests: &'a [String],
+    len_message: &str,
+) -> &'a str {
     assert_eq!(requests.len(), 1, "{len_message}: {requests:?}");
     &requests[0]
 }
@@ -257,7 +265,9 @@ pub(super) fn send_runtime_websocket_json(
         .expect("websocket request should send");
 }
 
-pub(super) fn read_runtime_websocket_text(socket: &mut RuntimeContinuationClientWebSocket) -> String {
+pub(super) fn read_runtime_websocket_text(
+    socket: &mut RuntimeContinuationClientWebSocket,
+) -> String {
     loop {
         match socket.read().expect("websocket response should read") {
             WsMessage::Text(text) => return text.to_string(),

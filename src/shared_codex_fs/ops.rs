@@ -77,9 +77,19 @@ fn ensure_shared_codex_target_is_file(path: &Path) -> Result<()> {
 }
 
 pub(super) fn copy_shared_codex_file(source: &Path, destination: &Path) -> Result<()> {
+    copy_shared_codex_file_replacing_existing(source, destination, "failed to copy")
+}
+
+pub(super) fn copy_shared_codex_file_replacing_existing(
+    source: &Path,
+    destination: &Path,
+    context: &str,
+) -> Result<()> {
+    ensure_shared_codex_parent_dir(destination)?;
+    remove_existing_shared_codex_file_destination(destination)?;
     fs::copy(source, destination).with_context(|| {
         format!(
-            "failed to copy {} to {}",
+            "{context} {} to {}",
             source.display(),
             destination.display()
         )
@@ -88,14 +98,11 @@ pub(super) fn copy_shared_codex_file(source: &Path, destination: &Path) -> Resul
 }
 
 pub(super) fn copy_legacy_shared_codex_file(source: &Path, destination: &Path) -> Result<()> {
-    fs::copy(source, destination).with_context(|| {
-        format!(
-            "failed to copy legacy shared Codex file {} to {}",
-            source.display(),
-            destination.display()
-        )
-    })?;
-    Ok(())
+    copy_shared_codex_file_replacing_existing(
+        source,
+        destination,
+        "failed to copy legacy shared Codex file",
+    )
 }
 
 pub(super) fn move_directory(source: &Path, destination: &Path) -> Result<()> {
@@ -124,13 +131,7 @@ pub(super) fn move_file(source: &Path, destination: &Path) -> Result<()> {
     match fs::rename(source, destination) {
         Ok(()) => Ok(()),
         Err(_) => {
-            fs::copy(source, destination).with_context(|| {
-                format!(
-                    "failed to copy {} to {}",
-                    source.display(),
-                    destination.display()
-                )
-            })?;
+            copy_shared_codex_file_replacing_existing(source, destination, "failed to copy")?;
             fs::remove_file(source)
                 .with_context(|| format!("failed to remove {}", source.display()))
         }
@@ -189,6 +190,47 @@ fn create_symlink(target: &Path, link: &Path, kind: SharedCodexEntryKind) -> Res
     Ok(())
 }
 
+fn remove_existing_shared_codex_file_destination(path: &Path) -> Result<()> {
+    let Some(metadata) = load_shared_codex_entry_metadata(path)? else {
+        return Ok(());
+    };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        bail!(
+            "expected {} to be a file for shared Codex state",
+            path.display()
+        );
+    }
+    make_shared_codex_path_writable_for_removal(path, &metadata)?;
+    fs::remove_file(path)
+        .or_else(|_| fs::remove_dir(path))
+        .with_context(|| format!("failed to remove {}", path.display()))?;
+    Ok(())
+}
+
+fn make_shared_codex_path_writable_for_removal(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    if metadata.file_type().is_symlink() || !metadata.permissions().readonly() {
+        return Ok(());
+    }
+
+    let mut permissions = metadata.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(permissions.mode() | 0o200);
+    }
+    #[cfg(windows)]
+    {
+        permissions.set_readonly(false);
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        permissions.set_readonly(false);
+    }
+    fs::set_permissions(path, permissions)
+        .with_context(|| format!("failed to make {} writable", path.display()))?;
+    Ok(())
+}
+
 pub(super) fn remove_path(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect {}", path.display()))?;
@@ -204,6 +246,7 @@ pub(super) fn remove_path(path: &Path) -> Result<()> {
     if metadata.is_dir() {
         fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))?;
     } else {
+        make_shared_codex_path_writable_for_removal(path, &metadata)?;
         fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
 

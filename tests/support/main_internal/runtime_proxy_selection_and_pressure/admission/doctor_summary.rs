@@ -12,6 +12,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 [2026-03-20 12:00:00.040 +07:00] runtime_proxy_active_limit_reached transport=http path=/backend-api/codex/responses active=12 limit=12
 [2026-03-20 12:00:00.050 +07:00] runtime_proxy_lane_limit_reached transport=http path=/backend-api/codex/responses lane=responses active=9 limit=9
 [2026-03-20 12:00:00.055 +07:00] runtime_proxy_admission_recovered transport=http path=/backend-api/codex/responses waited_ms=20
+[2026-03-20 12:00:00.056 +07:00] runtime_proxy_overload_backoff until=123 reason=active_request_limit
 [2026-03-20 12:00:00.060 +07:00] profile_inflight_saturated profile=main hard_limit=8
 [2026-03-20 12:00:00.070 +07:00] runtime_proxy_queue_overloaded transport=http path=/backend-api/codex/responses reason=long_lived_queue_full
 [2026-03-20 12:00:00.072 +07:00] runtime_proxy_queue_wait_started transport=http path=/backend-api/codex/responses budget_ms=120 poll_ms=10 reason=long_lived_queue_full
@@ -44,7 +45,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
 "#,
         );
 
-    assert!((37..=38).contains(&summary.line_count));
+    assert!((38..=39).contains(&summary.line_count));
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_queue_overloaded"),
         1
@@ -63,6 +64,10 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     );
     assert_eq!(
         runtime_doctor_marker_count(&summary, "runtime_proxy_admission_recovered"),
+        1
+    );
+    assert_eq!(
+        runtime_doctor_marker_count(&summary, "runtime_proxy_overload_backoff"),
         1
     );
     assert_eq!(
@@ -199,7 +204,7 @@ fn runtime_doctor_summary_counts_recent_runtime_markers() {
     assert_eq!(
         summary.failure_class_counts,
         BTreeMap::from([
-            ("admission".to_string(), 8),
+            ("admission".to_string(), 9),
             ("auth".to_string(), 1),
             ("continuation".to_string(), 5),
             ("persistence".to_string(), 1),

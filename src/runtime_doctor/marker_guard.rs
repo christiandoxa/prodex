@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
-const RUNTIME_LOG_FUNCTIONS: &[&str] = &["runtime_proxy_log", "runtime_proxy_log_to_path"];
+const RUNTIME_LOG_FUNCTIONS: &[&str] = &[
+    "runtime_proxy_log",
+    "runtime_proxy_log_to_path",
+    "runtime_proxy_structured_log_message",
+];
 
 const RUNTIME_MARKER_PREFIXES: &[&str] = &[
     "chain",
@@ -146,7 +150,12 @@ fn collect_runtime_log_marker_candidates(
             + 1;
         let display_path = path.strip_prefix(manifest_dir).unwrap_or(path);
         let location = format!("{}:{line_number}", display_path.display());
-        for message in runtime_log_message_format_strings(call_body) {
+        let messages = if function_name == "runtime_proxy_structured_log_message" {
+            runtime_structured_log_message_events(call_body)
+        } else {
+            runtime_log_message_format_strings(call_body)
+        };
+        for message in messages {
             for marker in runtime_log_marker_tokens(&message) {
                 candidates
                     .entry(marker)
@@ -239,6 +248,62 @@ fn runtime_log_message_format_strings(call_body: &str) -> Vec<String> {
         index += 1;
     }
     Vec::new()
+}
+
+fn runtime_structured_log_message_events(call_body: &str) -> Vec<String> {
+    let mut string_start = 0;
+    while call_body
+        .as_bytes()
+        .get(string_start)
+        .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == b'&')
+    {
+        string_start += 1;
+    }
+    read_string_literal(call_body, string_start)
+        .map(|(_, event)| vec![event])
+        .unwrap_or_default()
+}
+
+#[test]
+fn runtime_doctor_marker_guard_reads_structured_log_message_events() {
+    assert!(RUNTIME_LOG_FUNCTIONS.contains(&"runtime_proxy_structured_log_message"));
+
+    let manifest_dir = Path::new("/workspace");
+    let path = manifest_dir.join("src/runtime_proxy/sample.rs");
+    let source = r#"
+fn sample(shared: &RuntimeRotationProxyShared) {
+    let message = runtime_proxy_structured_log_message(
+        "selection_pick",
+        [
+            runtime_proxy_log_field("route", "responses"),
+            runtime_proxy_log_field("profile", "main"),
+        ],
+    );
+    runtime_proxy_log(shared, message);
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "runtime_proxy_queue_overloaded",
+            [
+                runtime_proxy_log_field("reason", "queue_full"),
+                runtime_proxy_log_field("debug", format!("{:?}", (1, 2))),
+            ],
+        ),
+    );
+}
+"#;
+    let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
+
+    collect_runtime_log_marker_candidates(
+        manifest_dir,
+        &path,
+        source,
+        "runtime_proxy_structured_log_message",
+        &mut candidates,
+    );
+
+    assert!(candidates.contains_key("selection_pick"));
+    assert!(candidates.contains_key("runtime_proxy_queue_overloaded"));
 }
 
 fn runtime_log_marker_tokens(message: &str) -> Vec<String> {

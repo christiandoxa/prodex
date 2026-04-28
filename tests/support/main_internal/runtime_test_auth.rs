@@ -200,7 +200,11 @@ impl TokenAwareServer {
         )
     }
 
-    pub(super) fn start_usage(expected_token: &str, expected_account_id: &str, email: &str) -> Self {
+    pub(super) fn start_usage(
+        expected_token: &str,
+        expected_account_id: &str,
+        email: &str,
+    ) -> Self {
         Self::start(
             TokenAwareServerMode::Usage,
             expected_token,

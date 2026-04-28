@@ -557,8 +557,8 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_session_tool_ou
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_blocks_header_session_tool_output_replay(
-) {
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_header_session_tool_output_replay()
+{
     let request = tool_output_only_request()
         .previous_response_id("resp_123")
         .session_header("sess_123")
@@ -615,8 +615,8 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_header_session_
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_blocks_turn_metadata_session_message_followups(
-) {
+fn runtime_request_previous_response_fresh_fallback_shape_blocks_turn_metadata_session_message_followups()
+ {
     let request = message_followup_request()
         .previous_response_id("resp_123")
         .turn_metadata_session("sess_123")
@@ -635,8 +635,7 @@ fn runtime_request_previous_response_fresh_fallback_shape_blocks_turn_metadata_s
 }
 
 #[test]
-fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_scoped_empty_input()
-{
+fn runtime_request_previous_response_fresh_fallback_shape_classifies_session_scoped_empty_input() {
     let request = empty_input_request()
         .previous_response_id("resp_123")
         .session_id("sess_123")
@@ -747,20 +746,19 @@ fn runtime_previous_response_not_found_decision_matrix_stays_consistent() {
                             _ => None,
                         };
                         let expected_stale_continuation = !has_turn_state_retry;
-                        let expected_fresh_fallback_blocked_without_affinity =
-                            !has_turn_state_retry
-                                && !request_requires_locked_previous_response_affinity;
-                        let expected_observability = if expected_fresh_fallback_blocked_without_affinity
-                        {
-                            match fallback_case.fresh_fallback_shape() {
+                        let expected_fresh_fallback_blocked_without_affinity = !has_turn_state_retry
+                            && !request_requires_locked_previous_response_affinity;
+                        let expected_observability =
+                            if expected_fresh_fallback_blocked_without_affinity {
+                                match fallback_case.fresh_fallback_shape() {
                                 Some(
                                     RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
                                 ) => Some("blocked_nonreplayable_without_affinity"),
                                 _ => Some("blocked_without_affinity"),
                             }
-                        } else {
-                            None
-                        };
+                            } else {
+                                None
+                            };
                         let case_label = format!(
                             "route={} turn_state={} trusted_affinity={} fallback={} retry_index={}",
                             previous_response_not_found_route_label(route),
@@ -792,20 +790,17 @@ fn runtime_previous_response_not_found_decision_matrix_stays_consistent() {
                         );
                         assert_eq!(decision.retry_delay, expected_retry_delay, "{}", case_label);
                         assert_eq!(
-                            decision.retry_reason,
-                            expected_retry_reason,
+                            decision.retry_reason, expected_retry_reason,
                             "{}",
                             case_label
                         );
                         assert_eq!(
-                            decision.chain_retry_reason,
-                            expected_chain_retry_reason,
+                            decision.chain_retry_reason, expected_chain_retry_reason,
                             "{}",
                             case_label
                         );
                         assert_eq!(
-                            decision.stale_continuation,
-                            expected_stale_continuation,
+                            decision.stale_continuation, expected_stale_continuation,
                             "{}",
                             case_label
                         );
@@ -901,19 +896,21 @@ fn websocket_session_header_does_not_make_message_followup_replayable() {
 
 #[test]
 fn runtime_previous_response_fresh_fallback_policy_is_explicitly_fail_closed() {
-    let policy =
-        runtime_previous_response_fresh_fallback_policy(RuntimePreviousResponseFreshFallbackPolicyInput {
+    let policy = runtime_previous_response_fresh_fallback_policy(
+        RuntimePreviousResponseFreshFallbackPolicyInput {
             has_previous_response_context: true,
             request_requires_locked_previous_response_affinity: false,
             fresh_fallback_shape: Some(
                 RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay,
             ),
-        });
+        },
+    );
 
     assert_eq!(
         policy,
         RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-            request_shape: RuntimePreviousResponseFreshFallbackPolicyShape::SessionScopedFreshReplay,
+            request_shape:
+                RuntimePreviousResponseFreshFallbackPolicyShape::SessionScopedFreshReplay,
         }
     );
     assert!(!policy.allows_fresh_fallback());
@@ -963,8 +960,8 @@ fn websocket_previous_response_not_found_fallback_policy_is_explicitly_fail_clos
 
 #[test]
 fn quota_blocked_affinity_release_policy_preserves_unclassified_release_behavior() {
-    let policy = runtime_quota_blocked_affinity_release_policy(
-        RuntimeQuotaBlockedAffinityReleaseRequest {
+    let policy =
+        runtime_quota_blocked_affinity_release_policy(RuntimeQuotaBlockedAffinityReleaseRequest {
             affinity: RuntimeCandidateAffinity::new(
                 RuntimeRouteKind::Responses,
                 "main",
@@ -975,10 +972,198 @@ fn quota_blocked_affinity_release_policy_preserves_unclassified_release_behavior
                 true,
             ),
             fresh_fallback_shape: None,
+        });
+
+    assert_eq!(
+        policy,
+        RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity
+    );
+}
+
+#[test]
+fn runtime_candidate_no_rotate_affinity_makes_hard_affinity_explicit() {
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Responses,
+            "main",
+            Some("main"),
+            None,
+            None,
+            None,
+            false,
+        )),
+        Some(RuntimeNoRotateAffinity::Strict)
+    );
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Responses,
+            "main",
+            None,
+            Some("main"),
+            None,
+            None,
+            true,
+        )),
+        Some(RuntimeNoRotateAffinity::TrustedPreviousResponse)
+    );
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Responses,
+            "main",
+            None,
+            Some("main"),
+            None,
+            None,
+            false,
+        )),
+        None
+    );
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(RuntimeCandidateAffinity::new(
+            RuntimeRouteKind::Compact,
+            "main",
+            None,
+            None,
+            None,
+            Some("main"),
+            false,
+        )),
+        Some(RuntimeNoRotateAffinity::CompactSession)
+    );
+}
+
+fn runtime_shared_for_affinity_selection(
+    temp_dir: &TestDir,
+    response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
+) -> RuntimeRotationProxyShared {
+    let now = Local::now().timestamp();
+    runtime_rotation_proxy_shared(
+        temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: temp_dir.path.join("homes/main"),
+                            managed: true,
+                            email: None,
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: temp_dir.path.join("homes/second"),
+                            managed: true,
+                            email: None,
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings,
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage_with_main_windows(0, 300, 95, 86_400)),
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    RuntimeProfileProbeCacheEntry {
+                        checked_at: now,
+                        auth: AuthSummary {
+                            label: "chatgpt".to_string(),
+                            quota_compatible: true,
+                        },
+                        result: Ok(usage_with_main_windows(95, 18_000, 95, 604_800)),
+                    },
+                ),
+            ]),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
         },
+        usize::MAX,
+    )
+}
+
+#[test]
+fn response_selection_preserves_bound_previous_response_affinity_despite_quota() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(
+        &temp_dir,
+        BTreeMap::from([(
+            "resp_123".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
     );
 
-    assert_eq!(policy, RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity);
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        &BTreeSet::new(),
+        None,
+        Some("main"),
+        None,
+        None,
+        false,
+        Some("resp_123"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("main"));
+}
+
+#[test]
+fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        &BTreeSet::new(),
+        None,
+        Some("main"),
+        None,
+        None,
+        false,
+        Some("resp_unbound"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
 }
 
 #[test]
@@ -996,18 +1181,22 @@ fn quota_blocked_previous_response_fresh_fallback_blocks_tool_output_only() {
 
 #[test]
 fn quota_blocked_previous_response_fresh_fallback_blocks_session_scoped_requests() {
-    assert!(!runtime_quota_blocked_previous_response_fresh_fallback_allowed(
-        Some("resp_123"),
-        true,
-        false,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
-    ));
-    assert!(!runtime_quota_blocked_previous_response_fresh_fallback_allowed(
-        Some("resp_123"),
-        true,
-        false,
-        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
-    ));
+    assert!(
+        !runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+            Some("resp_123"),
+            true,
+            false,
+            Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
+        )
+    );
+    assert!(
+        !runtime_quota_blocked_previous_response_fresh_fallback_allowed(
+            Some("resp_123"),
+            true,
+            false,
+            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
+        )
+    );
 }
 
 #[test]
@@ -1836,7 +2025,8 @@ fn caveman_command_accepts_full_access_shortcut_after_mem_prefix() {
 
     let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
     assert!(mem_mode);
-    let (launch_args, include_code_review) = prepare_codex_launch_args(&codex_args, args.full_access);
+    let (launch_args, include_code_review) =
+        prepare_codex_launch_args(&codex_args, args.full_access);
     assert_eq!(
         launch_args,
         vec![
@@ -1937,7 +2127,9 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         &"model_providers.prodex-local.base_url=\"http://127.0.0.1:8131/v1\"".to_string()
     ));
     assert!(rendered.contains(&"model_providers.prodex-local.wire_api=\"responses\"".to_string()));
-    assert!(rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string()));
+    assert!(
+        rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string())
+    );
     assert!(rendered.contains(&"model_context_window=16384".to_string()));
     assert!(rendered.contains(&"model_auto_compact_token_limit=14000".to_string()));
     assert!(rendered.contains(&"web_search=\"disabled\"".to_string()));
@@ -1977,10 +2169,12 @@ fn super_command_url_keeps_v1_path_when_provided() {
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    assert!(rendered.contains(
-        &"model_providers.prodex-local.base_url=\"http://host.docker.internal:11434/v1\""
-            .to_string()
-    ));
+    assert!(
+        rendered.contains(
+            &"model_providers.prodex-local.base_url=\"http://host.docker.internal:11434/v1\""
+                .to_string()
+        )
+    );
 }
 
 #[test]

@@ -74,6 +74,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths: paths.clone(),
@@ -163,6 +164,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths,
@@ -249,6 +251,7 @@ fn response_affinity_skips_dead_continuation_status() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths,
@@ -342,6 +345,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths,
@@ -446,6 +450,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths,

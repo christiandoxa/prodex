@@ -75,6 +75,7 @@ pub struct RuntimeBrokerSnapshot {
     pub active_requests: u64,
     pub active_request_limit: u64,
     pub local_overload_backoff_remaining_seconds: u64,
+    pub runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, u64>,
     pub retry_backoffs: u64,
@@ -85,6 +86,13 @@ pub struct RuntimeBrokerSnapshot {
     pub continuations: RuntimeBrokerContinuationMetrics,
     pub previous_response_continuity: RuntimeBrokerPreviousResponseContinuityMetrics,
     pub continuity_failure_reasons: RuntimeBrokerContinuityFailureReasonMetrics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RuntimeBrokerStateLockWaitMetrics {
+    pub wait_total_ns: u64,
+    pub wait_count: u64,
+    pub wait_max_ns: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +149,21 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "prodex_runtime_broker_local_overload_backoff_remaining_seconds",
             "Remaining backoff time for local overload shedding.",
             self.snapshot.local_overload_backoff_remaining_seconds as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_runtime_state_lock_wait_total_seconds",
+            "Cumulative time spent waiting for the runtime state lock.",
+            self.snapshot.runtime_state_lock_wait.wait_total_ns as f64 / 1_000_000_000.0,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_runtime_state_lock_acquisitions_total",
+            "Cumulative runtime state lock acquisitions observed by instrumented call sites.",
+            self.snapshot.runtime_state_lock_wait.wait_count as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_runtime_state_lock_wait_max_seconds",
+            "Maximum observed wait for the runtime state lock.",
+            self.snapshot.runtime_state_lock_wait.wait_max_ns as f64 / 1_000_000_000.0,
         );
         self.render_broker_gauge(
             "prodex_runtime_broker_retry_backoffs",
@@ -355,6 +378,20 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
     fn render_broker_gauge(&mut self, metric_name: &str, help: &str, value: f64) {
         self.push_help(metric_name, help);
         push_type(&mut self.out, metric_name, "gauge");
+        push_gauge(
+            &mut self.out,
+            metric_name,
+            labels(&[
+                ("broker_key", self.snapshot.broker_key.as_str()),
+                ("listen_addr", self.snapshot.listen_addr.as_str()),
+            ]),
+            value,
+        );
+    }
+
+    fn render_broker_counter(&mut self, metric_name: &str, help: &str, value: f64) {
+        self.push_help(metric_name, help);
+        push_type(&mut self.out, metric_name, "counter");
         push_gauge(
             &mut self.out,
             metric_name,
@@ -691,6 +728,11 @@ mod tests {
             active_requests: 5,
             active_request_limit: 12,
             local_overload_backoff_remaining_seconds: 0,
+            runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics {
+                wait_total_ns: 25_000_000,
+                wait_count: 3,
+                wait_max_ns: 10_000_000,
+            },
             traffic: RuntimeBrokerTrafficMetrics {
                 responses: RuntimeBrokerLaneMetrics {
                     active: 3,
@@ -788,6 +830,13 @@ mod tests {
         assert!(rendered.contains("# HELP prodex_runtime_broker_info"));
         assert!(rendered.contains("# TYPE prodex_runtime_broker_info gauge"));
         assert!(rendered.contains("prodex_runtime_broker_active_requests"));
+        assert!(rendered.contains("prodex_runtime_broker_runtime_state_lock_wait_total_seconds"));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_runtime_state_lock_acquisitions_total{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 3"
+        ));
+        assert!(rendered.contains(
+            "prodex_runtime_broker_runtime_state_lock_wait_max_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.01"
+        ));
         assert!(rendered.contains("prodex_runtime_broker_lane_admissions_total"));
         assert!(rendered.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
         assert!(rendered.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));

@@ -4,6 +4,33 @@ mod routed_command;
 
 use routed_command::{CommandAction, RoutedCommand};
 
+#[derive(Debug)]
+pub(crate) struct ProdexCommandExit {
+    code: i32,
+    message: String,
+}
+
+impl ProdexCommandExit {
+    pub(crate) fn code(&self) -> i32 {
+        self.code
+    }
+}
+
+impl std::fmt::Display for ProdexCommandExit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ProdexCommandExit {}
+
+pub(crate) fn command_exit_error(code: i32, message: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(ProdexCommandExit {
+        code,
+        message: message.into(),
+    })
+}
+
 macro_rules! impl_command_action {
     ($($ty:ty),+ $(,)?) => {
         $(

@@ -246,6 +246,9 @@ pub(crate) struct DoctorArgs {
     /// Also summarize runtime proxy state and recent logs from the configured log directory.
     #[arg(long)]
     pub(crate) runtime: bool,
+    /// Recover orphaned profile import auth rollback journals before reporting.
+    #[arg(long)]
+    pub(crate) repair_import_auth_journals: bool,
     /// Bytes of runtime log tail to inspect for --runtime/--json.
     #[arg(long, default_value_t = RUNTIME_PROXY_DOCTOR_TAIL_BYTES, value_name = "BYTES")]
     pub(crate) tail_bytes: usize,

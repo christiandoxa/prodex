@@ -730,6 +730,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -1442,24 +1443,28 @@ fn previous_response_release_preserves_session_and_compact_session_lineage_for_c
     .expect("compact session lineage should be recorded");
     wait_for_runtime_background_queues_idle();
 
-    assert!(!release_runtime_previous_response_affinity(
-        &shared,
-        "second",
-        Some("resp-second"),
-        Some("turn-second"),
-        Some("sess-compact"),
-        RuntimeRouteKind::Responses,
-    )
-    .expect("first not-found should defer release"));
-    assert!(release_runtime_previous_response_affinity(
-        &shared,
-        "second",
-        Some("resp-second"),
-        Some("turn-second"),
-        Some("sess-compact"),
-        RuntimeRouteKind::Responses,
-    )
-    .expect("second not-found should release response and turn-state affinity"));
+    assert!(
+        !release_runtime_previous_response_affinity(
+            &shared,
+            "second",
+            Some("resp-second"),
+            Some("turn-second"),
+            Some("sess-compact"),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("first not-found should defer release")
+    );
+    assert!(
+        release_runtime_previous_response_affinity(
+            &shared,
+            "second",
+            Some("resp-second"),
+            Some("turn-second"),
+            Some("sess-compact"),
+            RuntimeRouteKind::Responses,
+        )
+        .expect("second not-found should release response and turn-state affinity")
+    );
     wait_for_runtime_background_queues_idle();
 
     let compact_session_key = runtime_compact_session_lineage_key("sess-compact");
@@ -1642,7 +1647,9 @@ fn clear_runtime_stale_previous_response_binding_marks_dead_tombstone() {
     );
 }
 
-fn runtime_shared_for_dead_response_binding_cleanup(temp_dir: &TestDir) -> RuntimeRotationProxyShared {
+fn runtime_shared_for_dead_response_binding_cleanup(
+    temp_dir: &TestDir,
+) -> RuntimeRotationProxyShared {
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
 
@@ -2015,7 +2022,9 @@ fn websocket_success_without_turn_state_keeps_compact_lineage_alive() {
     {
         let runtime = shared.runtime.lock().expect("runtime lock should succeed");
         assert!(
-            runtime.session_id_bindings.contains_key(&compact_session_key),
+            runtime
+                .session_id_bindings
+                .contains_key(&compact_session_key),
             "compact session lineage should survive until a successor turn_state exists"
         );
         assert_eq!(
@@ -2129,10 +2138,12 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
         ],
         body: br#"{"input":[],"stream":true,"previous_response_id":"resp-second"}"#.to_vec(),
     };
-    let inflight_guard = acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
-        .expect("responses inflight guard should be acquired");
-    let response = send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
-        .expect("responses follow-up should reach upstream");
+    let inflight_guard =
+        acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
+            .expect("responses inflight guard should be acquired");
+    let response =
+        send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
+            .expect("responses follow-up should reach upstream");
     match prepare_runtime_proxy_responses_success(
         RuntimeResponsesSuccessContext {
             request_id: 1,
@@ -2157,7 +2168,9 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
     {
         let runtime = shared.runtime.lock().expect("runtime lock should succeed");
         assert!(
-            runtime.session_id_bindings.contains_key(&compact_session_key),
+            runtime
+                .session_id_bindings
+                .contains_key(&compact_session_key),
             "compact session lineage should survive until a successor turn_state exists"
         );
         assert_eq!(
@@ -2267,7 +2280,9 @@ fn websocket_success_with_turn_state_releases_compact_lineage() {
     {
         let runtime = shared.runtime.lock().expect("runtime lock should succeed");
         assert!(
-            !runtime.session_id_bindings.contains_key(&compact_session_key),
+            !runtime
+                .session_id_bindings
+                .contains_key(&compact_session_key),
             "compact session lineage should be released once a successor turn_state exists"
         );
         assert_eq!(
@@ -2363,10 +2378,12 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
         ],
         body: br#"{"input":[],"stream":true}"#.to_vec(),
     };
-    let inflight_guard = acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
-        .expect("responses inflight guard should be acquired");
-    let response = send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
-        .expect("responses request should reach upstream");
+    let inflight_guard =
+        acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
+            .expect("responses inflight guard should be acquired");
+    let response =
+        send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
+            .expect("responses request should reach upstream");
     match prepare_runtime_proxy_responses_success(
         RuntimeResponsesSuccessContext {
             request_id: 1,
@@ -2395,7 +2412,9 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
             "successor response turn_state should be remembered before compact lineage release"
         );
         assert!(
-            !runtime.session_id_bindings.contains_key(&compact_session_key),
+            !runtime
+                .session_id_bindings
+                .contains_key(&compact_session_key),
             "compact session lineage should be released once a successor turn_state exists"
         );
         assert_eq!(
@@ -2547,6 +2566,7 @@ fn optimistic_current_candidate_skips_transport_backoff() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -2852,6 +2872,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -2927,6 +2948,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -3010,6 +3032,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -3092,6 +3115,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -3177,6 +3201,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
@@ -3256,6 +3281,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit: usize::MAX,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };

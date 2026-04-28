@@ -28,7 +28,10 @@ pub(super) fn ci_runtime_proxy_timeout_guard(
     TestEnvVarGuard::set(env_key, &ci_timing_budget_ms(local_ms, ci_ms))
 }
 
-pub(super) fn ci_runtime_proxy_admission_wait_budget_guard(local_ms: u64, ci_ms: u64) -> TestEnvVarGuard {
+pub(super) fn ci_runtime_proxy_admission_wait_budget_guard(
+    local_ms: u64,
+    ci_ms: u64,
+) -> TestEnvVarGuard {
     ci_runtime_proxy_timeout_guard(
         "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
         local_ms,
@@ -200,7 +203,10 @@ pub(super) fn stale_critical_runtime_usage_snapshot(now: i64) -> RuntimeProfileU
     }
 }
 
-pub(super) fn ready_runtime_usage_snapshot(now: i64, remaining_percent: i64) -> RuntimeProfileUsageSnapshot {
+pub(super) fn ready_runtime_usage_snapshot(
+    now: i64,
+    remaining_percent: i64,
+) -> RuntimeProfileUsageSnapshot {
     RuntimeProfileUsageSnapshot {
         checked_at: now,
         five_hour_status: RuntimeQuotaWindowStatus::Ready,
@@ -239,6 +245,7 @@ pub(super) fn runtime_rotation_proxy_shared(
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit,
+        runtime_state_lock_wait_counters: RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(active_request_limit),
         runtime: Arc::new(Mutex::new(runtime)),
     }
@@ -260,7 +267,12 @@ impl RuntimeProxyFixtureBuilder {
         self
     }
 
-    pub(super) fn profile_health(mut self, key: impl Into<String>, score: u32, updated_at: i64) -> Self {
+    pub(super) fn profile_health(
+        mut self,
+        key: impl Into<String>,
+        score: u32,
+        updated_at: i64,
+    ) -> Self {
         self.profile_health
             .insert(key.into(), RuntimeProfileHealth { score, updated_at });
         self
@@ -492,7 +504,6 @@ where
     }
 }
 
-
 pub(super) fn write_versioned_runtime_sidecar<T: Serialize>(
     path: &Path,
     backup_path: &Path,
@@ -511,7 +522,9 @@ pub(super) fn write_versioned_runtime_sidecar<T: Serialize>(
     fs::write(backup_path, &json).expect("versioned sidecar backup should write");
 }
 
-pub(super) fn tiny_http_response_status_and_body(response: tiny_http::ResponseBox) -> (u16, String) {
+pub(super) fn tiny_http_response_status_and_body(
+    response: tiny_http::ResponseBox,
+) -> (u16, String) {
     let status = response.status_code().0;
     let mut bytes = Vec::new();
     response

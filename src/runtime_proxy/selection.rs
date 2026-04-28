@@ -1,5 +1,41 @@
 use super::*;
 
+fn runtime_selection_quota_source_label(source: Option<RuntimeQuotaSource>) -> &'static str {
+    source.map(runtime_quota_source_label).unwrap_or("unknown")
+}
+
+fn runtime_selection_log_fields_with_quota<'a>(
+    fields: impl IntoIterator<Item = RuntimeProxyLogField<'a>>,
+    summary: RuntimeQuotaSummary,
+) -> Vec<RuntimeProxyLogField<'a>> {
+    let mut fields = fields.into_iter().collect::<Vec<_>>();
+    fields.extend([
+        runtime_proxy_log_field(
+            "quota_band",
+            runtime_quota_pressure_band_reason(summary.route_band),
+        ),
+        runtime_proxy_log_field(
+            "five_hour_status",
+            runtime_quota_window_status_reason(summary.five_hour.status),
+        ),
+        runtime_proxy_log_field(
+            "five_hour_remaining",
+            summary.five_hour.remaining_percent.to_string(),
+        ),
+        runtime_proxy_log_field("five_hour_reset_at", summary.five_hour.reset_at.to_string()),
+        runtime_proxy_log_field(
+            "weekly_status",
+            runtime_quota_window_status_reason(summary.weekly.status),
+        ),
+        runtime_proxy_log_field(
+            "weekly_remaining",
+            summary.weekly.remaining_percent.to_string(),
+        ),
+        runtime_proxy_log_field("weekly_reset_at", summary.weekly.reset_at.to_string()),
+    ]);
+    fields
+}
+
 pub(crate) fn runtime_proxy_sync_probe_pressure_pause(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
@@ -16,12 +52,17 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_pause(
     );
     runtime_proxy_log(
         shared,
-        format!(
-            "runtime_proxy_sync_probe_pressure_pause route={} pause_ms={} waited_ms={} outcome={}",
-            runtime_route_kind_label(route_kind),
-            pause_ms,
-            started_at.elapsed().as_millis(),
-            runtime_profile_wait_outcome_label(wait_outcome),
+        runtime_proxy_structured_log_message(
+            "runtime_proxy_sync_probe_pressure_pause",
+            [
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("pause_ms", pause_ms.to_string()),
+                runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
+                runtime_proxy_log_field(
+                    "outcome",
+                    runtime_profile_wait_outcome_label(wait_outcome),
+                ),
+            ],
         ),
     );
 }
@@ -347,20 +388,47 @@ impl<'a> RuntimeCandidateAffinity<'a> {
 }
 
 pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffinity<'_>) -> bool {
-    affinity
+    runtime_candidate_no_rotate_affinity(affinity).is_some()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeNoRotateAffinity {
+    Strict,
+    TurnState,
+    TrustedPreviousResponse,
+    CompactSession,
+}
+
+pub(crate) fn runtime_candidate_no_rotate_affinity(
+    affinity: RuntimeCandidateAffinity<'_>,
+) -> Option<RuntimeNoRotateAffinity> {
+    if affinity
         .strict_affinity_profile
         .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-        || affinity
-            .turn_state_profile
+    {
+        return Some(RuntimeNoRotateAffinity::Strict);
+    }
+    if affinity
+        .turn_state_profile
+        .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+    {
+        return Some(RuntimeNoRotateAffinity::TurnState);
+    }
+    if affinity.trusted_previous_response_affinity
+        && affinity
+            .pinned_profile
             .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-        || (affinity.trusted_previous_response_affinity
-            && affinity
-                .pinned_profile
-                .is_some_and(|profile_name| profile_name == affinity.candidate_name))
-        || (affinity.route_kind == RuntimeRouteKind::Compact
-            && affinity
-                .session_profile
-                .is_some_and(|profile_name| profile_name == affinity.candidate_name))
+    {
+        return Some(RuntimeNoRotateAffinity::TrustedPreviousResponse);
+    }
+    if affinity.route_kind == RuntimeRouteKind::Compact
+        && affinity
+            .session_profile
+            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+    {
+        return Some(RuntimeNoRotateAffinity::CompactSession);
+    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -626,6 +694,180 @@ pub(crate) struct RuntimeResponseCandidateSelection<'a> {
     pub(crate) route_kind: RuntimeRouteKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeAffinitySelectionKind {
+    Strict,
+    Pinned,
+    TurnState,
+    Session,
+}
+
+impl RuntimeAffinitySelectionKind {
+    fn profile<'a>(self, selection: RuntimeResponseCandidateSelection<'a>) -> Option<&'a str> {
+        match self {
+            Self::Strict => selection.strict_affinity_profile,
+            Self::Pinned => selection.pinned_profile,
+            Self::TurnState => selection.turn_state_profile,
+            Self::Session => selection.session_profile,
+        }
+    }
+
+    fn skip_label(self) -> &'static str {
+        match self {
+            Self::Strict => "compact_followup",
+            Self::Pinned => "pinned",
+            Self::TurnState => "turn_state",
+            Self::Session => "session",
+        }
+    }
+
+    fn excluded_is_terminal(self) -> bool {
+        matches!(self, Self::Strict)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RuntimeAffinitySelectionDecision {
+    Selected(String),
+    Continue,
+    Exhausted,
+}
+
+fn runtime_affinity_selection_decision(
+    shared: &RuntimeRotationProxyShared,
+    selection: RuntimeResponseCandidateSelection<'_>,
+    affinity_kind: RuntimeAffinitySelectionKind,
+) -> Result<RuntimeAffinitySelectionDecision> {
+    let Some(profile_name) = affinity_kind.profile(selection) else {
+        return Ok(RuntimeAffinitySelectionDecision::Continue);
+    };
+    if selection.excluded_profiles.contains(profile_name) {
+        return Ok(if affinity_kind.excluded_is_terminal() {
+            RuntimeAffinitySelectionDecision::Exhausted
+        } else {
+            RuntimeAffinitySelectionDecision::Continue
+        });
+    }
+
+    if affinity_kind == RuntimeAffinitySelectionKind::Pinned
+        && runtime_previous_response_affinity_is_bound(
+            shared,
+            selection.previous_response_id,
+            selection.pinned_profile,
+        )?
+    {
+        return Ok(RuntimeAffinitySelectionDecision::Selected(
+            profile_name.to_string(),
+        ));
+    }
+
+    let trusted_previous_response_affinity =
+        if affinity_kind == RuntimeAffinitySelectionKind::Pinned {
+            runtime_previous_response_affinity_is_trusted(
+                shared,
+                selection.previous_response_id,
+                selection.pinned_profile,
+            )?
+        } else {
+            false
+        };
+    if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+        route_kind: selection.route_kind,
+        candidate_name: profile_name,
+        strict_affinity_profile: selection.strict_affinity_profile,
+        pinned_profile: selection.pinned_profile,
+        turn_state_profile: selection.turn_state_profile,
+        session_profile: selection.session_profile,
+        trusted_previous_response_affinity,
+    }) {
+        return Ok(RuntimeAffinitySelectionDecision::Selected(
+            profile_name.to_string(),
+        ));
+    }
+
+    let (quota_summary, quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, selection.route_kind)?;
+    let soft_affinity_allowed = match affinity_kind {
+        RuntimeAffinitySelectionKind::Strict => {
+            let compact_followup_owner_without_probe = matches!(
+                selection.route_kind,
+                RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+            ) && quota_source.is_none();
+            runtime_quota_summary_allows_soft_affinity(
+                quota_summary,
+                quota_source,
+                selection.route_kind,
+            ) || compact_followup_owner_without_probe
+        }
+        RuntimeAffinitySelectionKind::Pinned | RuntimeAffinitySelectionKind::TurnState => {
+            quota_summary.route_band <= RuntimeQuotaPressureBand::Critical
+                && runtime_quota_precommit_guard_reason(quota_summary, selection.route_kind)
+                    .is_none()
+        }
+        RuntimeAffinitySelectionKind::Session => {
+            let compact_session_owner_without_probe =
+                selection.route_kind == RuntimeRouteKind::Compact && quota_source.is_none();
+            let websocket_unknown_current_profile_without_pool_fallback = selection.route_kind
+                == RuntimeRouteKind::Websocket
+                && quota_source.is_none()
+                && runtime_proxy_current_profile(shared)? == profile_name
+                && !runtime_has_route_eligible_quota_fallback(
+                    shared,
+                    profile_name,
+                    selection.excluded_profiles,
+                    selection.route_kind,
+                )?;
+            runtime_quota_summary_allows_soft_affinity(
+                quota_summary,
+                quota_source,
+                selection.route_kind,
+            ) || compact_session_owner_without_probe
+                || websocket_unknown_current_profile_without_pool_fallback
+        }
+    };
+    if soft_affinity_allowed {
+        return Ok(RuntimeAffinitySelectionDecision::Selected(
+            profile_name.to_string(),
+        ));
+    }
+
+    let reason = match affinity_kind {
+        RuntimeAffinitySelectionKind::Pinned | RuntimeAffinitySelectionKind::TurnState => {
+            runtime_quota_pressure_band_reason(quota_summary.route_band)
+        }
+        RuntimeAffinitySelectionKind::Strict | RuntimeAffinitySelectionKind::Session => {
+            runtime_quota_soft_affinity_rejection_reason(
+                quota_summary,
+                quota_source,
+                selection.route_kind,
+            )
+        }
+    };
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "selection_skip_affinity",
+            runtime_selection_log_fields_with_quota(
+                [
+                    runtime_proxy_log_field(
+                        "route",
+                        runtime_route_kind_label(selection.route_kind),
+                    ),
+                    runtime_proxy_log_field("affinity", affinity_kind.skip_label()),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field(
+                        "quota_source",
+                        runtime_selection_quota_source_label(quota_source),
+                    ),
+                ],
+                quota_summary,
+            ),
+        ),
+    );
+    Ok(RuntimeAffinitySelectionDecision::Continue)
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_runtime_response_candidate_for_route(
@@ -658,210 +900,52 @@ pub(crate) fn select_runtime_response_candidate_for_route_with_selection(
     shared: &RuntimeRotationProxyShared,
     selection: RuntimeResponseCandidateSelection<'_>,
 ) -> Result<Option<String>> {
-    let RuntimeResponseCandidateSelection {
-        excluded_profiles,
-        strict_affinity_profile,
-        pinned_profile,
-        turn_state_profile,
-        session_profile,
-        discover_previous_response_owner,
-        previous_response_id,
-        route_kind,
-    } = selection;
-
-    if let Some(profile_name) = strict_affinity_profile {
-        if excluded_profiles.contains(profile_name) {
-            return Ok(None);
+    for affinity_kind in [
+        RuntimeAffinitySelectionKind::Strict,
+        RuntimeAffinitySelectionKind::Pinned,
+        RuntimeAffinitySelectionKind::TurnState,
+    ] {
+        match runtime_affinity_selection_decision(shared, selection, affinity_kind)? {
+            RuntimeAffinitySelectionDecision::Selected(profile_name) => {
+                return Ok(Some(profile_name));
+            }
+            RuntimeAffinitySelectionDecision::Continue => {}
+            RuntimeAffinitySelectionDecision::Exhausted => return Ok(None),
         }
-        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind,
-            candidate_name: profile_name,
-            strict_affinity_profile,
-            pinned_profile,
-            turn_state_profile,
-            session_profile,
-            trusted_previous_response_affinity: false,
-        }) {
-            return Ok(Some(profile_name.to_string()));
-        }
-        let (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        let compact_followup_owner_without_probe = matches!(
-            route_kind,
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-        ) && quota_source.is_none();
-        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source, route_kind)
-            || compact_followup_owner_without_probe
-        {
-            return Ok(Some(profile_name.to_string()));
-        }
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route={} affinity=compact_followup profile={} reason={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                profile_name,
-                runtime_quota_soft_affinity_rejection_reason(
-                    quota_summary,
-                    quota_source,
-                    route_kind,
-                ),
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-        return Ok(None);
     }
 
-    if let Some(profile_name) = pinned_profile.filter(|name| !excluded_profiles.contains(*name)) {
-        if runtime_previous_response_affinity_is_bound(
-            shared,
-            previous_response_id,
-            pinned_profile,
-        )? {
-            return Ok(Some(profile_name.to_string()));
-        }
-        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind,
-            candidate_name: profile_name,
-            strict_affinity_profile,
-            pinned_profile,
-            turn_state_profile,
-            session_profile,
-            trusted_previous_response_affinity: runtime_previous_response_affinity_is_trusted(
-                shared,
-                previous_response_id,
-                pinned_profile,
-            )?,
-        }) {
-            return Ok(Some(profile_name.to_string()));
-        }
-        let (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical
-            && runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_none()
-        {
-            return Ok(Some(profile_name.to_string()));
-        }
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route={} affinity=pinned profile={} reason={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                profile_name,
-                runtime_quota_pressure_band_reason(quota_summary.route_band),
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-    }
-
-    if let Some(profile_name) = turn_state_profile.filter(|name| !excluded_profiles.contains(*name))
-    {
-        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind,
-            candidate_name: profile_name,
-            strict_affinity_profile,
-            pinned_profile,
-            turn_state_profile,
-            session_profile,
-            trusted_previous_response_affinity: false,
-        }) {
-            return Ok(Some(profile_name.to_string()));
-        }
-        let (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        if quota_summary.route_band <= RuntimeQuotaPressureBand::Critical
-            && runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_none()
-        {
-            return Ok(Some(profile_name.to_string()));
-        }
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route={} affinity=turn_state profile={} reason={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                profile_name,
-                runtime_quota_pressure_band_reason(quota_summary.route_band),
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-    }
-
-    if discover_previous_response_owner {
+    if selection.discover_previous_response_owner {
         return next_runtime_previous_response_candidate(
             shared,
-            excluded_profiles,
-            previous_response_id,
-            route_kind,
+            selection.excluded_profiles,
+            selection.previous_response_id,
+            selection.route_kind,
         );
     }
 
-    if let Some(profile_name) = session_profile.filter(|name| !excluded_profiles.contains(*name)) {
-        if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind,
-            candidate_name: profile_name,
-            strict_affinity_profile,
-            pinned_profile,
-            turn_state_profile,
-            session_profile,
-            trusted_previous_response_affinity: false,
-        }) {
-            return Ok(Some(profile_name.to_string()));
-        }
-        let (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-        let compact_session_owner_without_probe =
-            route_kind == RuntimeRouteKind::Compact && quota_source.is_none();
-        let websocket_unknown_current_profile_without_pool_fallback = route_kind
-            == RuntimeRouteKind::Websocket
-            && quota_source.is_none()
-            && runtime_proxy_current_profile(shared)? == profile_name
-            && !runtime_has_route_eligible_quota_fallback(
-                shared,
-                profile_name,
-                excluded_profiles,
-                route_kind,
-            )?;
-        if runtime_quota_summary_allows_soft_affinity(quota_summary, quota_source, route_kind)
-            || compact_session_owner_without_probe
-            || websocket_unknown_current_profile_without_pool_fallback
-        {
-            return Ok(Some(profile_name.to_string()));
-        }
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route={} affinity=session profile={} reason={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                profile_name,
-                runtime_quota_soft_affinity_rejection_reason(
-                    quota_summary,
-                    quota_source,
-                    route_kind,
-                ),
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
+    match runtime_affinity_selection_decision(
+        shared,
+        selection,
+        RuntimeAffinitySelectionKind::Session,
+    )? {
+        RuntimeAffinitySelectionDecision::Selected(profile_name) => return Ok(Some(profile_name)),
+        RuntimeAffinitySelectionDecision::Continue => {}
+        RuntimeAffinitySelectionDecision::Exhausted => return Ok(None),
     }
 
-    if let Some(profile_name) =
-        runtime_proxy_optimistic_current_candidate_for_route(shared, excluded_profiles, route_kind)?
-    {
+    if let Some(profile_name) = runtime_proxy_optimistic_current_candidate_for_route(
+        shared,
+        selection.excluded_profiles,
+        selection.route_kind,
+    )? {
         return Ok(Some(profile_name));
     }
 
-    next_runtime_response_candidate_for_route(shared, excluded_profiles, route_kind)
+    next_runtime_response_candidate_for_route(
+        shared,
+        selection.excluded_profiles,
+        selection.route_kind,
+    )
 }
 
 pub(crate) fn next_runtime_previous_response_candidate(
@@ -954,11 +1038,15 @@ pub(crate) fn next_runtime_previous_response_candidate(
         {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason=negative_cache response_id={}",
-                    runtime_route_kind_label(route_kind),
-                    name,
-                    previous_response_id,
+                runtime_proxy_structured_log_message(
+                    "selection_skip_affinity",
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("affinity", "previous_response_discovery"),
+                        runtime_proxy_log_field("profile", name.as_str()),
+                        runtime_proxy_log_field("reason", "negative_cache"),
+                        runtime_proxy_log_field("response_id", previous_response_id),
+                    ],
                 ),
             );
             continue;
@@ -974,10 +1062,14 @@ pub(crate) fn next_runtime_previous_response_candidate(
         if entry.auth_failure_active {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason=auth_failure_backoff",
-                    runtime_route_kind_label(route_kind),
-                    name,
+                runtime_proxy_structured_log_message(
+                    "selection_skip_affinity",
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("affinity", "previous_response_discovery"),
+                        runtime_proxy_log_field("profile", name.as_str()),
+                        runtime_proxy_log_field("reason", "auth_failure_backoff"),
+                    ],
                 ),
             );
             continue;
@@ -989,17 +1081,27 @@ pub(crate) fn next_runtime_previous_response_candidate(
         {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_affinity route={} affinity=previous_response_discovery profile={} reason={} quota_source={} {}",
-                    runtime_route_kind_label(route_kind),
-                    name,
-                    runtime_quota_precommit_guard_reason(quota_summary, route_kind).unwrap_or_else(
-                        || runtime_quota_pressure_band_reason(quota_summary.route_band)
+                runtime_proxy_structured_log_message(
+                    "selection_skip_affinity",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("affinity", "previous_response_discovery"),
+                            runtime_proxy_log_field("profile", name.as_str()),
+                            runtime_proxy_log_field(
+                                "reason",
+                                runtime_quota_precommit_guard_reason(quota_summary, route_kind)
+                                    .unwrap_or_else(|| {
+                                        runtime_quota_pressure_band_reason(quota_summary.route_band)
+                                    }),
+                            ),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_selection_quota_source_label(quota_source),
+                            ),
+                        ],
+                        quota_summary,
                     ),
-                    quota_source
-                        .map(runtime_quota_source_label)
-                        .unwrap_or("unknown"),
-                    runtime_quota_summary_log_fields(quota_summary),
                 ),
             );
             continue;
@@ -1154,20 +1256,28 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
         };
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_skip_current route={} profile={} reason={} inflight={} health={} performance={} soft_limit={} circuit_until={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                current_profile,
-                reason,
-                inflight_count,
-                health_score,
-                performance_score,
-                inflight_soft_limit,
-                circuit_open_until.unwrap_or_default(),
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
+            runtime_proxy_structured_log_message(
+                "selection_skip_current",
+                runtime_selection_log_fields_with_quota(
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", current_profile.as_str()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                        runtime_proxy_log_field("health", health_score.to_string()),
+                        runtime_proxy_log_field("performance", performance_score.to_string()),
+                        runtime_proxy_log_field("soft_limit", inflight_soft_limit.to_string()),
+                        runtime_proxy_log_field(
+                            "circuit_until",
+                            circuit_open_until.unwrap_or_default().to_string(),
+                        ),
+                        runtime_proxy_log_field(
+                            "quota_source",
+                            runtime_selection_quota_source_label(quota_source),
+                        ),
+                    ],
+                    quota_summary,
+                ),
             ),
         );
         return Ok(None);
@@ -1175,10 +1285,13 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
     if !current_profile_quota_compatible {
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_skip_current route={} profile={} reason=auth_not_quota_compatible",
-                runtime_route_kind_label(route_kind),
-                current_profile
+            runtime_proxy_structured_log_message(
+                "selection_skip_current",
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("profile", current_profile.as_str()),
+                    runtime_proxy_log_field("reason", "auth_not_quota_compatible"),
+                ],
             ),
         );
         return Ok(None);
@@ -1186,34 +1299,45 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
 
     runtime_proxy_log(
         shared,
-        format!(
-            "selection_keep_current route={} profile={} inflight={} health={} performance={} quota_source={} {}",
-            runtime_route_kind_label(route_kind),
-            current_profile,
-            inflight_count,
-            health_score,
-            performance_score,
-            quota_source
-                .map(runtime_quota_source_label)
-                .unwrap_or("unknown"),
-            runtime_quota_summary_log_fields(quota_summary),
+        runtime_proxy_structured_log_message(
+            "selection_keep_current",
+            runtime_selection_log_fields_with_quota(
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("profile", current_profile.as_str()),
+                    runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                    runtime_proxy_log_field("health", health_score.to_string()),
+                    runtime_proxy_log_field("performance", performance_score.to_string()),
+                    runtime_proxy_log_field(
+                        "quota_source",
+                        runtime_selection_quota_source_label(quota_source),
+                    ),
+                ],
+                quota_summary,
+            ),
         ),
     );
     if !reserve_runtime_profile_route_circuit_half_open_probe(shared, &current_profile, route_kind)?
     {
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} performance={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                current_profile,
-                inflight_count,
-                health_score,
-                performance_score,
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
+            runtime_proxy_structured_log_message(
+                "selection_skip_current",
+                runtime_selection_log_fields_with_quota(
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", current_profile.as_str()),
+                        runtime_proxy_log_field("reason", "route_circuit_half_open_probe_wait"),
+                        runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                        runtime_proxy_log_field("health", health_score.to_string()),
+                        runtime_proxy_log_field("performance", performance_score.to_string()),
+                        runtime_proxy_log_field(
+                            "quota_source",
+                            runtime_selection_quota_source_label(quota_source),
+                        ),
+                    ],
+                    quota_summary,
+                ),
             ),
         );
         return Ok(None);
@@ -1255,10 +1379,13 @@ pub(crate) fn next_runtime_response_candidate_for_route(
     if let Some(skip_jobs) = probe_plan.sync_probe_skip_jobs_count {
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_skip_sync_probe route={} reason=pressure_mode cold_start_jobs={}",
-                runtime_route_kind_label(route_kind),
-                skip_jobs,
+            runtime_proxy_structured_log_message(
+                "selection_skip_sync_probe",
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("reason", "pressure_mode"),
+                    runtime_proxy_log_field("cold_start_jobs", skip_jobs.to_string()),
+                ],
             ),
         );
     }
@@ -1338,10 +1465,13 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         if let Some(skip_profiles) = probe_plan.sync_probe_skip_profiles_count {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_sync_probe route={} reason=pressure_mode cold_start_profiles={}",
-                    runtime_route_kind_label(route_kind),
-                    skip_profiles
+                runtime_proxy_structured_log_message(
+                    "selection_skip_sync_probe",
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("reason", "pressure_mode"),
+                        runtime_proxy_log_field("cold_start_profiles", skip_profiles.to_string()),
+                    ],
                 ),
             );
         }
@@ -1363,29 +1493,65 @@ pub(crate) fn next_runtime_response_candidate_for_route(
             if reason == "profile_inflight_soft_limit" {
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "selection_skip_current route={} profile={} reason=profile_inflight_soft_limit inflight={} soft_limit={} health={} quota_source={} {}",
-                        runtime_route_kind_label(route_kind),
-                        candidate.name,
-                        candidate.inflight_count,
-                        candidate.inflight_soft_limit,
-                        candidate.health_sort_key,
-                        runtime_quota_source_label(candidate.quota_source),
-                        runtime_quota_summary_log_fields(candidate.quota_summary),
+                    runtime_proxy_structured_log_message(
+                        "selection_skip_current",
+                        runtime_selection_log_fields_with_quota(
+                            [
+                                runtime_proxy_log_field(
+                                    "route",
+                                    runtime_route_kind_label(route_kind),
+                                ),
+                                runtime_proxy_log_field("profile", candidate.name.as_str()),
+                                runtime_proxy_log_field("reason", "profile_inflight_soft_limit"),
+                                runtime_proxy_log_field(
+                                    "inflight",
+                                    candidate.inflight_count.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "soft_limit",
+                                    candidate.inflight_soft_limit.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "health",
+                                    candidate.health_sort_key.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "quota_source",
+                                    runtime_quota_source_label(candidate.quota_source),
+                                ),
+                            ],
+                            candidate.quota_summary,
+                        ),
                     ),
                 );
             } else {
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "selection_skip_current route={} profile={} reason={} inflight={} health={} quota_source={} {}",
-                        runtime_route_kind_label(route_kind),
-                        candidate.name,
-                        reason,
-                        candidate.inflight_count,
-                        candidate.health_sort_key,
-                        runtime_quota_source_label(candidate.quota_source),
-                        runtime_quota_summary_log_fields(candidate.quota_summary),
+                    runtime_proxy_structured_log_message(
+                        "selection_skip_current",
+                        runtime_selection_log_fields_with_quota(
+                            [
+                                runtime_proxy_log_field(
+                                    "route",
+                                    runtime_route_kind_label(route_kind),
+                                ),
+                                runtime_proxy_log_field("profile", candidate.name.as_str()),
+                                runtime_proxy_log_field("reason", reason),
+                                runtime_proxy_log_field(
+                                    "inflight",
+                                    candidate.inflight_count.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "health",
+                                    candidate.health_sort_key.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "quota_source",
+                                    runtime_quota_source_label(candidate.quota_source),
+                                ),
+                            ],
+                            candidate.quota_summary,
+                        ),
                     ),
                 );
             }
@@ -1398,31 +1564,50 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         )? {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
-                    runtime_route_kind_label(route_kind),
-                    candidate.name,
-                    candidate.inflight_count,
-                    candidate.health_sort_key,
-                    runtime_quota_source_label(candidate.quota_source),
-                    runtime_quota_summary_log_fields(candidate.quota_summary),
+                runtime_proxy_structured_log_message(
+                    "selection_skip_current",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("profile", candidate.name.as_str()),
+                            runtime_proxy_log_field("reason", "route_circuit_half_open_probe_wait"),
+                            runtime_proxy_log_field(
+                                "inflight",
+                                candidate.inflight_count.to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "health",
+                                candidate.health_sort_key.to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_quota_source_label(candidate.quota_source),
+                            ),
+                        ],
+                        candidate.quota_summary,
+                    ),
                 ),
             );
             continue;
         }
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_pick route={} profile={} mode=ready inflight={} health={} order={} {}",
-                runtime_route_kind_label(route_kind),
-                candidate.name,
-                candidate.inflight_count,
-                candidate.health_sort_key,
-                candidate.order_index,
-                format_args!(
-                    "quota_source={} {}",
-                    runtime_quota_source_label(candidate.quota_source),
-                    runtime_quota_summary_log_fields(candidate.quota_summary)
+            runtime_proxy_structured_log_message(
+                "selection_pick",
+                runtime_selection_log_fields_with_quota(
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", candidate.name.as_str()),
+                        runtime_proxy_log_field("mode", "ready"),
+                        runtime_proxy_log_field("inflight", candidate.inflight_count.to_string()),
+                        runtime_proxy_log_field("health", candidate.health_sort_key.to_string()),
+                        runtime_proxy_log_field("order", candidate.order_index.to_string()),
+                        runtime_proxy_log_field(
+                            "quota_source",
+                            runtime_quota_source_label(candidate.quota_source),
+                        ),
+                    ],
+                    candidate.quota_summary,
                 ),
             ),
         );
@@ -1434,15 +1619,28 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         if let Some(reason) = candidate.fallback_skip_reason() {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_current route={} profile={} reason={} inflight={} health={} quota_source={} {}",
-                    runtime_route_kind_label(route_kind),
-                    candidate.name,
-                    reason,
-                    candidate.inflight_count,
-                    candidate.health_sort_key,
-                    runtime_quota_source_label(candidate.quota_source),
-                    runtime_quota_summary_log_fields(candidate.quota_summary),
+                runtime_proxy_structured_log_message(
+                    "selection_skip_current",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("profile", candidate.name.as_str()),
+                            runtime_proxy_log_field("reason", reason),
+                            runtime_proxy_log_field(
+                                "inflight",
+                                candidate.inflight_count.to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "health",
+                                candidate.health_sort_key.to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_quota_source_label(candidate.quota_source),
+                            ),
+                        ],
+                        candidate.quota_summary,
+                    ),
                 ),
             );
             continue;
@@ -1454,30 +1652,55 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         )? {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "selection_skip_current route={} profile={} reason=route_circuit_half_open_probe_wait inflight={} health={} quota_source={} {}",
-                    runtime_route_kind_label(route_kind),
-                    candidate.name,
-                    candidate.inflight_count,
-                    candidate.health_sort_key,
-                    runtime_quota_source_label(candidate.quota_source),
-                    runtime_quota_summary_log_fields(candidate.quota_summary),
+                runtime_proxy_structured_log_message(
+                    "selection_skip_current",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("profile", candidate.name.as_str()),
+                            runtime_proxy_log_field("reason", "route_circuit_half_open_probe_wait"),
+                            runtime_proxy_log_field(
+                                "inflight",
+                                candidate.inflight_count.to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "health",
+                                candidate.health_sort_key.to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_quota_source_label(candidate.quota_source),
+                            ),
+                        ],
+                        candidate.quota_summary,
+                    ),
                 ),
             );
             continue;
         }
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_pick route={} profile={} mode=backoff inflight={} health={} backoff={:?} order={} quota_source={} {}",
-                runtime_route_kind_label(route_kind),
-                candidate.name,
-                candidate.inflight_count,
-                candidate.health_sort_key,
-                candidate.backoff_sort_key,
-                candidate.order_index,
-                runtime_quota_source_label(candidate.quota_source),
-                runtime_quota_summary_log_fields(candidate.quota_summary),
+            runtime_proxy_structured_log_message(
+                "selection_pick",
+                runtime_selection_log_fields_with_quota(
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", candidate.name.as_str()),
+                        runtime_proxy_log_field("mode", "backoff"),
+                        runtime_proxy_log_field("inflight", candidate.inflight_count.to_string()),
+                        runtime_proxy_log_field("health", candidate.health_sort_key.to_string()),
+                        runtime_proxy_log_field(
+                            "backoff",
+                            format!("{:?}", candidate.backoff_sort_key),
+                        ),
+                        runtime_proxy_log_field("order", candidate.order_index.to_string()),
+                        runtime_proxy_log_field(
+                            "quota_source",
+                            runtime_quota_source_label(candidate.quota_source),
+                        ),
+                    ],
+                    candidate.quota_summary,
+                ),
             ),
         );
         fallback = Some(candidate.name);
@@ -1487,10 +1710,14 @@ pub(crate) fn next_runtime_response_candidate_for_route(
     if fallback.is_none() {
         runtime_proxy_log(
             shared,
-            format!(
-                "selection_pick route={} profile=none mode=exhausted excluded_count={}",
-                runtime_route_kind_label(route_kind),
-                excluded_profiles.len()
+            runtime_proxy_structured_log_message(
+                "selection_pick",
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("profile", "none"),
+                    runtime_proxy_log_field("mode", "exhausted"),
+                    runtime_proxy_log_field("excluded_count", excluded_profiles.len().to_string()),
+                ],
             ),
         );
     }
@@ -1783,10 +2010,14 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
 
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport=http inflight_wait_started route={} wait_ms={}",
-            runtime_route_kind_label(route_kind),
-            total_wait_budget.as_millis()
+        runtime_proxy_structured_log_message(
+            "inflight_wait_started",
+            [
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("wait_ms", total_wait_budget.as_millis().to_string()),
+            ],
         ),
     );
     let started_at = Instant::now();
@@ -1826,12 +2057,20 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     }
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport=http inflight_wait_finished route={} waited_ms={} signaled={signaled} useful={} wake_source={}",
-            runtime_route_kind_label(route_kind),
-            started_at.elapsed().as_millis(),
-            useful_relief,
-            runtime_profile_inflight_wait_outcome_label(wake_source),
+        runtime_proxy_structured_log_message(
+            "inflight_wait_finished",
+            [
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
+                runtime_proxy_log_field("signaled", signaled.to_string()),
+                runtime_proxy_log_field("useful", useful_relief.to_string()),
+                runtime_proxy_log_field(
+                    "wake_source",
+                    runtime_profile_inflight_wait_outcome_label(wake_source),
+                ),
+            ],
         ),
     );
     Ok(useful_relief)

@@ -665,6 +665,99 @@ fn profile_import_auth_update_journal_is_removed_after_successful_state_save() {
 }
 
 #[test]
+fn profile_import_auth_update_journal_recovers_orphaned_auth_overwrite() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-journal-recovery");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
+
+    let mut existing_state = AppState {
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("imported@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email(
+                "imported@example.com",
+                "fresh-token",
+                "main-account",
+            ),
+        }],
+    };
+
+    import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("import should update same-name profile");
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "fresh-token".to_string(),
+        "test should simulate crash after auth overwrite"
+    );
+    assert_eq!(
+        existing_state
+            .profiles
+            .get("main")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("imported@example.com")
+    );
+    assert_eq!(
+        profile_commands_import_auth_journal_paths(&target_paths).len(),
+        1,
+        "auth overwrite journal should be orphaned"
+    );
+    assert_eq!(
+        super::import_export::count_profile_import_auth_journals(&target_paths)
+            .expect("journal count should succeed"),
+        1,
+        "orphaned journal should be visible outside import"
+    );
+
+    let recovered =
+        super::import_export::repair_profile_import_auth_journals(&target_paths, &mut existing_state)
+            .expect("orphaned journal should recover");
+
+    assert_eq!(recovered, 1);
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "old-token".to_string(),
+        "recovery should restore previous auth"
+    );
+    assert_eq!(
+        existing_state
+            .profiles
+            .get("main")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("main@example.com"),
+        "recovery should restore previous email"
+    );
+    assert!(
+        profile_commands_import_auth_journal_paths(&target_paths).is_empty(),
+        "recovery should remove recovered auth overwrite journals"
+    );
+}
+
+#[test]
 fn profile_import_updates_existing_profile_when_email_matches() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);

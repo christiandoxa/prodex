@@ -107,6 +107,8 @@ pub(super) struct RuntimeBrokerMetrics {
     pub(super) health: RuntimeBrokerHealth,
     pub(super) active_request_limit: usize,
     pub(super) local_overload_backoff_remaining_seconds: u64,
+    #[serde(default)]
+    pub(super) runtime_state_lock_wait: RuntimeStateLockWaitMetrics,
     pub(super) traffic: RuntimeBrokerTrafficMetrics,
     pub(super) profile_inflight: BTreeMap<String, usize>,
     pub(super) retry_backoffs: usize,

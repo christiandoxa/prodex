@@ -115,13 +115,20 @@ fn send_runtime_proxy_upstream_request_with_events(
 
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport=http {} profile={profile_name} method={} url={} turn_state_override={:?} previous_response_id={:?}",
+        runtime_proxy_structured_log_message(
             events.start,
-            request.method,
-            upstream_url,
-            turn_state_override,
-            runtime_request_previous_response_id(request)
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("method", request.method.as_str()),
+                runtime_proxy_log_field("url", upstream_url.as_str()),
+                runtime_proxy_log_field("turn_state_override", format!("{turn_state_override:?}")),
+                runtime_proxy_log_field(
+                    "previous_response_id",
+                    format!("{:?}", runtime_request_previous_response_id(request)),
+                ),
+            ],
         ),
     );
     if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
@@ -150,15 +157,31 @@ fn send_runtime_proxy_upstream_request_with_events(
     runtime_proxy_capture_reqwest_cookies(shared, profile_name, &response);
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport=http {} profile={profile_name} status={} content_type={:?} turn_state={:?}",
+        runtime_proxy_structured_log_message(
             events.response,
-            response.status().as_u16(),
-            response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok()),
-            runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("status", response.status().as_u16().to_string()),
+                runtime_proxy_log_field(
+                    "content_type",
+                    format!(
+                        "{:?}",
+                        response
+                            .headers()
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|value| value.to_str().ok())
+                    ),
+                ),
+                runtime_proxy_log_field(
+                    "turn_state",
+                    format!(
+                        "{:?}",
+                        runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
+                    ),
+                ),
+            ],
         ),
     );
     note_runtime_profile_latency_observation(

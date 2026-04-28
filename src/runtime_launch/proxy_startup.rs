@@ -213,6 +213,8 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
         active_request_limit,
+        runtime_state_lock_wait_counters:
+            RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: lane_admission.clone(),
         runtime: Arc::new(Mutex::new(RuntimeRotationState {
             paths: paths.clone(),

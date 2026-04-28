@@ -11,7 +11,6 @@ pub(super) use self::request_parsing::*;
 pub(super) use self::shared::*;
 pub(super) use self::websocket::*;
 
-
 pub(super) struct RuntimeProxyBackend {
     addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
@@ -1596,7 +1595,11 @@ pub(super) fn handle_runtime_proxy_backend_request(
         )
         && account_id == "second-account"
     {
-        for (index, event) in body.split("\r\n\r\n").filter(|event| !event.is_empty()).enumerate() {
+        for (index, event) in body
+            .split("\r\n\r\n")
+            .filter(|event| !event.is_empty())
+            .enumerate()
+        {
             let _ = stream.write_all(format!("{event}\r\n\r\n").as_bytes());
             let _ = stream.flush();
             if index == 1 {

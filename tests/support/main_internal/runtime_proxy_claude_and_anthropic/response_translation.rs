@@ -1840,8 +1840,8 @@ fn runtime_anthropic_sse_response_parts_from_message_value_preserves_generic_too
 }
 
 #[test]
-fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carried_server_tool_usage(
-) {
+fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carried_server_tool_usage()
+ {
     let body = concat!(
         "event: response.completed\r\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"output\":[]}}\r\n",

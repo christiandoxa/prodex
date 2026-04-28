@@ -1,6 +1,8 @@
 use super::*;
 
-pub(crate) fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str) -> Option<&'static str> {
+pub(crate) fn runtime_proxy_backend_profile_name_for_account_id(
+    account_id: &str,
+) -> Option<&'static str> {
     match account_id {
         "main-account" => Some("main"),
         "second-account" => Some("second"),
@@ -11,7 +13,9 @@ pub(crate) fn runtime_proxy_backend_profile_name_for_account_id(account_id: &str
     }
 }
 
-pub(crate) fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &str) -> Option<&'static str> {
+pub(crate) fn runtime_proxy_backend_account_id_for_profile_name(
+    profile_name: &str,
+) -> Option<&'static str> {
     match profile_name {
         "main" => Some("main-account"),
         "second" => Some("second-account"),
@@ -22,7 +26,9 @@ pub(crate) fn runtime_proxy_backend_account_id_for_profile_name(profile_name: &s
     }
 }
 
-pub(crate) fn runtime_proxy_backend_initial_response_id_for_account(account_id: &str) -> Option<&'static str> {
+pub(crate) fn runtime_proxy_backend_initial_response_id_for_account(
+    account_id: &str,
+) -> Option<&'static str> {
     match account_id {
         "second-account" => Some("resp-second"),
         "third-account" => Some("resp-third"),
@@ -32,7 +38,9 @@ pub(crate) fn runtime_proxy_backend_initial_response_id_for_account(account_id: 
     }
 }
 
-pub(crate) fn runtime_proxy_backend_response_owner_account_id(response_id: &str) -> Option<&'static str> {
+pub(crate) fn runtime_proxy_backend_response_owner_account_id(
+    response_id: &str,
+) -> Option<&'static str> {
     if response_id == "resp-second" || response_id.starts_with("resp-second-next") {
         Some("second-account")
     } else if response_id == "resp-third" || response_id.starts_with("resp-third-next") {
@@ -46,7 +54,9 @@ pub(crate) fn runtime_proxy_backend_response_owner_account_id(response_id: &str)
     }
 }
 
-pub(crate) fn runtime_proxy_backend_profile_name_for_response_id(response_id: &str) -> Option<&'static str> {
+pub(crate) fn runtime_proxy_backend_profile_name_for_response_id(
+    response_id: &str,
+) -> Option<&'static str> {
     runtime_proxy_backend_response_owner_account_id(response_id)
         .and_then(runtime_proxy_backend_profile_name_for_account_id)
 }
@@ -58,7 +68,9 @@ pub(crate) fn runtime_proxy_backend_initial_response_id_for_profile_name(
         .and_then(runtime_proxy_backend_initial_response_id_for_account)
 }
 
-pub(crate) fn runtime_proxy_backend_next_response_id(previous_response_id: Option<&str>) -> Option<String> {
+pub(crate) fn runtime_proxy_backend_next_response_id(
+    previous_response_id: Option<&str>,
+) -> Option<String> {
     match previous_response_id {
         Some("resp-second") | Some("resp-third") => {
             Some(format!("{}-next", previous_response_id.unwrap()))

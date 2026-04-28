@@ -871,85 +871,34 @@ pub(super) fn attempt_runtime_websocket_request(
     } = attempt;
 
     let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
-    let (initial_quota_summary, initial_quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Websocket)?;
-    if (request_previous_response_id.is_some()
-        || request_session_id.is_some()
-        || request_turn_state.is_some())
-        && matches!(
-            initial_quota_source,
-            Some(RuntimeQuotaSource::PersistedSnapshot)
-        )
-        && let Some(reason) =
-            runtime_quota_precommit_guard_reason(initial_quota_summary, RuntimeRouteKind::Websocket)
-    {
-        websocket_session.close();
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason={reason} quota_source={} {}",
-                initial_quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(initial_quota_summary),
-            ),
-        );
-        return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
-            profile_name: profile_name.to_string(),
-            reason,
-        });
-    }
-    let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
+    let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
         shared,
         profile_name,
-        &BTreeSet::new(),
-        RuntimeRouteKind::Websocket,
-    )?;
-    let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
-        shared,
-        profile_name,
-        RuntimeRouteKind::Websocket,
-        "websocket_precommit_reprobe",
-    )?;
-    if runtime_quota_summary_requires_live_source_after_probe(
-        quota_summary,
-        quota_source,
-        RuntimeRouteKind::Websocket,
-    ) && has_alternative_quota_profile
+        route_kind: RuntimeRouteKind::Websocket,
+        has_continuation_context: request_previous_response_id.is_some()
+            || request_session_id.is_some()
+            || request_turn_state.is_some(),
+        reprobe_context: "websocket_precommit_reprobe",
+    })?;
+    if let RuntimePrecommitQuotaGateDecision::Block {
+        reason,
+        summary,
+        source,
+    } = quota_gate
     {
         websocket_session.close();
+        let reason_label = reason.as_str();
         runtime_proxy_log(
             shared,
             format!(
-                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason=quota_windows_unavailable_after_reprobe quota_source={} {}",
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
+                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason={reason_label} quota_source={} {}",
+                source.map(runtime_quota_source_label).unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(summary),
             ),
         );
         return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
             profile_name: profile_name.to_string(),
-            reason: "quota_windows_unavailable_after_reprobe",
-        });
-    }
-    if let Some(reason) =
-        runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Websocket)
-    {
-        websocket_session.close();
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason={reason} quota_source={} {}",
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-        return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
-            profile_name: profile_name.to_string(),
-            reason,
+            reason: reason_label,
         });
     }
 
@@ -1695,6 +1644,8 @@ mod tests {
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             active_request_count: Arc::new(AtomicUsize::new(0)),
             active_request_limit: 8,
+            runtime_state_lock_wait_counters:
+                RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
             lane_admission: RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
                 responses: 8,
                 compact: 8,

@@ -9,10 +9,13 @@ pub(crate) fn reject_runtime_proxy_overloaded_request(
     let websocket = is_tiny_http_websocket_upgrade(&request);
     runtime_proxy_log(
         shared,
-        format!(
-            "runtime_proxy_queue_overloaded transport={} path={} reason={reason}",
-            if websocket { "websocket" } else { "http" },
-            path
+        runtime_proxy_structured_log_message(
+            "runtime_proxy_queue_overloaded",
+            [
+                runtime_proxy_log_field("transport", if websocket { "websocket" } else { "http" }),
+                runtime_proxy_log_field("path", path.as_str()),
+                runtime_proxy_log_field("reason", reason),
+            ],
         ),
     );
     let response = if websocket {
@@ -52,7 +55,13 @@ pub(crate) fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxySha
     }
     runtime_proxy_log(
         shared,
-        format!("runtime_proxy_overload_backoff until={until} reason={reason}"),
+        runtime_proxy_structured_log_message(
+            "runtime_proxy_overload_backoff",
+            [
+                runtime_proxy_log_field("until", until.to_string()),
+                runtime_proxy_log_field("reason", reason),
+            ],
+        ),
     );
 }
 

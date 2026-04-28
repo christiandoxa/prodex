@@ -1,4 +1,5 @@
 use super::*;
+use crate::command_dispatch::command_exit_error;
 
 struct RunCommandStrategy {
     args: RunArgs,
@@ -468,7 +469,7 @@ fn run_auto_runtime_launch_preflight(
     }
 
     if let Some(report) = selected_report {
-        handle_no_ready_runtime_profiles(report, &selection.initial_profile_name, request);
+        handle_no_ready_runtime_profiles(report, &selection.initial_profile_name, request)?;
     }
     Ok(())
 }
@@ -552,7 +553,7 @@ fn handle_no_ready_runtime_profiles(
     report: &RunProfileProbeReport,
     profile_name: &str,
     request: &RuntimeLaunchRequest<'_>,
-) {
+) -> Result<()> {
     match &report.result {
         Ok(usage) => {
             let blocked = collect_blocked_limits(usage, request.include_code_review);
@@ -564,7 +565,13 @@ fn handle_no_ready_runtime_profiles(
             ));
             print_wrapped_stderr("No ready profile was found.");
             print_quota_preflight_inspect_hint(profile_name);
-            std::process::exit(2);
+            return Err(command_exit_error(
+                2,
+                format!(
+                    "quota preflight blocked profile '{}' and no ready profile was found",
+                    profile_name
+                ),
+            ));
         }
         Err(err) => {
             print_wrapped_stderr(&section_header("Quota Preflight"));
@@ -575,6 +582,7 @@ fn handle_no_ready_runtime_profiles(
             print_wrapped_stderr("Continuing without quota gate.");
         }
     }
+    Ok(())
 }
 
 fn run_selected_runtime_launch_preflight(
@@ -634,7 +642,13 @@ fn handle_blocked_selected_runtime_profile(
         } else {
             print_wrapped_stderr("No other ready profile was found.");
             print_quota_preflight_inspect_hint(&selection.initial_profile_name);
-            std::process::exit(2);
+            return Err(command_exit_error(
+                2,
+                format!(
+                    "quota preflight blocked profile '{}' and no other ready profile was found",
+                    selection.initial_profile_name
+                ),
+            ));
         }
     } else {
         if !alternatives.is_empty() {
@@ -645,7 +659,13 @@ fn handle_blocked_selected_runtime_profile(
             print_wrapped_stderr("Rerun without `--no-auto-rotate` to allow fallback.");
         }
         print_quota_preflight_inspect_hint(&selection.initial_profile_name);
-        std::process::exit(2);
+        return Err(command_exit_error(
+            2,
+            format!(
+                "quota preflight blocked profile '{}' with auto-rotate disabled",
+                selection.initial_profile_name
+            ),
+        ));
     }
 
     Ok(())
@@ -1047,6 +1067,78 @@ mod tests {
         let message = format!("{err:#}");
         assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
         assert!(message.contains("prodex claude"));
+    }
+
+    #[test]
+    fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
+        let report = RunProfileProbeReport {
+            name: "main".to_string(),
+            order_index: 0,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(UsageResponse {
+                email: None,
+                plan_type: None,
+                rate_limit: None,
+                code_review_rate_limit: None,
+                additional_rate_limits: Vec::new(),
+            }),
+        };
+
+        let err = handle_no_ready_runtime_profiles(
+            &report,
+            "main",
+            &RuntimeLaunchRequest {
+                profile: None,
+                allow_auto_rotate: true,
+                skip_quota_check: false,
+                base_url: None,
+                include_code_review: false,
+                force_runtime_proxy: false,
+                model_provider_override: None,
+            },
+        )
+        .expect_err("blocked preflight should return an error instead of exiting");
+
+        let message = format!("{err:#}");
+        assert!(message.contains("quota preflight blocked profile 'main'"));
+        assert!(message.contains("no ready profile"));
+        assert_eq!(
+            err.downcast_ref::<crate::command_dispatch::ProdexCommandExit>()
+                .expect("blocked preflight should carry an explicit exit code")
+                .code(),
+            2
+        );
+    }
+
+    #[test]
+    fn no_ready_runtime_profiles_continues_when_probe_failed() {
+        let report = RunProfileProbeReport {
+            name: "main".to_string(),
+            order_index: 0,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Err("network down".to_string()),
+        };
+
+        handle_no_ready_runtime_profiles(
+            &report,
+            "main",
+            &RuntimeLaunchRequest {
+                profile: None,
+                allow_auto_rotate: true,
+                skip_quota_check: false,
+                base_url: None,
+                include_code_review: false,
+                force_runtime_proxy: false,
+                model_provider_override: None,
+            },
+        )
+        .expect("probe failure should still continue without quota gate");
     }
 
     fn write_state(root: &Path, state: AppState) {

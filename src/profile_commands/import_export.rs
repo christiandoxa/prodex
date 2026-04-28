@@ -104,6 +104,12 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
 
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
+    let recovered_auth_updates = recover_imported_auth_update_journals(&paths, &mut state)?;
+    if recovered_auth_updates > 0 {
+        state
+            .save(&paths)
+            .context("failed to save recovered import auth rollback state")?;
+    }
     let commit = import_profile_export_payload(&paths, &mut state, &payload)?;
     if let Err(err) = state.save(&paths) {
         rollback_imported_profiles(&mut state, &commit);
@@ -174,6 +180,17 @@ pub(crate) fn handle_import_current_profile(args: ImportCurrentArgs) -> Result<(
         copy_current: true,
         activate: true,
     })
+}
+
+pub(crate) fn count_profile_import_auth_journals(paths: &AppPaths) -> Result<usize> {
+    Ok(imported_auth_update_journal_paths(paths)?.len())
+}
+
+pub(crate) fn repair_profile_import_auth_journals(
+    paths: &AppPaths,
+    state: &mut AppState,
+) -> Result<usize> {
+    recover_imported_auth_update_journals(paths, state)
 }
 
 fn resolve_export_profile_names(state: &AppState, requested: &[String]) -> Result<Vec<String>> {
@@ -667,6 +684,78 @@ pub(super) fn rollback_imported_auth_updates(
             let _ = fs::remove_file(secret_store::auth_json_path(&update.codex_home));
         }
     }
+}
+
+pub(super) fn recover_imported_auth_update_journals(
+    paths: &AppPaths,
+    state: &mut AppState,
+) -> Result<usize> {
+    let journal_root = imported_auth_update_journal_root(paths);
+    let journal_paths = imported_auth_update_journal_paths(paths)?;
+
+    let mut journals = Vec::new();
+    for journal_path in journal_paths {
+        let journal_text = fs::read_to_string(&journal_path)
+            .with_context(|| format!("failed to read {}", journal_path.display()))?;
+        let journal: ImportedExistingProfileAuthUpdateJournal = serde_json::from_str(&journal_text)
+            .with_context(|| format!("failed to parse {}", journal_path.display()))?;
+        if journal.version != IMPORT_AUTH_UPDATE_JOURNAL_VERSION {
+            bail!(
+                "unsupported auth update journal version {} in {}",
+                journal.version,
+                journal_path.display()
+            );
+        }
+        journals.push((journal_path, journal));
+    }
+    journals.sort_by(|left, right| {
+        right
+            .1
+            .created_at
+            .cmp(&left.1.created_at)
+            .then_with(|| right.0.cmp(&left.0))
+    });
+
+    let mut recovered = 0;
+    for (journal_path, journal) in journals {
+        rollback_imported_auth_updates(
+            state,
+            &[ImportedExistingProfileAuthUpdate {
+                profile_name: journal.profile_name,
+                codex_home: PathBuf::from(journal.codex_home),
+                previous_auth_json: journal.previous_auth_json,
+                previous_email: journal.previous_email,
+                journal_path: Some(journal_path.clone()),
+            }],
+        );
+        fs::remove_file(&journal_path)
+            .with_context(|| format!("failed to remove {}", journal_path.display()))?;
+        recovered += 1;
+    }
+
+    let _ = fs::remove_dir(&journal_root);
+    Ok(recovered)
+}
+
+fn imported_auth_update_journal_paths(paths: &AppPaths) -> Result<Vec<PathBuf>> {
+    let journal_root = imported_auth_update_journal_root(paths);
+    let entries = match fs::read_dir(&journal_root) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", journal_root.display()));
+        }
+    };
+    let mut journal_paths = entries
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .with_context(|| format!("failed to read entry in {}", journal_root.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    journal_paths.retain(|path| path.is_file());
+    journal_paths.sort();
+    Ok(journal_paths)
 }
 
 pub(super) fn cleanup_imported_auth_update_journals(commit: &ImportedProfilesCommit) {

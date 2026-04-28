@@ -442,6 +442,11 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             local_overload_backoff_remaining_seconds: self
                 .metrics
                 .local_overload_backoff_remaining_seconds,
+            runtime_state_lock_wait: runtime_metrics::RuntimeBrokerStateLockWaitMetrics {
+                wait_total_ns: self.metrics.runtime_state_lock_wait.wait_total_ns,
+                wait_count: self.metrics.runtime_state_lock_wait.wait_count,
+                wait_max_ns: self.metrics.runtime_state_lock_wait.wait_max_ns,
+            },
             traffic: self.build_traffic(),
             profile_inflight: self.build_profile_inflight(),
             retry_backoffs: self.metrics.retry_backoffs as u64,
@@ -606,8 +611,7 @@ pub(crate) fn runtime_broker_metrics_snapshot(
     let now = Local::now().timestamp();
     let now_u64 = now.max(0) as u64;
     let runtime = shared
-        .runtime
-        .lock()
+        .lock_runtime_state()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
 
     let health = RuntimeBrokerHealth {
@@ -652,6 +656,7 @@ pub(crate) fn runtime_broker_metrics_snapshot(
             .local_overload_backoff_until
             .load(Ordering::SeqCst)
             .saturating_sub(now_u64),
+        runtime_state_lock_wait: shared.runtime_state_lock_wait_metrics(),
         traffic: RuntimeBrokerTrafficMetrics {
             responses: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Responses),
             compact: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Compact),
@@ -793,6 +798,8 @@ mod tests {
             local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
             active_request_count: Arc::new(AtomicUsize::new(0)),
             active_request_limit: 8,
+            runtime_state_lock_wait_counters:
+                RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
             lane_admission: RuntimeProxyLaneAdmission::new(runtime_proxy_lane_limits(8, 1, 1)),
         }
     }

@@ -747,6 +747,129 @@ pub(crate) fn ensure_runtime_profile_precommit_quota_ready(
     Ok((quota_summary, quota_source))
 }
 
+pub(crate) struct RuntimePrecommitQuotaGateRequest<'a> {
+    pub(crate) shared: &'a RuntimeRotationProxyShared,
+    pub(crate) profile_name: &'a str,
+    pub(crate) route_kind: RuntimeRouteKind,
+    pub(crate) has_continuation_context: bool,
+    pub(crate) reprobe_context: &'a str,
+}
+
+pub(crate) enum RuntimePrecommitQuotaGateDecision {
+    Proceed,
+    Block {
+        reason: RuntimePrecommitQuotaBlockReason,
+        summary: RuntimeQuotaSummary,
+        source: Option<RuntimeQuotaSource>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimePrecommitQuotaBlockReason {
+    ExhaustedBeforeSend,
+    CriticalFloorBeforeSend,
+    WindowsUnavailableAfterReprobe,
+}
+
+impl RuntimePrecommitQuotaBlockReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend => "quota_exhausted_before_send",
+            RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend => {
+                "quota_critical_floor_before_send"
+            }
+            RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe => {
+                "quota_windows_unavailable_after_reprobe"
+            }
+        }
+    }
+}
+
+fn runtime_precommit_quota_block_reason(
+    summary: RuntimeQuotaSummary,
+    route_kind: RuntimeRouteKind,
+) -> Option<RuntimePrecommitQuotaBlockReason> {
+    let floor_percent = runtime_quota_precommit_floor_percent(route_kind);
+    if summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+        return Some(RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend);
+    }
+
+    if matches!(
+        route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && (runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
+        || runtime_quota_window_precommit_guard(summary.weekly, floor_percent))
+    {
+        return Some(RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend);
+    }
+
+    None
+}
+
+pub(crate) fn runtime_precommit_quota_gate(
+    request: RuntimePrecommitQuotaGateRequest<'_>,
+) -> Result<RuntimePrecommitQuotaGateDecision> {
+    let RuntimePrecommitQuotaGateRequest {
+        shared,
+        profile_name,
+        route_kind,
+        has_continuation_context,
+        reprobe_context,
+    } = request;
+
+    let (initial_quota_summary, initial_quota_source) =
+        runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+    if has_continuation_context
+        && matches!(
+            initial_quota_source,
+            Some(RuntimeQuotaSource::PersistedSnapshot)
+        )
+        && let Some(reason) =
+            runtime_precommit_quota_block_reason(initial_quota_summary, route_kind)
+    {
+        return Ok(RuntimePrecommitQuotaGateDecision::Block {
+            reason,
+            summary: initial_quota_summary,
+            source: initial_quota_source,
+        });
+    }
+
+    let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
+        shared,
+        profile_name,
+        &BTreeSet::new(),
+        route_kind,
+    )?;
+    let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
+        shared,
+        profile_name,
+        route_kind,
+        reprobe_context,
+    )?;
+    if runtime_quota_summary_requires_live_source_after_probe(
+        quota_summary,
+        quota_source,
+        route_kind,
+    ) && has_alternative_quota_profile
+    {
+        return Ok(RuntimePrecommitQuotaGateDecision::Block {
+            reason: RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe,
+            summary: quota_summary,
+            source: quota_source,
+        });
+    }
+
+    if let Some(reason) = runtime_precommit_quota_block_reason(quota_summary, route_kind) {
+        return Ok(RuntimePrecommitQuotaGateDecision::Block {
+            reason,
+            summary: quota_summary,
+            source: quota_source,
+        });
+    }
+
+    Ok(RuntimePrecommitQuotaGateDecision::Proceed)
+}
+
 pub(crate) fn runtime_proxy_direct_current_fallback_profile(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,

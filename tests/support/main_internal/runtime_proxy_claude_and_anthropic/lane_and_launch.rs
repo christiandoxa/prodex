@@ -110,9 +110,10 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5.4-mini".to_string())
     );
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
+    );
     assert!(env.iter().all(|(key, _)| *key != "ANTHROPIC_API_KEY"));
     assert_eq!(
         runtime_proxy_claude_removed_env(),
@@ -175,9 +176,10 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("haiku".to_string())
     );
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
+    );
 }
 
 #[test]
@@ -228,9 +230,10 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("opus".to_string())
     );
-    assert!(env
-        .iter()
-        .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION"));
+    assert!(
+        env.iter()
+            .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
+    );
 }
 
 #[test]
@@ -869,12 +872,16 @@ fn runtime_proxy_serves_local_anthropic_compat_metadata_routes() {
             .unwrap_or_default()
             .starts_with("claude-")
     }));
-    assert!(data
-        .iter()
-        .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4") }));
-    assert!(data
-        .iter()
-        .any(|model| { model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2") }));
+    assert!(
+        data.iter().any(|model| {
+            model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4")
+        })
+    );
+    assert!(
+        data.iter().any(|model| {
+            model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.2")
+        })
+    );
     assert!(data.iter().any(|model| {
         model.get("id").and_then(serde_json::Value::as_str) == Some("gpt-5.4-mini")
     }));

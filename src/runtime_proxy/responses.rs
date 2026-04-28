@@ -982,82 +982,33 @@ pub(crate) fn attempt_runtime_responses_request(
     let request_session_id = runtime_request_session_id(request);
     let request_previous_response_id = runtime_request_previous_response_id(request);
     let request_turn_state = runtime_request_turn_state(request);
-    let (initial_quota_summary, initial_quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Responses)?;
-    if (request_previous_response_id.is_some()
-        || request_session_id.is_some()
-        || request_turn_state.is_some())
-        && matches!(
-            initial_quota_source,
-            Some(RuntimeQuotaSource::PersistedSnapshot)
-        )
-        && let Some(reason) =
-            runtime_quota_precommit_guard_reason(initial_quota_summary, RuntimeRouteKind::Responses)
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses reason={reason} quota_source={} {}",
-                initial_quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(initial_quota_summary),
-            ),
-        );
-        return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
-            profile_name: profile_name.to_string(),
-            reason,
-        });
-    }
-    let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
+    let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
         shared,
         profile_name,
-        &BTreeSet::new(),
-        RuntimeRouteKind::Responses,
-    )?;
-    let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
-        shared,
-        profile_name,
-        RuntimeRouteKind::Responses,
-        "responses_precommit_reprobe",
-    )?;
-    if runtime_quota_summary_requires_live_source_after_probe(
-        quota_summary,
-        quota_source,
-        RuntimeRouteKind::Responses,
-    ) && has_alternative_quota_profile
+        route_kind: RuntimeRouteKind::Responses,
+        has_continuation_context: request_previous_response_id.is_some()
+            || request_session_id.is_some()
+            || request_turn_state.is_some(),
+        reprobe_context: "responses_precommit_reprobe",
+    })?;
+    if let RuntimePrecommitQuotaGateDecision::Block {
+        reason,
+        summary,
+        source,
+    } = quota_gate
     {
+        let reason_label = reason.as_str();
         runtime_proxy_log(
             shared,
             format!(
-                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses reason=quota_windows_unavailable_after_reprobe quota_source={} {}",
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
+                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses reason={reason_label} quota_source={} {}",
+                source.map(runtime_quota_source_label).unwrap_or("unknown"),
+                runtime_quota_summary_log_fields(summary),
             ),
         );
         return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
             profile_name: profile_name.to_string(),
-            reason: "quota_windows_unavailable_after_reprobe",
-        });
-    }
-    if let Some(reason) =
-        runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Responses)
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http responses_pre_send_skip profile={profile_name} route=responses reason={reason} quota_source={} {}",
-                quota_source
-                    .map(runtime_quota_source_label)
-                    .unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-        return Ok(RuntimeResponsesAttempt::LocalSelectionBlocked {
-            profile_name: profile_name.to_string(),
-            reason,
+            reason: reason_label,
         });
     }
     let inflight_guard =

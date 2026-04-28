@@ -24,7 +24,8 @@ use self::import_export::{
     serialize_profile_export_payload, validate_profile_export_header,
 };
 pub(crate) use self::import_export::{
-    handle_export_profiles, handle_import_current_profile, handle_import_profiles,
+    count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
+    handle_import_profiles, repair_profile_import_auth_journals,
 };
 use self::import_export::{
     remove_committed_import_homes, rollback_imported_auth_updates, write_secret_text_file,
