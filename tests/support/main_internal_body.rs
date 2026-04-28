@@ -492,6 +492,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         runtime: true,
         repair_import_auth_journals: false,
         tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
+        suggest_policy: false,
         json: true,
     })));
     assert!(!should_emit_update_notice(&Commands::Audit(AuditArgs {
@@ -522,12 +523,14 @@ fn doctor_tail_bytes_cli_defaults_and_overrides() {
     };
     assert_eq!(args.tail_bytes, RUNTIME_PROXY_DOCTOR_TAIL_BYTES);
     assert!(!args.repair_import_auth_journals);
+    assert!(!args.suggest_policy);
 
     let command = parse_cli_command_from([
         "prodex",
         "doctor",
         "--runtime",
         "--repair-import-auth-journals",
+        "--suggest-policy",
         "--tail-bytes",
         "42",
     ])
@@ -537,6 +540,11 @@ fn doctor_tail_bytes_cli_defaults_and_overrides() {
     };
     assert_eq!(args.tail_bytes, 42);
     assert!(args.repair_import_auth_journals);
+    assert!(args.suggest_policy);
+    assert!(
+        parse_cli_command_from(["prodex", "doctor", "--suggest-policy"]).is_err(),
+        "policy suggestions require --runtime"
+    );
 }
 
 #[test]
@@ -1518,6 +1526,12 @@ websocket_connect_timeout_ms = 777
 websocket_happy_eyeballs_delay_ms = 88
 websocket_precommit_progress_timeout_ms = 999
 websocket_previous_response_reuse_stale_ms = 1001
+websocket_connect_worker_count = 4
+websocket_connect_queue_capacity = 12
+websocket_connect_overflow_capacity = 0
+websocket_dns_worker_count = 2
+websocket_dns_queue_capacity = 8
+websocket_dns_overflow_capacity = 0
 admission_wait_budget_ms = 111
 pressure_admission_wait_budget_ms = 22
 long_lived_queue_wait_budget_ms = 333
@@ -1546,6 +1560,12 @@ pressure_long_lived_queue_wait_budget_ms = 44
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS"),
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS"),
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS"),
+        TestEnvVarGuard::set("PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT", "6"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_WEBSOCKET_CONNECT_OVERFLOW_CAPACITY"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY"),
+        TestEnvVarGuard::set("PRODEX_RUNTIME_WEBSOCKET_DNS_OVERFLOW_CAPACITY", "9"),
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS"),
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS"),
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS"),
@@ -1601,11 +1621,17 @@ pressure_long_lived_queue_wait_budget_ms = 44
     assert_eq!(snapshot.websocket_happy_eyeballs_delay_ms, 88);
     assert_eq!(snapshot.websocket_precommit_progress_timeout_ms, 999);
     assert_eq!(snapshot.websocket_previous_response_reuse_stale_ms, 1001);
+    assert_eq!(snapshot.websocket_connect_worker_count, 6);
+    assert_eq!(snapshot.websocket_connect_queue_capacity, 12);
+    assert_eq!(snapshot.websocket_connect_overflow_capacity, 0);
+    assert_eq!(snapshot.websocket_dns_worker_count, 2);
+    assert_eq!(snapshot.websocket_dns_queue_capacity, 8);
+    assert_eq!(snapshot.websocket_dns_overflow_capacity, 9);
     assert_eq!(snapshot.profile_inflight_soft_limit, 9);
     assert_eq!(snapshot.profile_inflight_hard_limit, 10);
     assert_eq!(
         format_runtime_tuning_workers(&snapshot),
-        "workers proxy=12, long-lived=5, async=3, probe-refresh=4; active=40, queue=88; lanes responses=31, compact=5, websocket=7, standard=6"
+        "workers proxy=12, long-lived=5, async=3, probe-refresh=4; active=40, queue=88; lanes responses=31, compact=5, websocket=7, standard=6; ws-connect workers=6, queue=12, overflow=0; ws-dns workers=2, queue=8, overflow=9"
     );
     assert_eq!(
         format_runtime_tuning_budgets(&snapshot),

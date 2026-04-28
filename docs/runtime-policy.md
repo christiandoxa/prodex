@@ -23,6 +23,7 @@ Defaults below are production defaults. Test builds use smaller timeouts and lim
 
 ## Runtime Proxy Keys
 
+<!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
 | `runtime_proxy.worker_count` | `PRODEX_RUNTIME_PROXY_WORKER_COUNT` | CPU parallelism clamped to `4..12` | Short-lived proxy worker pool size. |
@@ -50,6 +51,12 @@ Defaults below are production defaults. Test builds use smaller timeouts and lim
 | `runtime_proxy.websocket_connect_timeout_ms` | `PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS` | `15000` | Upstream websocket connect timeout. |
 | `runtime_proxy.websocket_happy_eyeballs_delay_ms` | `PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS` | `200` | Delay before alternate websocket TCP connect attempt. |
 | `runtime_proxy.websocket_precommit_progress_timeout_ms` | `PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS` | `8000` | Websocket pre-commit progress timeout. |
+| `runtime_proxy.websocket_connect_worker_count` | `PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT` | CPU parallelism clamped to `4..16` | Worker count for bounded websocket TCP connect executor. |
+| `runtime_proxy.websocket_connect_queue_capacity` | `PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY` | `websocket_connect_worker_count * 8` clamped to `32..128` | Bounded queue capacity for websocket TCP connect work; effective value is at least the worker count. |
+| `runtime_proxy.websocket_connect_overflow_capacity` | `PRODEX_RUNTIME_WEBSOCKET_CONNECT_OVERFLOW_CAPACITY` | `websocket_connect_queue_capacity * 4` clamped to `32..512` | Overflow queue capacity for websocket TCP connect work after the bounded queue fills; `0` disables overflow buffering. |
+| `runtime_proxy.websocket_dns_worker_count` | `PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT` | CPU parallelism clamped to `2..8` | Worker count for bounded websocket DNS resolution executor. |
+| `runtime_proxy.websocket_dns_queue_capacity` | `PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY` | `websocket_dns_worker_count * 4` clamped to `16..64` | Bounded queue capacity for websocket DNS resolution work; effective value is at least the worker count. |
+| `runtime_proxy.websocket_dns_overflow_capacity` | `PRODEX_RUNTIME_WEBSOCKET_DNS_OVERFLOW_CAPACITY` | `websocket_dns_queue_capacity * 2` clamped to `16..128` | Overflow queue capacity for websocket DNS resolution work after the bounded queue fills; `0` disables overflow buffering. |
 | `runtime_proxy.websocket_previous_response_reuse_stale_ms` | `PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS` | `60000` | Window for reusing a websocket previous-response binding before treating it as stale. |
 | `runtime_proxy.broker_ready_timeout_ms` | `PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS` | `15000` | Startup wait for the runtime broker to become ready. |
 | `runtime_proxy.broker_health_connect_timeout_ms` | `PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS` | `750` | Broker health check connect timeout. |
@@ -57,8 +64,9 @@ Defaults below are production defaults. Test builds use smaller timeouts and lim
 | `runtime_proxy.sync_probe_pressure_pause_ms` | `PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS` | `5` | Pause before synchronous probe work when local pressure is detected. |
 | `runtime_proxy.responses_critical_floor_percent` | `PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT` | `2` | Minimum remaining Responses quota percentage treated as critical; valid range `1..10`. |
 | `runtime_proxy.startup_sync_probe_warm_limit` | `PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT` | `1` | Startup synchronous quota probe warm-up limit, capped internally at `3`. |
+<!-- END GENERATED RUNTIME_PROXY_KEYS -->
 
-Positive integer values are required for numeric policy keys, except `responses_critical_floor_percent`, which must be between `1` and `10`.
+Positive integer values are required for numeric policy keys, except websocket overflow capacity keys, which may be `0`, and `responses_critical_floor_percent`, which must be between `1` and `10`.
 Some effective values are clamped after env or policy resolution to protect runtime bounds.
 
 ## Example

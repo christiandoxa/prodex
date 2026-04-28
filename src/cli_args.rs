@@ -252,6 +252,9 @@ pub(crate) struct DoctorArgs {
     /// Bytes of runtime log tail to inspect for --runtime/--json.
     #[arg(long, default_value_t = RUNTIME_PROXY_DOCTOR_TAIL_BYTES, value_name = "BYTES")]
     pub(crate) tail_bytes: usize,
+    /// Suggest policy.toml tuning snippets from recent runtime markers.
+    #[arg(long, requires = "runtime")]
+    pub(crate) suggest_policy: bool,
     /// Emit machine-readable JSON output. Supported together with --runtime.
     #[arg(long)]
     pub(crate) json: bool,

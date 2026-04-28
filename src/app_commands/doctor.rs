@@ -27,7 +27,11 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 
     if args.runtime && args.json {
         let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
-        let mut value = runtime_doctor_json_value(&summary);
+        let mut value = if args.suggest_policy {
+            runtime_doctor_json_value_with_policy_suggestions(&summary)
+        } else {
+            runtime_doctor_json_value(&summary)
+        };
         if let Some(object) = value.as_object_mut() {
             object.insert(
                 "runtime_policy".to_string(),
@@ -129,13 +133,17 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 
     if args.runtime {
         print_blank_line();
-        let fields = if args.tail_bytes == RUNTIME_PROXY_DOCTOR_TAIL_BYTES {
-            runtime_doctor_fields()
-        } else {
-            let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
-            runtime_doctor_fields_for_summary(&summary, &runtime_proxy_latest_log_pointer_path())
-        };
+        let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
+        let fields =
+            runtime_doctor_fields_for_summary(&summary, &runtime_proxy_latest_log_pointer_path());
         print_panel("Runtime Proxy", &fields);
+        if args.suggest_policy {
+            print_blank_line();
+            let suggestions = runtime_doctor_policy_suggestions(&summary);
+            for line in runtime_doctor_policy_suggestion_lines(&suggestions) {
+                print_stdout_line(&line);
+            }
+        }
     }
 
     if state.profiles.is_empty() {

@@ -654,7 +654,7 @@ pub(crate) fn runtime_logs_json_value() -> serde_json::Value {
 
 pub(crate) fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {
     format!(
-        "workers proxy={}, long-lived={}, async={}, probe-refresh={}; active={}, queue={}; lanes responses={}, compact={}, websocket={}, standard={}",
+        "workers proxy={}, long-lived={}, async={}, probe-refresh={}; active={}, queue={}; lanes responses={}, compact={}, websocket={}, standard={}; ws-connect workers={}, queue={}, overflow={}; ws-dns workers={}, queue={}, overflow={}",
         snapshot.worker_count,
         snapshot.long_lived_worker_count,
         snapshot.async_worker_count,
@@ -664,7 +664,13 @@ pub(crate) fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) ->
         snapshot.lane_limits.responses,
         snapshot.lane_limits.compact,
         snapshot.lane_limits.websocket,
-        snapshot.lane_limits.standard
+        snapshot.lane_limits.standard,
+        snapshot.websocket_connect_worker_count,
+        snapshot.websocket_connect_queue_capacity,
+        snapshot.websocket_connect_overflow_capacity,
+        snapshot.websocket_dns_worker_count,
+        snapshot.websocket_dns_queue_capacity,
+        snapshot.websocket_dns_overflow_capacity
     )
 }
 

@@ -29,6 +29,37 @@ const CONTINUATION_TAGS = Object.freeze([
 
 export const RUNTIME_TEST_TAGS = TAGS;
 
+export const RUNTIME_SMOKE_TESTS = [
+  {
+    label: "log-json",
+    filter: "runtime_proxy_log_to_path_preserves_valid_json_format",
+  },
+  {
+    label: "doctor-markers-json",
+    filter: "runtime_doctor_json_value_includes_selection_markers",
+  },
+  {
+    label: "header-preservation",
+    filter: "runtime_proxy_header_skip_list_preserves_codex_metadata_headers",
+  },
+  {
+    label: "selection-hard-affinity",
+    filter: "response_selection_preserves_bound_previous_response_affinity_despite_quota",
+  },
+  {
+    label: "stale-continuation-guard",
+    filter: "websocket_previous_response_not_found_requires_stale_continuation_without_turn_state",
+  },
+  {
+    label: "websocket-local-pressure",
+    filter: "websocket_local_pressure_connect_error_does_not_mark_profile_transport_failure",
+  },
+  {
+    label: "tuning-snapshot",
+    filter: "runtime_tuning_snapshot_reports_effective_policy_and_env_values",
+  },
+];
+
 export const RUNTIME_CI_BROAD_SHARD_FILTERS = [
   {
     id: "root-broker",

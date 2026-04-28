@@ -759,9 +759,17 @@ pub(crate) fn proxy_runtime_responses_request(
         {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={}",
-                    runtime_proxy_profile_inflight_hard_limit(),
+                runtime_proxy_structured_log_message(
+                    "profile_inflight_saturated",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", candidate_name.as_str()),
+                        runtime_proxy_log_field(
+                            "hard_limit",
+                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                        ),
+                    ],
                 ),
             );
             saw_inflight_saturation = true;

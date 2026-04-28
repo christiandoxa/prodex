@@ -651,10 +651,6 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
     runtime_doctor_collect_broker_identities(paths, summary);
 }
 
-pub(crate) fn collect_runtime_doctor_summary() -> RuntimeDoctorSummary {
-    collect_runtime_doctor_summary_with_tail_bytes(RUNTIME_PROXY_DOCTOR_TAIL_BYTES)
-}
-
 pub(crate) fn collect_runtime_doctor_summary_with_tail_bytes(
     tail_bytes: usize,
 ) -> RuntimeDoctorSummary {

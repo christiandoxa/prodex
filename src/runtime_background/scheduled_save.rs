@@ -59,9 +59,13 @@ pub(crate) fn schedule_runtime_state_save_request(
     if !runtime_proxy_persistence_enabled(shared) {
         runtime_proxy_log(
             shared,
-            format!(
-                "state_save_suppressed role=follower reason={reason} path={}",
-                request.paths.state_file.display()
+            runtime_proxy_structured_log_message(
+                "state_save_suppressed",
+                [
+                    runtime_proxy_log_field("role", "follower"),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("path", request.paths.state_file.display().to_string()),
+                ],
             ),
         );
         return;
@@ -75,11 +79,19 @@ pub(crate) fn schedule_runtime_state_save_request(
     if cfg!(test) {
         runtime_proxy_log(
             shared,
-            format!(
-                "state_save_inline revision={} reason={} ready_in_ms={}",
-                revision,
-                reason,
-                ready_at.saturating_duration_since(queued_at).as_millis()
+            runtime_proxy_structured_log_message(
+                "state_save_inline",
+                [
+                    runtime_proxy_log_field("revision", revision.to_string()),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field(
+                        "ready_in_ms",
+                        ready_at
+                            .saturating_duration_since(queued_at)
+                            .as_millis()
+                            .to_string(),
+                    ),
+                ],
             ),
         );
         match save_runtime_state_snapshot_if_latest(
@@ -94,23 +106,37 @@ pub(crate) fn schedule_runtime_state_save_request(
         ) {
             Ok(true) => runtime_proxy_log(
                 shared,
-                format!(
-                    "state_save_ok revision={} reason={} lag_ms=0",
-                    revision, reason
+                runtime_proxy_structured_log_message(
+                    "state_save_ok",
+                    [
+                        runtime_proxy_log_field("revision", revision.to_string()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                    ],
                 ),
             ),
             Ok(false) => runtime_proxy_log(
                 shared,
-                format!(
-                    "state_save_skipped revision={} reason={} lag_ms=0",
-                    revision, reason
+                runtime_proxy_structured_log_message(
+                    "state_save_skipped",
+                    [
+                        runtime_proxy_log_field("revision", revision.to_string()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                    ],
                 ),
             ),
             Err(err) => runtime_proxy_log(
                 shared,
-                format!(
-                    "state_save_error revision={} reason={} lag_ms=0 stage=write error={err:#}",
-                    revision, reason
+                runtime_proxy_structured_log_message(
+                    "state_save_error",
+                    [
+                        runtime_proxy_log_field("revision", revision.to_string()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                        runtime_proxy_log_field("stage", "write"),
+                        runtime_proxy_log_field("error", format!("{err:#}")),
+                    ],
                 ),
             ),
         }
@@ -143,20 +169,32 @@ pub(crate) fn schedule_runtime_state_save_request(
     );
     runtime_proxy_log(
         shared,
-        format!(
-            "state_save_queued revision={} reason={} backlog={} ready_in_ms={}",
-            revision,
-            reason,
-            backlog,
-            ready_at.saturating_duration_since(queued_at).as_millis()
+        runtime_proxy_structured_log_message(
+            "state_save_queued",
+            [
+                runtime_proxy_log_field("revision", revision.to_string()),
+                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("backlog", backlog.to_string()),
+                runtime_proxy_log_field(
+                    "ready_in_ms",
+                    ready_at
+                        .saturating_duration_since(queued_at)
+                        .as_millis()
+                        .to_string(),
+                ),
+            ],
         ),
     );
     if runtime_proxy_queue_pressure_active(backlog, 0, 0) {
         runtime_proxy_log(
             shared,
-            format!(
-                "state_save_queue_backpressure revision={} reason={} backlog={backlog}",
-                revision, reason
+            runtime_proxy_structured_log_message(
+                "state_save_queue_backpressure",
+                [
+                    runtime_proxy_log_field("revision", revision.to_string()),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("backlog", backlog.to_string()),
+                ],
             ),
         );
     }
@@ -271,20 +309,32 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
     );
     runtime_proxy_log(
         shared,
-        format!(
-            "state_save_queued revision={} reason={} backlog={} ready_in_ms={}",
-            revision,
-            reason,
-            backlog,
-            ready_at.saturating_duration_since(queued_at).as_millis()
+        runtime_proxy_structured_log_message(
+            "state_save_queued",
+            [
+                runtime_proxy_log_field("revision", revision.to_string()),
+                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("backlog", backlog.to_string()),
+                runtime_proxy_log_field(
+                    "ready_in_ms",
+                    ready_at
+                        .saturating_duration_since(queued_at)
+                        .as_millis()
+                        .to_string(),
+                ),
+            ],
         ),
     );
     if runtime_proxy_queue_pressure_active(backlog, 0, 0) {
         runtime_proxy_log(
             shared,
-            format!(
-                "state_save_queue_backpressure revision={} reason={} backlog={backlog}",
-                revision, reason
+            runtime_proxy_structured_log_message(
+                "state_save_queue_backpressure",
+                [
+                    runtime_proxy_log_field("revision", revision.to_string()),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("backlog", backlog.to_string()),
+                ],
             ),
         );
     }
@@ -367,19 +417,30 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
     queue.wake.notify_one();
     runtime_proxy_log(
         shared,
-        format!(
-            "continuation_journal_save_queued reason={} backlog={} ready_in_ms={}",
-            reason,
-            backlog,
-            ready_at.saturating_duration_since(queued_at).as_millis()
+        runtime_proxy_structured_log_message(
+            "continuation_journal_save_queued",
+            [
+                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("backlog", backlog.to_string()),
+                runtime_proxy_log_field(
+                    "ready_in_ms",
+                    ready_at
+                        .saturating_duration_since(queued_at)
+                        .as_millis()
+                        .to_string(),
+                ),
+            ],
         ),
     );
     if runtime_proxy_queue_pressure_active(0, backlog, 0) {
         runtime_proxy_log(
             shared,
-            format!(
-                "continuation_journal_queue_backpressure reason={} backlog={backlog}",
-                reason
+            runtime_proxy_structured_log_message(
+                "continuation_journal_queue_backpressure",
+                [
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("backlog", backlog.to_string()),
+                ],
             ),
         );
     }
@@ -460,9 +521,18 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
     if !runtime_proxy_persistence_enabled(shared) {
         runtime_proxy_log(
             shared,
-            format!(
-                "continuation_journal_save_suppressed role=follower reason={reason} path={}",
-                runtime_continuation_journal_file_path(&paths).display()
+            runtime_proxy_structured_log_message(
+                "continuation_journal_save_suppressed",
+                [
+                    runtime_proxy_log_field("role", "follower"),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field(
+                        "path",
+                        runtime_continuation_journal_file_path(&paths)
+                            .display()
+                            .to_string(),
+                    ),
+                ],
             ),
         );
         return;
@@ -470,7 +540,13 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
     if cfg!(test) {
         runtime_proxy_log(
             shared,
-            format!("continuation_journal_save_inline reason={reason} backlog=0"),
+            runtime_proxy_structured_log_message(
+                "continuation_journal_save_inline",
+                [
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("backlog", "0"),
+                ],
+            ),
         );
         let saved_at = Local::now().timestamp();
         match save_runtime_continuation_journal_for_profiles(
@@ -481,16 +557,26 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
         ) {
             Ok(()) => runtime_proxy_log(
                 shared,
-                format!(
-                    "continuation_journal_save_ok saved_at={} reason={} lag_ms=0",
-                    saved_at, reason
+                runtime_proxy_structured_log_message(
+                    "continuation_journal_save_ok",
+                    [
+                        runtime_proxy_log_field("saved_at", saved_at.to_string()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                    ],
                 ),
             ),
             Err(err) => runtime_proxy_log(
                 shared,
-                format!(
-                    "continuation_journal_save_error saved_at={} reason={} lag_ms=0 stage=write error={err:#}",
-                    saved_at, reason
+                runtime_proxy_structured_log_message(
+                    "continuation_journal_save_error",
+                    [
+                        runtime_proxy_log_field("saved_at", saved_at.to_string()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                        runtime_proxy_log_field("stage", "write"),
+                        runtime_proxy_log_field("error", format!("{err:#}")),
+                    ],
                 ),
             ),
         }
@@ -526,19 +612,30 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
     queue.wake.notify_one();
     runtime_proxy_log(
         shared,
-        format!(
-            "continuation_journal_save_queued reason={} backlog={} ready_in_ms={}",
-            reason,
-            backlog,
-            ready_at.saturating_duration_since(queued_at).as_millis()
+        runtime_proxy_structured_log_message(
+            "continuation_journal_save_queued",
+            [
+                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("backlog", backlog.to_string()),
+                runtime_proxy_log_field(
+                    "ready_in_ms",
+                    ready_at
+                        .saturating_duration_since(queued_at)
+                        .as_millis()
+                        .to_string(),
+                ),
+            ],
         ),
     );
     if runtime_proxy_queue_pressure_active(0, backlog, 0) {
         runtime_proxy_log(
             shared,
-            format!(
-                "continuation_journal_queue_backpressure reason={} backlog={backlog}",
-                reason
+            runtime_proxy_structured_log_message(
+                "continuation_journal_queue_backpressure",
+                [
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("backlog", backlog.to_string()),
+                ],
             ),
         );
     }
@@ -608,29 +705,46 @@ pub(crate) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
             match result {
                 Ok(true) => runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "state_save_ok revision={} reason={} lag_ms={}",
-                        revision,
-                        reason,
-                        queued_at.elapsed().as_millis()
+                    &runtime_proxy_structured_log_message(
+                        "state_save_ok",
+                        [
+                            runtime_proxy_log_field("revision", revision.to_string()),
+                            runtime_proxy_log_field("reason", reason.as_str()),
+                            runtime_proxy_log_field(
+                                "lag_ms",
+                                queued_at.elapsed().as_millis().to_string(),
+                            ),
+                        ],
                     ),
                 ),
                 Ok(false) => runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "state_save_skipped revision={} reason={} lag_ms={}",
-                        revision,
-                        reason,
-                        queued_at.elapsed().as_millis()
+                    &runtime_proxy_structured_log_message(
+                        "state_save_skipped",
+                        [
+                            runtime_proxy_log_field("revision", revision.to_string()),
+                            runtime_proxy_log_field("reason", reason.as_str()),
+                            runtime_proxy_log_field(
+                                "lag_ms",
+                                queued_at.elapsed().as_millis().to_string(),
+                            ),
+                        ],
                     ),
                 ),
                 Err(err) => runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "state_save_error revision={} reason={} lag_ms={} stage=write error={err:#}",
-                        revision,
-                        reason,
-                        queued_at.elapsed().as_millis()
+                    &runtime_proxy_structured_log_message(
+                        "state_save_error",
+                        [
+                            runtime_proxy_log_field("revision", revision.to_string()),
+                            runtime_proxy_log_field("reason", reason.as_str()),
+                            runtime_proxy_log_field(
+                                "lag_ms",
+                                queued_at.elapsed().as_millis().to_string(),
+                            ),
+                            runtime_proxy_log_field("stage", "write"),
+                            runtime_proxy_log_field("error", format!("{err:#}")),
+                        ],
                     ),
                 ),
             }
@@ -671,20 +785,32 @@ pub(crate) fn runtime_continuation_journal_save_worker_loop(
             }) {
                 Ok(()) => runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "continuation_journal_save_ok saved_at={} reason={} lag_ms={}",
-                        saved_at,
-                        reason,
-                        queued_at.elapsed().as_millis()
+                    &runtime_proxy_structured_log_message(
+                        "continuation_journal_save_ok",
+                        [
+                            runtime_proxy_log_field("saved_at", saved_at.to_string()),
+                            runtime_proxy_log_field("reason", reason.as_str()),
+                            runtime_proxy_log_field(
+                                "lag_ms",
+                                queued_at.elapsed().as_millis().to_string(),
+                            ),
+                        ],
                     ),
                 ),
                 Err(err) => runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "continuation_journal_save_error saved_at={} reason={} lag_ms={} stage=write error={err:#}",
-                        saved_at,
-                        reason,
-                        queued_at.elapsed().as_millis()
+                    &runtime_proxy_structured_log_message(
+                        "continuation_journal_save_error",
+                        [
+                            runtime_proxy_log_field("saved_at", saved_at.to_string()),
+                            runtime_proxy_log_field("reason", reason.as_str()),
+                            runtime_proxy_log_field(
+                                "lag_ms",
+                                queued_at.elapsed().as_millis().to_string(),
+                            ),
+                            runtime_proxy_log_field("stage", "write"),
+                            runtime_proxy_log_field("error", format!("{err:#}")),
+                        ],
                     ),
                 ),
             }

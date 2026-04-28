@@ -6,13 +6,18 @@ mod marker_guard;
 mod parsing;
 mod render;
 mod state;
+mod suggestions;
 mod types;
 
 pub(crate) use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
 pub(crate) use render::{
-    runtime_doctor_fields, runtime_doctor_fields_for_summary, runtime_doctor_json_value,
+    runtime_doctor_fields_for_summary, runtime_doctor_json_value,
+    runtime_doctor_json_value_with_policy_suggestions,
 };
 pub(crate) use state::collect_runtime_doctor_summary_with_tail_bytes;
+pub(crate) use suggestions::{
+    runtime_doctor_policy_suggestion_lines, runtime_doctor_policy_suggestions,
+};
 pub(crate) use types::{
     RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteSummary,
     RuntimeDoctorSummary,

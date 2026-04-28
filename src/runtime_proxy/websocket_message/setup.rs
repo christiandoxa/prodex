@@ -191,12 +191,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         {
             runtime_proxy_log(
                 self.shared,
-                format!(
-                    "request={} websocket_session={} profile_inflight_saturated profile={} hard_limit={}",
-                    self.request_id,
-                    self.session_id,
-                    candidate_name,
-                    runtime_proxy_profile_inflight_hard_limit(),
+                runtime_proxy_structured_log_message(
+                    "profile_inflight_saturated",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field("profile", candidate_name),
+                        runtime_proxy_log_field(
+                            "hard_limit",
+                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                        ),
+                    ],
                 ),
             );
             self.excluded_profiles.insert(candidate_name.to_string());

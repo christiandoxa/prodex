@@ -409,9 +409,20 @@ where
                     Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_disconnected",
-                                started_at.elapsed().as_millis()
+                            runtime_proxy_structured_log_message(
+                                "runtime_proxy_queue_wait_exhausted",
+                                [
+                                    runtime_proxy_log_field("transport", transport),
+                                    runtime_proxy_log_field("path", path),
+                                    runtime_proxy_log_field(
+                                        "waited_ms",
+                                        started_at.elapsed().as_millis().to_string(),
+                                    ),
+                                    runtime_proxy_log_field(
+                                        "reason",
+                                        "long_lived_queue_disconnected",
+                                    ),
+                                ],
                             ),
                         );
                         return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));
@@ -428,9 +439,17 @@ where
             Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_disconnected",
-                        started_at.elapsed().as_millis()
+                    runtime_proxy_structured_log_message(
+                        "runtime_proxy_queue_wait_exhausted",
+                        [
+                            runtime_proxy_log_field("transport", transport),
+                            runtime_proxy_log_field("path", path),
+                            runtime_proxy_log_field(
+                                "waited_ms",
+                                started_at.elapsed().as_millis().to_string(),
+                            ),
+                            runtime_proxy_log_field("reason", "long_lived_queue_disconnected"),
+                        ],
                     ),
                 );
                 return Err((RuntimeProxyQueueRejection::Disconnected, returned_item));

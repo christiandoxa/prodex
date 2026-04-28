@@ -229,7 +229,10 @@ pub(crate) fn runtime_launch_dry_run_report(
     let mut output = String::new();
     output.push_str("Prodex dry run: launch diagnostics\n");
     output.push_str(&format!("Flow: {flow}\n"));
-    output.push_str(&format!("Binary: {}\n", dry_run_os(&child.binary)));
+    output.push_str(&format!(
+        "Binary: {}\n",
+        redaction_display_os(&child.binary)
+    ));
     output.push_str(&format!("Provider: {provider}\n"));
     output.push_str(&format!("Model: {model}\n"));
     output.push_str(&format!("CODEX_HOME: {}\n", child.codex_home.display()));
@@ -254,8 +257,8 @@ pub(crate) fn runtime_launch_dry_run_report(
     if child.args.is_empty() {
         output.push_str("  (none)\n");
     } else {
-        for arg in &child.args {
-            output.push_str(&format!("  {}\n", dry_run_redacted_arg(arg)));
+        for arg in redaction_redacted_cli_args(&child.args) {
+            output.push_str(&format!("  {arg}\n"));
         }
     }
     output.push_str("Env:\n");
@@ -263,14 +266,14 @@ pub(crate) fn runtime_launch_dry_run_report(
     for (key, value) in &child.extra_env {
         output.push_str(&format!(
             "  {}={}\n",
-            dry_run_os(key),
-            dry_run_redacted_env_value(key, value)
+            redaction_display_os(key),
+            redaction_redacted_env_value(key, value)
         ));
     }
     if !child.removed_env.is_empty() {
         output.push_str("Removed env:\n");
         for key in &child.removed_env {
-            output.push_str(&format!("  {}\n", dry_run_os(key)));
+            output.push_str(&format!("  {}\n", redaction_display_os(key)));
         }
     }
     output.push_str("Codex/TUI not started because --dry-run was set.\n");
@@ -279,57 +282,6 @@ pub(crate) fn runtime_launch_dry_run_report(
 
 fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
     codex_cli_config_override_value(args, key).or_else(|| codex_config_value(codex_home, key))
-}
-
-fn dry_run_redacted_env_value(key: &OsString, value: &OsString) -> String {
-    if dry_run_key_looks_secret(key) {
-        "<redacted>".to_string()
-    } else {
-        dry_run_os(value)
-    }
-}
-
-fn dry_run_redacted_arg(value: &OsString) -> String {
-    if dry_run_value_looks_secret(&value.to_string_lossy()) {
-        "<redacted>".to_string()
-    } else {
-        dry_run_os(value)
-    }
-}
-
-fn dry_run_os(value: &OsString) -> String {
-    let value = value.to_string_lossy();
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':' | '='))
-    {
-        return value.into_owned();
-    }
-    format!("{value:?}")
-}
-
-fn dry_run_key_looks_secret(key: &OsString) -> bool {
-    dry_run_value_looks_secret(&key.to_string_lossy())
-}
-
-fn dry_run_value_looks_secret(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "access_token",
-        "api_key",
-        "apikey",
-        "auth",
-        "authorization",
-        "bearer",
-        "password",
-        "secret",
-        "token",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
 }
 
 pub(crate) fn is_review_invocation(args: &[OsString]) -> bool {
@@ -531,9 +483,18 @@ mod tests {
                     OsString::from("-c"),
                     OsString::from("model=\"gpt-5.4\""),
                     OsString::from("--config=api_key=\"secret-value\""),
+                    OsString::from("--api-key"),
+                    OsString::from("opaque-cli-value"),
+                    OsString::from("--header"),
+                    OsString::from("Authorization: Bearer dry-run-bearer-secret-12345"),
+                    OsString::from("sk-proj-dry-run-secret-123456789"),
                 ])
                 .with_extra_env(vec![
                     ("ANTHROPIC_AUTH_TOKEN", OsString::from("secret-value")),
+                    (
+                        "PRODEX_VISIBLE_BEARER",
+                        OsString::from("Bearer dry-run-env-bearer-secret-12345"),
+                    ),
                     ("PRODEX_VISIBLE", OsString::from("1")),
                 ]),
         );
@@ -554,8 +515,15 @@ mod tests {
 
         assert!(report.contains("Model: gpt-5.4"));
         assert!(report.contains("ANTHROPIC_AUTH_TOKEN=<redacted>"));
+        assert!(report.contains("PRODEX_VISIBLE=1"));
+        assert!(report.contains("Bearer <redacted>"));
+        assert!(report.contains("sk-proj-<redacted>"));
         assert!(report.contains("<redacted>"));
         assert!(!report.contains("secret-value"));
+        assert!(!report.contains("opaque-cli-value"));
+        assert!(!report.contains("dry-run-bearer-secret-12345"));
+        assert!(!report.contains("dry-run-secret-123456789"));
+        assert!(!report.contains("dry-run-env-bearer-secret-12345"));
         assert!(report.contains("Codex/TUI not started"));
     }
 }

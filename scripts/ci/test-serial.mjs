@@ -7,7 +7,7 @@ import {
   skipArgs,
 } from "./main-internal-test-runner.mjs";
 
-const VALID_SUITES = new Set(["core", "runtime", "stress", "all"]);
+const VALID_SUITES = new Set(["core", "runtime", "runtime-smoke", "stress", "all"]);
 
 function parseArgs(argv) {
   const args = {
@@ -46,13 +46,14 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/test-serial.mjs [--suite core|runtime|stress|all] [--dry-run]",
+      "Usage: node scripts/ci/test-serial.mjs [--suite core|runtime|runtime-smoke|stress|all] [--dry-run]",
       "",
       "Runs local serial/quarantine cargo shards with --test-threads=1.",
       "",
       "Suites:",
       "  core    profile command internals and main_internal non-runtime-proxy tests",
       "  runtime runtime/global-state unit tests plus runtime proxy broad shard",
+      "  runtime-smoke curated local runtime invariant checks",
       "  stress  manifest-driven serialized and continuation-heavy runtime shards",
       "  all     core, runtime, and stress",
       "",
@@ -83,6 +84,23 @@ function runtimeSteps(stressSkipTests) {
   ];
 }
 
+function runtimeSmokeSteps(smokeTests) {
+  if (smokeTests.length === 0) {
+    throw new Error("runtime smoke suite requires RUNTIME_SMOKE_TESTS manifest entries");
+  }
+
+  return smokeTests.map((testCase) => {
+    if (!testCase || typeof testCase !== "object" || Array.isArray(testCase)) {
+      throw new Error("runtime smoke manifest entries must be objects");
+    }
+    if (!testCase.filter || typeof testCase.filter !== "string") {
+      throw new Error("runtime smoke manifest entries need a string filter");
+    }
+    const label = testCase.label ?? testCase.filter;
+    return cargoTestStep(`serial:runtime-smoke:${label}`, testCase.filter);
+  });
+}
+
 function stressSteps(serializedTests, continuationTests) {
   const serializedSteps = serializedTests.map((testName) => ({
     ...cargoTestStep(`serial:stress:${testName}`, testName),
@@ -98,12 +116,15 @@ function stressSteps(serializedTests, continuationTests) {
   return [...serializedSteps, ...continuationSteps];
 }
 
-function selectSteps({ suite, core, runtime, stress }) {
+function selectSteps({ suite, core, runtime, runtimeSmoke, stress }) {
   if (suite === "core") {
     return core;
   }
   if (suite === "runtime") {
     return runtime;
+  }
+  if (suite === "runtime-smoke") {
+    return runtimeSmoke;
   }
   if (suite === "stress") {
     return stress;
@@ -122,11 +143,13 @@ async function main() {
   const stressSkipTests = manifestArray(manifest, "RUNTIME_STRESS_SKIP_TESTS", []);
   const serializedTests = manifestArray(manifest, "RUNTIME_STRESS_SERIALIZED_TESTS", []);
   const continuationTests = manifestArray(manifest, "RUNTIME_STRESS_CONTINUATION_TESTS", []);
+  const smokeTests = manifestArray(manifest, "RUNTIME_SMOKE_TESTS", []);
 
   const steps = selectSteps({
     suite: args.suite,
     core: coreSteps(stressSkipTests),
     runtime: runtimeSteps(stressSkipTests),
+    runtimeSmoke: args.suite === "runtime-smoke" ? runtimeSmokeSteps(smokeTests) : [],
     stress: stressSteps(serializedTests, continuationTests),
   });
 

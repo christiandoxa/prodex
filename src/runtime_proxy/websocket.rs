@@ -86,8 +86,15 @@ pub(crate) fn acquire_runtime_profile_inflight_guard(
     };
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_inflight profile={profile_name} count={count} weight={weight} context={context} event=acquire"
+        runtime_proxy_structured_log_message(
+            "profile_inflight",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("count", count.to_string()),
+                runtime_proxy_log_field("weight", weight.to_string()),
+                runtime_proxy_log_field("context", context),
+                runtime_proxy_log_field("event", "acquire"),
+            ],
         ),
     );
     Ok(RuntimeProfileInFlightGuard {
@@ -270,9 +277,18 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
 
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket upstream_connect_start profile={profile_name} url={upstream_url} turn_state_override={:?}",
-                turn_state_override
+            runtime_proxy_structured_log_message(
+                "upstream_connect_start",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("url", upstream_url.as_str()),
+                    runtime_proxy_log_field(
+                        "turn_state_override",
+                        format!("{turn_state_override:?}"),
+                    ),
+                ],
             ),
         );
         if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
@@ -304,13 +320,30 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                         );
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "request={request_id} transport=websocket upstream_connect_ok profile={profile_name} status={} addr={} resolved_addrs={} attempted_addrs={} turn_state={:?}",
-                                response.status().as_u16(),
-                                selected_addr,
-                                resolved_addrs,
-                                attempted_addrs,
-                                turn_state
+                            runtime_proxy_structured_log_message(
+                                "upstream_connect_ok",
+                                [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
+                                    runtime_proxy_log_field("transport", "websocket"),
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field(
+                                        "status",
+                                        response.status().as_u16().to_string(),
+                                    ),
+                                    runtime_proxy_log_field("addr", selected_addr.to_string()),
+                                    runtime_proxy_log_field(
+                                        "resolved_addrs",
+                                        resolved_addrs.to_string(),
+                                    ),
+                                    runtime_proxy_log_field(
+                                        "attempted_addrs",
+                                        attempted_addrs.to_string(),
+                                    ),
+                                    runtime_proxy_log_field(
+                                        "turn_state",
+                                        format!("{turn_state:?}"),
+                                    ),
+                                ],
                             ),
                         );
                         note_runtime_profile_latency_observation(
@@ -356,9 +389,15 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 }
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "request={request_id} transport=websocket upstream_connect_http profile={profile_name} status={status} body_bytes={}",
-                        body.len()
+                    runtime_proxy_structured_log_message(
+                        "upstream_connect_http",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "websocket"),
+                            runtime_proxy_log_field("profile", profile_name),
+                            runtime_proxy_log_field("status", status.to_string()),
+                            runtime_proxy_log_field("body_bytes", body.len().to_string()),
+                        ],
                     ),
                 );
                 if matches!(status, 403 | 429)
@@ -397,9 +436,15 @@ fn runtime_websocket_connect_transport_error(
     if let Some(local_pressure_kind) = runtime_websocket_local_pressure_kind_from_ws_error(err) {
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket websocket_connect_local_pressure profile={profile_name} class={} error={err}",
-                local_pressure_kind.as_str(),
+            runtime_proxy_structured_log_message(
+                "websocket_connect_local_pressure",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("class", local_pressure_kind.as_str()),
+                    runtime_proxy_log_field("error", err.to_string()),
+                ],
             ),
         );
         return transport_error;
@@ -888,13 +933,43 @@ pub(super) fn attempt_runtime_websocket_request(
     {
         websocket_session.close();
         let reason_label = reason.as_str();
+        let mut log_fields = vec![
+            runtime_proxy_log_field("request", request_id.to_string()),
+            runtime_proxy_log_field("transport", "websocket"),
+            runtime_proxy_log_field("profile", profile_name),
+            runtime_proxy_log_field("reason", reason_label),
+            runtime_proxy_log_field(
+                "quota_source",
+                source.map(runtime_quota_source_label).unwrap_or("unknown"),
+            ),
+        ];
+        log_fields.extend([
+            runtime_proxy_log_field(
+                "quota_band",
+                runtime_quota_pressure_band_reason(summary.route_band),
+            ),
+            runtime_proxy_log_field(
+                "five_hour_status",
+                runtime_quota_window_status_reason(summary.five_hour.status),
+            ),
+            runtime_proxy_log_field(
+                "five_hour_remaining",
+                summary.five_hour.remaining_percent.to_string(),
+            ),
+            runtime_proxy_log_field("five_hour_reset_at", summary.five_hour.reset_at.to_string()),
+            runtime_proxy_log_field(
+                "weekly_status",
+                runtime_quota_window_status_reason(summary.weekly.status),
+            ),
+            runtime_proxy_log_field(
+                "weekly_remaining",
+                summary.weekly.remaining_percent.to_string(),
+            ),
+            runtime_proxy_log_field("weekly_reset_at", summary.weekly.reset_at.to_string()),
+        ]);
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket websocket_pre_send_skip profile={profile_name} reason={reason_label} quota_source={} {}",
-                source.map(runtime_quota_source_label).unwrap_or("unknown"),
-                runtime_quota_summary_log_fields(summary),
-            ),
+            runtime_proxy_structured_log_message("websocket_pre_send_skip", log_fields),
         );
         return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
             profile_name: profile_name.to_string(),
@@ -909,9 +984,17 @@ pub(super) fn attempt_runtime_websocket_request(
         if reuse_existing_session {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "request={request_id} transport=websocket websocket_reuse_start profile={profile_name} turn_state_override={:?}",
-                    turn_state_override
+                runtime_proxy_structured_log_message(
+                    "websocket_reuse_start",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "websocket"),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field(
+                            "turn_state_override",
+                            format!("{turn_state_override:?}"),
+                        ),
+                    ],
                 ),
             );
             runtime_proxy_log(
@@ -989,8 +1072,14 @@ pub(super) fn attempt_runtime_websocket_request(
         );
         runtime_proxy_log(
             shared,
-            format!(
-                "request={request_id} transport=websocket upstream_send_error profile={profile_name} error={err}"
+            runtime_proxy_structured_log_message(
+                "upstream_send_error",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("error", err.to_string()),
+                ],
             ),
         );
         if reuse_existing_session {
@@ -1077,9 +1166,17 @@ pub(super) fn attempt_runtime_websocket_request(
                     if precommit_hold_count == 0 {
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "request={request_id} transport=websocket precommit_hold profile={profile_name} event_type={}",
-                                inspected.event_type.as_deref().unwrap_or("-")
+                            runtime_proxy_structured_log_message(
+                                "precommit_hold",
+                                [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
+                                    runtime_proxy_log_field("transport", "websocket"),
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field(
+                                        "event_type",
+                                        inspected.event_type.as_deref().unwrap_or("-"),
+                                    ),
+                                ],
                             ),
                         );
                     }
@@ -1095,8 +1192,21 @@ pub(super) fn attempt_runtime_websocket_request(
                         websocket_session.reset();
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "websocket_precommit_hold_timeout profile={profile_name} elapsed_ms={elapsed_ms} threshold_ms={timeout_ms} reuse={reuse_existing_session} hold_count={precommit_hold_count}"
+                            runtime_proxy_structured_log_message(
+                                "websocket_precommit_hold_timeout",
+                                [
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
+                                    runtime_proxy_log_field("threshold_ms", timeout_ms.to_string()),
+                                    runtime_proxy_log_field(
+                                        "reuse",
+                                        reuse_existing_session.to_string(),
+                                    ),
+                                    runtime_proxy_log_field(
+                                        "hold_count",
+                                        precommit_hold_count.to_string(),
+                                    ),
+                                ],
                             ),
                         );
                         let transport_error = anyhow::anyhow!(
@@ -1350,16 +1460,29 @@ pub(super) fn attempt_runtime_websocket_request(
                 if let Some(started_at) = reuse_started_at {
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "websocket_reuse_watchdog profile={profile_name} event=upstream_close_before_terminal elapsed_ms={} committed={committed}",
-                            started_at.elapsed().as_millis()
+                        runtime_proxy_structured_log_message(
+                            "websocket_reuse_watchdog",
+                            [
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field("event", "upstream_close_before_terminal"),
+                                runtime_proxy_log_field(
+                                    "elapsed_ms",
+                                    started_at.elapsed().as_millis().to_string(),
+                                ),
+                                runtime_proxy_log_field("committed", committed.to_string()),
+                            ],
                         ),
                     );
                 }
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "request={request_id} transport=websocket upstream_close_before_completed profile={profile_name}"
+                    runtime_proxy_structured_log_message(
+                        "upstream_close_before_completed",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "websocket"),
+                            runtime_proxy_log_field("profile", profile_name),
+                        ],
                     ),
                 );
                 let _ = frame;
@@ -1385,16 +1508,29 @@ pub(super) fn attempt_runtime_websocket_request(
                 if let Some(started_at) = reuse_started_at {
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "websocket_reuse_watchdog profile={profile_name} event=connection_closed elapsed_ms={} committed={committed}",
-                            started_at.elapsed().as_millis()
+                        runtime_proxy_structured_log_message(
+                            "websocket_reuse_watchdog",
+                            [
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field("event", "connection_closed"),
+                                runtime_proxy_log_field(
+                                    "elapsed_ms",
+                                    started_at.elapsed().as_millis().to_string(),
+                                ),
+                                runtime_proxy_log_field("committed", committed.to_string()),
+                            ],
                         ),
                     );
                 }
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "request={request_id} transport=websocket upstream_connection_closed profile={profile_name}"
+                    runtime_proxy_structured_log_message(
+                        "upstream_connection_closed",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "websocket"),
+                            runtime_proxy_log_field("profile", profile_name),
+                        ],
                     ),
                 );
                 let transport_error =
@@ -1421,8 +1557,21 @@ pub(super) fn attempt_runtime_websocket_request(
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "websocket_precommit_hold_timeout profile={profile_name} elapsed_ms={elapsed_ms} threshold_ms={timeout_ms} reuse={reuse_existing_session} hold_count={precommit_hold_count}"
+                        runtime_proxy_structured_log_message(
+                            "websocket_precommit_hold_timeout",
+                            [
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
+                                runtime_proxy_log_field("threshold_ms", timeout_ms.to_string()),
+                                runtime_proxy_log_field(
+                                    "reuse",
+                                    reuse_existing_session.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "hold_count",
+                                    precommit_hold_count.to_string(),
+                                ),
+                            ],
                         ),
                     );
                     let transport_error = anyhow::anyhow!(
@@ -1439,9 +1588,17 @@ pub(super) fn attempt_runtime_websocket_request(
                         if let Some(started_at) = reuse_started_at {
                             runtime_proxy_log(
                                 shared,
-                                format!(
-                                    "websocket_reuse_watchdog profile={profile_name} event=precommit_hold_timeout elapsed_ms={} committed={committed}",
-                                    started_at.elapsed().as_millis()
+                                runtime_proxy_structured_log_message(
+                                    "websocket_reuse_watchdog",
+                                    [
+                                        runtime_proxy_log_field("profile", profile_name),
+                                        runtime_proxy_log_field("event", "precommit_hold_timeout"),
+                                        runtime_proxy_log_field(
+                                            "elapsed_ms",
+                                            started_at.elapsed().as_millis().to_string(),
+                                        ),
+                                        runtime_proxy_log_field("committed", committed.to_string()),
+                                    ],
                                 ),
                             );
                         }
@@ -1457,8 +1614,20 @@ pub(super) fn attempt_runtime_websocket_request(
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "websocket_precommit_frame_timeout profile={profile_name} event=no_first_upstream_frame_before_deadline elapsed_ms={elapsed_ms} reuse={reuse_existing_session}"
+                        runtime_proxy_structured_log_message(
+                            "websocket_precommit_frame_timeout",
+                            [
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field(
+                                    "event",
+                                    "no_first_upstream_frame_before_deadline",
+                                ),
+                                runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
+                                runtime_proxy_log_field(
+                                    "reuse",
+                                    reuse_existing_session.to_string(),
+                                ),
+                            ],
                         ),
                     );
                     let transport_error = anyhow::anyhow!(
@@ -1474,8 +1643,17 @@ pub(super) fn attempt_runtime_websocket_request(
                     if reuse_existing_session {
                         runtime_proxy_log(
                             shared,
-                            format!(
-                                "websocket_reuse_watchdog profile={profile_name} event=no_first_upstream_frame_before_deadline elapsed_ms={elapsed_ms} committed={committed}"
+                            runtime_proxy_structured_log_message(
+                                "websocket_reuse_watchdog",
+                                [
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field(
+                                        "event",
+                                        "no_first_upstream_frame_before_deadline",
+                                    ),
+                                    runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
+                                    runtime_proxy_log_field("committed", committed.to_string()),
+                                ],
                             ),
                         );
                         return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
@@ -1488,16 +1666,30 @@ pub(super) fn attempt_runtime_websocket_request(
                 if let Some(started_at) = reuse_started_at {
                     runtime_proxy_log(
                         shared,
-                        format!(
-                            "websocket_reuse_watchdog profile={profile_name} event=read_error elapsed_ms={} committed={committed}",
-                            started_at.elapsed().as_millis()
+                        runtime_proxy_structured_log_message(
+                            "websocket_reuse_watchdog",
+                            [
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field("event", "read_error"),
+                                runtime_proxy_log_field(
+                                    "elapsed_ms",
+                                    started_at.elapsed().as_millis().to_string(),
+                                ),
+                                runtime_proxy_log_field("committed", committed.to_string()),
+                            ],
                         ),
                     );
                 }
                 runtime_proxy_log(
                     shared,
-                    format!(
-                        "request={request_id} transport=websocket upstream_read_error profile={profile_name} error={err}"
+                    runtime_proxy_structured_log_message(
+                        "upstream_read_error",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "websocket"),
+                            runtime_proxy_log_field("profile", profile_name),
+                            runtime_proxy_log_field("error", err.to_string()),
+                        ],
                     ),
                 );
                 let transport_error = anyhow::anyhow!(
@@ -2411,11 +2603,16 @@ mod tests {
             std::fs::read_to_string(&shared.log_path).expect("local-pressure log should exist");
         for (index, (kind, _message)) in cases.into_iter().enumerate() {
             let request_id = 81 + index as u64;
+            let expected_class = format!("class={}", kind.as_str());
+            let expected_request = format!("request={request_id}");
             assert!(
-                log.contains(&format!(
-                    "request={request_id} transport=websocket websocket_connect_local_pressure profile=main class={}",
-                    kind.as_str()
-                )),
+                log.lines().any(|line| {
+                    line.contains("websocket_connect_local_pressure")
+                        && line.contains(&expected_request)
+                        && line.contains("transport=websocket")
+                        && line.contains("profile=main")
+                        && line.contains(&expected_class)
+                }),
                 "local pressure log marker missing: {log}"
             );
         }

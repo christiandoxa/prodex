@@ -192,20 +192,7 @@ fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
 }
 
 fn runtime_doctor_parse_message_fields(message: &str) -> BTreeMap<String, String> {
-    let mut fields = BTreeMap::new();
-    for token in message.split_whitespace() {
-        let Some((key, value)) = token.split_once('=') else {
-            continue;
-        };
-        if key.is_empty() || value.is_empty() {
-            continue;
-        }
-        fields.insert(
-            key.to_string(),
-            value.trim_matches(|c| matches!(c, '"' | ',')).to_string(),
-        );
-    }
-    fields
+    runtime_proxy_log_fields(message)
 }
 
 fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
@@ -429,4 +416,23 @@ fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
         .take(limit.saturating_sub(1))
         .collect::<String>()
         + "…"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_doctor_parse_message_fields_handles_quoted_structured_values() {
+        let fields = runtime_doctor_parse_message_fields(
+            "stream_read_error request=7 transport=http error=\"failed with spaces\" empty=\"\"",
+        );
+
+        assert_eq!(fields.get("request").map(String::as_str), Some("7"));
+        assert_eq!(
+            fields.get("error").map(String::as_str),
+            Some("failed with spaces")
+        );
+        assert_eq!(fields.get("empty").map(String::as_str), Some(""));
+    }
 }

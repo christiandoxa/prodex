@@ -260,10 +260,23 @@ pub(crate) fn runtime_doctor_json_value(summary: &RuntimeDoctorSummary) -> serde
         .expect("runtime doctor serialization should always succeed")
 }
 
-pub(crate) fn runtime_doctor_fields() -> Vec<(String, String)> {
-    let pointer_path = runtime_proxy_latest_log_pointer_path();
-    let summary = state::collect_runtime_doctor_summary();
-    runtime_doctor_fields_for_summary(&summary, &pointer_path)
+pub(crate) fn runtime_doctor_json_value_with_policy_suggestions(
+    summary: &RuntimeDoctorSummary,
+) -> serde_json::Value {
+    let mut value = runtime_doctor_json_value(summary);
+    if let Some(object) = value.as_object_mut() {
+        let suggestions = suggestions::runtime_doctor_policy_suggestions(summary);
+        object.insert(
+            "policy_suggestion_count".to_string(),
+            serde_json::Value::from(suggestions.len()),
+        );
+        object.insert(
+            "policy_suggestions".to_string(),
+            serde_json::to_value(&suggestions)
+                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+        );
+    }
+    value
 }
 
 fn runtime_doctor_format_option<T: ToString>(value: Option<T>) -> String {
@@ -1126,6 +1139,29 @@ mod tests {
                 .get("Failure classes")
                 .expect("failure classes should be rendered"),
             "admission=2"
+        );
+    }
+
+    #[test]
+    fn runtime_doctor_json_with_policy_suggestions_exposes_machine_readable_fields() {
+        let summary = runtime_doctor_fixture_summary(LANE_PRESSURE_LOG);
+        let value = runtime_doctor_json_value_with_policy_suggestions(&summary);
+
+        assert_eq!(value["policy_suggestion_count"], 1);
+        assert_eq!(value["policy_suggestions"][0]["id"], "lane_pressure");
+        assert_eq!(
+            value["policy_suggestions"][0]["settings"][0]["section"],
+            "runtime_proxy"
+        );
+        assert_eq!(
+            value["policy_suggestions"][0]["settings"][0]["key"],
+            "compact_active_limit"
+        );
+        assert!(
+            value["policy_suggestions"][0]["snippet"]
+                .as_str()
+                .expect("snippet should be a string")
+                .contains("[runtime_proxy]")
         );
     }
 

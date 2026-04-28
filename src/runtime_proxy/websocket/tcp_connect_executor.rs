@@ -1,8 +1,10 @@
 use crate::{
     RuntimeRotationProxyShared, RuntimeWebsocketTcpAttemptResult, runtime_proxy_log_to_path,
+    runtime_websocket_dns_resolve_overflow_capacity, runtime_websocket_dns_resolve_queue_capacity,
+    runtime_websocket_dns_resolve_worker_count, runtime_websocket_tcp_connect_overflow_capacity,
+    runtime_websocket_tcp_connect_queue_capacity, runtime_websocket_tcp_connect_worker_count,
 };
 use std::collections::VecDeque;
-use std::env;
 use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -643,89 +645,6 @@ impl RuntimeWebsocketDnsResolveExecutor {
     pub(super) fn overflow_snapshot(&self) -> Option<RuntimeWebsocketTcpConnectOverflowSnapshot> {
         self.inner.overflow_snapshot()
     }
-}
-
-fn runtime_websocket_tcp_connect_worker_count() -> usize {
-    runtime_websocket_tcp_connect_env_usize(
-        "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
-        thread::available_parallelism()
-            .map(|count| count.get())
-            .unwrap_or(4)
-            .clamp(4, 16),
-    )
-    .max(1)
-}
-
-fn runtime_websocket_tcp_connect_queue_capacity(worker_count: usize) -> usize {
-    runtime_websocket_tcp_connect_env_usize(
-        "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
-        worker_count.saturating_mul(8).clamp(32, 128),
-    )
-    .max(worker_count)
-    .max(1)
-}
-
-fn runtime_websocket_tcp_connect_overflow_capacity(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    let default_capacity = queue_capacity
-        .saturating_mul(4)
-        .max(worker_count)
-        .clamp(32, 512);
-    runtime_websocket_tcp_connect_env_usize_allow_zero(
-        "PRODEX_RUNTIME_WEBSOCKET_CONNECT_OVERFLOW_CAPACITY",
-        default_capacity,
-    )
-}
-
-fn runtime_websocket_dns_resolve_worker_count() -> usize {
-    runtime_websocket_tcp_connect_env_usize(
-        "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
-        thread::available_parallelism()
-            .map(|count| count.get())
-            .unwrap_or(2)
-            .clamp(2, 8),
-    )
-    .max(1)
-}
-
-fn runtime_websocket_dns_resolve_queue_capacity(worker_count: usize) -> usize {
-    runtime_websocket_tcp_connect_env_usize(
-        "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
-        worker_count.saturating_mul(4).clamp(16, 64),
-    )
-    .max(worker_count)
-    .max(1)
-}
-
-fn runtime_websocket_dns_resolve_overflow_capacity(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    let default_capacity = queue_capacity
-        .saturating_mul(2)
-        .max(worker_count)
-        .clamp(16, 128);
-    runtime_websocket_tcp_connect_env_usize_allow_zero(
-        "PRODEX_RUNTIME_WEBSOCKET_DNS_OVERFLOW_CAPACITY",
-        default_capacity,
-    )
-}
-
-fn runtime_websocket_tcp_connect_env_usize(name: &str, default: usize) -> usize {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(default)
-}
-
-fn runtime_websocket_tcp_connect_env_usize_allow_zero(name: &str, default: usize) -> usize {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .unwrap_or(default)
 }
 
 fn runtime_websocket_tcp_connect_dispatcher_loop(

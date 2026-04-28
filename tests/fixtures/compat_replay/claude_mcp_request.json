@@ -1,0 +1,67 @@
+{
+  "method": "POST",
+  "path_and_query": "/v1/messages?beta=true",
+  "headers": [
+    {
+      "name": "Content-Type",
+      "value": "application/json"
+    },
+    {
+      "name": "User-Agent",
+      "value": "claude-code/2.1.90"
+    },
+    {
+      "name": "anthropic-version",
+      "value": "2023-06-01"
+    },
+    {
+      "name": "x-claude-code-session-id",
+      "value": "claude_session_20260428"
+    },
+    {
+      "name": "x-api-key",
+      "value": "fixture-key"
+    }
+  ],
+  "body": {
+    "model": "claude-sonnet-4-6",
+    "stream": true,
+    "system": "You are a compatibility replay harness.",
+    "mcp_servers": [
+      {
+        "name": "workspace",
+        "url": "https://mcp.example.invalid/sse",
+        "authorization_token": "fixture-mcp-token",
+        "headers": {
+          "X-Mcp-Trace": "trace_20260428"
+        },
+        "description": "Workspace MCP server"
+      }
+    ],
+    "tools": [
+      {
+        "type": "mcp_toolset",
+        "mcp_server_name": "workspace",
+        "name": "workspace",
+        "default_config": {
+          "enabled": false,
+          "defer_loading": true
+        },
+        "configs": {
+          "list_files": {
+            "enabled": true
+          },
+          "read_file": {
+            "enabled": true
+          }
+        }
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "List files in the repository root."
+      }
+    ]
+  }
+}

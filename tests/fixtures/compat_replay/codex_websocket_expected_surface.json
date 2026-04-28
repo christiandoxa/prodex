@@ -1,0 +1,14 @@
+{
+  "stage": "message",
+  "family": "codex",
+  "client": "codex_cli",
+  "route": "responses",
+  "transport": "websocket",
+  "stream": "streaming",
+  "tool_surface": "shell",
+  "continuation": "previous_response+session+turn_state",
+  "request_origin": "external",
+  "approval": false,
+  "user_agent": "codex-cli/0.61.0",
+  "warnings": []
+}

@@ -229,6 +229,33 @@ impl RuntimeRequestSessionPlacement {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeAffinityProfileCase {
+    None,
+    Candidate,
+    Other,
+}
+
+impl RuntimeAffinityProfileCase {
+    const ALL: [Self; 3] = [Self::None, Self::Candidate, Self::Other];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Candidate => "candidate",
+            Self::Other => "other",
+        }
+    }
+
+    fn profile(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::Candidate => Some("main"),
+            Self::Other => Some("second"),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum WebsocketSessionPlacement {
     None,
@@ -959,6 +986,51 @@ fn websocket_previous_response_not_found_fallback_policy_is_explicitly_fail_clos
 }
 
 #[test]
+fn previous_response_not_found_fallback_matrix_fails_closed_for_context_dependent_replay() {
+    for previous_response_id in [None, Some("resp_123")] {
+        for has_turn_state_retry in [false, true] {
+            for request_requires_locked_previous_response_affinity in [false, true] {
+                for previous_response_fresh_fallback_used in [false, true] {
+                    let policy = runtime_previous_response_not_found_fallback_policy(
+                        RuntimePreviousResponseNotFoundFallbackRequest {
+                            previous_response_id,
+                            has_turn_state_retry,
+                            request_requires_locked_previous_response_affinity,
+                            previous_response_fresh_fallback_used,
+                            fresh_fallback_shape: Some(
+                                RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
+                            ),
+                        },
+                    );
+                    let label = format!(
+                        "previous_response={} turn_state_retry={} locked_affinity={} fresh_fallback_used={}",
+                        previous_response_id.is_some(),
+                        has_turn_state_retry,
+                        request_requires_locked_previous_response_affinity,
+                        previous_response_fresh_fallback_used
+                    );
+
+                    assert_eq!(
+                        policy.fresh_fallback,
+                        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
+                            request_shape:
+                                RuntimePreviousResponseFreshFallbackPolicyShape::ContextDependentContinuation,
+                        },
+                        "{label}"
+                    );
+                    assert!(!policy.fresh_fallback.allows_fresh_fallback(), "{label}");
+                    assert_eq!(
+                        policy.stale_continuation.requires_stale_continuation(),
+                        previous_response_id.is_some() && !has_turn_state_retry,
+                        "{label}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn quota_blocked_affinity_release_policy_preserves_unclassified_release_behavior() {
     let policy =
         runtime_quota_blocked_affinity_release_policy(RuntimeQuotaBlockedAffinityReleaseRequest {
@@ -1030,6 +1102,154 @@ fn runtime_candidate_no_rotate_affinity_makes_hard_affinity_explicit() {
         )),
         Some(RuntimeNoRotateAffinity::CompactSession)
     );
+}
+
+#[test]
+fn runtime_candidate_no_rotate_affinity_matrix_prioritizes_hard_bindings() {
+    for route_kind in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard,
+    ] {
+        for strict in RuntimeAffinityProfileCase::ALL {
+            for pinned in RuntimeAffinityProfileCase::ALL {
+                for turn_state in RuntimeAffinityProfileCase::ALL {
+                    for session in RuntimeAffinityProfileCase::ALL {
+                        for trusted_previous_response_affinity in [false, true] {
+                            let affinity = RuntimeCandidateAffinity::new(
+                                route_kind,
+                                "main",
+                                strict.profile(),
+                                pinned.profile(),
+                                turn_state.profile(),
+                                session.profile(),
+                                trusted_previous_response_affinity,
+                            );
+                            let expected = if strict == RuntimeAffinityProfileCase::Candidate {
+                                Some(RuntimeNoRotateAffinity::Strict)
+                            } else if turn_state == RuntimeAffinityProfileCase::Candidate {
+                                Some(RuntimeNoRotateAffinity::TurnState)
+                            } else if trusted_previous_response_affinity
+                                && pinned == RuntimeAffinityProfileCase::Candidate
+                            {
+                                Some(RuntimeNoRotateAffinity::TrustedPreviousResponse)
+                            } else if route_kind == RuntimeRouteKind::Compact
+                                && session == RuntimeAffinityProfileCase::Candidate
+                            {
+                                Some(RuntimeNoRotateAffinity::CompactSession)
+                            } else {
+                                None
+                            };
+                            let label = format!(
+                                "route={} strict={} pinned={} turn_state={} session={} trusted_previous_response_affinity={}",
+                                runtime_route_kind_label(route_kind),
+                                strict.label(),
+                                pinned.label(),
+                                turn_state.label(),
+                                session.label(),
+                                trusted_previous_response_affinity
+                            );
+
+                            assert_eq!(
+                                runtime_candidate_no_rotate_affinity(affinity),
+                                expected,
+                                "{label}"
+                            );
+                            assert_eq!(
+                                runtime_candidate_has_hard_affinity(affinity),
+                                expected.is_some(),
+                                "{label}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn quota_blocked_affinity_release_matrix_keeps_hard_or_classified_continuations() {
+    let shapes = [
+        None,
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly),
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
+    ];
+
+    for route_kind in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard,
+    ] {
+        for strict in RuntimeAffinityProfileCase::ALL {
+            for pinned in RuntimeAffinityProfileCase::ALL {
+                for turn_state in RuntimeAffinityProfileCase::ALL {
+                    for session in RuntimeAffinityProfileCase::ALL {
+                        for trusted_previous_response_affinity in [false, true] {
+                            for fresh_fallback_shape in shapes {
+                                let affinity = RuntimeCandidateAffinity::new(
+                                    route_kind,
+                                    "main",
+                                    strict.profile(),
+                                    pinned.profile(),
+                                    turn_state.profile(),
+                                    session.profile(),
+                                    trusted_previous_response_affinity,
+                                );
+                                let expected = if fresh_fallback_shape.is_some()
+                                    || strict == RuntimeAffinityProfileCase::Candidate
+                                    || turn_state == RuntimeAffinityProfileCase::Candidate
+                                    || (route_kind == RuntimeRouteKind::Compact
+                                        && session == RuntimeAffinityProfileCase::Candidate)
+                                {
+                                    RuntimeQuotaBlockedAffinityReleasePolicy::KeepAffinity
+                                } else {
+                                    RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity
+                                };
+                                let label = format!(
+                                    "route={} strict={} pinned={} turn_state={} session={} trusted_previous_response_affinity={} shape={}",
+                                    runtime_route_kind_label(route_kind),
+                                    strict.label(),
+                                    pinned.label(),
+                                    turn_state.label(),
+                                    session.label(),
+                                    trusted_previous_response_affinity,
+                                    runtime_previous_response_fresh_fallback_shape_label(
+                                        fresh_fallback_shape
+                                    )
+                                );
+
+                                assert_eq!(
+                                    runtime_quota_blocked_affinity_release_policy(
+                                        RuntimeQuotaBlockedAffinityReleaseRequest {
+                                            affinity,
+                                            fresh_fallback_shape,
+                                        }
+                                    ),
+                                    expected,
+                                    "{label}"
+                                );
+                                assert_eq!(
+                                    runtime_quota_blocked_affinity_is_releasable(
+                                        affinity,
+                                        false,
+                                        fresh_fallback_shape,
+                                    ),
+                                    expected
+                                        == RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity,
+                                    "{label}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn runtime_shared_for_affinity_selection(
@@ -1115,6 +1335,37 @@ fn runtime_shared_for_affinity_selection(
     )
 }
 
+fn apply_local_selection_penalties(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) {
+    let now = Local::now().timestamp();
+    let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    runtime.profile_transport_backoff_until.insert(
+        runtime_profile_transport_backoff_key(profile_name, route_kind),
+        now + 60,
+    );
+    runtime.profile_inflight.insert(
+        profile_name.to_string(),
+        runtime_profile_inflight_soft_limit(route_kind, false),
+    );
+    runtime.profile_health.insert(
+        profile_name.to_string(),
+        RuntimeProfileHealth {
+            score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
+            updated_at: now,
+        },
+    );
+    runtime.profile_health.insert(
+        runtime_profile_route_health_key(profile_name, route_kind),
+        RuntimeProfileHealth {
+            score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
+            updated_at: now,
+        },
+    );
+}
+
 #[test]
 fn response_selection_preserves_bound_previous_response_affinity_despite_quota() {
     let temp_dir = TestDir::isolated();
@@ -1164,6 +1415,98 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
     .expect("selection should succeed");
 
     assert_eq!(selected.as_deref(), Some("second"));
+}
+
+#[test]
+fn hard_affinity_selection_matrix_ignores_local_penalties() {
+    struct Case {
+        label: &'static str,
+        route_kind: RuntimeRouteKind,
+        response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
+        strict_affinity_profile: Option<&'static str>,
+        pinned_profile: Option<&'static str>,
+        turn_state_profile: Option<&'static str>,
+        session_profile: Option<&'static str>,
+        previous_response_id: Option<&'static str>,
+    }
+
+    let now = Local::now().timestamp();
+    let bound_response = BTreeMap::from([(
+        "resp_123".to_string(),
+        ResponseProfileBinding {
+            profile_name: "main".to_string(),
+            bound_at: now,
+        },
+    )]);
+    let cases = [
+        Case {
+            label: "strict",
+            route_kind: RuntimeRouteKind::Responses,
+            response_profile_bindings: BTreeMap::new(),
+            strict_affinity_profile: Some("main"),
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: None,
+            previous_response_id: None,
+        },
+        Case {
+            label: "previous_response",
+            route_kind: RuntimeRouteKind::Responses,
+            response_profile_bindings: bound_response,
+            strict_affinity_profile: None,
+            pinned_profile: Some("main"),
+            turn_state_profile: None,
+            session_profile: None,
+            previous_response_id: Some("resp_123"),
+        },
+        Case {
+            label: "turn_state",
+            route_kind: RuntimeRouteKind::Responses,
+            response_profile_bindings: BTreeMap::new(),
+            strict_affinity_profile: None,
+            pinned_profile: None,
+            turn_state_profile: Some("main"),
+            session_profile: None,
+            previous_response_id: None,
+        },
+        Case {
+            label: "compact_session",
+            route_kind: RuntimeRouteKind::Compact,
+            response_profile_bindings: BTreeMap::new(),
+            strict_affinity_profile: None,
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: Some("main"),
+            previous_response_id: None,
+        },
+    ];
+
+    for case in cases {
+        let temp_dir = TestDir::isolated();
+        let shared =
+            runtime_shared_for_affinity_selection(&temp_dir, case.response_profile_bindings);
+        apply_local_selection_penalties(&shared, "main", case.route_kind);
+
+        let selected = select_runtime_response_candidate_for_route(
+            &shared,
+            &BTreeSet::new(),
+            case.strict_affinity_profile,
+            case.pinned_profile,
+            case.turn_state_profile,
+            case.session_profile,
+            false,
+            case.previous_response_id,
+            case.route_kind,
+        )
+        .expect("selection should succeed");
+
+        assert_eq!(
+            selected.as_deref(),
+            Some("main"),
+            "{} hard affinity should beat transport backoff, health, and inflight heuristics",
+            case.label
+        );
+    }
 }
 
 #[test]

@@ -1,0 +1,14 @@
+{
+  "stage": "request",
+  "family": "codex",
+  "client": "codex_subagent",
+  "route": "responses",
+  "transport": "http",
+  "stream": "streaming",
+  "tool_surface": "approval+mcp+tool_result",
+  "continuation": "previous_response+session+turn_state",
+  "request_origin": "external",
+  "approval": true,
+  "user_agent": "codex-cli/0.61.0",
+  "warnings": []
+}

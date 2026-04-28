@@ -55,12 +55,20 @@ pub(crate) fn log_runtime_upstream_connect_failure(
 ) {
     runtime_proxy_log(
         shared,
-        format!(
-            "request={request_id} transport={transport} {} profile={profile_name} class={} error={error}",
+        runtime_proxy_structured_log_message(
             runtime_upstream_connect_failure_marker(failure_kind),
-            failure_kind
-                .map(runtime_transport_failure_kind_label)
-                .unwrap_or("unknown"),
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", transport),
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field(
+                    "class",
+                    failure_kind
+                        .map(runtime_transport_failure_kind_label)
+                        .unwrap_or("unknown"),
+                ),
+                runtime_proxy_log_field("error", error.to_string()),
+            ],
         ),
     );
 }

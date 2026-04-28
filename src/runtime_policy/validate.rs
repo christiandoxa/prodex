@@ -168,6 +168,36 @@ fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) -> Res
         path,
         "runtime_proxy.websocket_precommit_progress_timeout_ms",
     )?;
+    validate_optional_usize(
+        policy.runtime_proxy.websocket_connect_worker_count,
+        path,
+        "runtime_proxy.websocket_connect_worker_count",
+    )?;
+    validate_optional_usize(
+        policy.runtime_proxy.websocket_connect_queue_capacity,
+        path,
+        "runtime_proxy.websocket_connect_queue_capacity",
+    )?;
+    validate_optional_usize_allow_zero(
+        policy.runtime_proxy.websocket_connect_overflow_capacity,
+        path,
+        "runtime_proxy.websocket_connect_overflow_capacity",
+    )?;
+    validate_optional_usize(
+        policy.runtime_proxy.websocket_dns_worker_count,
+        path,
+        "runtime_proxy.websocket_dns_worker_count",
+    )?;
+    validate_optional_usize(
+        policy.runtime_proxy.websocket_dns_queue_capacity,
+        path,
+        "runtime_proxy.websocket_dns_queue_capacity",
+    )?;
+    validate_optional_usize_allow_zero(
+        policy.runtime_proxy.websocket_dns_overflow_capacity,
+        path,
+        "runtime_proxy.websocket_dns_overflow_capacity",
+    )?;
     validate_optional_u64(
         policy.runtime_proxy.broker_ready_timeout_ms,
         path,
@@ -238,6 +268,14 @@ fn validate_optional_usize(value: Option<usize>, path: &Path, field: &str) -> Re
     Ok(())
 }
 
+fn validate_optional_usize_allow_zero(
+    _value: Option<usize>,
+    _path: &Path,
+    _field: &str,
+) -> Result<()> {
+    Ok(())
+}
+
 fn validate_optional_u64(value: Option<u64>, path: &Path, field: &str) -> Result<()> {
     if matches!(value, Some(0)) {
         bail!("{field} in {} must be greater than 0", path.display());
@@ -252,4 +290,54 @@ fn validate_optional_i64_percent(value: Option<i64>, path: &Path, field: &str) -
         bail!("{field} in {} must be between 1 and 10", path.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_policy(input: &str) -> RuntimePolicyFile {
+        toml::from_str(input).expect("policy TOML should parse")
+    }
+
+    #[test]
+    fn validate_runtime_policy_allows_zero_websocket_executor_overflow_capacities() {
+        let policy = parse_policy(
+            r#"
+version = 1
+
+[runtime_proxy]
+websocket_connect_worker_count = 4
+websocket_connect_queue_capacity = 16
+websocket_connect_overflow_capacity = 0
+websocket_dns_worker_count = 2
+websocket_dns_queue_capacity = 8
+websocket_dns_overflow_capacity = 0
+"#,
+        );
+
+        validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+            .expect("zero websocket overflow capacities should be valid");
+    }
+
+    #[test]
+    fn validate_runtime_policy_rejects_zero_websocket_executor_non_overflow_values() {
+        let policy = parse_policy(
+            r#"
+version = 1
+
+[runtime_proxy]
+websocket_connect_worker_count = 0
+websocket_connect_overflow_capacity = 0
+websocket_dns_overflow_capacity = 0
+"#,
+        );
+
+        let err = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+            .expect_err("zero websocket executor worker count should be rejected");
+        assert!(
+            err.to_string()
+                .contains("runtime_proxy.websocket_connect_worker_count")
+        );
+    }
 }

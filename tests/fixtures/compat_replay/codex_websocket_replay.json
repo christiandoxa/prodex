@@ -1,0 +1,44 @@
+{
+  "handshake": {
+    "method": "GET",
+    "path_and_query": "/backend-api/codex/responses",
+    "headers": [
+      {
+        "name": "User-Agent",
+        "value": "codex-cli/0.61.0"
+      },
+      {
+        "name": "x-codex-turn-state",
+        "value": "turn_ws_20260428"
+      },
+      {
+        "name": "session_id",
+        "value": "sess_ws_header_20260428"
+      }
+    ],
+    "body": null
+  },
+  "message": {
+    "model": "gpt-5.3-codex",
+    "previous_response_id": "resp_ws_parent_20260428",
+    "session_id": "sess_ws_body_20260428",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Continue with the prior plan."
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "call_id": "call_ws_20260428",
+        "name": "bash",
+        "arguments": "{\"cmd\":\"ls\"}"
+      }
+    ]
+  }
+}

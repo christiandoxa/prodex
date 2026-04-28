@@ -361,7 +361,7 @@ pub(crate) fn translate_runtime_responses_reply_to_anthropic(
                         parts.status,
                         runtime_buffered_response_content_type(&parts),
                         followup_attempt,
-                        runtime_proxy_body_snippet(&parts.body, 2048),
+                        runtime_proxy_redacted_body_snippet(&parts.body, 2048),
                     ),
                 );
             }

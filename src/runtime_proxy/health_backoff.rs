@@ -203,7 +203,13 @@ pub(crate) fn mark_runtime_profile_retry_backoff(
     drop(runtime);
     runtime_proxy_log(
         shared,
-        format!("profile_retry_backoff profile={profile_name} until={until}"),
+        runtime_proxy_structured_log_message(
+            "profile_retry_backoff",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("until", until.to_string()),
+            ],
+        ),
     );
     Ok(())
 }
@@ -255,9 +261,15 @@ pub(crate) fn mark_runtime_profile_transport_backoff(
     drop(runtime);
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_transport_backoff profile={profile_name} route={} until={until} seconds={next_backoff_seconds} context={context}",
-            runtime_route_kind_label(route_kind)
+        runtime_proxy_structured_log_message(
+            "profile_transport_backoff",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("until", until.to_string()),
+                runtime_proxy_log_field("seconds", next_backoff_seconds.to_string()),
+                runtime_proxy_log_field("context", context),
+            ],
         ),
     );
     Ok(())

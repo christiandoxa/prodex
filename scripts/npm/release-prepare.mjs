@@ -69,6 +69,7 @@ function printHelp() {
       "",
       "Checks:",
       "  - Cargo/npm/docs version sync and available lockfiles",
+      "  - generated changelog freshness",
       "  - docs markdown lint",
       "  - upstream Codex compatibility baseline",
       "  - runtime test manifest",
@@ -278,6 +279,7 @@ async function main() {
   }
 
   await checkReleaseMetadata();
+  await runStep("changelog", "npm", ["run", "changelog:check"], args);
   await runStep("docs-lint", "npm", ["run", "docs:lint"], args);
   await runStep("upstream-compat", "node", ["scripts/compat/check-upstream-baseline.mjs"], args);
   await runStep("runtime-manifest", "npm", ["run", "ci:runtime-manifest"], args);

@@ -62,8 +62,12 @@ pub(crate) fn schedule_runtime_probe_refresh(
     if runtime_probe_refresh_nonlocal_upstream_for_test(&upstream_base_url) {
         runtime_proxy_log(
             shared,
-            format!(
-                "profile_probe_refresh_suppressed profile={profile_name} reason=test_nonlocal_upstream"
+            runtime_proxy_structured_log_message(
+                "profile_probe_refresh_suppressed",
+                [
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("reason", "test_nonlocal_upstream"),
+                ],
             ),
         );
         note_runtime_probe_refresh_progress();
@@ -94,14 +98,25 @@ pub(crate) fn schedule_runtime_probe_refresh(
     queue.wake.notify_one();
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_probe_refresh_queued profile={profile_name} reason=queued backlog={backlog}"
+        runtime_proxy_structured_log_message(
+            "profile_probe_refresh_queued",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("reason", "queued"),
+                runtime_proxy_log_field("backlog", backlog.to_string()),
+            ],
         ),
     );
     if runtime_proxy_queue_pressure_active(0, 0, backlog) {
         runtime_proxy_log(
             shared,
-            format!("profile_probe_refresh_backpressure profile={profile_name} backlog={backlog}"),
+            runtime_proxy_structured_log_message(
+                "profile_probe_refresh_backpressure",
+                [
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("backlog", backlog.to_string()),
+                ],
+            ),
         );
     }
 }
@@ -499,7 +514,10 @@ pub(crate) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
             };
             runtime_proxy_log_to_path(
                 &log_path,
-                &format!("profile_probe_refresh_panic error={panic_message}"),
+                &runtime_proxy_structured_log_message(
+                    "profile_probe_refresh_panic",
+                    [runtime_proxy_log_field("error", panic_message)],
+                ),
             );
         }
     }
@@ -578,22 +596,36 @@ impl RuntimeProbeExecutionMode<'_> {
                     Ok(_) => runtime_proxy_log(
                         shared,
                         if let Err(err) = apply_result {
-                            format!(
-                                "profile_probe_refresh_error profile={} lag_ms={} error=state_update:{err:#}",
-                                profile_name, lag_ms
+                            runtime_proxy_structured_log_message(
+                                "profile_probe_refresh_error",
+                                [
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field("lag_ms", lag_ms.to_string()),
+                                    runtime_proxy_log_field(
+                                        "error",
+                                        format!("state_update:{err:#}"),
+                                    ),
+                                ],
                             )
                         } else {
-                            format!(
-                                "profile_probe_refresh_ok profile={} lag_ms={lag_ms}",
-                                profile_name
+                            runtime_proxy_structured_log_message(
+                                "profile_probe_refresh_ok",
+                                [
+                                    runtime_proxy_log_field("profile", profile_name),
+                                    runtime_proxy_log_field("lag_ms", lag_ms.to_string()),
+                                ],
                             )
                         },
                     ),
                     Err(err) => runtime_proxy_log(
                         shared,
-                        format!(
-                            "profile_probe_refresh_error profile={} lag_ms={} error={err}",
-                            profile_name, lag_ms
+                        runtime_proxy_structured_log_message(
+                            "profile_probe_refresh_error",
+                            [
+                                runtime_proxy_log_field("profile", profile_name),
+                                runtime_proxy_log_field("lag_ms", lag_ms.to_string()),
+                                runtime_proxy_log_field("error", err.as_str()),
+                            ],
                         ),
                     ),
                 }
@@ -679,7 +711,13 @@ impl RuntimeProbeRefreshJob {
     fn execute(self) {
         runtime_proxy_log(
             &self.shared,
-            format!("profile_probe_refresh_start profile={}", self.profile_name),
+            runtime_proxy_structured_log_message(
+                "profile_probe_refresh_start",
+                [runtime_proxy_log_field(
+                    "profile",
+                    self.profile_name.as_str(),
+                )],
+            ),
         );
         RuntimeProbeRefreshAttempt::collect(&self.codex_home, self.upstream_base_url.as_str())
             .execute(

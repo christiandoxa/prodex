@@ -389,20 +389,15 @@ pub(crate) fn runtime_proxy_overload_message(message: &str) -> bool {
 }
 
 pub(crate) fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
-    let normalized = String::from_utf8_lossy(body)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if normalized.is_empty() {
-        return "-".to_string();
-    }
+    redaction_text_snippet(String::from_utf8_lossy(body).as_ref(), max_chars)
+}
 
-    let snippet = normalized.chars().take(max_chars).collect::<String>();
-    if normalized.chars().count() > max_chars {
-        format!("{snippet}...")
-    } else {
-        snippet
-    }
+pub(crate) fn runtime_proxy_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {
+    redaction_redacted_body_snippet(body, max_chars)
+}
+
+pub(crate) fn runtime_proxy_redacted_headers_debug(headers: &[(String, String)]) -> String {
+    redaction_redacted_headers_debug(headers)
 }
 
 pub(crate) fn extract_runtime_proxy_previous_response_message_from_value(
@@ -784,6 +779,102 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].response_ids, vec!["resp-2".to_string()]);
         assert_eq!(events[0].event_type.as_deref(), Some("response.completed"));
+    }
+
+    #[test]
+    fn redacted_headers_debug_removes_sensitive_header_values() {
+        let headers = vec![
+            (
+                "authorization".to_string(),
+                "Bearer live_authorization_secret_12345".to_string(),
+            ),
+            (
+                "x-api-key".to_string(),
+                "sk-ant-api-key-secret-12345".to_string(),
+            ),
+            (
+                "cookie".to_string(),
+                "session=secret-cookie-value".to_string(),
+            ),
+            (
+                "x-forwarded-token".to_string(),
+                "forwarded-token-secret".to_string(),
+            ),
+            (
+                "x-observed-value".to_string(),
+                "Bearer nested_bearer_secret_12345".to_string(),
+            ),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+        ];
+
+        let redacted = runtime_proxy_redacted_headers_debug(&headers);
+
+        assert!(redacted.contains("authorization"));
+        assert!(redacted.contains("Bearer <redacted>"));
+        assert!(redacted.contains("anthropic-version"));
+        assert!(redacted.contains("2023-06-01"));
+        assert!(!redacted.contains("live_authorization_secret_12345"));
+        assert!(!redacted.contains("sk-ant-api-key-secret-12345"));
+        assert!(!redacted.contains("secret-cookie-value"));
+        assert!(!redacted.contains("forwarded-token-secret"));
+        assert!(!redacted.contains("nested_bearer_secret_12345"));
+    }
+
+    #[test]
+    fn redacted_body_snippet_removes_json_secret_fields_and_token_values() {
+        let body = br#"{
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "api_key": "sk-ant-json-secret-123456789",
+            "auth": {
+                "access_token": "access-token-secret",
+                "refreshToken": "refresh-token-secret",
+                "client_secret": "client-secret-value",
+                "password": "password-secret"
+            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Use Bearer free_text_bearer_secret_12345 and sk-proj-free-text-secret-12345"
+                }
+            ]
+        }"#;
+
+        let redacted = runtime_proxy_redacted_body_snippet(body, 4096);
+
+        assert!(redacted.contains("claude-sonnet-4-6"));
+        assert!(redacted.contains("max_tokens"));
+        assert!(redacted.contains("\"api_key\":\"<redacted>\""));
+        assert!(redacted.contains("\"access_token\":\"<redacted>\""));
+        assert!(redacted.contains("\"refreshToken\":\"<redacted>\""));
+        assert!(redacted.contains("\"client_secret\":\"<redacted>\""));
+        assert!(redacted.contains("\"password\":\"<redacted>\""));
+        assert!(redacted.contains("Bearer <redacted>"));
+        assert!(redacted.contains("sk-proj-<redacted>"));
+        assert!(!redacted.contains("sk-ant-json-secret-123456789"));
+        assert!(!redacted.contains("access-token-secret"));
+        assert!(!redacted.contains("refresh-token-secret"));
+        assert!(!redacted.contains("client-secret-value"));
+        assert!(!redacted.contains("password-secret"));
+        assert!(!redacted.contains("free_text_bearer_secret_12345"));
+        assert!(!redacted.contains("free-text-secret-12345"));
+    }
+
+    #[test]
+    fn redacted_body_snippet_removes_plain_text_secret_assignments() {
+        let body = b"api_key=plain-api-key-secret-12345 access_token: plain-access-token-secret \
+Bearer plain-bearer-secret-12345 x=sk-live-plain-secret-12345";
+
+        let redacted = runtime_proxy_redacted_body_snippet(body, 4096);
+
+        assert!(redacted.contains("api_key=<redacted>"));
+        assert!(redacted.contains("access_token: <redacted>"));
+        assert!(redacted.contains("Bearer <redacted>"));
+        assert!(redacted.contains("sk-live-<redacted>"));
+        assert!(!redacted.contains("plain-api-key-secret-12345"));
+        assert!(!redacted.contains("plain-access-token-secret"));
+        assert!(!redacted.contains("plain-bearer-secret-12345"));
+        assert!(!redacted.contains("plain-secret-12345"));
     }
 
     #[test]

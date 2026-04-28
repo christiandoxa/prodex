@@ -1,0 +1,53 @@
+{
+  "method": "POST",
+  "path_and_query": "/backend-api/codex/responses",
+  "headers": [
+    {
+      "name": "Content-Type",
+      "value": "application/json"
+    },
+    {
+      "name": "User-Agent",
+      "value": "codex-cli/0.61.0"
+    },
+    {
+      "name": "x-codex-turn-state",
+      "value": "turn_live_20260428"
+    },
+    {
+      "name": "x-openai-subagent",
+      "value": "planner"
+    }
+  ],
+  "body": {
+    "model": "gpt-5.3-codex",
+    "stream": true,
+    "previous_response_id": "resp_parent_20260428",
+    "client_metadata": {
+      "session_id": "sess_codex_20260428"
+    },
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "List repo files."
+          }
+        ]
+      },
+      {
+        "type": "mcp_approval_request",
+        "id": "appr_20260428",
+        "server_label": "workspace",
+        "name": "read_file"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_20260428",
+        "output": "ok"
+      }
+    ]
+  }
+}

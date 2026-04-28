@@ -620,14 +620,20 @@ pub(crate) fn write_runtime_streaming_response(
             Err(err) => {
                 runtime_proxy_log_to_path(
                     &response.log_path,
-                    &format!(
-                        "request={} transport=http stream_read_error profile={} chunks={} bytes={} elapsed_ms={} error={}",
-                        response.request_id,
-                        response.profile_name,
-                        chunk_count,
-                        total_bytes,
-                        started_at.elapsed().as_millis(),
-                        err
+                    &runtime_proxy_structured_log_message(
+                        "stream_read_error",
+                        [
+                            runtime_proxy_log_field("request", response.request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field("profile", response.profile_name.as_str()),
+                            runtime_proxy_log_field("chunks", chunk_count.to_string()),
+                            runtime_proxy_log_field("bytes", total_bytes.to_string()),
+                            runtime_proxy_log_field(
+                                "elapsed_ms",
+                                started_at.elapsed().as_millis().to_string(),
+                            ),
+                            runtime_proxy_log_field("error", err.to_string()),
+                        ],
                     ),
                 );
                 let transport_error =
@@ -655,14 +661,20 @@ pub(crate) fn write_runtime_streaming_response(
             );
             runtime_proxy_log_to_path(
                 &response.log_path,
-                &format!(
-                    "request={} transport=http stream_read_error profile={} chunks={} bytes={} elapsed_ms={} error={}",
-                    response.request_id,
-                    response.profile_name,
-                    chunk_count,
-                    total_bytes,
-                    started_at.elapsed().as_millis(),
-                    err
+                &runtime_proxy_structured_log_message(
+                    "stream_read_error",
+                    [
+                        runtime_proxy_log_field("request", response.request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", response.profile_name.as_str()),
+                        runtime_proxy_log_field("chunks", chunk_count.to_string()),
+                        runtime_proxy_log_field("bytes", total_bytes.to_string()),
+                        runtime_proxy_log_field(
+                            "elapsed_ms",
+                            started_at.elapsed().as_millis().to_string(),
+                        ),
+                        runtime_proxy_log_field("error", err.to_string()),
+                    ],
                 ),
             );
             note_runtime_profile_latency_failure(
@@ -743,12 +755,18 @@ fn write_runtime_stream_chunk(
     if *chunk_count == 1 {
         runtime_proxy_log_to_path(
             log_path,
-            &format!(
-                "request={} transport=http first_local_chunk profile={} bytes={} elapsed_ms={}",
-                request_id,
-                profile_name,
-                chunk.len(),
-                started_at.elapsed().as_millis()
+            &runtime_proxy_structured_log_message(
+                "first_local_chunk",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("profile", profile_name.as_str()),
+                    runtime_proxy_log_field("bytes", chunk.len().to_string()),
+                    runtime_proxy_log_field(
+                        "elapsed_ms",
+                        started_at.elapsed().as_millis().to_string(),
+                    ),
+                ],
             ),
         );
         note_runtime_profile_latency_observation(

@@ -187,8 +187,13 @@ pub(crate) async fn runtime_prefetch_response_chunks(
             Ok(None) => {
                 runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "request={request_id} transport=http upstream_stream_end saw_data={saw_data}"
+                    &runtime_proxy_structured_log_message(
+                        "upstream_stream_end",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field("saw_data", saw_data.to_string()),
+                        ],
                     ),
                 );
                 let _ = sender.try_send(RuntimePrefetchChunk::End);
@@ -199,9 +204,13 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                     saw_data = true;
                     runtime_proxy_log_to_path(
                         &log_path,
-                        &format!(
-                            "request={request_id} transport=http first_upstream_chunk bytes={}",
-                            chunk.len()
+                        &runtime_proxy_structured_log_message(
+                            "first_upstream_chunk",
+                            [
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("transport", "http"),
+                                runtime_proxy_log_field("bytes", chunk.len().to_string()),
+                            ],
                         ),
                     );
                 }
@@ -273,8 +282,14 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                 runtime_prefetch_set_terminal_error(&shared, kind, err.to_string());
                 runtime_proxy_log_to_path(
                     &log_path,
-                    &format!(
-                        "request={request_id} transport=http upstream_stream_error kind={kind:?} error={err}"
+                    &runtime_proxy_structured_log_message(
+                        "upstream_stream_error",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field("kind", format!("{kind:?}")),
+                            runtime_proxy_log_field("error", err.to_string()),
+                        ],
                     ),
                 );
                 let _ = sender.try_send(RuntimePrefetchChunk::Error(kind, err.to_string()));

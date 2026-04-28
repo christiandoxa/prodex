@@ -122,10 +122,13 @@ fn dispatch_runtime_http_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("headers", format!("{:?}", captured.headers)),
+                    runtime_proxy_log_field(
+                        "headers",
+                        runtime_proxy_redacted_headers_debug(&captured.headers),
+                    ),
                     runtime_proxy_log_field(
                         "body_snippet",
-                        runtime_proxy_body_snippet(&captured.body, 1024),
+                        runtime_proxy_redacted_body_snippet(&captured.body, 1024),
                     ),
                 ],
             ),
@@ -427,11 +430,13 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
                     ),
                     runtime_proxy_log_field(
                         "headers",
-                        format!("{:?}", translated_request.translated_request.headers),
+                        runtime_proxy_redacted_headers_debug(
+                            &translated_request.translated_request.headers,
+                        ),
                     ),
                     runtime_proxy_log_field(
                         "body_snippet",
-                        runtime_proxy_body_snippet(
+                        runtime_proxy_redacted_body_snippet(
                             &translated_request.translated_request.body,
                             2048,
                         ),

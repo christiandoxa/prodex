@@ -31,9 +31,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         );
         runtime_proxy_log(
             self.shared,
-            format!(
-                "request={} websocket_session={} websocket_reuse_watchdog_timeout profile={} event={}",
-                self.request_id, self.session_id, profile_name, event
+            runtime_proxy_structured_log_message(
+                "websocket_reuse_watchdog_timeout",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                    runtime_proxy_log_field("profile", profile_name.as_str()),
+                    runtime_proxy_log_field("event", event),
+                ],
             ),
         );
         if nonreplayable_previous_response_reuse && self.request_requires_previous_response_affinity
@@ -46,9 +51,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     .insert(profile_name.clone());
                 runtime_proxy_log(
                     self.shared,
-                    format!(
-                        "request={} websocket_session={} websocket_reuse_locked_affinity_owner_fresh_retry profile={} event={}",
-                        self.request_id, self.session_id, profile_name, event
+                    runtime_proxy_structured_log_message(
+                        "websocket_reuse_locked_affinity_owner_fresh_retry",
+                        [
+                            runtime_proxy_log_field("request", self.request_id.to_string()),
+                            runtime_proxy_log_field(
+                                "websocket_session",
+                                self.session_id.to_string(),
+                            ),
+                            runtime_proxy_log_field("profile", profile_name.as_str()),
+                            runtime_proxy_log_field("event", event),
+                        ],
                     ),
                 );
                 runtime_proxy_log_chain_retried_owner(
@@ -74,9 +87,18 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             );
             runtime_proxy_log(
                 self.shared,
-                format!(
-                    "request={} websocket_session={} stale_continuation reason=websocket_reuse_watchdog_locked_affinity profile={} event={}",
-                    self.request_id, self.session_id, profile_name, event
+                runtime_proxy_structured_log_message(
+                    "stale_continuation",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field(
+                            "reason",
+                            "websocket_reuse_watchdog_locked_affinity",
+                        ),
+                        runtime_proxy_log_field("profile", profile_name.as_str()),
+                        runtime_proxy_log_field("event", event),
+                    ],
                 ),
             );
             runtime_proxy_log_chain_dead_upstream_confirmed(
@@ -105,9 +127,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     .insert(profile_name.clone());
                 runtime_proxy_log(
                     self.shared,
-                    format!(
-                        "request={} websocket_session={} websocket_reuse_nonreplayable_fresh_retry profile={} event={}",
-                        self.request_id, self.session_id, profile_name, event
+                    runtime_proxy_structured_log_message(
+                        "websocket_reuse_nonreplayable_fresh_retry",
+                        [
+                            runtime_proxy_log_field("request", self.request_id.to_string()),
+                            runtime_proxy_log_field(
+                                "websocket_session",
+                                self.session_id.to_string(),
+                            ),
+                            runtime_proxy_log_field("profile", profile_name.as_str()),
+                            runtime_proxy_log_field("event", event),
+                        ],
                     ),
                 );
                 return Ok(RuntimeWebsocketMessageLoopAction::Continue);
@@ -115,30 +145,53 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             if stale_previous_response_reuse {
                 runtime_proxy_log(
                     self.shared,
-                    format!(
-                        "request={} websocket_session={} websocket_reuse_stale_previous_response_blocked profile={} event={} elapsed_ms={} threshold_ms={}",
-                        self.request_id,
-                        self.session_id,
-                        profile_name,
-                        event,
-                        reuse_terminal_idle
-                            .map(|elapsed| elapsed.as_millis())
-                            .unwrap_or(0),
-                        runtime_proxy_websocket_previous_response_reuse_stale_ms(),
+                    runtime_proxy_structured_log_message(
+                        "websocket_reuse_stale_previous_response_blocked",
+                        [
+                            runtime_proxy_log_field("request", self.request_id.to_string()),
+                            runtime_proxy_log_field(
+                                "websocket_session",
+                                self.session_id.to_string(),
+                            ),
+                            runtime_proxy_log_field("profile", profile_name.as_str()),
+                            runtime_proxy_log_field("event", event),
+                            runtime_proxy_log_field(
+                                "elapsed_ms",
+                                reuse_terminal_idle
+                                    .map(|elapsed| elapsed.as_millis())
+                                    .unwrap_or(0)
+                                    .to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "threshold_ms",
+                                runtime_proxy_websocket_previous_response_reuse_stale_ms()
+                                    .to_string(),
+                            ),
+                        ],
                     ),
                 );
             } else {
                 runtime_proxy_log(
                     self.shared,
-                    format!(
-                        "request={} websocket_session={} websocket_reuse_previous_response_blocked profile={} event={} reason=missing_turn_state elapsed_ms={}",
-                        self.request_id,
-                        self.session_id,
-                        profile_name,
-                        event,
-                        reuse_terminal_idle
-                            .map(|elapsed| elapsed.as_millis())
-                            .unwrap_or(0),
+                    runtime_proxy_structured_log_message(
+                        "websocket_reuse_previous_response_blocked",
+                        [
+                            runtime_proxy_log_field("request", self.request_id.to_string()),
+                            runtime_proxy_log_field(
+                                "websocket_session",
+                                self.session_id.to_string(),
+                            ),
+                            runtime_proxy_log_field("profile", profile_name.as_str()),
+                            runtime_proxy_log_field("event", event),
+                            runtime_proxy_log_field("reason", "missing_turn_state"),
+                            runtime_proxy_log_field(
+                                "elapsed_ms",
+                                reuse_terminal_idle
+                                    .map(|elapsed| elapsed.as_millis())
+                                    .unwrap_or(0)
+                                    .to_string(),
+                            ),
+                        ],
                     ),
                 );
             }
@@ -151,9 +204,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 .insert(profile_name.clone());
             runtime_proxy_log(
                 self.shared,
-                format!(
-                    "request={} websocket_session={} websocket_reuse_owner_fresh_retry profile={} event={}",
-                    self.request_id, self.session_id, profile_name, event
+                runtime_proxy_structured_log_message(
+                    "websocket_reuse_owner_fresh_retry",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field("profile", profile_name.as_str()),
+                        runtime_proxy_log_field("event", event),
+                    ],
                 ),
             );
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);

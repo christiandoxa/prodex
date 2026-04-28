@@ -48,10 +48,19 @@ pub(crate) fn update_runtime_profile_route_performance(
     drop(runtime);
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_latency profile={profile_name} route={} score={} reason={reason}",
-            runtime_route_kind_label(route_kind),
-            next_score.min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX),
+        runtime_proxy_structured_log_message(
+            "profile_latency",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field(
+                    "score",
+                    next_score
+                        .min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX)
+                        .to_string(),
+                ),
+                runtime_proxy_log_field("reason", reason),
+            ],
         ),
     );
     Ok(())
@@ -178,9 +187,15 @@ pub(crate) fn bump_runtime_profile_bad_pairing_score(
     drop(runtime);
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_bad_pairing profile={profile_name} route={} score={next_score} delta={delta} reason={reason}",
-            runtime_route_kind_label(route_kind)
+        runtime_proxy_structured_log_message(
+            "profile_bad_pairing",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("score", next_score.to_string()),
+                runtime_proxy_log_field("delta", delta.to_string()),
+                runtime_proxy_log_field("reason", reason),
+            ],
         ),
     );
     Ok(())
@@ -271,17 +286,30 @@ pub(crate) fn bump_runtime_profile_health_score(
     drop(runtime);
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_health profile={profile_name} route={} score={next_score} delta={delta} reason={reason}",
-            runtime_route_kind_label(route_kind)
+        runtime_proxy_structured_log_message(
+            "profile_health",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("score", next_score.to_string()),
+                runtime_proxy_log_field("delta", delta.to_string()),
+                runtime_proxy_log_field("reason", reason),
+            ],
         ),
     );
     if let Some((until, reopen_stage)) = circuit_until {
         runtime_proxy_log(
             shared,
-            format!(
-                "profile_circuit_open profile={profile_name} route={} until={until} reopen_stage={reopen_stage} reason={reason} score={next_score}",
-                runtime_route_kind_label(route_kind)
+            runtime_proxy_structured_log_message(
+                "profile_circuit_open",
+                [
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("until", until.to_string()),
+                    runtime_proxy_log_field("reopen_stage", reopen_stage.to_string()),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("score", next_score.to_string()),
+                ],
             ),
         );
     }
@@ -349,10 +377,17 @@ pub(crate) fn note_runtime_profile_transport_failure(
     };
     runtime_proxy_log(
         shared,
-        format!(
-            "profile_transport_failure profile={profile_name} route={} class={} context={context}",
-            runtime_route_kind_label(route_kind),
-            runtime_transport_failure_kind_label(failure_kind),
+        runtime_proxy_structured_log_message(
+            "profile_transport_failure",
+            [
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field(
+                    "class",
+                    runtime_transport_failure_kind_label(failure_kind),
+                ),
+                runtime_proxy_log_field("context", context),
+            ],
         ),
     );
     let _ = bump_runtime_profile_health_score(

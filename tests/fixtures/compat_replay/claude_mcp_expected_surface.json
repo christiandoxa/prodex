@@ -1,0 +1,14 @@
+{
+  "stage": "request",
+  "family": "claude_code",
+  "client": "claude_code",
+  "route": "anthropic_messages",
+  "transport": "http",
+  "stream": "streaming",
+  "tool_surface": "mcp",
+  "continuation": "none",
+  "request_origin": "external",
+  "approval": false,
+  "user_agent": "claude-code/2.1.90",
+  "warnings": []
+}

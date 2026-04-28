@@ -26,9 +26,17 @@ pub(super) fn proxy_runtime_noncompact_request(
         )? {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "request={request_id} transport=http profile_inflight_saturated profile={current_profile} hard_limit={}",
-                    runtime_proxy_profile_inflight_hard_limit(),
+                runtime_proxy_structured_log_message(
+                    "profile_inflight_saturated",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", current_profile.as_str()),
+                        runtime_proxy_log_field(
+                            "hard_limit",
+                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                        ),
+                    ],
                 ),
             );
             return Ok(build_runtime_proxy_text_response(
@@ -208,9 +216,17 @@ pub(super) fn proxy_runtime_noncompact_request(
         )? {
             runtime_proxy_log(
                 shared,
-                format!(
-                    "request={request_id} transport=http profile_inflight_saturated profile={candidate_name} hard_limit={}",
-                    runtime_proxy_profile_inflight_hard_limit(),
+                runtime_proxy_structured_log_message(
+                    "profile_inflight_saturated",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", candidate_name.as_str()),
+                        runtime_proxy_log_field(
+                            "hard_limit",
+                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                        ),
+                    ],
                 ),
             );
             excluded_profiles.insert(candidate_name);
