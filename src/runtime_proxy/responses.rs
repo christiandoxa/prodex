@@ -1,5 +1,304 @@
 use super::*;
 
+#[derive(Debug)]
+struct RuntimeResponsesAffinityState {
+    bound_profile: Option<String>,
+    trusted_previous_response_affinity: bool,
+    turn_state_profile: Option<String>,
+    route_affinity: RuntimeResponseRouteAffinity,
+    previous_response_retry_candidate: Option<String>,
+    previous_response_retry_index: usize,
+    candidate_turn_state_retry_profile: Option<String>,
+    candidate_turn_state_retry_value: Option<String>,
+    saw_previous_response_not_found: bool,
+}
+
+impl RuntimeResponsesAffinityState {
+    fn new(
+        bound_profile: Option<String>,
+        trusted_previous_response_affinity: bool,
+        turn_state_profile: Option<String>,
+    ) -> Self {
+        Self {
+            bound_profile,
+            trusted_previous_response_affinity,
+            turn_state_profile,
+            route_affinity: RuntimeResponseRouteAffinity::default(),
+            previous_response_retry_candidate: None,
+            previous_response_retry_index: 0,
+            candidate_turn_state_retry_profile: None,
+            candidate_turn_state_retry_value: None,
+            saw_previous_response_not_found: false,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn refresh_route_affinity(
+        &mut self,
+        shared: &RuntimeRotationProxyShared,
+        request_id: u64,
+        reason: &str,
+        previous_response_id: Option<&str>,
+        request_turn_state: Option<&str>,
+        request_session_id: Option<&str>,
+        explicit_request_session_id: Option<&RuntimeExplicitSessionId>,
+    ) -> Result<()> {
+        refresh_and_log_runtime_response_route_affinity(
+            shared,
+            request_id,
+            None,
+            reason,
+            previous_response_id,
+            self.bound_profile.as_deref(),
+            self.turn_state_profile.as_deref(),
+            request_turn_state,
+            request_session_id,
+            explicit_request_session_id,
+            None,
+            &mut self.route_affinity.bound_session_profile,
+            &mut self.route_affinity.compact_followup_profile,
+            &mut self.route_affinity.compact_session_profile,
+            &mut self.route_affinity.session_profile,
+            &mut self.route_affinity.pinned_profile,
+        )
+    }
+
+    fn compact_followup_profile(&self) -> Option<(&str, &'static str)> {
+        self.route_affinity
+            .compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, source)| (profile_name.as_str(), *source))
+    }
+
+    fn compact_followup_profile_name(&self) -> Option<&str> {
+        self.compact_followup_profile()
+            .map(|(profile_name, _)| profile_name)
+    }
+
+    fn compact_session_profile(&self) -> Option<&str> {
+        self.route_affinity.compact_session_profile.as_deref()
+    }
+
+    fn session_profile(&self) -> Option<&str> {
+        self.route_affinity.session_profile.as_deref()
+    }
+
+    fn pinned_profile(&self) -> Option<&str> {
+        self.route_affinity.pinned_profile.as_deref()
+    }
+
+    fn turn_state_profile(&self) -> Option<&str> {
+        self.turn_state_profile.as_deref()
+    }
+
+    fn trusted_previous_response_affinity(&self) -> bool {
+        self.trusted_previous_response_affinity
+    }
+
+    fn noncompact_session_priority_profile(&self) -> Option<&str> {
+        runtime_noncompact_session_priority_profile(
+            self.session_profile(),
+            self.compact_session_profile(),
+        )
+    }
+
+    fn has_continuation_priority(
+        &self,
+        previous_response_id: Option<&str>,
+        request_turn_state: Option<&str>,
+    ) -> bool {
+        runtime_proxy_has_continuation_priority(
+            previous_response_id,
+            self.pinned_profile(),
+            request_turn_state,
+            self.turn_state_profile(),
+            self.noncompact_session_priority_profile(),
+        )
+    }
+
+    fn wait_affinity_owner(&self) -> Option<&str> {
+        runtime_wait_affinity_owner(
+            self.compact_followup_profile_name(),
+            self.pinned_profile(),
+            self.turn_state_profile(),
+            self.noncompact_session_priority_profile(),
+            self.trusted_previous_response_affinity,
+        )
+    }
+
+    fn allows_direct_current_profile_fallback(
+        &self,
+        previous_response_id: Option<&str>,
+        request_turn_state: Option<&str>,
+        saw_inflight_saturation: bool,
+        saw_upstream_failure: bool,
+    ) -> bool {
+        runtime_proxy_allows_direct_current_profile_fallback(
+            previous_response_id,
+            self.pinned_profile(),
+            request_turn_state,
+            self.turn_state_profile(),
+            self.noncompact_session_priority_profile(),
+            saw_inflight_saturation,
+            saw_upstream_failure,
+        )
+    }
+
+    fn candidate_selection<'a>(
+        &'a self,
+        excluded_profiles: &'a BTreeSet<String>,
+        previous_response_id: Option<&'a str>,
+    ) -> RuntimeResponseCandidateSelection<'a> {
+        RuntimeResponseCandidateSelection {
+            excluded_profiles,
+            strict_affinity_profile: self.compact_followup_profile_name(),
+            pinned_profile: self.pinned_profile(),
+            turn_state_profile: self.turn_state_profile(),
+            session_profile: self.session_profile(),
+            discover_previous_response_owner: previous_response_id.is_some(),
+            previous_response_id,
+            route_kind: RuntimeRouteKind::Responses,
+        }
+    }
+
+    fn candidate_affinity<'a>(&'a self, candidate_name: &'a str) -> RuntimeCandidateAffinity<'a> {
+        RuntimeCandidateAffinity {
+            route_kind: RuntimeRouteKind::Responses,
+            candidate_name,
+            strict_affinity_profile: self.compact_followup_profile_name(),
+            pinned_profile: self.pinned_profile(),
+            turn_state_profile: self.turn_state_profile(),
+            session_profile: self.session_profile(),
+            trusted_previous_response_affinity: self.trusted_previous_response_affinity,
+        }
+    }
+
+    fn quota_blocked_affinity_is_releasable(
+        &self,
+        profile_name: &str,
+        request_requires_previous_response_affinity: bool,
+        fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    ) -> bool {
+        runtime_quota_blocked_affinity_is_releasable(
+            self.candidate_affinity(profile_name),
+            request_requires_previous_response_affinity,
+            fresh_fallback_shape,
+        )
+    }
+
+    fn turn_state_override_for<'a>(
+        &'a self,
+        candidate_name: &str,
+        request_turn_state: Option<&'a str>,
+    ) -> Option<&'a str> {
+        if self.candidate_turn_state_retry_profile.as_deref() == Some(candidate_name) {
+            self.candidate_turn_state_retry_value.as_deref()
+        } else {
+            request_turn_state
+        }
+    }
+
+    fn clear_profile_affinity(
+        &mut self,
+        profile_name: &str,
+        reset_previous_response_retry_index: bool,
+    ) {
+        clear_runtime_response_profile_affinity(
+            profile_name,
+            &mut self.bound_profile,
+            &mut self.route_affinity.session_profile,
+            &mut self.candidate_turn_state_retry_profile,
+            &mut self.candidate_turn_state_retry_value,
+            &mut self.route_affinity.pinned_profile,
+            &mut self.previous_response_retry_index,
+            reset_previous_response_retry_index,
+            &mut self.turn_state_profile,
+            None,
+        );
+    }
+
+    fn previous_response_not_found_state<'a>(
+        &'a mut self,
+        excluded_profiles: &'a mut BTreeSet<String>,
+        update_trusted_previous_response_affinity: bool,
+    ) -> RuntimePreviousResponseNotFoundState<'a> {
+        RuntimePreviousResponseNotFoundState {
+            saw_previous_response_not_found: &mut self.saw_previous_response_not_found,
+            previous_response_retry_candidate: &mut self.previous_response_retry_candidate,
+            previous_response_retry_index: &mut self.previous_response_retry_index,
+            candidate_turn_state_retry_profile: &mut self.candidate_turn_state_retry_profile,
+            candidate_turn_state_retry_value: &mut self.candidate_turn_state_retry_value,
+            bound_profile: &mut self.bound_profile,
+            session_profile: &mut self.route_affinity.session_profile,
+            pinned_profile: &mut self.route_affinity.pinned_profile,
+            turn_state_profile: &mut self.turn_state_profile,
+            compact_followup_profile: Some(&mut self.route_affinity.compact_followup_profile),
+            excluded_profiles,
+            trusted_previous_response_affinity: if update_trusted_previous_response_affinity {
+                Some(&mut self.trusted_previous_response_affinity)
+            } else {
+                None
+            },
+        }
+    }
+
+    fn remember_successful_previous_response_owner(
+        &self,
+        shared: &RuntimeRotationProxyShared,
+        profile_name: &str,
+        previous_response_id: Option<&str>,
+    ) -> Result<()> {
+        if self.saw_previous_response_not_found {
+            remember_runtime_successful_previous_response_owner(
+                shared,
+                profile_name,
+                previous_response_id,
+                RuntimeRouteKind::Responses,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn runtime_responses_previous_response_not_found_context<'a>(
+    shared: &'a RuntimeRotationProxyShared,
+    request_id: u64,
+    profile_name: &'a str,
+    turn_state: Option<String>,
+    via: Option<&'a str>,
+    previous_response_id: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_requires_previous_response_affinity: bool,
+    trusted_previous_response_affinity: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    policy: RuntimePreviousResponseNotFoundPolicy,
+) -> RuntimePreviousResponseNotFoundContext<'a> {
+    RuntimePreviousResponseNotFoundContext {
+        shared,
+        log_context: RuntimePreviousResponseLogContext {
+            request_id,
+            transport: "http",
+            route: "responses",
+            websocket_session: None,
+            via,
+        },
+        route: RuntimePreviousResponseNotFoundRoute::Responses,
+        route_kind: RuntimeRouteKind::Responses,
+        profile_name,
+        turn_state,
+        previous_response_id,
+        request_turn_state,
+        request_session_id,
+        request_requires_previous_response_affinity,
+        trusted_previous_response_affinity,
+        previous_response_fresh_fallback_used: false,
+        fresh_fallback_shape,
+        policy,
+    }
+}
+
 pub(crate) fn proxy_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -14,14 +313,14 @@ pub(crate) fn proxy_runtime_responses_request(
     let mut request_turn_state = runtime_request_turn_state(&request);
     let explicit_request_session_id = runtime_request_explicit_session_id(&request);
     let request_session_id = runtime_request_session_id(&request);
-    let mut bound_profile = previous_response_id
+    let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| {
             runtime_response_bound_profile(shared, response_id, RuntimeRouteKind::Responses)
         })
         .transpose()?
         .flatten();
-    let mut trusted_previous_response_affinity = runtime_previous_response_affinity_is_trusted(
+    let trusted_previous_response_affinity = runtime_previous_response_affinity_is_trusted(
         shared,
         previous_response_id.as_deref(),
         bound_profile.as_deref(),
@@ -43,107 +342,30 @@ pub(crate) fn proxy_runtime_responses_request(
         );
         request_turn_state = Some(turn_state);
     }
-    let mut turn_state_profile = request_turn_state
+    let turn_state_profile = request_turn_state
         .as_deref()
         .map(|value| runtime_turn_state_bound_profile(shared, value))
         .transpose()?
         .flatten();
-    let mut bound_session_profile = None;
-    let mut compact_followup_profile = None;
-    let mut compact_session_profile = None;
-    let mut session_profile = None;
-    let mut pinned_profile = None;
-    macro_rules! recompute_route_affinity {
-        ($reason:expr) => {
-            refresh_and_log_runtime_response_route_affinity(
-                shared,
-                request_id,
-                None,
-                $reason,
-                previous_response_id.as_deref(),
-                bound_profile.as_deref(),
-                turn_state_profile.as_deref(),
-                request_turn_state.as_deref(),
-                request_session_id.as_deref(),
-                explicit_request_session_id.as_ref(),
-                None,
-                &mut bound_session_profile,
-                &mut compact_followup_profile,
-                &mut compact_session_profile,
-                &mut session_profile,
-                &mut pinned_profile,
-            )
-        };
-    }
-    recompute_route_affinity!("initial")?;
+    let mut affinity_state = RuntimeResponsesAffinityState::new(
+        bound_profile,
+        trusted_previous_response_affinity,
+        turn_state_profile,
+    );
+    affinity_state.refresh_route_affinity(
+        shared,
+        request_id,
+        "initial",
+        previous_response_id.as_deref(),
+        request_turn_state.as_deref(),
+        request_session_id.as_deref(),
+        explicit_request_session_id.as_ref(),
+    )?;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
-    let mut previous_response_retry_candidate: Option<String> = None;
-    let mut previous_response_retry_index = 0usize;
-    let mut candidate_turn_state_retry_profile: Option<String> = None;
-    let mut candidate_turn_state_retry_value: Option<String> = None;
     let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
-    let previous_response_fresh_fallback_used = false;
-    let mut saw_previous_response_not_found = false;
-    macro_rules! runtime_candidate_affinity {
-        ($route_kind:expr, $candidate_name:expr, $strict_affinity_profile:expr $(,)?) => {
-            RuntimeCandidateAffinity {
-                route_kind: $route_kind,
-                candidate_name: $candidate_name,
-                strict_affinity_profile: $strict_affinity_profile,
-                pinned_profile: pinned_profile.as_deref(),
-                turn_state_profile: turn_state_profile.as_deref(),
-                session_profile: session_profile.as_deref(),
-                trusted_previous_response_affinity,
-            }
-        };
-    }
-    macro_rules! runtime_responses_previous_response_not_found_context {
-        ($profile_name:expr, $turn_state:expr, $via:expr, $policy:expr $(,)?) => {
-            RuntimePreviousResponseNotFoundContext {
-                shared,
-                log_context: RuntimePreviousResponseLogContext {
-                    request_id,
-                    transport: "http",
-                    route: "responses",
-                    websocket_session: None,
-                    via: $via,
-                },
-                route: RuntimePreviousResponseNotFoundRoute::Responses,
-                route_kind: RuntimeRouteKind::Responses,
-                profile_name: $profile_name,
-                turn_state: $turn_state,
-                previous_response_id: previous_response_id.as_deref(),
-                request_turn_state: request_turn_state.as_deref(),
-                request_session_id: request_session_id.as_deref(),
-                request_requires_previous_response_affinity,
-                trusted_previous_response_affinity,
-                previous_response_fresh_fallback_used,
-                fresh_fallback_shape: previous_response_fresh_fallback_shape,
-                policy: $policy,
-            }
-        };
-    }
-    macro_rules! runtime_responses_previous_response_not_found_state {
-        ($trusted_previous_response_affinity:expr $(,)?) => {
-            RuntimePreviousResponseNotFoundState {
-                saw_previous_response_not_found: &mut saw_previous_response_not_found,
-                previous_response_retry_candidate: &mut previous_response_retry_candidate,
-                previous_response_retry_index: &mut previous_response_retry_index,
-                candidate_turn_state_retry_profile: &mut candidate_turn_state_retry_profile,
-                candidate_turn_state_retry_value: &mut candidate_turn_state_retry_value,
-                bound_profile: &mut bound_profile,
-                session_profile: &mut session_profile,
-                pinned_profile: &mut pinned_profile,
-                turn_state_profile: &mut turn_state_profile,
-                compact_followup_profile: Some(&mut compact_followup_profile),
-                excluded_profiles: &mut excluded_profiles,
-                trusted_previous_response_affinity: $trusted_previous_response_affinity,
-            }
-        };
-    }
 
     loop {
         let pressure_mode =
@@ -151,15 +373,9 @@ pub(crate) fn proxy_runtime_responses_request(
         if runtime_proxy_precommit_budget_exhausted(
             selection_started_at,
             selection_attempts,
-            runtime_proxy_has_continuation_priority(
+            affinity_state.has_continuation_priority(
                 previous_response_id.as_deref(),
-                pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
-                turn_state_profile.as_deref(),
-                runtime_noncompact_session_priority_profile(
-                    session_profile.as_deref(),
-                    compact_session_profile.as_deref(),
-                ),
             ),
             pressure_mode,
         ) {
@@ -170,7 +386,7 @@ pub(crate) fn proxy_runtime_responses_request(
                     selection_started_at.elapsed().as_millis()
                 ),
             );
-            if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+            if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -182,15 +398,9 @@ pub(crate) fn proxy_runtime_responses_request(
                     saw_inflight_saturation,
                 ));
             }
-            if runtime_proxy_allows_direct_current_profile_fallback(
+            if affinity_state.allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
-                pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
-                turn_state_profile.as_deref(),
-                runtime_noncompact_session_priority_profile(
-                    session_profile.as_deref(),
-                    compact_session_profile.as_deref(),
-                ),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
@@ -215,14 +425,11 @@ pub(crate) fn proxy_runtime_responses_request(
                         profile_name,
                         response,
                     } => {
-                        if saw_previous_response_not_found {
-                            remember_runtime_successful_previous_response_owner(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                RuntimeRouteKind::Responses,
-                            )?;
-                        }
+                        affinity_state.remember_successful_previous_response_owner(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                        )?;
                         commit_runtime_proxy_profile_selection_with_notice(
                             shared,
                             &profile_name,
@@ -241,14 +448,8 @@ pub(crate) fn proxy_runtime_responses_request(
                         response,
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                        if !runtime_quota_blocked_affinity_is_releasable(
-                            runtime_candidate_affinity!(
-                                RuntimeRouteKind::Responses,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                            ),
+                        if !affinity_state.quota_blocked_affinity_is_releasable(
+                            &profile_name,
                             request_requires_previous_response_affinity,
                             previous_response_fresh_fallback_shape,
                         ) {
@@ -261,18 +462,7 @@ pub(crate) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        clear_runtime_response_profile_affinity(
-                            &profile_name,
-                            &mut bound_profile,
-                            &mut session_profile,
-                            &mut candidate_turn_state_retry_profile,
-                            &mut candidate_turn_state_retry_value,
-                            &mut pinned_profile,
-                            &mut previous_response_retry_index,
-                            true,
-                            &mut turn_state_profile,
-                            None,
-                        );
+                        affinity_state.clear_profile_affinity(&profile_name, true);
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -299,13 +489,22 @@ pub(crate) fn proxy_runtime_responses_request(
                         turn_state,
                     } => {
                         match handle_runtime_previous_response_not_found(
-                            runtime_responses_previous_response_not_found_context!(
+                            runtime_responses_previous_response_not_found_context(
+                                shared,
+                                request_id,
                                 &profile_name,
                                 turn_state,
                                 Some("direct_current_profile_fallback"),
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                request_session_id.as_deref(),
+                                request_requires_previous_response_affinity,
+                                affinity_state.trusted_previous_response_affinity(),
+                                previous_response_fresh_fallback_shape,
                                 RuntimePreviousResponseNotFoundPolicy::responses(false),
                             ),
-                            runtime_responses_previous_response_not_found_state!(None),
+                            affinity_state
+                                .previous_response_not_found_state(&mut excluded_profiles, false),
                         )? {
                             RuntimePreviousResponseNotFoundAction::RetryOwner
                             | RuntimePreviousResponseNotFoundAction::Rotate => {
@@ -326,14 +525,8 @@ pub(crate) fn proxy_runtime_responses_request(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         match runtime_responses_local_selection_action(
-                            runtime_quota_blocked_affinity_is_releasable(
-                                runtime_candidate_affinity!(
-                                    RuntimeRouteKind::Responses,
-                                    &profile_name,
-                                    compact_followup_profile
-                                        .as_ref()
-                                        .map(|(profile_name, _)| profile_name.as_str()),
-                                ),
+                            affinity_state.quota_blocked_affinity_is_releasable(
+                                &profile_name,
                                 request_requires_previous_response_affinity,
                                 previous_response_fresh_fallback_shape,
                             ),
@@ -350,18 +543,7 @@ pub(crate) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        clear_runtime_response_profile_affinity(
-                            &profile_name,
-                            &mut bound_profile,
-                            &mut session_profile,
-                            &mut candidate_turn_state_retry_profile,
-                            &mut candidate_turn_state_retry_value,
-                            &mut pinned_profile,
-                            &mut previous_response_retry_index,
-                            true,
-                            &mut turn_state_profile,
-                            None,
-                        );
+                        affinity_state.clear_profile_affinity(&profile_name, true);
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -383,18 +565,7 @@ pub(crate) fn proxy_runtime_responses_request(
 
         let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
             shared,
-            RuntimeResponseCandidateSelection {
-                excluded_profiles: &excluded_profiles,
-                strict_affinity_profile: compact_followup_profile
-                    .as_ref()
-                    .map(|(profile_name, _)| profile_name.as_str()),
-                pinned_profile: pinned_profile.as_deref(),
-                turn_state_profile: turn_state_profile.as_deref(),
-                session_profile: session_profile.as_deref(),
-                discover_previous_response_owner: previous_response_id.is_some(),
-                previous_response_id: previous_response_id.as_deref(),
-                route_kind: RuntimeRouteKind::Responses,
-            },
+            affinity_state.candidate_selection(&excluded_profiles, previous_response_id.as_deref()),
         )?
         else {
             runtime_proxy_log(
@@ -416,33 +587,16 @@ pub(crate) fn proxy_runtime_responses_request(
                     &excluded_profiles,
                     RuntimeRouteKind::Responses,
                     selection_started_at,
-                    runtime_proxy_has_continuation_priority(
+                    affinity_state.has_continuation_priority(
                         previous_response_id.as_deref(),
-                        pinned_profile.as_deref(),
                         request_turn_state.as_deref(),
-                        turn_state_profile.as_deref(),
-                        runtime_noncompact_session_priority_profile(
-                            session_profile.as_deref(),
-                            compact_session_profile.as_deref(),
-                        ),
                     ),
-                    runtime_wait_affinity_owner(
-                        compact_followup_profile
-                            .as_ref()
-                            .map(|(profile_name, _)| profile_name.as_str()),
-                        pinned_profile.as_deref(),
-                        turn_state_profile.as_deref(),
-                        runtime_noncompact_session_priority_profile(
-                            session_profile.as_deref(),
-                            compact_session_profile.as_deref(),
-                        ),
-                        trusted_previous_response_affinity,
-                    ),
+                    affinity_state.wait_affinity_owner(),
                 ),
             )? {
                 continue;
             }
-            if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
+            if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -470,15 +624,9 @@ pub(crate) fn proxy_runtime_responses_request(
                 runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Responses);
                 continue;
             }
-            if runtime_proxy_allows_direct_current_profile_fallback(
+            if affinity_state.allows_direct_current_profile_fallback(
                 previous_response_id.as_deref(),
-                pinned_profile.as_deref(),
                 request_turn_state.as_deref(),
-                turn_state_profile.as_deref(),
-                runtime_noncompact_session_priority_profile(
-                    session_profile.as_deref(),
-                    compact_session_profile.as_deref(),
-                ),
                 saw_inflight_saturation,
                 last_failure.is_some(),
             ) && let Some(current_profile) = runtime_proxy_direct_current_fallback_profile(
@@ -503,14 +651,11 @@ pub(crate) fn proxy_runtime_responses_request(
                         profile_name,
                         response,
                     } => {
-                        if saw_previous_response_not_found {
-                            remember_runtime_successful_previous_response_owner(
-                                shared,
-                                &profile_name,
-                                previous_response_id.as_deref(),
-                                RuntimeRouteKind::Responses,
-                            )?;
-                        }
+                        affinity_state.remember_successful_previous_response_owner(
+                            shared,
+                            &profile_name,
+                            previous_response_id.as_deref(),
+                        )?;
                         commit_runtime_proxy_profile_selection_with_notice(
                             shared,
                             &profile_name,
@@ -529,14 +674,8 @@ pub(crate) fn proxy_runtime_responses_request(
                         response,
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                        if !runtime_quota_blocked_affinity_is_releasable(
-                            runtime_candidate_affinity!(
-                                RuntimeRouteKind::Responses,
-                                &profile_name,
-                                compact_followup_profile
-                                    .as_ref()
-                                    .map(|(profile_name, _)| profile_name.as_str()),
-                            ),
+                        if !affinity_state.quota_blocked_affinity_is_releasable(
+                            &profile_name,
                             request_requires_previous_response_affinity,
                             previous_response_fresh_fallback_shape,
                         ) {
@@ -549,18 +688,7 @@ pub(crate) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        clear_runtime_response_profile_affinity(
-                            &profile_name,
-                            &mut bound_profile,
-                            &mut session_profile,
-                            &mut candidate_turn_state_retry_profile,
-                            &mut candidate_turn_state_retry_value,
-                            &mut pinned_profile,
-                            &mut previous_response_retry_index,
-                            true,
-                            &mut turn_state_profile,
-                            None,
-                        );
+                        affinity_state.clear_profile_affinity(&profile_name, true);
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -587,13 +715,22 @@ pub(crate) fn proxy_runtime_responses_request(
                         turn_state,
                     } => {
                         match handle_runtime_previous_response_not_found(
-                            runtime_responses_previous_response_not_found_context!(
+                            runtime_responses_previous_response_not_found_context(
+                                shared,
+                                request_id,
                                 &profile_name,
                                 turn_state,
                                 Some("direct_current_profile_fallback"),
+                                previous_response_id.as_deref(),
+                                request_turn_state.as_deref(),
+                                request_session_id.as_deref(),
+                                request_requires_previous_response_affinity,
+                                affinity_state.trusted_previous_response_affinity(),
+                                previous_response_fresh_fallback_shape,
                                 RuntimePreviousResponseNotFoundPolicy::responses(false),
                             ),
-                            runtime_responses_previous_response_not_found_state!(None),
+                            affinity_state
+                                .previous_response_not_found_state(&mut excluded_profiles, false),
                         )? {
                             RuntimePreviousResponseNotFoundAction::RetryOwner
                             | RuntimePreviousResponseNotFoundAction::Rotate => {
@@ -614,14 +751,8 @@ pub(crate) fn proxy_runtime_responses_request(
                     } => {
                         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                         match runtime_responses_local_selection_action(
-                            runtime_quota_blocked_affinity_is_releasable(
-                                runtime_candidate_affinity!(
-                                    RuntimeRouteKind::Responses,
-                                    &profile_name,
-                                    compact_followup_profile
-                                        .as_ref()
-                                        .map(|(profile_name, _)| profile_name.as_str()),
-                                ),
+                            affinity_state.quota_blocked_affinity_is_releasable(
+                                &profile_name,
                                 request_requires_previous_response_affinity,
                                 previous_response_fresh_fallback_shape,
                             ),
@@ -638,18 +769,7 @@ pub(crate) fn proxy_runtime_responses_request(
                             request_turn_state.as_deref(),
                             request_session_id.as_deref(),
                         )?;
-                        clear_runtime_response_profile_affinity(
-                            &profile_name,
-                            &mut bound_profile,
-                            &mut session_profile,
-                            &mut candidate_turn_state_retry_profile,
-                            &mut candidate_turn_state_retry_value,
-                            &mut pinned_profile,
-                            &mut previous_response_retry_index,
-                            true,
-                            &mut turn_state_profile,
-                            None,
-                        );
+                        affinity_state.clear_profile_affinity(&profile_name, true);
                         if released_affinity {
                             runtime_proxy_log(
                                 shared,
@@ -670,25 +790,21 @@ pub(crate) fn proxy_runtime_responses_request(
         };
         selection_attempts = selection_attempts.saturating_add(1);
         let turn_state_override =
-            if candidate_turn_state_retry_profile.as_deref() == Some(candidate_name.as_str()) {
-                candidate_turn_state_retry_value.as_deref()
-            } else {
-                request_turn_state.as_deref()
-            };
+            affinity_state.turn_state_override_for(&candidate_name, request_turn_state.as_deref());
         runtime_proxy_log(
             shared,
             format!(
                 "request={request_id} transport=http candidate={} pinned={:?} turn_state_profile={:?} turn_state_override={:?} excluded_count={}",
                 candidate_name,
-                pinned_profile,
-                turn_state_profile,
+                affinity_state.pinned_profile(),
+                affinity_state.turn_state_profile(),
                 turn_state_override,
                 excluded_profiles.len()
             ),
         );
         if previous_response_id.is_none()
-            && pinned_profile.is_none()
-            && turn_state_profile.is_none()
+            && affinity_state.pinned_profile().is_none()
+            && affinity_state.turn_state_profile().is_none()
             && runtime_profile_inflight_hard_limited_for_context(
                 shared,
                 &candidate_name,
@@ -711,28 +827,11 @@ pub(crate) fn proxy_runtime_responses_request(
                     &excluded_profiles,
                     RuntimeRouteKind::Responses,
                     selection_started_at,
-                    runtime_proxy_has_continuation_priority(
+                    affinity_state.has_continuation_priority(
                         previous_response_id.as_deref(),
-                        pinned_profile.as_deref(),
                         request_turn_state.as_deref(),
-                        turn_state_profile.as_deref(),
-                        runtime_noncompact_session_priority_profile(
-                            session_profile.as_deref(),
-                            compact_session_profile.as_deref(),
-                        ),
                     ),
-                    runtime_wait_affinity_owner(
-                        compact_followup_profile
-                            .as_ref()
-                            .map(|(profile_name, _)| profile_name.as_str()),
-                        pinned_profile.as_deref(),
-                        turn_state_profile.as_deref(),
-                        runtime_noncompact_session_priority_profile(
-                            session_profile.as_deref(),
-                            compact_session_profile.as_deref(),
-                        ),
-                        trusted_previous_response_affinity,
-                    ),
+                    affinity_state.wait_affinity_owner(),
                 ),
             )? {
                 continue;
@@ -752,14 +851,11 @@ pub(crate) fn proxy_runtime_responses_request(
                 profile_name,
                 response,
             } => {
-                if saw_previous_response_not_found {
-                    remember_runtime_successful_previous_response_owner(
-                        shared,
-                        &profile_name,
-                        previous_response_id.as_deref(),
-                        RuntimeRouteKind::Responses,
-                    )?;
-                }
+                affinity_state.remember_successful_previous_response_owner(
+                    shared,
+                    &profile_name,
+                    previous_response_id.as_deref(),
+                )?;
                 commit_runtime_proxy_profile_selection_with_notice(
                     shared,
                     &profile_name,
@@ -789,14 +885,8 @@ pub(crate) fn proxy_runtime_responses_request(
                     RuntimeRouteKind::Responses,
                     quota_message.as_deref(),
                 )?;
-                if !runtime_quota_blocked_affinity_is_releasable(
-                    runtime_candidate_affinity!(
-                        RuntimeRouteKind::Responses,
-                        &profile_name,
-                        compact_followup_profile
-                            .as_ref()
-                            .map(|(profile_name, _)| profile_name.as_str()),
-                    ),
+                if !affinity_state.quota_blocked_affinity_is_releasable(
+                    &profile_name,
                     request_requires_previous_response_affinity,
                     previous_response_fresh_fallback_shape,
                 ) {
@@ -815,18 +905,7 @@ pub(crate) fn proxy_runtime_responses_request(
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
                 )?;
-                clear_runtime_response_profile_affinity(
-                    &profile_name,
-                    &mut bound_profile,
-                    &mut session_profile,
-                    &mut candidate_turn_state_retry_profile,
-                    &mut candidate_turn_state_retry_value,
-                    &mut pinned_profile,
-                    &mut previous_response_retry_index,
-                    true,
-                    &mut turn_state_profile,
-                    None,
-                );
+                affinity_state.clear_profile_affinity(&profile_name, true);
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -858,14 +937,8 @@ pub(crate) fn proxy_runtime_responses_request(
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
                 match runtime_responses_local_selection_action(
-                    runtime_quota_blocked_affinity_is_releasable(
-                        runtime_candidate_affinity!(
-                            RuntimeRouteKind::Responses,
-                            &profile_name,
-                            compact_followup_profile
-                                .as_ref()
-                                .map(|(profile_name, _)| profile_name.as_str()),
-                        ),
+                    affinity_state.quota_blocked_affinity_is_releasable(
+                        &profile_name,
                         request_requires_previous_response_affinity,
                         previous_response_fresh_fallback_shape,
                     ),
@@ -882,18 +955,7 @@ pub(crate) fn proxy_runtime_responses_request(
                     request_turn_state.as_deref(),
                     request_session_id.as_deref(),
                 )?;
-                clear_runtime_response_profile_affinity(
-                    &profile_name,
-                    &mut bound_profile,
-                    &mut session_profile,
-                    &mut candidate_turn_state_retry_profile,
-                    &mut candidate_turn_state_retry_value,
-                    &mut pinned_profile,
-                    &mut previous_response_retry_index,
-                    true,
-                    &mut turn_state_profile,
-                    None,
-                );
+                affinity_state.clear_profile_affinity(&profile_name, true);
                 if released_affinity {
                     runtime_proxy_log(
                         shared,
@@ -910,15 +972,21 @@ pub(crate) fn proxy_runtime_responses_request(
                 turn_state,
             } => {
                 match handle_runtime_previous_response_not_found(
-                    runtime_responses_previous_response_not_found_context!(
+                    runtime_responses_previous_response_not_found_context(
+                        shared,
+                        request_id,
                         &profile_name,
                         turn_state,
                         None,
+                        previous_response_id.as_deref(),
+                        request_turn_state.as_deref(),
+                        request_session_id.as_deref(),
+                        request_requires_previous_response_affinity,
+                        affinity_state.trusted_previous_response_affinity(),
+                        previous_response_fresh_fallback_shape,
                         RuntimePreviousResponseNotFoundPolicy::responses(true),
                     ),
-                    runtime_responses_previous_response_not_found_state!(Some(
-                        &mut trusted_previous_response_affinity
-                    )),
+                    affinity_state.previous_response_not_found_state(&mut excluded_profiles, true),
                 )? {
                     RuntimePreviousResponseNotFoundAction::RetryOwner
                     | RuntimePreviousResponseNotFoundAction::Rotate => {

@@ -4,6 +4,7 @@ pub(crate) fn handle_info(_args: InfoArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let policy_summary = runtime_policy_summary()?;
+    let runtime_tuning = collect_runtime_tuning_snapshot();
     let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
     let now = Local::now().timestamp();
     let version_summary = format_info_prodex_version(&paths)?;
@@ -44,6 +45,18 @@ pub(crate) fn handle_info(_args: InfoArgs) -> Result<()> {
         (
             "Runtime metrics".to_string(),
             format_runtime_broker_metrics_targets(&runtime_metrics_targets),
+        ),
+        (
+            "Runtime workers".to_string(),
+            format_runtime_tuning_workers(&runtime_tuning),
+        ),
+        (
+            "Runtime budgets".to_string(),
+            format_runtime_tuning_budgets(&runtime_tuning),
+        ),
+        (
+            "Runtime transport".to_string(),
+            format_runtime_tuning_transport(&runtime_tuning),
         ),
         ("Prodex version".to_string(), version_summary),
         (

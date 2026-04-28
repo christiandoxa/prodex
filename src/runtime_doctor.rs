@@ -12,7 +12,8 @@ pub(crate) use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
 pub(crate) use render::{runtime_doctor_fields, runtime_doctor_json_value};
 pub(crate) use state::collect_runtime_doctor_summary;
 pub(crate) use types::{
-    RuntimeDoctorProfileSummary, RuntimeDoctorRouteSummary, RuntimeDoctorSummary,
+    RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteSummary,
+    RuntimeDoctorSummary,
 };
 
 #[cfg(test)]

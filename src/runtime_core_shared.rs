@@ -6,6 +6,7 @@ unsafe extern "C" {
 }
 
 const RUNTIME_PROXY_LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
+const RUNTIME_PROXY_DROPPED_LOG_EVENT: &str = "runtime_proxy_async_log_dropped";
 
 #[derive(Debug)]
 struct RuntimeProxyQueuedLogLine {
@@ -13,10 +14,32 @@ struct RuntimeProxyQueuedLogLine {
     line: String,
 }
 
+#[derive(Debug)]
+struct RuntimeProxyDroppedLogCounter {
+    log_path: PathBuf,
+    dropped_count: u64,
+}
+
+#[derive(Debug)]
+struct RuntimeProxyDroppedLogMarker {
+    log_path: PathBuf,
+    dropped_count: u64,
+    queue_capacity: usize,
+    overflow: bool,
+}
+
+#[derive(Debug)]
+struct RuntimeProxyAsyncLoggerWorkItem {
+    line: Option<RuntimeProxyQueuedLogLine>,
+    dropped_marker: Option<RuntimeProxyDroppedLogMarker>,
+}
+
 #[derive(Debug, Default)]
 struct RuntimeProxyAsyncLoggerState {
     queue: VecDeque<RuntimeProxyQueuedLogLine>,
     pending_by_path: BTreeMap<PathBuf, usize>,
+    dropped_by_path: BTreeMap<PathBuf, u64>,
+    dropped_overflow: Option<RuntimeProxyDroppedLogCounter>,
 }
 
 #[derive(Debug)]
@@ -86,13 +109,11 @@ impl RuntimeProxyAsyncLogger {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.queue.len() >= self.inner.capacity {
+            state.note_dropped_log(log_path, self.inner.capacity);
+            self.inner.work_available.notify_one();
             return;
         }
-        state
-            .pending_by_path
-            .entry(log_path.to_path_buf())
-            .and_modify(|pending| *pending += 1)
-            .or_insert(1);
+        state.increment_pending_for_path(log_path);
         state.queue.push_back(RuntimeProxyQueuedLogLine {
             log_path: log_path.to_path_buf(),
             line,
@@ -132,6 +153,91 @@ impl RuntimeProxyAsyncLogger {
             .copied()
             .unwrap_or(0)
     }
+
+    #[cfg(test)]
+    fn capacity(&self) -> usize {
+        self.inner.capacity
+    }
+}
+
+impl RuntimeProxyAsyncLoggerState {
+    fn increment_pending_for_path(&mut self, log_path: &Path) {
+        self.pending_by_path
+            .entry(log_path.to_path_buf())
+            .and_modify(|pending| *pending += 1)
+            .or_insert(1);
+    }
+
+    fn decrement_pending_for_path(&mut self, log_path: &Path) {
+        if let Some(pending) = self.pending_by_path.get_mut(log_path) {
+            *pending = pending.saturating_sub(1);
+            if *pending == 0 {
+                self.pending_by_path.remove(log_path);
+            }
+        }
+    }
+
+    fn note_dropped_log(&mut self, log_path: &Path, dropped_path_limit: usize) {
+        if let Some(dropped_count) = self.dropped_by_path.get_mut(log_path) {
+            *dropped_count = dropped_count.saturating_add(1);
+            return;
+        }
+
+        if self.dropped_by_path.len() < dropped_path_limit {
+            self.dropped_by_path.insert(log_path.to_path_buf(), 1);
+            self.increment_pending_for_path(log_path);
+            return;
+        }
+
+        if let Some(overflow) = self.dropped_overflow.as_mut() {
+            overflow.dropped_count = overflow.dropped_count.saturating_add(1);
+            return;
+        }
+
+        self.dropped_overflow = Some(RuntimeProxyDroppedLogCounter {
+            log_path: log_path.to_path_buf(),
+            dropped_count: 1,
+        });
+        self.increment_pending_for_path(log_path);
+    }
+
+    fn pop_dropped_marker(
+        &mut self,
+        queue_capacity: usize,
+    ) -> Option<RuntimeProxyDroppedLogMarker> {
+        if let Some((log_path, dropped_count)) = self.dropped_by_path.pop_first() {
+            return Some(RuntimeProxyDroppedLogMarker {
+                log_path,
+                dropped_count,
+                queue_capacity,
+                overflow: false,
+            });
+        }
+
+        self.dropped_overflow
+            .take()
+            .map(|counter| RuntimeProxyDroppedLogMarker {
+                log_path: counter.log_path,
+                dropped_count: counter.dropped_count,
+                queue_capacity,
+                overflow: true,
+            })
+    }
+
+    fn pop_work_item(&mut self, queue_capacity: usize) -> Option<RuntimeProxyAsyncLoggerWorkItem> {
+        if let Some(entry) = self.queue.pop_front() {
+            return Some(RuntimeProxyAsyncLoggerWorkItem {
+                line: Some(entry),
+                dropped_marker: self.pop_dropped_marker(queue_capacity),
+            });
+        }
+
+        self.pop_dropped_marker(queue_capacity)
+            .map(|dropped_marker| RuntimeProxyAsyncLoggerWorkItem {
+                line: None,
+                dropped_marker: Some(dropped_marker),
+            })
+    }
 }
 
 #[cfg(test)]
@@ -170,14 +276,14 @@ fn runtime_proxy_async_logger_wait_for_write_permit() {
 
 fn runtime_proxy_async_logger_worker_loop(inner: Arc<RuntimeProxyAsyncLoggerInner>) {
     loop {
-        let entry = {
+        let work_item = {
             let mut state = inner
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             loop {
-                if let Some(entry) = state.queue.pop_front() {
-                    break entry;
+                if let Some(work_item) = state.pop_work_item(inner.capacity) {
+                    break work_item;
                 }
                 state = inner
                     .work_available
@@ -189,25 +295,39 @@ fn runtime_proxy_async_logger_worker_loop(inner: Arc<RuntimeProxyAsyncLoggerInne
         #[cfg(test)]
         runtime_proxy_async_logger_wait_for_write_permit();
 
-        if let Ok(mut file) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&entry.log_path)
-        {
-            let _ = file.write_all(entry.line.as_bytes());
+        let mut completed_line_path = None;
+        let mut completed_marker_path = None;
+        if let Some(entry) = work_item.line {
+            runtime_proxy_write_log_line(&entry.log_path, &entry.line);
+            completed_line_path = Some(entry.log_path);
+        }
+        if let Some(marker) = work_item.dropped_marker {
+            let line = runtime_proxy_format_dropped_log_marker(&marker);
+            runtime_proxy_write_log_line(&marker.log_path, &line);
+            completed_marker_path = Some(marker.log_path);
         }
 
         let mut state = inner
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(pending) = state.pending_by_path.get_mut(&entry.log_path) {
-            *pending = pending.saturating_sub(1);
-            if *pending == 0 {
-                state.pending_by_path.remove(&entry.log_path);
-            }
+        if let Some(log_path) = completed_line_path {
+            state.decrement_pending_for_path(&log_path);
+        }
+        if let Some(log_path) = completed_marker_path {
+            state.decrement_pending_for_path(&log_path);
         }
         inner.path_drained.notify_all();
+    }
+}
+
+fn runtime_proxy_write_log_line(log_path: &Path, line: &str) {
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        let _ = file.write_all(line.as_bytes());
     }
 }
 
@@ -648,6 +768,17 @@ fn runtime_proxy_format_log_line(message: &str, format: RuntimeLogFormat) -> Str
     }
 }
 
+fn runtime_proxy_format_dropped_log_marker(marker: &RuntimeProxyDroppedLogMarker) -> String {
+    let mut message = format!(
+        "{RUNTIME_PROXY_DROPPED_LOG_EVENT} dropped_count={} reason=queue_full queue_capacity={}",
+        marker.dropped_count, marker.queue_capacity
+    );
+    if marker.overflow {
+        message.push_str(" scope=overflow");
+    }
+    runtime_proxy_format_log_line(&message, runtime_proxy_log_format())
+}
+
 pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
     let logger = runtime_proxy_async_logger();
     let line = runtime_proxy_format_log_line(message, runtime_proxy_log_format());
@@ -703,13 +834,28 @@ mod tests {
         }
     }
 
+    struct RuntimeProxyAsyncLoggerPauseGuard;
+
+    impl RuntimeProxyAsyncLoggerPauseGuard {
+        fn pause() -> Self {
+            runtime_proxy_async_logger_set_pause_writes(true);
+            Self
+        }
+    }
+
+    impl Drop for RuntimeProxyAsyncLoggerPauseGuard {
+        fn drop(&mut self) {
+            runtime_proxy_async_logger_set_pause_writes(false);
+        }
+    }
+
     #[test]
     fn runtime_proxy_log_to_path_flushes_async_entries() {
         let _runtime_lock = acquire_test_runtime_lock();
         let dir = RuntimeProxyLogTestDir::new();
         let log_path = dir.log_path("async.log");
 
-        runtime_proxy_async_logger_set_pause_writes(true);
+        let pause_guard = RuntimeProxyAsyncLoggerPauseGuard::pause();
         runtime_proxy_log_to_path(&log_path, "async entry line1\nline2 request=7");
 
         assert_eq!(
@@ -722,12 +868,55 @@ mod tests {
             "async logger should not synchronously write to disk on caller path"
         );
 
-        runtime_proxy_async_logger_set_pause_writes(false);
+        drop(pause_guard);
         runtime_proxy_flush_logs_for_path(&log_path);
 
         let log = fs::read_to_string(&log_path).expect("async runtime log should flush to disk");
         assert!(log.contains("async entry line1 line2 request=7"));
         assert!(log.ends_with('\n'));
+    }
+
+    #[test]
+    fn runtime_proxy_log_to_path_marks_async_queue_drops_after_recovery() {
+        let _runtime_lock = acquire_test_runtime_lock();
+        let _format = TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_FORMAT", "text");
+        let dir = RuntimeProxyLogTestDir::new();
+        let log_path = dir.log_path("dropped.log");
+        let logger = runtime_proxy_async_logger();
+        let capacity = logger.capacity();
+
+        let pause_guard = RuntimeProxyAsyncLoggerPauseGuard::pause();
+        for index in 0..capacity.saturating_add(64) {
+            runtime_proxy_log_to_path(&log_path, &format!("queued entry index={index}"));
+        }
+
+        assert!(
+            logger.pending_count_for_path(&log_path) >= capacity,
+            "queued entries and drop marker should remain pending while writes are paused"
+        );
+        assert!(
+            fs::read_to_string(&log_path).unwrap_or_default().is_empty(),
+            "full async logger should not synchronously write drop markers on caller path"
+        );
+
+        drop(pause_guard);
+        runtime_proxy_flush_logs_for_path(&log_path);
+
+        let log = fs::read_to_string(&log_path).expect("async runtime log should flush to disk");
+        let marker = log
+            .lines()
+            .find(|line| line.contains(RUNTIME_PROXY_DROPPED_LOG_EVENT))
+            .expect("runtime log should include a dropped-log marker after recovery");
+        let dropped_count = marker
+            .split_whitespace()
+            .find_map(|token| token.strip_prefix("dropped_count="))
+            .and_then(|value| value.parse::<u64>().ok())
+            .expect("drop marker should include a numeric dropped_count field");
+
+        assert!(dropped_count > 0);
+        assert!(marker.contains("reason=queue_full"));
+        assert!(marker.contains("queue_capacity="));
+        assert!(log.contains("queued entry index=0"));
     }
 
     #[test]

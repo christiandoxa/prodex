@@ -182,8 +182,11 @@ When you import a Copilot profile, Prodex does not move the Copilot token into P
 prodex profile export
 prodex quota --all
 prodex quota --all --once
+prodex info
 prodex doctor --runtime
 ```
+
+`prodex info` includes the effective runtime tuning values after environment, policy, and default resolution.
 
 ## More
 

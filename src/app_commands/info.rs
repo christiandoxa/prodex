@@ -652,6 +652,53 @@ pub(crate) fn runtime_logs_json_value() -> serde_json::Value {
     })
 }
 
+pub(crate) fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {
+    format!(
+        "workers proxy={}, long-lived={}, async={}, probe-refresh={}; active={}, queue={}; lanes responses={}, compact={}, websocket={}, standard={}",
+        snapshot.worker_count,
+        snapshot.long_lived_worker_count,
+        snapshot.async_worker_count,
+        snapshot.probe_refresh_worker_count,
+        snapshot.active_request_limit,
+        snapshot.long_lived_queue_capacity,
+        snapshot.lane_limits.responses,
+        snapshot.lane_limits.compact,
+        snapshot.lane_limits.websocket,
+        snapshot.lane_limits.standard
+    )
+}
+
+pub(crate) fn format_runtime_tuning_budgets(snapshot: &RuntimeTuningSnapshot) -> String {
+    format!(
+        "precommit={}x/{}ms, pressure-precommit={}x/{}ms, continuation={}x/{}ms; admission={}ms, pressure-admission={}ms, long-lived={}ms, pressure-long-lived={}ms",
+        snapshot.precommit_attempt_limit,
+        snapshot.precommit_budget_ms,
+        snapshot.pressure_precommit_attempt_limit,
+        snapshot.pressure_precommit_budget_ms,
+        snapshot.continuation_precommit_attempt_limit,
+        snapshot.continuation_precommit_budget_ms,
+        snapshot.admission_wait_budget_ms,
+        snapshot.pressure_admission_wait_budget_ms,
+        snapshot.long_lived_queue_wait_budget_ms,
+        snapshot.pressure_long_lived_queue_wait_budget_ms
+    )
+}
+
+pub(crate) fn format_runtime_tuning_transport(snapshot: &RuntimeTuningSnapshot) -> String {
+    format!(
+        "http-connect={}ms, stream-idle={}ms, sse-lookahead={}ms; ws-connect={}ms, ws-progress={}ms, ws-happy={}ms, ws-stale-reuse={}ms; inflight soft/hard={}/{}",
+        snapshot.http_connect_timeout_ms,
+        snapshot.stream_idle_timeout_ms,
+        snapshot.sse_lookahead_timeout_ms,
+        snapshot.websocket_connect_timeout_ms,
+        snapshot.websocket_precommit_progress_timeout_ms,
+        snapshot.websocket_happy_eyeballs_delay_ms,
+        snapshot.websocket_previous_response_reuse_stale_ms,
+        snapshot.profile_inflight_soft_limit,
+        snapshot.profile_inflight_hard_limit
+    )
+}
+
 pub(crate) fn configured_secret_backend_selection() -> Result<secret_store::SecretBackendSelection>
 {
     let policy = runtime_policy_secrets();

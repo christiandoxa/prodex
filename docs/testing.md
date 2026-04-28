@@ -37,6 +37,7 @@ Current CI building blocks include:
 ```bash
 npm run test:fast
 npm run test:serial
+npm run ci:preflight
 npm run release:prepare
 npm run docs:lint
 npm run ci:runtime-manifest
@@ -52,10 +53,14 @@ cargo test -q --all-features -- --test-threads=1
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 
+Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release metadata/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan.
+
 Use `npm run release:prepare` before release work. It checks version/doc sync, available lockfile consistency, docs lint, upstream compatibility baseline, runtime manifest, cargo fmt, and full Rust test binary compilation without publishing.
 The default test-compile guard runs `cargo test --locked --all-targets --all-features --no-run` so lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --all-targets --all-features` instead.
 
 Use `npm run ci:runtime-manifest` after adding or renaming runtime proxy tests. New `main_internal_tests::runtime_proxy_` tests should normally get a targeted `RUNTIME_CI_TEST_CASES` entry; only add or rely on `RUNTIME_CI_BROAD_SHARD_FILTERS` when a broad CI shard intentionally owns that whole module or prefix. Broad shard filters must mirror the `label|filter` entries in the `main-internal-runtime-proxy` matrix in `.github/workflows/ci.yml` and must not match tests outside runtime CI ownership.
+
+When changing `prodex info` runtime tuning output, run the focused `cargo test -q runtime_tuning_snapshot_reports_effective_policy_and_env_values -- --test-threads=1` check so env, policy, and default-derived values stay aligned.
 
 Use `node scripts/compat/check-upstream-baseline.mjs` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces. Baseline format version 2 also records semantic check groups that tie route, header, event, and co-occurrence expectations back to specific upstream files instead of relying only on flat `required_contains` tokens.
 

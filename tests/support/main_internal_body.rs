@@ -1315,6 +1315,137 @@ worker_count = 11
 }
 
 #[test]
+fn runtime_tuning_snapshot_reports_effective_policy_and_env_values() {
+    let temp_dir = TestDir::new();
+    let prodex_home = temp_dir.path.join("prodex");
+    fs::create_dir_all(&prodex_home).expect("prodex home should exist");
+    fs::write(
+        prodex_home.join("policy.toml"),
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 8
+long_lived_worker_count = 5
+probe_refresh_worker_count = 4
+async_worker_count = 3
+long_lived_queue_capacity = 88
+active_request_limit = 40
+profile_inflight_soft_limit = 9
+profile_inflight_hard_limit = 10
+responses_active_limit = 9
+compact_active_limit = 5
+websocket_active_limit = 7
+standard_active_limit = 6
+http_connect_timeout_ms = 444
+stream_idle_timeout_ms = 555
+sse_lookahead_timeout_ms = 66
+websocket_connect_timeout_ms = 777
+websocket_happy_eyeballs_delay_ms = 88
+websocket_precommit_progress_timeout_ms = 999
+websocket_previous_response_reuse_stale_ms = 1001
+admission_wait_budget_ms = 111
+pressure_admission_wait_budget_ms = 22
+long_lived_queue_wait_budget_ms = 333
+pressure_long_lived_queue_wait_budget_ms = 44
+"#,
+    )
+    .expect("policy file should write");
+    let _env_guards = vec![
+        TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string()),
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "12"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT"),
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT", "31"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT"),
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS", "1234"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS"),
+        TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS"),
+    ];
+
+    clear_runtime_policy_cache();
+    let snapshot = collect_runtime_tuning_snapshot();
+    clear_runtime_policy_cache();
+
+    assert_eq!(snapshot.worker_count, 12);
+    assert_eq!(snapshot.long_lived_worker_count, 5);
+    assert_eq!(snapshot.async_worker_count, 3);
+    assert_eq!(snapshot.probe_refresh_worker_count, 4);
+    assert_eq!(snapshot.long_lived_queue_capacity, 88);
+    assert_eq!(snapshot.active_request_limit, 40);
+    assert_eq!(snapshot.lane_limits.responses, 31);
+    assert_eq!(snapshot.lane_limits.compact, 5);
+    assert_eq!(snapshot.lane_limits.websocket, 7);
+    assert_eq!(snapshot.lane_limits.standard, 6);
+    assert_eq!(snapshot.precommit_attempt_limit, RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT);
+    assert_eq!(snapshot.precommit_budget_ms, RUNTIME_PROXY_PRECOMMIT_BUDGET_MS);
+    assert_eq!(
+        snapshot.pressure_precommit_attempt_limit,
+        RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT
+    );
+    assert_eq!(
+        snapshot.pressure_precommit_budget_ms,
+        RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS
+    );
+    assert_eq!(
+        snapshot.continuation_precommit_attempt_limit,
+        RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT
+    );
+    assert_eq!(
+        snapshot.continuation_precommit_budget_ms,
+        RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS
+    );
+    assert_eq!(snapshot.admission_wait_budget_ms, 111);
+    assert_eq!(snapshot.pressure_admission_wait_budget_ms, 22);
+    assert_eq!(snapshot.long_lived_queue_wait_budget_ms, 333);
+    assert_eq!(snapshot.pressure_long_lived_queue_wait_budget_ms, 44);
+    assert_eq!(snapshot.http_connect_timeout_ms, 1234);
+    assert_eq!(snapshot.stream_idle_timeout_ms, 555);
+    assert_eq!(snapshot.sse_lookahead_timeout_ms, 66);
+    assert_eq!(snapshot.websocket_connect_timeout_ms, 777);
+    assert_eq!(snapshot.websocket_happy_eyeballs_delay_ms, 88);
+    assert_eq!(snapshot.websocket_precommit_progress_timeout_ms, 999);
+    assert_eq!(snapshot.websocket_previous_response_reuse_stale_ms, 1001);
+    assert_eq!(snapshot.profile_inflight_soft_limit, 9);
+    assert_eq!(snapshot.profile_inflight_hard_limit, 10);
+    assert_eq!(
+        format_runtime_tuning_workers(&snapshot),
+        "workers proxy=12, long-lived=5, async=3, probe-refresh=4; active=40, queue=88; lanes responses=31, compact=5, websocket=7, standard=6"
+    );
+    assert_eq!(
+        format_runtime_tuning_budgets(&snapshot),
+        format!(
+            "precommit={}x/{}ms, pressure-precommit={}x/{}ms, continuation={}x/{}ms; admission=111ms, pressure-admission=22ms, long-lived=333ms, pressure-long-lived=44ms",
+            RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRECOMMIT_BUDGET_MS,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
+            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS
+        )
+    );
+    assert_eq!(
+        format_runtime_tuning_transport(&snapshot),
+        "http-connect=1234ms, stream-idle=555ms, sse-lookahead=66ms; ws-connect=777ms, ws-progress=999ms, ws-happy=88ms, ws-stale-reuse=1001ms; inflight soft/hard=9/10"
+    );
+}
+
+#[test]
 fn cleanup_runtime_broker_stale_leases_removes_dead_pid_files() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {

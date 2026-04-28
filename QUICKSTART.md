@@ -48,11 +48,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.58.0`:
+The current local version in this repo is `0.59.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.58.0
-cargo install prodex --force --version 0.58.0
+npm install -g @christiandoxa/prodex@0.59.0
+cargo install prodex --force --version 0.59.0
 ```
 
 Dependency status in this repo:
@@ -113,6 +113,8 @@ prodex info
 ```bash
 prodex quota --all --once
 ```
+
+`prodex info` includes the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
 
 Backup or move profiles:
 
@@ -259,6 +261,7 @@ responses_active_limit = 96
 ```
 
 Environment variables still override `policy.toml`.
+Use `prodex info` to inspect the resulting effective runtime tuning values.
 
 ## Enterprise Notes
 

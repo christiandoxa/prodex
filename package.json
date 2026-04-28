@@ -16,6 +16,7 @@
     "docs:lint": "node scripts/docs/lint-markdown.mjs",
     "test:fast": "node scripts/ci/test-fast.mjs",
     "test:serial": "node scripts/ci/test-serial.mjs",
+    "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:runtime-manifest": "node scripts/ci/runtime-test-manifest-guard.mjs",
     "ci:runtime-stress": "node scripts/ci/runtime-stress.mjs",
     "ci:npm-smoke": "node scripts/ci/npm-package-smoke.mjs",

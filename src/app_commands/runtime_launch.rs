@@ -938,6 +938,117 @@ mod tests {
         assert!(prepared.runtime_proxy.is_none());
     }
 
+    #[test]
+    fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_override() {
+        let root = temp_dir("explicit-profile-local-override");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let main_home = root.join("main-home");
+        fs::create_dir_all(&main_home).unwrap();
+        write_state(
+            &root,
+            AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home.clone(),
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                ..AppState::default()
+            },
+        );
+
+        let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+            profile: Some("main"),
+            allow_auto_rotate: true,
+            skip_quota_check: true,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: false,
+            model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+        })
+        .unwrap();
+
+        assert_eq!(prepared.codex_home, main_home);
+        assert!(!prepared.managed);
+        assert!(prepared.runtime_proxy.is_none());
+    }
+
+    #[test]
+    fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
+        let root = temp_dir("dry-run-skip-proxy-non-openai");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let bedrock_home = root.join("bedrock-home");
+        fs::create_dir_all(&bedrock_home).unwrap();
+        fs::write(
+            bedrock_home.join("config.toml"),
+            "model_provider = 'amazon-bedrock'\n",
+        )
+        .unwrap();
+        write_state(
+            &root,
+            AppState {
+                active_profile: Some("bedrock".to_string()),
+                profiles: BTreeMap::from([(
+                    "bedrock".to_string(),
+                    ProfileEntry {
+                        codex_home: bedrock_home.clone(),
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                ..AppState::default()
+            },
+        );
+
+        let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
+            profile: Some("bedrock"),
+            allow_auto_rotate: true,
+            skip_quota_check: false,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: false,
+            model_provider_override: None,
+        })
+        .unwrap();
+
+        assert_eq!(prepared.codex_home, bedrock_home);
+        assert!(prepared.runtime_proxy.is_none());
+        let paths = AppPaths::discover().unwrap();
+        let state = AppState::load(&paths).unwrap();
+        assert!(
+            state.last_run_selected_at.is_empty(),
+            "dry-run must not record launch selection"
+        );
+    }
+
+    #[test]
+    fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
+        let root = temp_dir("profileless-local-force-proxy");
+        let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+
+        let err = match prepare_runtime_launch(RuntimeLaunchRequest {
+            profile: None,
+            allow_auto_rotate: true,
+            skip_quota_check: true,
+            base_url: None,
+            include_code_review: false,
+            force_runtime_proxy: true,
+            model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+        }) {
+            Ok(_) => panic!("expected forced proxy launch to reject profileless local provider"),
+            Err(err) => err,
+        };
+
+        let message = format!("{err:#}");
+        assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
+        assert!(message.contains("prodex claude"));
+    }
+
     fn write_state(root: &Path, state: AppState) {
         fs::create_dir_all(root).unwrap();
         let paths = AppPaths::discover().unwrap();

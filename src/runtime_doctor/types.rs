@@ -21,6 +21,8 @@ pub(crate) struct RuntimeDoctorSummary {
     pub(crate) stale_continuation_by_reason: BTreeMap<String, usize>,
     pub(crate) latest_chain_event: Option<String>,
     pub(crate) latest_stale_continuation_reason: Option<String>,
+    pub(crate) latest_request_id: Option<String>,
+    pub(crate) latest_request_timeline: Vec<RuntimeDoctorRequestTimelineEvent>,
     pub(crate) first_timestamp: Option<String>,
     pub(crate) last_timestamp: Option<String>,
     pub(crate) compat_warning_count: usize,
@@ -75,6 +77,14 @@ pub(crate) struct RuntimeDoctorSummary {
     pub(crate) runtime_broker_mismatch: bool,
     pub(crate) profiles: Vec<RuntimeDoctorProfileSummary>,
     pub(crate) diagnosis: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct RuntimeDoctorRequestTimelineEvent {
+    pub(crate) timestamp: Option<String>,
+    pub(crate) phase: String,
+    pub(crate) marker: String,
+    pub(crate) detail: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

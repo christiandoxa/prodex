@@ -45,6 +45,101 @@ pub(super) fn usize_override_with_policy(
         .unwrap_or(default_value)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeTuningLaneLimits {
+    pub(crate) responses: usize,
+    pub(crate) compact: usize,
+    pub(crate) websocket: usize,
+    pub(crate) standard: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeTuningSnapshot {
+    pub(crate) worker_count: usize,
+    pub(crate) long_lived_worker_count: usize,
+    pub(crate) async_worker_count: usize,
+    pub(crate) probe_refresh_worker_count: usize,
+    pub(crate) long_lived_queue_capacity: usize,
+    pub(crate) active_request_limit: usize,
+    pub(crate) lane_limits: RuntimeTuningLaneLimits,
+    pub(crate) precommit_attempt_limit: usize,
+    pub(crate) precommit_budget_ms: u64,
+    pub(crate) pressure_precommit_attempt_limit: usize,
+    pub(crate) pressure_precommit_budget_ms: u64,
+    pub(crate) continuation_precommit_attempt_limit: usize,
+    pub(crate) continuation_precommit_budget_ms: u64,
+    pub(crate) admission_wait_budget_ms: u64,
+    pub(crate) pressure_admission_wait_budget_ms: u64,
+    pub(crate) long_lived_queue_wait_budget_ms: u64,
+    pub(crate) pressure_long_lived_queue_wait_budget_ms: u64,
+    pub(crate) http_connect_timeout_ms: u64,
+    pub(crate) stream_idle_timeout_ms: u64,
+    pub(crate) sse_lookahead_timeout_ms: u64,
+    pub(crate) websocket_connect_timeout_ms: u64,
+    pub(crate) websocket_happy_eyeballs_delay_ms: u64,
+    pub(crate) websocket_precommit_progress_timeout_ms: u64,
+    pub(crate) websocket_previous_response_reuse_stale_ms: u64,
+    pub(crate) profile_inflight_soft_limit: usize,
+    pub(crate) profile_inflight_hard_limit: usize,
+}
+
+pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
+    let worker_count = runtime_proxy_worker_count();
+    let long_lived_worker_count = runtime_proxy_long_lived_worker_count();
+    let long_lived_queue_capacity =
+        runtime_proxy_long_lived_queue_capacity(long_lived_worker_count);
+    let active_request_limit =
+        runtime_proxy_active_request_limit(worker_count, long_lived_worker_count);
+    let lane_limits =
+        runtime_proxy_lane_limits(active_request_limit, worker_count, long_lived_worker_count);
+    let (precommit_attempt_limit, precommit_budget) = runtime_proxy_precommit_budget(false, false);
+    let (pressure_precommit_attempt_limit, pressure_precommit_budget) =
+        runtime_proxy_precommit_budget(false, true);
+    let (continuation_precommit_attempt_limit, continuation_precommit_budget) =
+        runtime_proxy_precommit_budget(true, false);
+
+    RuntimeTuningSnapshot {
+        worker_count,
+        long_lived_worker_count,
+        async_worker_count: runtime_proxy_async_worker_count(),
+        probe_refresh_worker_count: runtime_probe_refresh_worker_count(),
+        long_lived_queue_capacity,
+        active_request_limit,
+        lane_limits: RuntimeTuningLaneLimits {
+            responses: lane_limits.responses,
+            compact: lane_limits.compact,
+            websocket: lane_limits.websocket,
+            standard: lane_limits.standard,
+        },
+        precommit_attempt_limit,
+        precommit_budget_ms: runtime_duration_ms(precommit_budget),
+        pressure_precommit_attempt_limit,
+        pressure_precommit_budget_ms: runtime_duration_ms(pressure_precommit_budget),
+        continuation_precommit_attempt_limit,
+        continuation_precommit_budget_ms: runtime_duration_ms(continuation_precommit_budget),
+        admission_wait_budget_ms: runtime_proxy_admission_wait_budget_ms(),
+        pressure_admission_wait_budget_ms: runtime_proxy_pressure_admission_wait_budget_ms(),
+        long_lived_queue_wait_budget_ms: runtime_proxy_long_lived_queue_wait_budget_ms(),
+        pressure_long_lived_queue_wait_budget_ms:
+            runtime_proxy_pressure_long_lived_queue_wait_budget_ms(),
+        http_connect_timeout_ms: runtime_proxy_http_connect_timeout_ms(),
+        stream_idle_timeout_ms: runtime_proxy_stream_idle_timeout_ms(),
+        sse_lookahead_timeout_ms: runtime_proxy_sse_lookahead_timeout_ms(),
+        websocket_connect_timeout_ms: runtime_proxy_websocket_connect_timeout_ms(),
+        websocket_happy_eyeballs_delay_ms: runtime_proxy_websocket_happy_eyeballs_delay_ms(),
+        websocket_precommit_progress_timeout_ms:
+            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+        websocket_previous_response_reuse_stale_ms:
+            runtime_proxy_websocket_previous_response_reuse_stale_ms(),
+        profile_inflight_soft_limit: runtime_proxy_profile_inflight_soft_limit(),
+        profile_inflight_hard_limit: runtime_proxy_profile_inflight_hard_limit(),
+    }
+}
+
+fn runtime_duration_ms(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
+
 fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudget>> {
     static COUNTERS: OnceLock<Mutex<BTreeMap<String, RuntimeFaultBudget>>> = OnceLock::new();
     COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))

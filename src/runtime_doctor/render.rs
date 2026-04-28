@@ -32,6 +32,8 @@ struct RuntimeDoctorJsonView {
     stale_continuation_by_reason: BTreeMap<String, usize>,
     latest_chain_event: Option<String>,
     latest_stale_continuation_reason: Option<String>,
+    latest_request_id: Option<String>,
+    latest_request_timeline: Vec<RuntimeDoctorRequestTimelineEvent>,
     last_marker_line: Option<String>,
     selection_pressure: String,
     transport_pressure: String,
@@ -190,6 +192,8 @@ impl From<&RuntimeDoctorSummary> for RuntimeDoctorJsonView {
             stale_continuation_by_reason: summary.stale_continuation_by_reason.clone(),
             latest_chain_event: summary.latest_chain_event.clone(),
             latest_stale_continuation_reason: summary.latest_stale_continuation_reason.clone(),
+            latest_request_id: summary.latest_request_id.clone(),
+            latest_request_timeline: summary.latest_request_timeline.clone(),
             last_marker_line: summary.last_marker_line.clone(),
             selection_pressure: summary.selection_pressure.clone(),
             transport_pressure: summary.transport_pressure.clone(),
@@ -266,6 +270,29 @@ fn runtime_doctor_format_option<T: ToString>(value: Option<T>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn runtime_doctor_request_timeline_text(summary: &RuntimeDoctorSummary) -> String {
+    let Some(request_id) = summary.latest_request_id.as_deref() else {
+        return "-".to_string();
+    };
+    if summary.latest_request_timeline.is_empty() {
+        return format!("request={request_id}");
+    }
+    let events = summary
+        .latest_request_timeline
+        .iter()
+        .map(|event| {
+            let mut text = format!("{}:{}", event.phase, event.marker);
+            if !event.detail.is_empty() {
+                text.push(' ');
+                text.push_str(&event.detail);
+            }
+            text
+        })
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    format!("request={request_id} {events}")
 }
 
 fn runtime_doctor_push_marker_detail_rows(
@@ -938,6 +965,10 @@ fn runtime_doctor_push_summary_tail_rows(
         )
         .push("Suspect continuations", suspect_continuations)
         .push(
+            "Latest request timeline",
+            runtime_doctor_request_timeline_text(summary),
+        )
+        .push(
             "Last marker",
             summary
                 .last_marker_line
@@ -1026,6 +1057,8 @@ mod tests {
         include_bytes!("../../tests/fixtures/runtime_doctor/websocket_connect_overflow.log");
     const PROFILE_AUTH_RECOVERY_LOG: &[u8] =
         include_bytes!("../../tests/fixtures/runtime_doctor/profile_auth_recovery.log");
+    const REQUEST_TIMELINE_LOG: &[u8] =
+        include_bytes!("../../tests/fixtures/runtime_doctor/request_timeline.log");
 
     fn json_object_keys(value: &serde_json::Value) -> BTreeSet<String> {
         value
@@ -1276,6 +1309,45 @@ mod tests {
     }
 
     #[test]
+    fn runtime_doctor_fixture_request_timeline_surfaces_latest_request() {
+        let summary = runtime_doctor_fixture_summary(REQUEST_TIMELINE_LOG);
+        let fields = runtime_doctor_fixture_fields(&summary);
+        let value = runtime_doctor_json_value(&summary);
+
+        assert_eq!(summary.latest_request_id.as_deref(), Some("42"));
+        assert_eq!(summary.latest_request_timeline.len(), 4);
+        assert_eq!(value["latest_request_id"], "42");
+        assert_eq!(value["latest_request_timeline"][0]["phase"], "selection");
+        assert_eq!(
+            value["latest_request_timeline"][0]["marker"],
+            "selection_keep_affinity"
+        );
+        assert_eq!(value["latest_request_timeline"][1]["phase"], "pre_send");
+        assert_eq!(
+            value["latest_request_timeline"][2]["marker"],
+            "upstream_connect_http"
+        );
+        assert_eq!(
+            value["latest_request_timeline"][2]["timestamp"],
+            "2026-04-24T04:00:01.100Z"
+        );
+        assert_eq!(value["latest_request_timeline"][3]["phase"], "fail");
+        assert!(
+            value["latest_request_timeline"][2]["detail"]
+                .as_str()
+                .expect("timeline detail should be a string")
+                .contains("transport=http"),
+            "timeline should merge JSON message fields with structured fields: {value:#?}"
+        );
+        assert_eq!(
+            fields
+                .get("Latest request timeline")
+                .expect("latest request timeline should be rendered"),
+            "request=42 selection:selection_keep_affinity profile=beta route=responses affinity=previous_response_id -> pre_send:responses_pre_send_skip profile=beta route=responses reason=quota_critical_floor_before_send -> upstream:upstream_connect_http profile=beta route=responses transport=http status=429 -> fail:previous_response_fresh_fallback_blocked profile=beta route=responses reason=previous_response_not_found outcome=blocked_nonreplayable_without_affinity request_shape=continuation_only"
+        );
+    }
+
+    #[test]
     fn runtime_doctor_json_value_keeps_stable_top_level_shape() {
         let mut summary = RuntimeDoctorSummary {
             log_path: Some(PathBuf::from("/tmp/prodex-runtime.log")),
@@ -1328,6 +1400,8 @@ mod tests {
             "stale_continuation_by_reason",
             "latest_chain_event",
             "latest_stale_continuation_reason",
+            "latest_request_id",
+            "latest_request_timeline",
             "last_marker_line",
             "selection_pressure",
             "transport_pressure",

@@ -410,11 +410,29 @@ impl RuntimeWebsocketTcpConnectExecutor {
         started_worker_count: usize,
         dispatcher_started: bool,
     ) -> Self {
-        let worker_prefix = RuntimeWebsocketTcpConnectTaskKind::TcpConnect.worker_thread_prefix();
-        let dispatcher_name =
-            RuntimeWebsocketTcpConnectTaskKind::TcpConnect.dispatcher_thread_name();
-        Self::new_for_kind_with_spawner(
+        Self::new_for_kind_with_spawn_outcome_for_test(
             RuntimeWebsocketTcpConnectTaskKind::TcpConnect,
+            worker_count,
+            queue_capacity,
+            overflow_capacity,
+            started_worker_count,
+            dispatcher_started,
+        )
+    }
+
+    #[cfg(test)]
+    fn new_for_kind_with_spawn_outcome_for_test(
+        task_kind: RuntimeWebsocketTcpConnectTaskKind,
+        worker_count: usize,
+        queue_capacity: usize,
+        overflow_capacity: usize,
+        started_worker_count: usize,
+        dispatcher_started: bool,
+    ) -> Self {
+        let worker_prefix = task_kind.worker_thread_prefix();
+        let dispatcher_name = task_kind.dispatcher_thread_name();
+        Self::new_for_kind_with_spawner(
+            task_kind,
             worker_count,
             queue_capacity,
             overflow_capacity,
@@ -576,6 +594,26 @@ impl RuntimeWebsocketDnsResolveExecutor {
                 worker_count,
                 queue_capacity,
                 overflow_capacity,
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_with_spawn_outcome_for_test(
+        worker_count: usize,
+        queue_capacity: usize,
+        overflow_capacity: usize,
+        started_worker_count: usize,
+        dispatcher_started: bool,
+    ) -> Self {
+        Self {
+            inner: RuntimeWebsocketTcpConnectExecutor::new_for_kind_with_spawn_outcome_for_test(
+                RuntimeWebsocketTcpConnectTaskKind::DnsResolve,
+                worker_count,
+                queue_capacity,
+                overflow_capacity,
+                started_worker_count,
+                dispatcher_started,
             ),
         }
     }
@@ -948,5 +986,274 @@ pub(super) fn runtime_launch_websocket_tcp_connect_attempt(
                 format!("websocket TCP connect executor overflow for {addr}"),
             )),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn tcp_connect_executor_spawn_failure_falls_back_inline() {
+        for (started_worker_count, dispatcher_started) in [(0, true), (1, false)] {
+            let executor = RuntimeWebsocketTcpConnectExecutor::new_with_spawn_outcome_for_test(
+                2,
+                2,
+                1,
+                started_worker_count,
+                dispatcher_started,
+            );
+            let ran = Arc::new(AtomicUsize::new(0));
+            let ran_for_job = Arc::clone(&ran);
+
+            assert!(
+                executor.spawn(move || {
+                    ran_for_job.fetch_add(1, Ordering::SeqCst);
+                }),
+                "inline fallback should accept TCP connect work"
+            );
+
+            assert_eq!(
+                ran.load(Ordering::SeqCst),
+                1,
+                "spawn failure should run TCP connect work inline before returning"
+            );
+            assert!(
+                executor.overflow_snapshot().is_none(),
+                "inline fallback should not leave a bounded overflow queue"
+            );
+        }
+    }
+
+    #[test]
+    fn dns_executor_spawn_failure_falls_back_inline() {
+        for (started_worker_count, dispatcher_started) in [(0, true), (1, false)] {
+            let executor = RuntimeWebsocketDnsResolveExecutor::new_with_spawn_outcome_for_test(
+                2,
+                2,
+                1,
+                started_worker_count,
+                dispatcher_started,
+            );
+            let ran = Arc::new(AtomicUsize::new(0));
+            let ran_for_resolver = Arc::clone(&ran);
+
+            let addrs = runtime_resolve_websocket_tcp_addrs_with_executor(
+                &executor,
+                None,
+                None,
+                "inline.example.test".to_string(),
+                443,
+                Duration::from_millis(50),
+                move |_host, port| {
+                    ran_for_resolver.fetch_add(1, Ordering::SeqCst);
+                    Ok(vec![SocketAddr::from(([127, 0, 0, 1], port))])
+                },
+            )
+            .expect("inline DNS fallback should resolve synchronously");
+
+            assert_eq!(
+                ran.load(Ordering::SeqCst),
+                1,
+                "spawn failure should run DNS resolution inline before returning"
+            );
+            assert_eq!(addrs, vec![SocketAddr::from(([127, 0, 0, 1], 443))]);
+            assert!(
+                executor.overflow_snapshot().is_none(),
+                "inline DNS fallback should not leave a bounded overflow queue"
+            );
+        }
+    }
+
+    #[test]
+    fn overflow_queue_rejects_at_capacity_without_running_rejected_job() {
+        let queue = RuntimeWebsocketTcpConnectOverflowQueue::default();
+        let enqueued_ran = Arc::new(AtomicUsize::new(0));
+        let rejected_ran = Arc::new(AtomicUsize::new(0));
+
+        let enqueued_ran_for_job = Arc::clone(&enqueued_ran);
+        let accepted = queue
+            .push(
+                RuntimeWebsocketTcpConnectTask::new_tcp_connect(
+                    Box::new(move || {
+                        enqueued_ran_for_job.fetch_add(1, Ordering::SeqCst);
+                    }),
+                    None,
+                    None,
+                    None,
+                ),
+                1,
+            )
+            .expect("first overflow task should fit");
+        assert_eq!(accepted.pending_jobs, 1);
+        assert_eq!(accepted.total_enqueued, 1);
+
+        let rejected_ran_for_job = Arc::clone(&rejected_ran);
+        let rejected = queue
+            .push(
+                RuntimeWebsocketTcpConnectTask::new_tcp_connect(
+                    Box::new(move || {
+                        rejected_ran_for_job.fetch_add(1, Ordering::SeqCst);
+                    }),
+                    None,
+                    None,
+                    None,
+                ),
+                1,
+            )
+            .expect_err("full overflow queue should reject extra work");
+        assert_eq!(rejected.pending_jobs, 1);
+        assert_eq!(rejected.total_enqueued, 1);
+        assert_eq!(rejected.total_rejected, 1);
+        assert_eq!(
+            rejected_ran.load(Ordering::SeqCst),
+            0,
+            "rejected overflow task must not run inline"
+        );
+
+        let (task, popped) = queue.pop();
+        assert_eq!(popped.pending_jobs, 0);
+        assert_eq!(popped.total_dispatched, 1);
+        task.run();
+        assert_eq!(enqueued_ran.load(Ordering::SeqCst), 1);
+        assert_eq!(rejected_ran.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn tcp_connect_executor_overflow_is_classified_as_local_pressure() {
+        let executor = RuntimeWebsocketTcpConnectExecutor::new_with_overflow_capacity(1, 1, 0);
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (queued_done_tx, queued_done_rx) = mpsc::channel::<()>();
+        let rejected_ran = Arc::new(AtomicUsize::new(0));
+
+        assert!(
+            executor.spawn(move || {
+                started_tx.send(()).expect("start signal should send");
+                let _ = release_rx.recv();
+            }),
+            "first TCP task should occupy the worker"
+        );
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("TCP worker should start first task");
+
+        assert!(
+            executor.spawn(move || {
+                queued_done_tx
+                    .send(())
+                    .expect("queued task signal should send");
+            }),
+            "second TCP task should fill the bounded queue"
+        );
+
+        let rejected_ran_for_job = Arc::clone(&rejected_ran);
+        let accepted = executor.spawn(move || {
+            rejected_ran_for_job.fetch_add(1, Ordering::SeqCst);
+        });
+        let err = if accepted {
+            release_tx.send(()).expect("release should send");
+            panic!("saturated TCP executor should reject overflow work");
+        } else {
+            runtime_websocket_local_pressure_io_error(
+                RuntimeWebsocketLocalPressureKind::TcpConnectExecutorOverflow,
+                "websocket TCP connect executor overflow for 127.0.0.1:443",
+            )
+        };
+
+        release_tx.send(()).expect("release should send");
+        queued_done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("queued TCP task should run after release");
+
+        assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(
+            runtime_websocket_local_pressure_kind_from_io_error(&err),
+            Some(RuntimeWebsocketLocalPressureKind::TcpConnectExecutorOverflow)
+        );
+        assert_eq!(
+            rejected_ran.load(Ordering::SeqCst),
+            0,
+            "rejected TCP overflow task must not run inline"
+        );
+    }
+
+    #[test]
+    fn dns_timeout_and_executor_overflow_are_classified_as_local_pressure() {
+        let executor =
+            Arc::new(RuntimeWebsocketDnsResolveExecutor::new_with_overflow_capacity(1, 1, 0));
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let blocking_executor = Arc::clone(&executor);
+        let blocking_resolve = thread::spawn(move || {
+            runtime_resolve_websocket_tcp_addrs_with_executor(
+                &blocking_executor,
+                None,
+                Some(1),
+                "blocked.example.test".to_string(),
+                443,
+                Duration::from_secs(5),
+                move |_host, _port| {
+                    started_tx.send(()).expect("DNS start signal should send");
+                    let _ = release_rx.recv();
+                    Ok(Vec::new())
+                },
+            )
+        });
+
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("DNS worker should start blocking resolver");
+
+        let queued_result = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &executor,
+            None,
+            Some(2),
+            "queued.example.test".to_string(),
+            443,
+            Duration::from_millis(10),
+            |_host, _port| Ok(Vec::new()),
+        );
+        let overflow_result = runtime_resolve_websocket_tcp_addrs_with_executor(
+            &executor,
+            None,
+            Some(3),
+            "overflow.example.test".to_string(),
+            443,
+            Duration::from_millis(50),
+            |_host, _port| Ok(Vec::new()),
+        );
+
+        release_tx.send(()).expect("DNS release should send");
+        blocking_resolve
+            .join()
+            .expect("blocking DNS resolver thread should not panic")
+            .expect("blocking DNS resolver should finish after release");
+
+        let queued_err = queued_result.expect_err("queued DNS work should time out locally");
+        assert_eq!(queued_err.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(
+            runtime_websocket_local_pressure_kind_from_io_error(&queued_err),
+            Some(RuntimeWebsocketLocalPressureKind::DnsResolveTimeout)
+        );
+
+        let overflow_err = overflow_result.expect_err("saturated DNS executor should reject work");
+        assert_eq!(overflow_err.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(
+            runtime_websocket_local_pressure_kind_from_io_error(&overflow_err),
+            Some(RuntimeWebsocketLocalPressureKind::DnsResolveExecutorOverflow)
+        );
+    }
+
+    #[test]
+    fn local_pressure_classification_ignores_plain_io_errors() {
+        let plain = io::Error::new(io::ErrorKind::WouldBlock, "plain local backpressure");
+
+        assert_eq!(
+            runtime_websocket_local_pressure_kind_from_io_error(&plain),
+            None,
+            "plain WouldBlock errors should not be tagged as websocket local pressure"
+        );
     }
 }

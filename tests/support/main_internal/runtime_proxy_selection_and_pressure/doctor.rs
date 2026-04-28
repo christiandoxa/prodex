@@ -61,6 +61,21 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     );
     summary.latest_stale_continuation_reason =
         Some("previous_response_not_found_locked_affinity".to_string());
+    summary.latest_request_id = Some("42".to_string());
+    summary.latest_request_timeline = vec![
+        RuntimeDoctorRequestTimelineEvent {
+            timestamp: Some("2026-03-25 00:00:01.000 +07:00".to_string()),
+            phase: "selection".to_string(),
+            marker: "selection_pick".to_string(),
+            detail: "profile=second route=responses".to_string(),
+        },
+        RuntimeDoctorRequestTimelineEvent {
+            timestamp: Some("2026-03-25 00:00:02.000 +07:00".to_string()),
+            phase: "commit".to_string(),
+            marker: "first_local_chunk".to_string(),
+            detail: "profile=second route=responses".to_string(),
+        },
+    ];
     summary.marker_last_fields.insert(
         "selection_pick",
         BTreeMap::from([
@@ -182,6 +197,16 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(
         value["latest_stale_continuation_reason"],
         "previous_response_not_found_locked_affinity"
+    );
+    assert_eq!(value["latest_request_id"], "42");
+    assert_eq!(value["latest_request_timeline"][0]["phase"], "selection");
+    assert_eq!(
+        value["latest_request_timeline"][0]["marker"],
+        "selection_pick"
+    );
+    assert_eq!(
+        value["latest_request_timeline"][1]["marker"],
+        "first_local_chunk"
     );
     assert_eq!(value["facet_counts"]["route"]["responses"], 2);
     assert_eq!(
