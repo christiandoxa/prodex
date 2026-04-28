@@ -83,6 +83,12 @@ prodex claude -- -p "summarize this repo"
 prodex claude mem -- -p "recall past work on this repo"
 ```
 
+### Shared Codex history
+
+Managed Prodex profiles keep account credentials isolated per profile, but Codex-owned shared state uses the native Codex home by default. In practice, profile `history.jsonl`, `sessions`, `config.toml`, plugins, skills, and related shared files link to the same Codex home that direct Codex uses (`~/.codex` on Unix-like systems).
+
+This matches direct Codex behavior: logging out or switching accounts does not hide chat history. Older Prodex state from `$PRODEX_HOME/.codex` is merged into the native Codex home on the next managed-profile launch. Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shared Codex root.
+
 ## Common commands
 
 ### Run Codex
@@ -130,6 +136,8 @@ Use this when you want Caveman mode, Claude-Mem transcript watching, and launch-
 Use `prodex super --url http://127.0.0.1:8131` when you want the same Super mode front end to talk directly to a local OpenAI-compatible server such as `llama-server`. Prodex injects a temporary `prodex-local` Codex provider, appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and skips quota/proxy routing for that launch. The default local model id is `unsloth/qwen3.5-35b-a3b`; override it with `--model`, for example `prodex super --url http://127.0.0.1:8131 --model local/qwen`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 Add `--dry-run` to run, Caveman, or Super launches to print the resolved provider, model, `CODEX_HOME`, proxy args, and launch env with secret-looking values redacted. Dry-run output is prelaunch only and does not start Codex or the TUI.
+
+Prodex respects system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, including `HTTP_PROXY`, `HTTPS_PROXY`, and platform proxy configuration supported by reqwest. The local Codex-to-Prodex broker connection always receives `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1` so a user proxy does not intercept the local runtime proxy. Use `--no-proxy` on `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to bypass proxy settings.
 
 ### Run Claude Code
 

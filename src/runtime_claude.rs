@@ -101,6 +101,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             allow_auto_rotate: !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
+            upstream_no_proxy: self.args.no_proxy,
             include_code_review: false,
             force_runtime_proxy: true,
             model_provider_override: None,

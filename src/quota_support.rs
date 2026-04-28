@@ -189,13 +189,25 @@ pub(crate) fn fetch_profile_quota_json(
 }
 
 pub(crate) fn fetch_usage(codex_home: &Path, base_url: Option<&str>) -> Result<UsageResponse> {
-    let usage: UsageResponse = serde_json::from_value(fetch_usage_json(codex_home, base_url)?)
-        .with_context(|| {
-            format!(
-                "invalid JSON returned by quota backend for {}",
-                codex_home.display()
-            )
-        })?;
+    fetch_usage_with_proxy_policy(codex_home, base_url, false)
+}
+
+pub(crate) fn fetch_usage_with_proxy_policy(
+    codex_home: &Path,
+    base_url: Option<&str>,
+    upstream_no_proxy: bool,
+) -> Result<UsageResponse> {
+    let usage: UsageResponse = serde_json::from_value(fetch_usage_json_with_proxy_policy(
+        codex_home,
+        base_url,
+        upstream_no_proxy,
+    )?)
+    .with_context(|| {
+        format!(
+            "invalid JSON returned by quota backend for {}",
+            codex_home.display()
+        )
+    })?;
     Ok(usage)
 }
 
@@ -204,6 +216,14 @@ pub(crate) fn fetch_usage_json(
     base_url: Option<&str>,
 ) -> Result<serde_json::Value> {
     UsageFetchFlow::new(codex_home, base_url)?.execute()
+}
+
+pub(crate) fn fetch_usage_json_with_proxy_policy(
+    codex_home: &Path,
+    base_url: Option<&str>,
+    upstream_no_proxy: bool,
+) -> Result<serde_json::Value> {
+    UsageFetchFlow::new_with_proxy_policy(codex_home, base_url, upstream_no_proxy)?.execute()
 }
 
 fn ensure_profile_supports_quota(provider: &ProfileProvider, codex_home: &Path) -> Result<()> {

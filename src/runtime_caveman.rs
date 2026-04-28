@@ -107,6 +107,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             allow_auto_rotate: !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
+            upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
@@ -124,10 +125,11 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home(&caveman_home)?;
         }
-        Ok(
-            RuntimeLaunchPlan::new(codex_child_plan(caveman_home.clone(), runtime_args))
-                .with_cleanup_path(caveman_home),
-        )
+        let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
+        if self.args.no_proxy && runtime_proxy.is_none() {
+            remove_upstream_proxy_env(&mut child);
+        }
+        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
     }
 }
 

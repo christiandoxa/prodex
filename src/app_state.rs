@@ -118,7 +118,7 @@ impl AppPaths {
             managed_profiles_root: root.join("profiles"),
             shared_codex_root: match env::var_os("PRODEX_SHARED_CODEX_HOME") {
                 Some(path) => resolve_shared_codex_root(&root, PathBuf::from(path)),
-                None => prodex_default_shared_codex_root(&root),
+                None => prodex_default_shared_codex_root(&root)?,
             },
             legacy_shared_codex_root: root.join("shared"),
             root,

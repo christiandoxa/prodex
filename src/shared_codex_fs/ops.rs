@@ -97,14 +97,6 @@ pub(super) fn copy_shared_codex_file_replacing_existing(
     Ok(())
 }
 
-pub(super) fn copy_legacy_shared_codex_file(source: &Path, destination: &Path) -> Result<()> {
-    copy_shared_codex_file_replacing_existing(
-        source,
-        destination,
-        "failed to copy legacy shared Codex file",
-    )
-}
-
 pub(super) fn move_directory(source: &Path, destination: &Path) -> Result<()> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)

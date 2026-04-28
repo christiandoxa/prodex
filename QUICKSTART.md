@@ -48,11 +48,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.62.0`:
+The current local version in this repo is `0.63.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.62.0
-cargo install prodex --force --version 0.62.0
+npm install -g @christiandoxa/prodex@0.63.0
+cargo install prodex --force --version 0.63.0
 ```
 
 Dependency status in this repo:
@@ -97,6 +97,10 @@ If you want a fixed profile name first:
 prodex profile add second
 prodex login --profile second
 ```
+
+Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history and session state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl` and `sessions` aligned with direct Codex, so logout or account switching does not hide prior chats.
+
+Older Prodex shared state from `$PRODEX_HOME/.codex` is merged into the native Codex home on the next managed-profile launch. Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shared Codex root.
 
 ## 2. Inspect the pool
 
@@ -169,6 +173,8 @@ Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 Use `--dry-run` on `prodex run`, `prodex caveman`, or `prodex super` when you want to inspect resolved provider/model choices, proxy args, and launch env without starting Codex. Secret-looking values are redacted.
+
+Prodex uses system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, while forcing localhost broker traffic to bypass proxies with `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1`. Add `--no-proxy` to `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to ignore proxy settings.
 
 ## 5. Run Claude Code with `prodex claude`
 

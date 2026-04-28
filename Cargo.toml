@@ -1,6 +1,6 @@
 [package]
 name = "prodex"
-version = "0.62.0"
+version = "0.63.0"
 edition = "2024"
 description = "OpenAI profile pooling and safe auto-rotate for Codex CLI and Claude Code"
 license = "MIT"
@@ -21,7 +21,7 @@ dirs = "6.0.0"
 fs2 = "0.4.3"
 getrandom = "0.4.2"
 pbkdf2 = "0.13.0"
-reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 rpassword = "7.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

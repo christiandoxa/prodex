@@ -7,6 +7,8 @@ pub(super) struct RuntimeBrokerRegistry {
     pub(super) started_at: i64,
     pub(super) upstream_base_url: String,
     pub(super) include_code_review: bool,
+    #[serde(default)]
+    pub(super) upstream_no_proxy: bool,
     pub(super) current_profile: String,
     pub(super) instance_token: String,
     pub(super) admin_token: String,
@@ -138,6 +140,7 @@ pub(super) struct RuntimeBrokerMetadata {
     pub(super) started_at: i64,
     pub(super) current_profile: String,
     pub(super) include_code_review: bool,
+    pub(super) upstream_no_proxy: bool,
     pub(super) instance_token: String,
     pub(super) admin_token: String,
     pub(super) prodex_version: Option<String>,

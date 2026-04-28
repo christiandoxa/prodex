@@ -2067,8 +2067,13 @@ fn run_preflight_reports_with_current_first_preserves_current_and_rotation_order
         result: Ok(usage_with_main_windows(90, 3_600, 95, 86_400)),
     };
 
-    let reports =
-        run_preflight_reports_with_current_first(&state, "main", current_report.clone(), None);
+    let reports = run_preflight_reports_with_current_first(
+        &state,
+        "main",
+        current_report.clone(),
+        None,
+        false,
+    );
 
     assert_eq!(reports.len(), 3);
     assert_eq!(reports[0].name, "main");
@@ -2318,6 +2323,38 @@ fn bare_prodex_accepts_run_options_before_codex_args() {
         args.codex_args,
         vec![OsString::from("exec"), OsString::from("review this repo")]
     );
+}
+
+#[test]
+fn launch_commands_accept_no_proxy_flag() {
+    let run = parse_cli_command_from(["prodex", "run", "--no-proxy", "exec", "hello"])
+        .expect("run no-proxy should parse");
+    let Commands::Run(args) = run else {
+        panic!("expected run command");
+    };
+    assert!(args.no_proxy);
+
+    let caveman = parse_cli_command_from(["prodex", "caveman", "--no-proxy", "exec", "hello"])
+        .expect("caveman no-proxy should parse");
+    let Commands::Caveman(args) = caveman else {
+        panic!("expected caveman command");
+    };
+    assert!(args.no_proxy);
+
+    let super_command = parse_cli_command_from(["prodex", "super", "--no-proxy", "exec", "hello"])
+        .expect("super no-proxy should parse");
+    let Commands::Super(args) = super_command else {
+        panic!("expected super command");
+    };
+    assert!(args.no_proxy);
+    assert!(args.into_caveman_args().no_proxy);
+
+    let claude = parse_cli_command_from(["prodex", "claude", "--no-proxy", "--", "-p", "hello"])
+        .expect("claude no-proxy should parse");
+    let Commands::Claude(args) = claude else {
+        panic!("expected claude command");
+    };
+    assert!(args.no_proxy);
 }
 
 #[test]

@@ -110,6 +110,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
@@ -169,6 +170,7 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
@@ -227,6 +229,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
@@ -245,6 +248,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         broker_key,
         &registry.upstream_base_url,
         registry.include_code_review,
+        registry.upstream_no_proxy,
     )
     .expect("wait should not fail");
 
@@ -334,6 +338,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
@@ -353,6 +358,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         broker_key,
         &registry.upstream_base_url,
         registry.include_code_review,
+        registry.upstream_no_proxy,
     )
     .expect("wait should not fail");
     let elapsed = started_at.elapsed();
@@ -427,6 +433,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "legacy-instance".to_string(),
         admin_token: "secret".to_string(),
@@ -465,6 +472,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         &paths,
         "current-key",
         "https://chatgpt.com/backend-api",
+        false,
         false,
     )
     .expect("registry scan should not fail")
@@ -520,6 +528,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "secret".to_string(),
@@ -551,6 +560,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         broker_key,
         &upstream_base_url,
         include_code_review,
+        false,
     )
     .expect("wait should not fail");
 
@@ -597,6 +607,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_registry_withou
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "dead-instance".to_string(),
         admin_token: "secret".to_string(),
@@ -615,6 +626,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_registry_withou
         broker_key,
         &registry.upstream_base_url,
         registry.include_code_review,
+        registry.upstream_no_proxy,
     )
     .expect("wait should not fail");
 
@@ -669,6 +681,7 @@ fn find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe() 
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         current_profile: "main".to_string(),
         instance_token: "dead-compatible".to_string(),
         admin_token: "secret".to_string(),
@@ -687,6 +700,7 @@ fn find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe() 
         "excluded-key",
         &registry.upstream_base_url,
         registry.include_code_review,
+        registry.upstream_no_proxy,
     )
     .expect("compatible scan should not fail");
 

@@ -262,15 +262,17 @@ fn runtime_request_explicit_session_id_ignores_turn_metadata_session_id() {
 
 #[test]
 fn runtime_proxy_broker_key_uses_stable_mount_path() {
-    let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false);
+    let current_key = runtime_broker_key("https://chatgpt.com/backend-api", false, false);
 
     let stable_key = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
+        false,
         false,
         &runtime_broker_current_binary_identity_key(),
     );
     let previous_version_key = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
+        false,
         false,
         "version=0.29.0",
     );

@@ -2,8 +2,7 @@ use super::*;
 
 pub(crate) fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
-    migrate_legacy_shared_codex_root(paths)?;
-    seed_legacy_default_codex_home(paths)?;
+    migrate_legacy_shared_codex_roots(paths)?;
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
 
@@ -14,40 +13,25 @@ pub(crate) fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) ->
     Ok(())
 }
 
-fn seed_legacy_default_codex_home(paths: &AppPaths) -> Result<()> {
-    if env::var_os("PRODEX_SHARED_CODEX_HOME").is_some() {
-        return Ok(());
+fn migrate_legacy_shared_codex_roots(paths: &AppPaths) -> Result<()> {
+    migrate_legacy_shared_codex_root(paths, &paths.legacy_shared_codex_root)?;
+    if env::var_os("PRODEX_SHARED_CODEX_HOME").is_none() {
+        let previous_default_root = prodex_previous_default_shared_codex_root(&paths.root);
+        migrate_legacy_shared_codex_root(paths, &previous_default_root)?;
     }
-
-    let legacy_root = legacy_default_codex_home()?;
-    if same_path(&paths.shared_codex_root, &legacy_root) || !legacy_root.is_dir() {
-        return Ok(());
-    }
-
-    fs::create_dir_all(&paths.shared_codex_root)
-        .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
-
-    for entry in shared_codex_entries_for_roots([legacy_root.as_path()])? {
-        let legacy_path = legacy_root.join(&entry.name);
-        let shared_path = paths.shared_codex_root.join(&entry.name);
-        seed_shared_codex_entry(&legacy_path, &shared_path, entry.kind)?;
-    }
-
     Ok(())
 }
 
-fn migrate_legacy_shared_codex_root(paths: &AppPaths) -> Result<()> {
-    if same_path(&paths.shared_codex_root, &paths.legacy_shared_codex_root)
-        || !paths.legacy_shared_codex_root.exists()
-    {
+fn migrate_legacy_shared_codex_root(paths: &AppPaths, legacy_root: &Path) -> Result<()> {
+    if same_path(&paths.shared_codex_root, legacy_root) || !legacy_root.exists() {
         return Ok(());
     }
 
     fs::create_dir_all(&paths.shared_codex_root)
         .with_context(|| format!("failed to create {}", paths.shared_codex_root.display()))?;
 
-    for entry in shared_codex_entries_for_roots([paths.legacy_shared_codex_root.as_path()])? {
-        let legacy_path = paths.legacy_shared_codex_root.join(&entry.name);
+    for entry in shared_codex_entries_for_roots([legacy_root])? {
+        let legacy_path = legacy_root.join(&entry.name);
         let shared_path = paths.shared_codex_root.join(&entry.name);
         migrate_shared_codex_entry(&legacy_path, &shared_path, entry.kind)?;
     }

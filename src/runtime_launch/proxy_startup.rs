@@ -14,6 +14,7 @@ pub(crate) fn start_runtime_rotation_proxy(
         current_profile,
         upstream_base_url,
         include_code_review,
+        false,
         None,
     )
 }
@@ -24,8 +25,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
     current_profile: &str,
     upstream_base_url: String,
     include_code_review: bool,
+    upstream_no_proxy: bool,
     preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeRotationProxy> {
+    set_runtime_upstream_no_proxy_override(upstream_no_proxy);
     let log_path = initialize_runtime_proxy_log_path();
     let (server, listen_addr) = match preferred_listen_addr {
         Some(preferred) => match TinyServer::http(preferred) {
@@ -199,13 +202,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
         .filter(|key| key.starts_with("__route_success__"))
         .count();
     let shared = RuntimeRotationProxyShared {
-        async_client: reqwest::Client::builder()
-            .connect_timeout(Duration::from_millis(
-                runtime_proxy_http_connect_timeout_ms(),
-            ))
-            .read_timeout(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms()))
-            .build()
-            .context("failed to build runtime auto-rotate async HTTP client")?,
+        async_client: build_runtime_upstream_async_http_client(upstream_no_proxy)?,
         async_runtime,
         log_path: log_path.clone(),
         request_sequence: Arc::new(AtomicU64::new(1)),
@@ -245,6 +242,13 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
             } else {
                 "follower"
             }
+        ),
+    );
+    runtime_proxy_log_to_path(
+        &log_path,
+        &format!(
+            "runtime_proxy_upstream_proxy_mode mode={}",
+            runtime_upstream_proxy_mode_label(upstream_no_proxy)
         ),
     );
     runtime_proxy_log_to_path(

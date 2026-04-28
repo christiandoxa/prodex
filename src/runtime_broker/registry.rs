@@ -4,11 +4,13 @@ use sha2::{Digest, Sha256};
 pub(crate) fn runtime_broker_key_for_binary_identity(
     upstream_base_url: &str,
     include_code_review: bool,
+    upstream_no_proxy: bool,
     binary_identity_key: &str,
 ) -> String {
     let mut hasher = DefaultHasher::new();
     upstream_base_url.hash(&mut hasher);
     include_code_review.hash(&mut hasher);
+    upstream_no_proxy.hash(&mut hasher);
     RUNTIME_PROXY_OPENAI_MOUNT_PATH.hash(&mut hasher);
     binary_identity_key.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
@@ -32,10 +34,15 @@ pub(crate) fn runtime_broker_current_binary_identity_key() -> String {
     }
 }
 
-pub(crate) fn runtime_broker_key(upstream_base_url: &str, include_code_review: bool) -> String {
+pub(crate) fn runtime_broker_key(
+    upstream_base_url: &str,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+) -> String {
     runtime_broker_key_for_binary_identity(
         upstream_base_url,
         include_code_review,
+        upstream_no_proxy,
         &runtime_broker_current_binary_identity_key(),
     )
 }

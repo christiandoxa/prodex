@@ -60,6 +60,7 @@ pub(crate) fn collect_run_profile_reports(
     state: &AppState,
     profile_names: Vec<String>,
     base_url: Option<&str>,
+    upstream_no_proxy: bool,
 ) -> Vec<RunProfileProbeReport> {
     let jobs = profile_names
         .into_iter()
@@ -79,7 +80,8 @@ pub(crate) fn collect_run_profile_reports(
     map_parallel(jobs, |job| {
         let auth = job.provider.auth_summary(&job.codex_home);
         let result = if auth.quota_compatible {
-            fetch_usage(&job.codex_home, base_url.as_deref()).map_err(|err| err.to_string())
+            fetch_usage_with_proxy_policy(&job.codex_home, base_url.as_deref(), upstream_no_proxy)
+                .map_err(|err| err.to_string())
         } else {
             Err("auth mode is not quota-compatible".to_string())
         };
@@ -98,6 +100,7 @@ pub(crate) fn probe_run_profile(
     profile_name: &str,
     order_index: usize,
     base_url: Option<&str>,
+    upstream_no_proxy: bool,
 ) -> Result<RunProfileProbeReport> {
     let profile = state
         .profiles
@@ -105,7 +108,8 @@ pub(crate) fn probe_run_profile(
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
     let auth = profile.provider.auth_summary(&profile.codex_home);
     let result = if auth.quota_compatible {
-        fetch_usage(&profile.codex_home, base_url).map_err(|err| err.to_string())
+        fetch_usage_with_proxy_policy(&profile.codex_home, base_url, upstream_no_proxy)
+            .map_err(|err| err.to_string())
     } else {
         Err("auth mode is not quota-compatible".to_string())
     };
@@ -133,6 +137,7 @@ pub(crate) fn run_preflight_reports_with_current_first(
     current_profile: &str,
     current_report: RunProfileProbeReport,
     base_url: Option<&str>,
+    upstream_no_proxy: bool,
 ) -> Vec<RunProfileProbeReport> {
     let mut reports = Vec::with_capacity(state.profiles.len());
     reports.push(current_report);
@@ -141,6 +146,7 @@ pub(crate) fn run_preflight_reports_with_current_first(
             state,
             profile_rotation_order(state, current_profile),
             base_url,
+            upstream_no_proxy,
         )
         .into_iter()
         .map(|mut report| {
@@ -522,12 +528,14 @@ pub(crate) fn find_ready_profiles(
     current_profile: &str,
     base_url: Option<&str>,
     include_code_review: bool,
+    upstream_no_proxy: bool,
 ) -> Vec<String> {
     ready_profile_candidates(
         &collect_run_profile_reports(
             state,
             profile_rotation_order(state, current_profile),
             base_url,
+            upstream_no_proxy,
         ),
         include_code_review,
         None,

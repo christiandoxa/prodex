@@ -136,26 +136,31 @@ struct ChatgptRefreshResponse {
     refresh_token: Option<String>,
 }
 
-fn build_usage_http_client(context_label: &'static str) -> Result<Client> {
-    Client::builder()
-        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
-        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
-        .build()
-        .with_context(|| format!("failed to build {context_label} client"))
-}
-
 pub(super) struct UsageFetchFlow<'a> {
     codex_home: &'a Path,
     usage_url: String,
     client: Client,
     auth: UsageAuth,
+    upstream_no_proxy: bool,
 }
 
 impl<'a> UsageFetchFlow<'a> {
     pub(super) fn new(codex_home: &'a Path, base_url: Option<&str>) -> Result<Self> {
+        Self::new_with_proxy_policy(codex_home, base_url, false)
+    }
+
+    pub(super) fn new_with_proxy_policy(
+        codex_home: &'a Path,
+        base_url: Option<&str>,
+        upstream_no_proxy: bool,
+    ) -> Result<Self> {
         let mut auth = read_usage_auth(codex_home)?;
         if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp())
-            && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(codex_home, Some(&auth))
+            && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
+                codex_home,
+                Some(&auth),
+                upstream_no_proxy,
+            )
         {
             auth = outcome.auth;
         }
@@ -163,8 +168,9 @@ impl<'a> UsageFetchFlow<'a> {
         Ok(Self {
             codex_home,
             usage_url: usage_url(&quota_base_url(base_url)),
-            client: build_usage_http_client("quota HTTP")?,
+            client: build_upstream_blocking_http_client("quota HTTP", upstream_no_proxy)?,
             auth,
+            upstream_no_proxy,
         })
     }
 
@@ -197,8 +203,11 @@ impl<'a> UsageFetchFlow<'a> {
     }
 
     fn retry_after_unauthorized(&mut self) -> Result<Option<(reqwest::StatusCode, Vec<u8>)>> {
-        let Ok(outcome) = sync_usage_auth_from_disk_or_refresh(self.codex_home, Some(&self.auth))
-        else {
+        let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
+            self.codex_home,
+            Some(&self.auth),
+            self.upstream_no_proxy,
+        ) else {
             return Ok(None);
         };
 
@@ -323,6 +332,14 @@ pub(crate) fn sync_usage_auth_from_disk_or_refresh(
     codex_home: &Path,
     expected_current: Option<&UsageAuth>,
 ) -> Result<UsageAuthSyncOutcome> {
+    sync_usage_auth_from_disk_or_refresh_with_proxy_policy(codex_home, expected_current, false)
+}
+
+pub(crate) fn sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
+    codex_home: &Path,
+    expected_current: Option<&UsageAuth>,
+    upstream_no_proxy: bool,
+) -> Result<UsageAuthSyncOutcome> {
     let latest = read_usage_auth(codex_home)?;
     if usage_auth_changed(expected_current, &latest) {
         return Ok(usage_auth_sync_outcome(
@@ -336,7 +353,7 @@ pub(crate) fn sync_usage_auth_from_disk_or_refresh(
         .refresh_token
         .as_deref()
         .context("refresh token not found in the stored auth secret")?;
-    refresh_usage_auth_file(codex_home, refresh_token)?;
+    refresh_usage_auth_file(codex_home, refresh_token, upstream_no_proxy)?;
 
     let refreshed = read_usage_auth(codex_home)?;
     Ok(usage_auth_sync_outcome(
@@ -407,9 +424,13 @@ fn refresh_usage_auth_endpoint() -> String {
         .unwrap_or_else(|_| CHATGPT_AUTH_REFRESH_URL.to_string())
 }
 
-fn refresh_usage_auth_file(codex_home: &Path, refresh_token: &str) -> Result<()> {
+fn refresh_usage_auth_file(
+    codex_home: &Path,
+    refresh_token: &str,
+    upstream_no_proxy: bool,
+) -> Result<()> {
     let mut auth_json = read_auth_json_value(codex_home)?;
-    let refreshed = request_chatgpt_auth_refresh(refresh_token)?;
+    let refreshed = request_chatgpt_auth_refresh(refresh_token, upstream_no_proxy)?;
     apply_chatgpt_refresh(&mut auth_json, refreshed)?;
     write_auth_json_value(codex_home, &auth_json)
 }
@@ -444,8 +465,11 @@ fn read_auth_json_value(codex_home: &Path) -> Result<serde_json::Value> {
         .with_context(|| format!("failed to parse {}", auth_location.display()))
 }
 
-fn request_chatgpt_auth_refresh(refresh_token: &str) -> Result<ChatgptRefreshResponse> {
-    let client = build_usage_http_client("auth refresh HTTP")?;
+fn request_chatgpt_auth_refresh(
+    refresh_token: &str,
+    upstream_no_proxy: bool,
+) -> Result<ChatgptRefreshResponse> {
+    let client = build_upstream_blocking_http_client("auth refresh HTTP", upstream_no_proxy)?;
     let response = client
         .post(refresh_usage_auth_endpoint())
         .header("Content-Type", "application/json")

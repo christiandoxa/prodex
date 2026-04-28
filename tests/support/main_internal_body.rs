@@ -897,11 +897,12 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
-            broker_key: runtime_broker_key(&backend.base_url(), false),
+            broker_key: runtime_broker_key(&backend.base_url(), false, false),
             listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
             prodex_version: current_identity.prodex_version.clone(),
@@ -978,11 +979,12 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
-            broker_key: runtime_broker_key(&backend.base_url(), false),
+            broker_key: runtime_broker_key(&backend.base_url(), false, false),
             listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
@@ -1081,11 +1083,12 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
-            broker_key: runtime_broker_key(&backend.base_url(), false),
+            broker_key: runtime_broker_key(&backend.base_url(), false, false),
             listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
@@ -1242,6 +1245,7 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
             prodex_version: None,
@@ -1321,6 +1325,7 @@ fn runtime_broker_metrics_snapshot_records_runtime_state_lock_wait() {
                 started_at: Local::now().timestamp(),
                 current_profile: "main".to_string(),
                 include_code_review: false,
+                upstream_no_proxy: false,
                 instance_token: "instance".to_string(),
                 admin_token: "secret".to_string(),
                 prodex_version: None,
@@ -1430,11 +1435,12 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
     register_runtime_broker_metadata(
         &proxy.log_path,
         RuntimeBrokerMetadata {
-            broker_key: runtime_broker_key(&backend.base_url(), false),
+            broker_key: runtime_broker_key(&backend.base_url(), false, false),
             listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             current_profile: "main".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             instance_token: "instance".to_string(),
             admin_token: "secret".to_string(),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
@@ -1722,16 +1728,17 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
 }
 
 #[test]
-fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
-    let without_review = runtime_broker_process_args(
-        "main",
-        "https://chatgpt.com/backend-api",
-        false,
-        "broker-key",
-        "instance",
-        "admin",
-        None,
-    );
+fn runtime_broker_process_args_encode_optional_boolean_switches() {
+    let without_review = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
+        current_profile: "main",
+        upstream_base_url: "https://chatgpt.com/backend-api",
+        include_code_review: false,
+        upstream_no_proxy: false,
+        broker_key: "broker-key",
+        instance_token: "instance",
+        admin_token: "admin",
+        listen_addr: None,
+    });
     let without_review: Vec<String> = without_review
         .into_iter()
         .map(|value| value.to_string_lossy().into_owned())
@@ -1743,15 +1750,16 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
         "false should not emit a stray boolean value for the review flag"
     );
 
-    let with_review = runtime_broker_process_args(
-        "main",
-        "https://chatgpt.com/backend-api",
-        true,
-        "broker-key",
-        "instance",
-        "admin",
-        Some("127.0.0.1:33475"),
-    );
+    let with_review = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
+        current_profile: "main",
+        upstream_base_url: "https://chatgpt.com/backend-api",
+        include_code_review: true,
+        upstream_no_proxy: false,
+        broker_key: "broker-key",
+        instance_token: "instance",
+        admin_token: "admin",
+        listen_addr: Some("127.0.0.1:33475"),
+    });
     let with_review: Vec<String> = with_review
         .into_iter()
         .map(|value| value.to_string_lossy().into_owned())
@@ -1774,6 +1782,27 @@ fn runtime_broker_process_args_only_include_review_flag_when_enabled() {
             .any(|pair| pair == ["--listen-addr", "127.0.0.1:33475"]),
         "listen addr should be forwarded when requested"
     );
+
+    let without_proxy = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
+        current_profile: "main",
+        upstream_base_url: "https://chatgpt.com/backend-api",
+        include_code_review: false,
+        upstream_no_proxy: true,
+        broker_key: "broker-key",
+        instance_token: "instance",
+        admin_token: "admin",
+        listen_addr: None,
+    });
+    let without_proxy: Vec<String> = without_proxy
+        .into_iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        without_proxy
+            .iter()
+            .any(|value| value == "--upstream-no-proxy"),
+        "upstream no-proxy mode should be encoded as a clap boolean switch"
+    );
 }
 
 #[test]
@@ -1781,20 +1810,30 @@ fn runtime_broker_key_is_scoped_to_prodex_binary_identity() {
     let first = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
         false,
+        false,
         "version=0.39.0;sha256=alpha",
     );
     let second = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
+        false,
         false,
         "version=0.39.0;sha256=beta",
     );
     let third = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
         false,
+        false,
         "version=0.40.0;sha256=alpha",
     );
     let review = runtime_broker_key_for_binary_identity(
         "https://chatgpt.com/backend-api",
+        true,
+        false,
+        "version=0.39.0;sha256=alpha",
+    );
+    let no_proxy = runtime_broker_key_for_binary_identity(
+        "https://chatgpt.com/backend-api",
+        false,
         true,
         "version=0.39.0;sha256=alpha",
     );
@@ -1802,6 +1841,10 @@ fn runtime_broker_key_is_scoped_to_prodex_binary_identity() {
     assert_ne!(
         first, second,
         "runtime broker keys must not reuse brokers from a different binary build"
+    );
+    assert_ne!(
+        first, no_proxy,
+        "runtime broker keys must not reuse brokers with a different upstream proxy mode"
     );
     assert_ne!(
         first, third,
@@ -1833,6 +1876,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             current_profile: "main".to_string(),
             instance_token: "dead-instance".to_string(),
             admin_token: "secret".to_string(),
@@ -1859,6 +1903,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
+            upstream_no_proxy: false,
             current_profile: "main".to_string(),
             instance_token: "live-instance".to_string(),
             admin_token: "secret".to_string(),
@@ -1918,6 +1963,7 @@ fn runtime_rotation_proxy_can_bind_a_requested_listen_addr() {
         "main",
         backend.base_url(),
         false,
+        false,
         Some(&requested_addr.to_string()),
     )
     .expect("runtime proxy should bind requested listen addr");
@@ -1963,6 +2009,7 @@ fn runtime_broker_command_is_the_only_command_without_update_notice() {
         current_profile: "main".to_string(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
+        upstream_no_proxy: false,
         broker_key: "broker".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "admin".to_string(),
@@ -1975,6 +2022,7 @@ fn runtime_broker_command_is_the_only_command_without_update_notice() {
         skip_quota_check: false,
         full_access: false,
         base_url: None,
+        no_proxy: false,
         dry_run: false,
         codex_args: vec![OsString::from("hello")],
     });

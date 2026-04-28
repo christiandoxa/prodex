@@ -31,7 +31,11 @@ pub(crate) fn legacy_default_codex_home() -> Result<PathBuf> {
         .join(DEFAULT_CODEX_DIR))
 }
 
-pub(crate) fn prodex_default_shared_codex_root(root: &Path) -> PathBuf {
+pub(crate) fn prodex_default_shared_codex_root(_root: &Path) -> Result<PathBuf> {
+    legacy_default_codex_home()
+}
+
+pub(crate) fn prodex_previous_default_shared_codex_root(root: &Path) -> PathBuf {
     root.join(DEFAULT_CODEX_DIR)
 }
 

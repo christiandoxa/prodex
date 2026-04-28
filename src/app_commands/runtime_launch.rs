@@ -37,6 +37,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             allow_auto_rotate: !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
+            upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
@@ -53,10 +54,11 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
         }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
-        Ok(RuntimeLaunchPlan::new(codex_child_plan(
-            prepared.codex_home.clone(),
-            runtime_args,
-        )))
+        let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
+        if self.args.no_proxy && runtime_proxy.is_none() {
+            remove_upstream_proxy_env(&mut child);
+        }
+        Ok(RuntimeLaunchPlan::new(child))
     }
 }
 
@@ -315,6 +317,7 @@ impl RuntimeProxyStartupFactory {
                 &selection.selected_profile_name,
                 runtime_upstream_base_url.as_str(),
                 request.include_code_review,
+                request.upstream_no_proxy,
             )?));
         }
 
@@ -428,8 +431,13 @@ fn run_auto_runtime_launch_preflight(
     request: &RuntimeLaunchRequest<'_>,
     selection: &mut RuntimeLaunchSelection,
 ) -> Result<()> {
-    let current_report =
-        probe_run_profile(state, &selection.initial_profile_name, 0, request.base_url)?;
+    let current_report = probe_run_profile(
+        state,
+        &selection.initial_profile_name,
+        0,
+        request.base_url,
+        request.upstream_no_proxy,
+    )?;
     if run_profile_probe_is_ready(&current_report, request.include_code_review) {
         return Ok(());
     }
@@ -441,6 +449,7 @@ fn run_auto_runtime_launch_preflight(
         &selection.initial_profile_name,
         current_report,
         request.base_url,
+        request.upstream_no_proxy,
     );
     let ready_candidates = ready_profile_candidates(
         &reports,
@@ -591,7 +600,11 @@ fn run_selected_runtime_launch_preflight(
     request: &RuntimeLaunchRequest<'_>,
     selection: &mut RuntimeLaunchSelection,
 ) -> Result<()> {
-    match fetch_usage(&selection.codex_home, request.base_url) {
+    match fetch_usage_with_proxy_policy(
+        &selection.codex_home,
+        request.base_url,
+        request.upstream_no_proxy,
+    ) {
         Ok(usage) => {
             let blocked = collect_blocked_limits(&usage, request.include_code_review);
             if !blocked.is_empty() {
@@ -625,6 +638,7 @@ fn handle_blocked_selected_runtime_profile(
         &selection.initial_profile_name,
         request.base_url,
         request.include_code_review,
+        request.upstream_no_proxy,
     );
 
     print_wrapped_stderr(&section_header("Quota Preflight"));
@@ -761,6 +775,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: false,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: false,
             model_provider_override: None,
@@ -804,6 +819,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: false,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: true,
             model_provider_override: None,
@@ -868,6 +884,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: false,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: false,
             model_provider_override: None,
@@ -903,6 +920,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: true,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: false,
             model_provider_override: Some("prodex-local"),
@@ -947,6 +965,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: true,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: false,
             model_provider_override: Some("prodex-local"),
@@ -986,6 +1005,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: true,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: false,
             model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
@@ -1030,6 +1050,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: false,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: false,
             model_provider_override: None,
@@ -1056,6 +1077,7 @@ mod tests {
             allow_auto_rotate: true,
             skip_quota_check: true,
             base_url: None,
+            upstream_no_proxy: false,
             include_code_review: false,
             force_runtime_proxy: true,
             model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
@@ -1095,6 +1117,7 @@ mod tests {
                 allow_auto_rotate: true,
                 skip_quota_check: false,
                 base_url: None,
+                upstream_no_proxy: false,
                 include_code_review: false,
                 force_runtime_proxy: false,
                 model_provider_override: None,
@@ -1133,6 +1156,7 @@ mod tests {
                 allow_auto_rotate: true,
                 skip_quota_check: false,
                 base_url: None,
+                upstream_no_proxy: false,
                 include_code_review: false,
                 force_runtime_proxy: false,
                 model_provider_override: None,

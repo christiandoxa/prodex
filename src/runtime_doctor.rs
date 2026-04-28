@@ -54,6 +54,7 @@ const RUNTIME_DOCTOR_FACETS: &[&str] = &[
     "source",
     "request_shape",
     "exit",
+    "mode",
 ];
 
 const RUNTIME_DOCTOR_MARKERS: &[&str] = &[
@@ -183,6 +184,7 @@ const RUNTIME_DOCTOR_MARKERS: &[&str] = &[
     "continuation_journal_queue_backpressure",
     "runtime_proxy_restore_counts",
     "runtime_proxy_startup_audit",
+    "runtime_proxy_upstream_proxy_mode",
     "profile_probe_refresh_queued",
     "profile_probe_refresh_start",
     "profile_probe_refresh_ok",

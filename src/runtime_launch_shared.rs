@@ -5,6 +5,7 @@ pub(super) struct RuntimeLaunchRequest<'a> {
     pub(super) allow_auto_rotate: bool,
     pub(super) skip_quota_check: bool,
     pub(super) base_url: Option<&'a str>,
+    pub(super) upstream_no_proxy: bool,
     pub(super) include_code_review: bool,
     pub(super) force_runtime_proxy: bool,
     pub(super) model_provider_override: Option<&'a str>,

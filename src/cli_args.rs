@@ -97,7 +97,7 @@ pub(crate) enum ProfileCommands {
     Export(ExportProfileArgs),
     /// Import profiles from a bundle created by `prodex profile export`.
     Import(ImportProfileArgs),
-    /// Copy the current shared Prodex CODEX_HOME into a new managed profile and activate it.
+    /// Copy the current shared Codex home into a new managed profile and activate it.
     ImportCurrent(ImportCurrentArgs),
     /// List configured profiles and show which one is active.
     List,
@@ -117,7 +117,7 @@ pub(crate) struct AddProfileArgs {
     /// Copy initial state from another CODEX_HOME path into the new managed profile.
     #[arg(long, value_name = "PATH")]
     pub(crate) copy_from: Option<PathBuf>,
-    /// Seed the new managed profile from the default shared Prodex CODEX_HOME.
+    /// Seed the new managed profile from the default shared Codex home.
     #[arg(long)]
     pub(crate) copy_current: bool,
     /// Make the new profile active after creation.
@@ -156,7 +156,7 @@ pub(crate) struct ImportProfileArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct ImportCurrentArgs {
-    /// Name of the managed profile to create from the current shared Prodex CODEX_HOME.
+    /// Name of the managed profile to create from the current shared Codex home.
     #[arg(default_value = "default")]
     pub(crate) name: String,
 }
@@ -299,6 +299,9 @@ pub(crate) struct RunArgs {
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL")]
     pub(crate) base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub(crate) no_proxy: bool,
     /// Print resolved launch diagnostics without starting Codex.
     #[arg(long)]
     pub(crate) dry_run: bool,
@@ -324,6 +327,9 @@ pub(crate) struct ClaudeArgs {
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL")]
     pub(crate) base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub(crate) no_proxy: bool,
     /// Arguments passed through to `claude` unchanged.
     #[arg(value_name = "CLAUDE_ARG", allow_hyphen_values = true)]
     pub(crate) claude_args: Vec<OsString>,
@@ -352,6 +358,9 @@ pub(crate) struct CavemanArgs {
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL")]
     pub(crate) base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub(crate) no_proxy: bool,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub(crate) codex_args: Vec<OsString>,
@@ -377,6 +386,9 @@ pub(crate) struct SuperArgs {
     /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
     #[arg(long, value_name = "URL", conflicts_with = "url")]
     pub(crate) base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub(crate) no_proxy: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
     #[arg(long, value_name = "URL", value_parser = parse_super_local_url)]
     pub(crate) url: Option<String>,
@@ -439,6 +451,7 @@ impl SuperArgs {
             full_access: true,
             dry_run: self.dry_run,
             base_url: self.base_url,
+            no_proxy: self.no_proxy,
             codex_args,
         }
     }
@@ -545,6 +558,8 @@ pub(crate) struct RuntimeBrokerArgs {
     pub(crate) upstream_base_url: String,
     #[arg(long, default_value_t = false)]
     pub(crate) include_code_review: bool,
+    #[arg(long = "upstream-no-proxy", default_value_t = false)]
+    pub(crate) upstream_no_proxy: bool,
     #[arg(long)]
     pub(crate) broker_key: String,
     #[arg(long)]

@@ -5,6 +5,16 @@ const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
 const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
 const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
+const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "PROXY",
+    "proxy",
+];
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     let local_provider_hosts = local_provider_proxy_bypass_hosts(&args);
@@ -87,6 +97,19 @@ pub(crate) fn codex_sandbox_removed_env() -> Vec<OsString> {
     removed.into_iter().collect()
 }
 
+pub(crate) fn upstream_proxy_removed_env() -> Vec<OsString> {
+    UPSTREAM_PROXY_ENV_KEYS
+        .into_iter()
+        .map(OsString::from)
+        .collect()
+}
+
+pub(crate) fn remove_upstream_proxy_env(plan: &mut ChildProcessPlan) {
+    let mut removed = BTreeSet::<OsString>::from_iter(plan.removed_env.iter().cloned());
+    removed.extend(upstream_proxy_removed_env());
+    plan.removed_env = removed.into_iter().collect();
+}
+
 pub(crate) fn run_child_plan(
     plan: &ChildProcessPlan,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
@@ -165,6 +188,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         allow_auto_rotate: !args.no_auto_rotate,
         skip_quota_check: args.skip_quota_check,
         base_url: args.base_url.as_deref(),
+        upstream_no_proxy: args.no_proxy,
         include_code_review,
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
@@ -186,19 +210,27 @@ pub(crate) fn print_runtime_launch_dry_run(
     request: RuntimeLaunchRequest<'_>,
     child: RuntimeLaunchDryRunChild,
 ) -> Result<()> {
+    let upstream_no_proxy = request.upstream_no_proxy;
     let prepared = prepare_runtime_launch_dry_run(request)?;
     let runtime_proxy = prepared.runtime_proxy.as_ref();
     let plan = match child {
         RuntimeLaunchDryRunChild::Codex { codex_args } => {
             let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
-            RuntimeLaunchPlan::new(codex_child_plan(prepared.codex_home.clone(), runtime_args))
+            let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
+            if upstream_no_proxy && runtime_proxy.is_none() {
+                remove_upstream_proxy_env(&mut child);
+            }
+            RuntimeLaunchPlan::new(child)
         }
         RuntimeLaunchDryRunChild::Caveman { codex_args } => {
             let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
             let caveman_home =
                 dry_run_caveman_home_placeholder(&prepared.paths, &prepared.codex_home);
-            RuntimeLaunchPlan::new(codex_child_plan(caveman_home.clone(), runtime_args))
-                .with_cleanup_path(caveman_home)
+            let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
+            if upstream_no_proxy && runtime_proxy.is_none() {
+                remove_upstream_proxy_env(&mut child);
+            }
+            RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home)
         }
     };
     let output = runtime_launch_dry_run_report(flow, &prepared, &plan);
@@ -427,6 +459,28 @@ mod tests {
                 .find(|(key, _)| key == "no_proxy")
                 .map(|(_, value)| value.to_string_lossy().into_owned()),
             Some("example.com,127.0.0.1,localhost,::1,host.docker.internal".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_upstream_proxy_env_preserves_local_proxy_bypass_env() {
+        let _env_guard = TestEnvVarGuard::lock();
+        let _http_proxy_guard = TestEnvVarGuard::set("HTTP_PROXY", "http://127.0.0.1:1086");
+        let _https_proxy_guard = TestEnvVarGuard::set("https_proxy", "http://127.0.0.1:1086");
+        let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
+        let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
+        let mut plan = codex_child_plan(PathBuf::from("/tmp/prodex-codex-home"), vec![]);
+
+        remove_upstream_proxy_env(&mut plan);
+
+        assert!(plan.removed_env.iter().any(|key| key == "HTTP_PROXY"));
+        assert!(plan.removed_env.iter().any(|key| key == "https_proxy"));
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "NO_PROXY")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("example.com,127.0.0.1,localhost,::1".to_string())
         );
     }
 

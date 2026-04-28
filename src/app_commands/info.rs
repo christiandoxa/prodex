@@ -21,7 +21,7 @@ pub(crate) fn collect_info_quota_aggregate(
     let persisted_usage_snapshots =
         load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
     let reports =
-        collect_run_profile_reports(state, state.profiles.keys().cloned().collect(), None);
+        collect_run_profile_reports(state, state.profiles.keys().cloned().collect(), None, false);
     build_info_quota_aggregate(&reports, &persisted_usage_snapshots, now)
 }
 

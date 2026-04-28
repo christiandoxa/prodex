@@ -98,7 +98,7 @@ fn runtime_profile_usage_auth_cache_entry_freshness_detects_auth_json_changes() 
 }
 
 #[test]
-fn prepare_managed_codex_home_does_not_reseed_populated_legacy_sessions_every_run() {
+fn prepare_managed_codex_home_links_native_codex_history_and_sessions_by_default() {
     let temp_dir = TestDir::new();
     let home_dir = temp_dir.path.join("home");
     let prodex_home = temp_dir.path.join("prodex");
@@ -108,42 +108,71 @@ fn prepare_managed_codex_home_does_not_reseed_populated_legacy_sessions_every_ru
     let _prodex_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
     let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
 
-    let legacy_session_dir = home_dir.join(".codex/sessions/2026/04/02");
-    create_codex_home_if_missing(&legacy_session_dir)
-        .expect("legacy session dir should be created");
-    let first_legacy_session = legacy_session_dir.join("legacy-first.jsonl");
-    fs::write(&first_legacy_session, "legacy-first")
-        .expect("first legacy session should be written");
+    let native_codex_home = home_dir.join(".codex");
+    let native_session_dir = native_codex_home.join("sessions/2026/04/02");
+    create_codex_home_if_missing(&native_session_dir)
+        .expect("native session dir should be created");
+    fs::write(
+        native_codex_home.join("history.jsonl"),
+        "{\"session_id\":\"native\",\"ts\":100,\"text\":\"native-first\"}\n",
+    )
+    .expect("native history should be written");
+    fs::write(
+        native_session_dir.join("native-first.jsonl"),
+        "native-first",
+    )
+    .expect("first native session should be written");
 
     let paths = AppPaths::discover().expect("app paths should resolve");
+    assert_eq!(paths.shared_codex_root, native_codex_home);
+
     let profile_home = paths.root.join("profiles/main");
 
     prepare_managed_codex_home(&paths, &profile_home)
-        .expect("first prepare should seed legacy sessions");
+        .expect("prepare should link managed profile to native Codex state");
 
-    let shared_session_dir = paths.shared_codex_root.join("sessions/2026/04/02");
-    let first_shared_session = shared_session_dir.join("legacy-first.jsonl");
     assert_eq!(
-        fs::read_to_string(&first_shared_session)
-            .expect("shared session should exist after initial seed"),
-        "legacy-first"
+        fs::read_link(profile_home.join("history.jsonl"))
+            .expect("profile history should be a symlink"),
+        paths.shared_codex_root.join("history.jsonl")
+    );
+    assert_eq!(
+        fs::read_link(profile_home.join("sessions")).expect("profile sessions should be a symlink"),
+        paths.shared_codex_root.join("sessions")
     );
 
-    let second_legacy_session = legacy_session_dir.join("legacy-second.jsonl");
-    fs::write(&second_legacy_session, "legacy-second")
-        .expect("second legacy session should be written");
+    fs::write(
+        paths.shared_codex_root.join("history.jsonl"),
+        concat!(
+            "{\"session_id\":\"native\",\"ts\":100,\"text\":\"native-first\"}\n",
+            "{\"session_id\":\"native\",\"ts\":200,\"text\":\"native-second\"}\n"
+        ),
+    )
+    .expect("native history should accept Codex writes after prepare");
+    fs::write(
+        native_session_dir.join("native-second.jsonl"),
+        "native-second",
+    )
+    .expect("second native session should be written");
 
-    prepare_managed_codex_home(&paths, &profile_home)
-        .expect("second prepare should keep startup cheap");
-
-    assert!(
-        !shared_session_dir.join("legacy-second.jsonl").exists(),
-        "populated shared session trees should not be re-seeded on every run"
+    assert_eq!(
+        fs::read_to_string(profile_home.join("history.jsonl"))
+            .expect("profile history should read native file through symlink"),
+        concat!(
+            "{\"session_id\":\"native\",\"ts\":100,\"text\":\"native-first\"}\n",
+            "{\"session_id\":\"native\",\"ts\":200,\"text\":\"native-second\"}\n"
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(profile_home.join("sessions/2026/04/02/native-second.jsonl"))
+            .expect("profile session path should read native session through symlink"),
+        "native-second"
     );
 }
 
 #[test]
-fn prepare_managed_codex_home_does_not_reseed_populated_legacy_history_every_run() {
+fn prepare_managed_codex_home_migrates_previous_prodex_default_shared_home_into_native_codex_home()
+{
     let temp_dir = TestDir::new();
     let home_dir = temp_dir.path.join("home");
     let prodex_home = temp_dir.path.join("prodex");
@@ -153,47 +182,63 @@ fn prepare_managed_codex_home_does_not_reseed_populated_legacy_history_every_run
     let _prodex_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string());
     let _shared_override_guard = TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME");
 
-    let legacy_history = home_dir.join(".codex/history.jsonl");
-    create_codex_home_if_missing(
-        legacy_history
-            .parent()
-            .expect("legacy history parent should exist"),
-    )
-    .expect("legacy history parent should be created");
+    let native_codex_home = home_dir.join(".codex");
+    let previous_prodex_shared_home = prodex_home.join(".codex");
+    create_codex_home_if_missing(&native_codex_home).expect("native Codex home should be created");
+    create_codex_home_if_missing(&previous_prodex_shared_home)
+        .expect("previous Prodex shared home should be created");
     fs::write(
-        &legacy_history,
-        "{\"session_id\":\"legacy\",\"ts\":100,\"text\":\"legacy-first\"}\n",
+        native_codex_home.join("history.jsonl"),
+        "{\"session_id\":\"native\",\"ts\":200,\"text\":\"native-root\"}\n",
     )
-    .expect("legacy history should be written");
+    .expect("native history should be written");
+    fs::write(
+        previous_prodex_shared_home.join("history.jsonl"),
+        "{\"session_id\":\"previous\",\"ts\":100,\"text\":\"previous-root\"}\n",
+    )
+    .expect("previous Prodex shared history should be written");
+
+    let native_session_dir = native_codex_home.join("sessions/2026/04/04");
+    let previous_session_dir = previous_prodex_shared_home.join("sessions/2026/04/03");
+    create_codex_home_if_missing(&native_session_dir).expect("native session dir should exist");
+    create_codex_home_if_missing(&previous_session_dir)
+        .expect("previous Prodex session dir should exist");
+    fs::write(native_session_dir.join("native.jsonl"), "native")
+        .expect("native session should be written");
+    fs::write(previous_session_dir.join("previous.jsonl"), "previous")
+        .expect("previous Prodex session should be written");
 
     let paths = AppPaths::discover().expect("app paths should resolve");
+    assert_eq!(paths.shared_codex_root, native_codex_home);
+
     let profile_home = paths.root.join("profiles/main");
-
     prepare_managed_codex_home(&paths, &profile_home)
-        .expect("first prepare should seed legacy history");
+        .expect("prepare should migrate previous Prodex shared state");
 
-    let shared_history = paths.shared_codex_root.join("history.jsonl");
     assert_eq!(
-        fs::read_to_string(&shared_history).expect("shared history should exist"),
-        "{\"session_id\":\"legacy\",\"ts\":100,\"text\":\"legacy-first\"}\n"
+        fs::read_link(profile_home.join("history.jsonl"))
+            .expect("profile history should be linked to native Codex history"),
+        paths.shared_codex_root.join("history.jsonl")
     );
-
-    fs::write(
-        &legacy_history,
-        concat!(
-            "{\"session_id\":\"legacy\",\"ts\":100,\"text\":\"legacy-first\"}\n",
-            "{\"session_id\":\"legacy\",\"ts\":200,\"text\":\"legacy-second\"}\n"
-        ),
-    )
-    .expect("updated legacy history should be written");
-
-    prepare_managed_codex_home(&paths, &profile_home)
-        .expect("second prepare should keep startup cheap");
-
     assert_eq!(
-        fs::read_to_string(&shared_history)
-            .expect("shared history should remain unchanged after reseed"),
-        "{\"session_id\":\"legacy\",\"ts\":100,\"text\":\"legacy-first\"}\n"
+        fs::read_to_string(paths.shared_codex_root.join("history.jsonl"))
+            .expect("merged native history should be readable"),
+        concat!(
+            "{\"session_id\":\"previous\",\"ts\":100,\"text\":\"previous-root\"}\n",
+            "{\"session_id\":\"native\",\"ts\":200,\"text\":\"native-root\"}"
+        )
+    );
+    assert!(
+        paths
+            .shared_codex_root
+            .join("sessions/2026/04/03/previous.jsonl")
+            .is_file()
+    );
+    assert!(
+        paths
+            .shared_codex_root
+            .join("sessions/2026/04/04/native.jsonl")
+            .is_file()
     );
 }
 

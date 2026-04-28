@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
+    set_runtime_upstream_no_proxy_override(args.upstream_no_proxy);
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let proxy = start_runtime_rotation_proxy_with_listen_addr(
@@ -9,6 +10,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         &args.current_profile,
         args.upstream_base_url.clone(),
         args.include_code_review,
+        args.upstream_no_proxy,
         args.listen_addr.as_deref(),
     )?;
     if proxy.owner_lock.is_none() {
@@ -17,11 +19,16 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
 
     let current_identity = runtime_current_prodex_binary_identity();
     let metadata = RuntimeBrokerMetadata {
-        broker_key: runtime_broker_key(&args.upstream_base_url, args.include_code_review),
+        broker_key: runtime_broker_key(
+            &args.upstream_base_url,
+            args.include_code_review,
+            args.upstream_no_proxy,
+        ),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         current_profile: args.current_profile.clone(),
         include_code_review: args.include_code_review,
+        upstream_no_proxy: args.upstream_no_proxy,
         instance_token: args.instance_token.clone(),
         admin_token: args.admin_token.clone(),
         prodex_version: current_identity.prodex_version.clone(),
@@ -38,6 +45,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         started_at: metadata.started_at,
         upstream_base_url: args.upstream_base_url.clone(),
         include_code_review: args.include_code_review,
+        upstream_no_proxy: args.upstream_no_proxy,
         current_profile: args.current_profile.clone(),
         instance_token: args.instance_token.clone(),
         admin_token: args.admin_token.clone(),
@@ -53,11 +61,12 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     runtime_proxy_log_to_path(
         &proxy.log_path,
         &format!(
-            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={} prodex_version={} executable_path={} executable_sha256={}",
+            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={} upstream_proxy_mode={} prodex_version={} executable_path={} executable_sha256={}",
             proxy.listen_addr,
             args.broker_key,
             args.current_profile,
             args.include_code_review,
+            runtime_upstream_proxy_mode_label(args.upstream_no_proxy),
             metadata.prodex_version.as_deref().unwrap_or("-"),
             metadata.executable_path.as_deref().unwrap_or("-"),
             metadata.executable_sha256.as_deref().unwrap_or("-")
@@ -72,6 +81,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             "listen_addr": proxy.listen_addr.to_string(),
             "current_profile": args.current_profile,
             "include_code_review": args.include_code_review,
+            "upstream_proxy_mode": runtime_upstream_proxy_mode_label(args.upstream_no_proxy),
             "upstream_base_url": args.upstream_base_url,
             "prodex_version": metadata.prodex_version,
             "executable_path": metadata.executable_path,
