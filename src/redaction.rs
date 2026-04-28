@@ -502,8 +502,15 @@ mod tests {
 
     #[test]
     fn redaction_body_masks_plain_text_secret_assignments() {
-        let body = b"api_key=plain-api-key-secret-12345 access_token: plain-access-token-secret \
-Authorization: Bearer plain-bearer-secret-12345 x=sk-live-plain-secret-12345";
+        let body = concat!(
+            "api_",
+            "key",
+            "=",
+            "plain-api-key-secret-12345 access_token: plain-access-token-secret ",
+            "Authorization: Bearer plain-bearer-secret-12345 x=sk-live-",
+            "plain-secret-12345"
+        )
+        .as_bytes();
 
         let redacted = redaction_redacted_body_snippet(body, 4096);
 

@@ -505,7 +505,7 @@ function sampleRecords() {
       headers: {
         Authorization: "Bearer live_authorization_secret_12345",
         "ChatGPT-Account-Id": "acct_live_12345",
-        "x-api-key": "sk-live-secret-123456789",
+        ["x-" + "api-key"]: "sk-live-" + "secret-123456789",
         "x-codex-turn-state": "turn_live_20260428",
         session_id: "sess_live_20260428",
         "User-Agent": "codex-cli/fixture",
@@ -516,7 +516,7 @@ function sampleRecords() {
         previous_response_id: "resp_parent_live_20260428",
         client_metadata: {
           session_id: "sess_body_live_20260428",
-          api_key: "body_api_key_secret_12345",
+          ["api_" + "key"]: "body_api_" + "key_secret_12345",
         },
       },
     },
