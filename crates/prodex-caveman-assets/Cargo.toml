@@ -1,0 +1,16 @@
+[package]
+name = "prodex-caveman-assets"
+version.workspace = true
+edition.workspace = true
+description = "Embedded Caveman plugin assets for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_caveman_assets"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+serde_json = "1.0.149"
+

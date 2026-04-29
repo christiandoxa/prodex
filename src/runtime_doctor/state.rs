@@ -172,8 +172,11 @@ impl RuntimeDoctorCollector {
         if let Some(paths) = self.paths.as_ref() {
             collect_runtime_doctor_state(paths, &mut summary);
         }
-        diagnosis::runtime_doctor_finalize_summary(&mut summary);
-        diagnosis::runtime_doctor_append_pointer_note(&mut summary, self.pointer_note());
+        prodex_runtime_doctor::diagnosis::runtime_doctor_finalize_summary(&mut summary);
+        prodex_runtime_doctor::diagnosis::runtime_doctor_append_pointer_note(
+            &mut summary,
+            self.pointer_note(),
+        );
         summary
     }
 }
@@ -662,8 +665,8 @@ fn runtime_doctor_summary_from_log(
     tail_bytes: usize,
 ) -> RuntimeDoctorSummary {
     if let Some(log_path) = log_path.filter(|path| path.exists()) {
-        match parsing::read_runtime_log_tail(log_path, tail_bytes) {
-            Ok(tail) => parsing::summarize_runtime_log_tail(&tail),
+        match prodex_runtime_doctor::read_runtime_log_tail(log_path, tail_bytes) {
+            Ok(tail) => prodex_runtime_doctor::summarize_runtime_log_tail(&tail),
             Err(err) => RuntimeDoctorSummary {
                 diagnosis: format!("Failed to read the latest runtime log tail: {err}"),
                 ..RuntimeDoctorSummary::default()

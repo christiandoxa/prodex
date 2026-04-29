@@ -1,0 +1,16 @@
+[package]
+name = "prodex-runtime-anthropic"
+version.workspace = true
+edition.workspace = true
+description = "Anthropic compatibility translation helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "runtime_anthropic"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+base64 = "0.22.1"
+serde_json = "1.0.149"

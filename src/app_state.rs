@@ -95,37 +95,6 @@ pub(crate) struct ResponseProfileBinding {
     pub(crate) bound_at: i64,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct AppPaths {
-    pub(crate) root: PathBuf,
-    pub(crate) state_file: PathBuf,
-    pub(crate) managed_profiles_root: PathBuf,
-    pub(crate) shared_codex_root: PathBuf,
-    pub(crate) legacy_shared_codex_root: PathBuf,
-}
-
-impl AppPaths {
-    pub(crate) fn discover() -> Result<Self> {
-        let root = match env::var_os("PRODEX_HOME") {
-            Some(path) => absolutize(PathBuf::from(path))?,
-            None => home_dir()
-                .context("failed to determine home directory")?
-                .join(DEFAULT_PRODEX_DIR),
-        };
-
-        Ok(Self {
-            state_file: root.join("state.json"),
-            managed_profiles_root: root.join("profiles"),
-            shared_codex_root: match env::var_os("PRODEX_SHARED_CODEX_HOME") {
-                Some(path) => resolve_shared_codex_root(&root, PathBuf::from(path)),
-                None => prodex_default_shared_codex_root(&root)?,
-            },
-            legacy_shared_codex_root: root.join("shared"),
-            root,
-        })
-    }
-}
-
 impl AppState {
     pub(crate) fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>> {
         cleanup_stale_login_dirs(paths);

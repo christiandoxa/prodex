@@ -18,33 +18,15 @@ pub(crate) fn normalize_path_for_compare(path: &Path) -> PathBuf {
 }
 
 pub(crate) fn absolutize(path: PathBuf) -> Result<PathBuf> {
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    let current_dir = env::current_dir().context("failed to determine current directory")?;
-    Ok(current_dir.join(path))
+    prodex_core::absolutize(path)
 }
 
 pub(crate) fn legacy_default_codex_home() -> Result<PathBuf> {
-    Ok(home_dir()
-        .context("failed to determine home directory")?
-        .join(DEFAULT_CODEX_DIR))
-}
-
-pub(crate) fn prodex_default_shared_codex_root(_root: &Path) -> Result<PathBuf> {
-    legacy_default_codex_home()
+    prodex_core::legacy_default_codex_home()
 }
 
 pub(crate) fn prodex_previous_default_shared_codex_root(root: &Path) -> PathBuf {
-    root.join(DEFAULT_CODEX_DIR)
-}
-
-pub(crate) fn resolve_shared_codex_root(root: &Path, path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    }
+    prodex_core::prodex_previous_default_shared_codex_root(root)
 }
 
 pub(crate) fn select_default_codex_home(

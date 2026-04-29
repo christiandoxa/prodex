@@ -41,6 +41,7 @@ pub(crate) fn runtime_proxy_claude_model_override() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_normalize_responses_reasoning_effort(
     effort: &str,
 ) -> Option<&'static str> {
@@ -57,6 +58,7 @@ pub(crate) fn runtime_proxy_normalize_responses_reasoning_effort(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_claude_reasoning_effort_override() -> Option<String> {
     env::var("PRODEX_CLAUDE_REASONING_EFFORT")
         .ok()
@@ -65,6 +67,7 @@ pub(crate) fn runtime_proxy_claude_reasoning_effort_override() -> Option<String>
         })
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_claude_native_client_tool_enabled(enabled_tokens: &[&str]) -> bool {
     let Some(value) = env::var("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS").ok() else {
         return false;
@@ -85,10 +88,12 @@ pub(crate) fn runtime_proxy_claude_native_client_tool_enabled(enabled_tokens: &[
     enabled
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_claude_native_shell_enabled() -> bool {
     runtime_proxy_claude_native_client_tool_enabled(&["shell", "bash"])
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_claude_native_computer_enabled() -> bool {
     runtime_proxy_claude_native_client_tool_enabled(&["computer"])
 }
@@ -326,6 +331,7 @@ pub(crate) fn runtime_proxy_responses_model_descriptors()
     ]
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_claude_target_model(requested_model: &str) -> String {
     if let Some(override_model) = runtime_proxy_claude_model_override() {
         return override_model;
@@ -363,6 +369,7 @@ pub(crate) fn runtime_proxy_claude_target_model(requested_model: &str) -> String
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_responses_model_supports_native_computer_tool(model_id: &str) -> bool {
     model_id.trim().eq_ignore_ascii_case("gpt-5.4")
 }

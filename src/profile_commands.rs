@@ -20,9 +20,9 @@ pub(crate) use self::copilot::{
 };
 #[cfg(test)]
 use self::import_export::{
-    PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, build_profile_export_payload,
-    decode_profile_export_envelope, derive_profile_export_key, import_profile_export_payload,
-    serialize_profile_export_payload, validate_profile_export_header,
+    build_profile_export_payload, decode_profile_export_envelope, derive_profile_export_key,
+    import_profile_export_payload, serialize_profile_export_payload,
+    validate_profile_export_header,
 };
 pub(crate) use self::import_export::{
     count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
@@ -42,6 +42,8 @@ use aes_gcm_siv::aead::Aead;
 use aes_gcm_siv::aead::KeyInit;
 #[cfg(test)]
 use aes_gcm_siv::{Aes256GcmSiv, Nonce};
+#[cfg(test)]
+use prodex_profile_export::{PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ProfileExportPayload {
@@ -62,25 +64,8 @@ pub(super) struct ExportedProfile {
     auth_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "payload_kind", rename_all = "snake_case")]
-pub(super) enum ProfileExportEnvelope {
-    Plain {
-        format: String,
-        version: u32,
-        payload: ProfileExportPayload,
-    },
-    Encrypted {
-        format: String,
-        version: u32,
-        cipher: String,
-        kdf: String,
-        iterations: u32,
-        salt_base64: String,
-        nonce_base64: String,
-        ciphertext_base64: String,
-    },
-}
+pub(super) type ProfileExportEnvelope =
+    prodex_profile_export::ProfileExportEnvelope<ProfileExportPayload>;
 
 #[derive(Debug)]
 pub(super) struct StagedImportedProfile {

@@ -296,6 +296,7 @@ pub(super) fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {
     ]
 }
 
+#[allow(dead_code)]
 pub(super) fn runtime_proxy_claude_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "x-claude-code-session-id")
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "session_id"))

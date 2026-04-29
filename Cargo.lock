@@ -1374,11 +1374,16 @@ dependencies = [
  "criterion",
  "dirs",
  "fs2",
- "getrandom 0.4.2",
- "pbkdf2",
+ "prodex-caveman-assets",
  "prodex-codex-config",
+ "prodex-core",
+ "prodex-profile-export",
  "prodex-redaction",
+ "prodex-runtime-anthropic",
+ "prodex-runtime-doctor",
+ "prodex-runtime-mem",
  "prodex-runtime-metrics",
+ "prodex-runtime-policy",
  "prodex-secret-store",
  "prodex-terminal-ui",
  "reqwest",
@@ -1393,8 +1398,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-caveman-assets"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
 name = "prodex-codex-config"
 version = "0.67.0"
+
+[[package]]
+name = "prodex-core"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+]
+
+[[package]]
+name = "prodex-profile-export"
+version = "0.67.0"
+dependencies = [
+ "aes-gcm-siv",
+ "anyhow",
+ "base64",
+ "getrandom 0.4.2",
+ "pbkdf2",
+ "serde",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "prodex-redaction"
@@ -1404,8 +1439,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-runtime-anthropic"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "serde_json",
+]
+
+[[package]]
+name = "prodex-runtime-doctor"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "prodex-terminal-ui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prodex-runtime-mem"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "serde_json",
+]
+
+[[package]]
 name = "prodex-runtime-metrics"
 version = "0.67.0"
+
+[[package]]
+name = "prodex-runtime-policy"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+ "prodex-secret-store",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "prodex-runtime-proxy"
+version = "0.67.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "prodex-secret-store"

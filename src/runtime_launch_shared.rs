@@ -1,4 +1,6 @@
-use super::*;
+use std::path::PathBuf;
+
+use crate::{AppPaths, RuntimeProxyEndpoint};
 
 pub(super) struct RuntimeLaunchRequest<'a> {
     pub(super) profile: Option<&'a str>,

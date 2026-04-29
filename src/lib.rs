@@ -85,6 +85,7 @@ pub(crate) use cli_args::*;
 pub(crate) use codex_config::*;
 pub(crate) use core_constants::*;
 use housekeeping::*;
+pub(crate) use prodex_core::AppPaths;
 use profile_commands::*;
 use profile_identity::*;
 use proxy_config::*;
