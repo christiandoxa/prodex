@@ -17,7 +17,7 @@ const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
 ];
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
-    let local_provider_hosts = local_provider_proxy_bypass_hosts(&args);
+    let local_provider_hosts = local_proxy_bypass_hosts_from_args(&args);
     ChildProcessPlan::new(codex_bin(), codex_home)
         .with_args(args)
         .with_extra_env(local_proxy_bypass_env_for_hosts(&local_provider_hosts))
@@ -54,15 +54,37 @@ where
         .collect()
 }
 
-fn local_provider_proxy_bypass_hosts(args: &[OsString]) -> Vec<String> {
-    codex_cli_config_override_value(
-        args,
-        &format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url"),
-    )
-    .and_then(|base_url| reqwest::Url::parse(&base_url).ok())
-    .and_then(|parsed| parsed.host_str().map(str::to_string))
-    .into_iter()
-    .collect()
+fn local_proxy_bypass_hosts_from_args(args: &[OsString]) -> Vec<String> {
+    let mut hosts = Vec::new();
+    let local_provider_key = format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url");
+    for key in [
+        "chatgpt_base_url",
+        "openai_base_url",
+        local_provider_key.as_str(),
+    ] {
+        if let Some(base_url) = codex_cli_config_override_value(args, key) {
+            push_proxy_bypass_url_hosts(&mut hosts, &base_url);
+        }
+    }
+    hosts
+}
+
+fn push_proxy_bypass_url_hosts(parts: &mut Vec<String>, base_url: &str) {
+    let Ok(parsed) = reqwest::Url::parse(base_url) else {
+        return;
+    };
+    let Some(host) = parsed.host_str() else {
+        return;
+    };
+    push_proxy_bypass_part(parts, host);
+    if let Some(port) = parsed.port() {
+        let host_port = if host.contains(':') {
+            format!("[{host}]:{port}")
+        } else {
+            format!("{host}:{port}")
+        };
+        push_proxy_bypass_part(parts, &host_port);
+    }
 }
 
 fn push_proxy_bypass_parts(parts: &mut Vec<String>, value: &str) {
@@ -451,14 +473,52 @@ mod tests {
                 .iter()
                 .find(|(key, _)| key == "NO_PROXY")
                 .map(|(_, value)| value.to_string_lossy().into_owned()),
-            Some("example.com,127.0.0.1,localhost,::1,host.docker.internal".to_string())
+            Some(
+                "example.com,127.0.0.1,localhost,::1,host.docker.internal,host.docker.internal:11434"
+                    .to_string()
+            )
         );
         assert_eq!(
             plan.extra_env
                 .iter()
                 .find(|(key, _)| key == "no_proxy")
                 .map(|(_, value)| value.to_string_lossy().into_owned()),
-            Some("example.com,127.0.0.1,localhost,::1,host.docker.internal".to_string())
+            Some(
+                "example.com,127.0.0.1,localhost,::1,host.docker.internal,host.docker.internal:11434"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn codex_child_plan_adds_runtime_proxy_ports_to_proxy_bypass_env() {
+        let _env_guard = TestEnvVarGuard::lock();
+        let _http_proxy_guard = TestEnvVarGuard::set("http_proxy", "http://127.0.0.1:1086");
+        let _https_proxy_guard = TestEnvVarGuard::set("https_proxy", "http://127.0.0.1:1086");
+        let _no_proxy_guard = TestEnvVarGuard::unset("NO_PROXY");
+        let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
+        let args = vec![
+            OsString::from("-c"),
+            OsString::from("chatgpt_base_url=\"http://127.0.0.1:64550/backend-api\""),
+            OsString::from("-c"),
+            OsString::from("openai_base_url=\"http://127.0.0.1:64550/backend-api/prodex\""),
+        ];
+
+        let plan = codex_child_plan(PathBuf::from("/tmp/prodex-codex-home"), args);
+
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "NO_PROXY")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("127.0.0.1,localhost,::1,127.0.0.1:64550".to_string())
+        );
+        assert_eq!(
+            plan.extra_env
+                .iter()
+                .find(|(key, _)| key == "no_proxy")
+                .map(|(_, value)| value.to_string_lossy().into_owned()),
+            Some("127.0.0.1,localhost,::1,127.0.0.1:64550".to_string())
         );
     }
 

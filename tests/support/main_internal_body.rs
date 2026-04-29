@@ -1778,6 +1778,50 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
 }
 
 #[test]
+fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "version-lease-test";
+    let lease_dir = runtime_broker_lease_dir(&paths, broker_key);
+    fs::create_dir_all(&lease_dir).expect("lease dir should exist");
+    let live_lease = lease_dir.join(format!("{}-child.lease", std::process::id()));
+    fs::write(&live_lease, "live").expect("live child lease should write");
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        listen_addr: "127.0.0.1:33475".to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        current_profile: "main".to_string(),
+        instance_token: "old-instance".to_string(),
+        admin_token: "secret".to_string(),
+        prodex_version: Some("0.0.0-old".to_string()),
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+    };
+
+    let outcome =
+        replace_runtime_broker_if_version_mismatch_with_health(&paths, broker_key, &registry, None);
+
+    assert_eq!(
+        outcome,
+        RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests
+    );
+    assert!(
+        live_lease.exists(),
+        "live child lease must keep the old broker available for its Codex TUI"
+    );
+}
+
+#[test]
 fn runtime_broker_process_args_encode_optional_boolean_switches() {
     let without_review = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
         current_profile: "main",

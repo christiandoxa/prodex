@@ -214,8 +214,16 @@ impl RuntimeProcessPlatform for RuntimeProcessWindows {
 
 #[cfg(not(any(target_os = "linux", windows)))]
 impl RuntimeProcessPlatform for RuntimeProcessFallback {
-    fn pid_alive(_pid: u32) -> bool {
-        false
+    fn pid_alive(pid: u32) -> bool {
+        let pid_value = pid.to_string();
+        Command::new("kill")
+            .arg("-0")
+            .arg(pid_value)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
     }
 
     fn executable_path(_pid: u32) -> Option<PathBuf> {
@@ -587,9 +595,12 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
         return RuntimeBrokerVersionGuardOutcome::Compatible;
     }
 
-    if health.is_some_and(|health| {
-        health.instance_token == registry.instance_token && health.active_requests > 0
-    }) {
+    let active_requests = health
+        .filter(|health| health.instance_token == registry.instance_token)
+        .map(|health| health.active_requests)
+        .unwrap_or_default();
+    let live_leases = cleanup_runtime_broker_stale_leases(paths, broker_key);
+    if active_requests > 0 || live_leases > 0 {
         return RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests;
     }
 
