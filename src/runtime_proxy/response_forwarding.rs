@@ -249,13 +249,15 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
     let reader = prefetch.into_reader(prelude.clone());
     let reader = RuntimeSseTapReader::new(
         reader,
-        shared.clone(),
-        profile_name.to_string(),
-        &prelude,
-        &response_ids,
-        request_previous_response_id,
-        response_turn_state.as_deref(),
-        request_id,
+        RuntimeSseTapReaderInit {
+            shared: shared.clone(),
+            profile_name: profile_name.to_string(),
+            prelude: &prelude,
+            remembered_response_ids: &response_ids,
+            request_previous_response_id,
+            turn_state: response_turn_state.as_deref(),
+            request_id,
+        },
     );
     let response = RuntimeResponsesAttempt::Success {
         profile_name: profile_name.to_string(),
@@ -535,17 +537,30 @@ impl Drop for RuntimePrefetchReader {
     }
 }
 
+pub(crate) struct RuntimeSseTapReaderInit<'a> {
+    pub(crate) shared: RuntimeRotationProxyShared,
+    pub(crate) profile_name: String,
+    pub(crate) prelude: &'a [u8],
+    pub(crate) remembered_response_ids: &'a [String],
+    pub(crate) request_previous_response_id: Option<&'a str>,
+    pub(crate) turn_state: Option<&'a str>,
+    pub(crate) request_id: u64,
+}
+
 impl RuntimeSseTapReader {
     pub(crate) fn new(
         inner: impl Read + Send + 'static,
-        shared: RuntimeRotationProxyShared,
-        profile_name: String,
-        prelude: &[u8],
-        remembered_response_ids: &[String],
-        request_previous_response_id: Option<&str>,
-        turn_state: Option<&str>,
-        request_id: u64,
+        init: RuntimeSseTapReaderInit<'_>,
     ) -> Self {
+        let RuntimeSseTapReaderInit {
+            shared,
+            profile_name,
+            prelude,
+            remembered_response_ids,
+            request_previous_response_id,
+            turn_state,
+            request_id,
+        } = init;
         let mut state = RuntimeSseTapState {
             request_id,
             remembered_response_ids: remembered_response_ids.iter().cloned().collect(),
@@ -996,13 +1011,15 @@ mod tests {
         ];
         let mut reader = RuntimeSseTapReader::new(
             ChunkedReader::new(chunks),
-            shared.clone(),
-            "test".to_string(),
-            &[],
-            &[],
-            None,
-            None,
-            1,
+            RuntimeSseTapReaderInit {
+                shared: shared.clone(),
+                profile_name: "test".to_string(),
+                prelude: &[],
+                remembered_response_ids: &[],
+                request_previous_response_id: None,
+                turn_state: None,
+                request_id: 1,
+            },
         );
 
         let mut sink = Vec::new();

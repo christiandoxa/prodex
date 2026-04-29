@@ -386,9 +386,11 @@ fn write_caveman_plugin_files(root: &Path, files: &[EmbeddedCavemanFile]) -> Res
 fn caveman_full_assets_enabled() -> bool {
     env::var(PRODEX_CAVEMAN_FULL_ASSETS_ENV)
         .ok()
-        .is_some_and(|value| match value.trim().to_ascii_lowercase().as_str() {
-            "" | "0" | "false" | "no" | "off" => false,
-            _ => true,
+        .is_some_and(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "" | "0" | "false" | "no" | "off"
+            )
         })
 }
 

@@ -206,19 +206,46 @@ impl RuntimeResponsePlannedCandidate {
     }
 }
 
+pub(crate) struct RuntimeResponseCandidateExecutionOptions<'a, F>
+where
+    F: Fn(&str) -> u64,
+{
+    pub(crate) prompt_cache_key: Option<&'a str>,
+    pub(crate) prompt_cache_owner_profile: Option<&'a str>,
+    pub(crate) jitter_for: F,
+}
+
+pub(crate) fn runtime_response_candidate_execution_options<'a, F>(
+    prompt_cache_key: Option<&'a str>,
+    prompt_cache_owner_profile: Option<&'a str>,
+    jitter_for: F,
+) -> RuntimeResponseCandidateExecutionOptions<'a, F>
+where
+    F: Fn(&str) -> u64,
+{
+    RuntimeResponseCandidateExecutionOptions {
+        prompt_cache_key,
+        prompt_cache_owner_profile,
+        jitter_for,
+    }
+}
+
 pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
     selection_state: &RuntimeRouteSelectionCatalog,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     inflight_soft_limit: usize,
     ready_profile_candidates: Vec<ReadyProfileCandidate>,
-    prompt_cache_key: Option<&str>,
-    prompt_cache_owner_profile: Option<&str>,
-    jitter_for: F,
+    options: RuntimeResponseCandidateExecutionOptions<'_, F>,
 ) -> RuntimeResponseCandidateExecutionPlan
 where
     F: Fn(&str) -> u64,
 {
+    let RuntimeResponseCandidateExecutionOptions {
+        prompt_cache_key,
+        prompt_cache_owner_profile,
+        jitter_for,
+    } = options;
     let available_candidates = ready_profile_candidates
         .into_iter()
         .enumerate()
@@ -495,9 +522,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
-            None,
-            None,
-            |_| 0,
+            runtime_response_candidate_execution_options(None, None, |_| 0),
         );
 
         assert_eq!(
@@ -559,9 +584,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
-            None,
-            None,
-            |_| 0,
+            runtime_response_candidate_execution_options(None, None, |_| 0),
         );
 
         assert_eq!(
@@ -682,9 +705,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
-            None,
-            None,
-            |_| 0,
+            runtime_response_candidate_execution_options(None, None, |_| 0),
         );
 
         assert_eq!(
@@ -733,9 +754,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
-            Some(prompt_cache_key),
-            None,
-            |_| 0,
+            runtime_response_candidate_execution_options(Some(prompt_cache_key), None, |_| 0),
         );
 
         let mut expected = vec!["main", "second", "third"];
@@ -792,9 +811,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
-            Some(prompt_cache_key),
-            None,
-            |_| 0,
+            runtime_response_candidate_execution_options(Some(prompt_cache_key), None, |_| 0),
         );
 
         assert_eq!(
@@ -878,9 +895,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
-            None,
-            None,
-            |_| 0,
+            runtime_response_candidate_execution_options(None, None, |_| 0),
         );
 
         assert_eq!(

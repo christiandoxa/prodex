@@ -74,13 +74,15 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
             b"\"}}\r\n\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n\r\n";
     let mut reader = RuntimeSseTapReader::new(
         Cursor::new(prelude.to_vec()).chain(Cursor::new(remainder.to_vec())),
-        shared.clone(),
-        "second".to_string(),
-        prelude,
-        &[],
-        None,
-        None,
-        1,
+        RuntimeSseTapReaderInit {
+            shared: shared.clone(),
+            profile_name: "second".to_string(),
+            prelude,
+            remembered_response_ids: &[],
+            request_previous_response_id: None,
+            turn_state: None,
+            request_id: 1,
+        },
     );
     let mut body = Vec::new();
     reader

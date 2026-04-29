@@ -1182,9 +1182,11 @@ fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
         route_kind,
         inflight_soft_limit,
         ready_candidates,
-        prompt_cache_key,
-        runtime_prompt_cache_bound_profile(prompt_cache_key).as_deref(),
-        |name| runtime_profile_selection_jitter(shared, name, route_kind),
+        runtime_response_candidate_execution_options(
+            prompt_cache_key,
+            runtime_prompt_cache_bound_profile(prompt_cache_key).as_deref(),
+            |name| runtime_profile_selection_jitter(shared, name, route_kind),
+        ),
     );
 
     for candidate in candidate_plan.ready_candidates {
