@@ -791,7 +791,7 @@ pub(super) fn stage_imported_profiles(
     let mut staged_profiles = Vec::with_capacity(payload.profiles.len());
     let mut auth_updates = Vec::new();
     let mut resolved_profile_names = BTreeMap::new();
-    let mut email_targets = BTreeMap::new();
+    let mut identity_targets = BTreeMap::new();
     let result = (|| -> Result<()> {
         for exported in &payload.profiles {
             validate_profile_name(&exported.name)?;
@@ -812,7 +812,8 @@ pub(super) fn stage_imported_profiles(
                         )
                     })?;
             }
-            let resolved_email = resolved_exported_profile_email(exported);
+            let resolved_identity = resolved_exported_profile_identity(exported);
+            let resolved_email = resolved_identity.email.clone();
 
             if let Some(existing_profile) = state.profiles.get(&exported.name) {
                 if !provider.supports_codex_runtime()
@@ -828,22 +829,21 @@ pub(super) fn stage_imported_profiles(
                     exported.auth_json.clone(),
                 );
                 resolved_profile_names.insert(exported.name.clone(), exported.name.clone());
-                if let Some(email) = resolved_email.as_deref() {
-                    email_targets.insert(
-                        normalize_email(email),
-                        ImportEmailTarget::Existing(exported.name.clone()),
+                if let Some(identity_key) = import_identity_target_key(&resolved_identity) {
+                    identity_targets.insert(
+                        identity_key,
+                        ImportIdentityTarget::Existing(exported.name.clone()),
                     );
                 }
                 continue;
             }
 
-            if provider.supports_codex_runtime()
-                && let Some(email) = resolved_email.as_deref()
-            {
-                let normalized_email = normalize_email(email);
-                if let Some(target) = email_targets.get(&normalized_email) {
+            if provider.supports_codex_runtime() {
+                if let Some(identity_key) = import_identity_target_key(&resolved_identity)
+                    && let Some(target) = identity_targets.get(&identity_key)
+                {
                     match target {
-                        ImportEmailTarget::Existing(profile_name) => {
+                        ImportIdentityTarget::Existing(profile_name) => {
                             queue_existing_profile_auth_update(
                                 &mut auth_updates,
                                 profile_name,
@@ -854,7 +854,7 @@ pub(super) fn stage_imported_profiles(
                                 .insert(exported.name.clone(), profile_name.clone());
                             continue;
                         }
-                        ImportEmailTarget::PendingNew(index) => {
+                        ImportIdentityTarget::PendingNew(index) => {
                             let staged: &mut StagedImportedProfile =
                                 staged_profiles.get_mut(*index).with_context(|| {
                                     format!(
@@ -874,11 +874,15 @@ pub(super) fn stage_imported_profiles(
                     }
                 }
 
-                if let Some(existing_profile_name) = find_profile_by_email(state, email)? {
-                    email_targets.insert(
-                        normalized_email,
-                        ImportEmailTarget::Existing(existing_profile_name.clone()),
-                    );
+                if let Some(existing_profile_name) =
+                    find_profile_by_identity(state, &resolved_identity)?
+                {
+                    if let Some(identity_key) = import_identity_target_key(&resolved_identity) {
+                        identity_targets.insert(
+                            identity_key,
+                            ImportIdentityTarget::Existing(existing_profile_name.clone()),
+                        );
+                    }
                     queue_existing_profile_auth_update(
                         &mut auth_updates,
                         &existing_profile_name,
@@ -916,12 +920,9 @@ pub(super) fn stage_imported_profiles(
             });
             resolved_profile_names.insert(exported.name.clone(), exported.name.clone());
             if provider.supports_codex_runtime()
-                && let Some(email) = resolved_email
+                && let Some(identity_key) = import_identity_target_key(&resolved_identity)
             {
-                email_targets.insert(
-                    normalize_email(&email),
-                    ImportEmailTarget::PendingNew(new_index),
-                );
+                identity_targets.insert(identity_key, ImportIdentityTarget::PendingNew(new_index));
             }
         }
         Ok(())
@@ -947,6 +948,23 @@ fn unique_import_staging_home(paths: &AppPaths, profile_name: &str) -> PathBuf {
         profile_name,
         runtime_random_token("profile")
     ))
+}
+
+fn import_identity_target_key(identity: &ProfileIdentity) -> Option<String> {
+    identity
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|account_id| !account_id.is_empty())
+        .map(|account_id| format!("account:{account_id}"))
+        .or_else(|| {
+            identity
+                .email
+                .as_deref()
+                .map(str::trim)
+                .filter(|email| !email.is_empty())
+                .map(|email| format!("email:{}", normalize_email(email)))
+        })
 }
 
 fn write_imported_auth_update_journal(

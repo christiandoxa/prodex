@@ -2173,6 +2173,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 0, 3_600, 80, 86_400,
             ))),
@@ -2185,6 +2186,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 7_200, 95, 172_800,
             ))),
@@ -2197,6 +2199,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Err("boom".to_string()),
             fetched_at: 1_700_000_000,
         },
@@ -2207,6 +2210,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 1_800, 95, 259_200,
             ))),
@@ -2713,6 +2717,7 @@ fn quota_reports_include_pool_summary_lines() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(alpha.clone())),
             fetched_at: 1_700_000_100,
         },
@@ -2723,6 +2728,7 @@ fn quota_reports_include_pool_summary_lines() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(beta.clone())),
             fetched_at: last_update,
         },
@@ -2733,6 +2739,7 @@ fn quota_reports_include_pool_summary_lines() {
                 label: "api-key".to_string(),
                 quota_compatible: false,
             },
+            workspace_id: None,
             result: Err("auth mode is not quota-compatible".to_string()),
             fetched_at: 1_700_000_090,
         },
@@ -2759,6 +2766,84 @@ fn quota_reports_include_pool_summary_lines() {
 }
 
 #[test]
+fn quota_reports_detail_shows_workspace_only_for_duplicate_account_email() {
+    let mut first_usage = usage_with_main_windows(90, 7_200, 95, 172_800);
+    first_usage.email = Some("same@example.com".to_string());
+    let mut second_usage = usage_with_main_windows(80, 3_600, 88, 86_400);
+    second_usage.email = Some("same@example.com".to_string());
+    let mut same_workspace_first_usage = usage_with_main_windows(75, 3_600, 86, 86_400);
+    same_workspace_first_usage.email = Some("same-workspace@example.com".to_string());
+    let mut same_workspace_second_usage = usage_with_main_windows(74, 3_600, 85, 86_400);
+    same_workspace_second_usage.email = Some("same-workspace@example.com".to_string());
+    let mut solo_usage = usage_with_main_windows(70, 1_800, 78, 259_200);
+    solo_usage.email = Some("solo@example.com".to_string());
+    let reports = vec![
+        QuotaReport {
+            name: "workspace-one".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: Some("acct_workspace_one_123456789".to_string()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(first_usage)),
+            fetched_at: 1_700_000_100,
+        },
+        QuotaReport {
+            name: "workspace-two".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: Some("acct_workspace_two_987654321".to_string()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(second_usage)),
+            fetched_at: 1_700_000_100,
+        },
+        QuotaReport {
+            name: "same-workspace-one".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: Some("acct_same_workspace".to_string()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(same_workspace_first_usage)),
+            fetched_at: 1_700_000_100,
+        },
+        QuotaReport {
+            name: "same-workspace-two".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: Some("acct_same_workspace".to_string()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(same_workspace_second_usage)),
+            fetched_at: 1_700_000_100,
+        },
+        QuotaReport {
+            name: "solo".to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: Some("acct_solo".to_string()),
+            result: Ok(ProviderQuotaSnapshot::OpenAi(solo_usage)),
+            fetched_at: 1_700_000_100,
+        },
+    ];
+
+    let output = render_quota_reports_with_layout(&reports, true, None, 160);
+
+    assert!(output.contains("workspace: acct_workspa...456789"));
+    assert!(output.contains("workspace: acct_workspa...654321"));
+    assert!(!output.contains("workspace: acct_same_workspace"));
+    assert!(!output.contains("workspace: acct_solo"));
+}
+
+#[test]
 fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
     let reports = vec![
         QuotaReport {
@@ -2768,6 +2853,7 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 7_200, 95, 172_800,
             ))),
@@ -2780,6 +2866,7 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
                 label: "copilot".to_string(),
                 quota_compatible: false,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::Copilot(CopilotUserInfo {
                 login: Some("copilot-user".to_string()),
                 access_type_sku: Some("free_limited_copilot".to_string()),
@@ -2823,6 +2910,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 0, 3_600, 80, 86_400,
             ))),
@@ -2835,6 +2923,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 7_200, 95, 172_800,
             ))),
@@ -2847,6 +2936,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Err("boom".to_string()),
             fetched_at: 1_700_000_000,
         },
@@ -2857,6 +2947,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 1_800, 95, 259_200,
             ))),
@@ -2883,6 +2974,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 0, 3_600, 80, 86_400,
             ))),
@@ -2895,6 +2987,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 7_200, 95, 172_800,
             ))),
@@ -2907,6 +3000,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Err("boom".to_string()),
             fetched_at: 1_700_000_000,
         },
@@ -2917,6 +3011,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 1_800, 95, 259_200,
             ))),
@@ -2951,6 +3046,7 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 1_800, 95, 259_200,
             ))),
@@ -2963,6 +3059,7 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 0, 3_600, 80, 86_400,
             ))),

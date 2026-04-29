@@ -52,6 +52,7 @@ pub(crate) struct QuotaReport {
     pub(crate) name: String,
     pub(crate) active: bool,
     pub(crate) auth: AuthSummary,
+    pub(crate) workspace_id: Option<String>,
     pub(crate) result: std::result::Result<ProviderQuotaSnapshot, String>,
     pub(crate) fetched_at: i64,
 }
@@ -106,12 +107,19 @@ pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) ->
 
     map_parallel(jobs, |job| {
         let auth = job.provider.auth_summary(&job.codex_home);
+        let workspace_id = match job.provider {
+            ProfileProvider::Openai => read_profile_account_id_from_auth(&job.codex_home)
+                .ok()
+                .flatten(),
+            ProfileProvider::Copilot { .. } => None,
+        };
         let result = fetch_profile_quota(&job.provider, &job.codex_home, base_url.as_deref())
             .map_err(|err| err.to_string());
         QuotaReport {
             name: job.name,
             active: job.active,
             auth,
+            workspace_id,
             result,
             fetched_at: Local::now().timestamp(),
         }

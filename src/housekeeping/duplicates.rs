@@ -68,7 +68,24 @@ fn select_canonical_duplicate_profile(
     })
 }
 
-fn resolve_cleanup_profile_emails(state: &mut AppState) -> Vec<(String, String)> {
+fn cleanup_duplicate_identity_key(identity: &ProfileIdentity) -> Option<String> {
+    identity
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|account_id| !account_id.is_empty())
+        .map(|account_id| format!("account:{account_id}"))
+        .or_else(|| {
+            identity
+                .email
+                .as_deref()
+                .map(str::trim)
+                .filter(|email| !email.is_empty())
+                .map(|email| format!("email:{}", normalize_email(email)))
+        })
+}
+
+fn resolve_cleanup_profile_identities(state: &mut AppState) -> Vec<(String, ProfileIdentity)> {
     let jobs = state
         .profiles
         .iter()
@@ -85,21 +102,23 @@ fn resolve_cleanup_profile_emails(state: &mut AppState) -> Vec<(String, String)>
         .collect::<Vec<_>>();
 
     let resolved = map_parallel(jobs, |(name, codex_home, cached_email)| {
-        (
-            name,
-            cached_email.or_else(|| fetch_profile_email(&codex_home).ok()),
-        )
+        let mut identity = fetch_profile_identity(&codex_home).unwrap_or_default();
+        if identity.email.is_none() {
+            identity.email = cached_email;
+        }
+        (name, identity)
     });
 
     let mut discovered = Vec::new();
-    for (name, email) in resolved {
-        let Some(email) = email else {
-            continue;
-        };
-        if let Some(profile) = state.profiles.get_mut(&name) {
+    for (name, identity) in resolved {
+        if let Some(email) = identity.email.as_ref()
+            && let Some(profile) = state.profiles.get_mut(&name)
+        {
             profile.email = Some(email.clone());
         }
-        discovered.push((name, email));
+        if cleanup_duplicate_identity_key(&identity).is_some() {
+            discovered.push((name, identity));
+        }
     }
     discovered
 }
@@ -108,15 +127,18 @@ pub(super) fn cleanup_duplicate_profiles(
     paths: &AppPaths,
     state: &mut AppState,
 ) -> Result<ProdexCleanupSummary> {
-    let mut duplicates_by_email = BTreeMap::<String, Vec<String>>::new();
-    for (profile_name, email) in resolve_cleanup_profile_emails(state) {
-        duplicates_by_email
-            .entry(normalize_email(&email))
+    let mut duplicates_by_identity = BTreeMap::<String, Vec<String>>::new();
+    for (profile_name, identity) in resolve_cleanup_profile_identities(state) {
+        let Some(identity_key) = cleanup_duplicate_identity_key(&identity) else {
+            continue;
+        };
+        duplicates_by_identity
+            .entry(identity_key)
             .or_default()
             .push(profile_name);
     }
 
-    let duplicate_groups = duplicates_by_email
+    let duplicate_groups = duplicates_by_identity
         .into_values()
         .filter(|profile_names| profile_names.len() > 1)
         .collect::<Vec<_>>();

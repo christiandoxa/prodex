@@ -1056,6 +1056,67 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
 }
 
 #[test]
+fn perform_prodex_cleanup_keeps_same_email_profiles_when_workspace_differs() {
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+
+    let first_home = paths.managed_profiles_root.join("first");
+    let second_home = paths.managed_profiles_root.join("second");
+    fs::create_dir_all(&first_home).expect("first home should exist");
+    fs::create_dir_all(&second_home).expect("second home should exist");
+    fs::write(
+        first_home.join("auth.json"),
+        r#"{"tokens":{"access_token":"token-one","account_id":"acct-one"}}"#,
+    )
+    .expect("first auth should write");
+    fs::write(
+        second_home.join("auth.json"),
+        r#"{"tokens":{"access_token":"token-two","account_id":"acct-two"}}"#,
+    )
+    .expect("second auth should write");
+
+    let mut state = AppState {
+        active_profile: Some("first".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "first".to_string(),
+                ProfileEntry {
+                    codex_home: first_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("Main@Example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+
+    let summary = perform_prodex_cleanup(&paths, &mut state).expect("cleanup should succeed");
+
+    assert_eq!(summary.duplicate_profiles_removed, 0);
+    assert_eq!(state.profiles.len(), 2);
+    assert!(first_home.exists());
+    assert!(second_home.exists());
+}
+
+#[test]
 fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
     let temp_dir = TestDir::isolated();
     let now = Local::now().timestamp();

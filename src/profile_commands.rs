@@ -1,6 +1,7 @@
 use super::profile_identity::{
-    fetch_profile_email, find_profile_by_email, normalize_email, parse_email_from_auth_json,
-    persist_login_home, remove_dir_if_exists, unique_profile_name_for_email,
+    ProfileIdentity, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
+    normalize_email, parse_identity_from_auth_json, persist_login_home, remove_dir_if_exists,
+    unique_profile_name_for_email,
 };
 use super::shared_codex_fs::{
     copy_codex_home, create_codex_home_if_missing, prepare_managed_codex_home,
@@ -178,7 +179,7 @@ impl ImportedProfilesTransaction {
 }
 
 #[derive(Debug)]
-pub(super) enum ImportEmailTarget {
+pub(super) enum ImportIdentityTarget {
     Existing(String),
     PendingNew(usize),
 }
@@ -249,18 +250,17 @@ pub(super) fn update_existing_profile_auth(
     })
 }
 
-fn resolved_exported_profile_email(exported: &ExportedProfile) -> Option<String> {
-    parse_email_from_auth_json(&exported.auth_json)
-        .ok()
-        .flatten()
-        .or_else(|| {
-            exported
-                .email
-                .as_deref()
-                .map(str::trim)
-                .filter(|email| !email.is_empty())
-                .map(ToOwned::to_owned)
-        })
+fn resolved_exported_profile_identity(exported: &ExportedProfile) -> ProfileIdentity {
+    let mut identity = parse_identity_from_auth_json(&exported.auth_json).unwrap_or_default();
+    if identity.email.is_none() {
+        identity.email = exported
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
+            .map(ToOwned::to_owned);
+    }
+    identity
 }
 
 fn queue_existing_profile_auth_update(

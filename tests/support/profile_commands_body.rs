@@ -828,6 +828,65 @@ fn profile_import_updates_existing_profile_when_email_matches() {
 }
 
 #[test]
+fn profile_import_keeps_distinct_workspaces_with_same_email() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-same-email-different-workspace");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("primary");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "account-one"),
+    )
+    .expect("existing auth should be written");
+
+    let mut existing_state = AppState {
+        profiles: BTreeMap::from([(
+            "primary".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: None,
+        profiles: vec![ExportedProfile {
+            name: "business".to_string(),
+            email: Some("Main@Example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email(
+                "main@example.com",
+                "fresh-token",
+                "account-two",
+            ),
+        }],
+    };
+
+    let commit = import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("different workspace should import as a new profile");
+
+    assert_eq!(commit.imported_names, vec!["business".to_string()]);
+    assert!(commit.updated_existing_names.is_empty());
+    assert_eq!(existing_state.profiles.len(), 2);
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "old-token".to_string()
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&target_paths.managed_profiles_root.join("business")),
+        "fresh-token".to_string()
+    );
+}
+
+#[test]
 fn profile_import_save_failure_rolls_back_auth_and_keeps_recoverable_journal() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);

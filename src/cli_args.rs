@@ -203,7 +203,7 @@ impl LogoutArgs {
 
 #[derive(Args, Debug)]
 pub(crate) struct CodexPassthroughArgs {
-    /// Existing profile to log into. If omitted, prodex creates or reuses a profile by account email.
+    /// Existing profile to log into. If omitted, prodex creates or reuses a profile by workspace identity.
     #[arg(short, long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
     /// Extra arguments passed through to `codex login` unchanged.

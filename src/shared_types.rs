@@ -54,12 +54,20 @@ pub(crate) struct IdTokenClaims {
     pub(crate) email: Option<String>,
     #[serde(rename = "https://api.openai.com/profile", default)]
     pub(crate) profile: Option<IdTokenProfileClaims>,
+    #[serde(rename = "https://api.openai.com/auth", default)]
+    pub(crate) auth: Option<IdTokenAuthClaims>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct IdTokenProfileClaims {
     #[serde(default)]
     pub(crate) email: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct IdTokenAuthClaims {
+    #[serde(default)]
+    pub(crate) chatgpt_account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,11 +137,6 @@ pub(crate) struct InfoRunwayEstimate {
 pub(crate) enum InfoQuotaWindow {
     FiveHour,
     Weekly,
-}
-
-pub(crate) struct ProfileEmailLookupJob {
-    pub(crate) name: String,
-    pub(crate) codex_home: PathBuf,
 }
 
 #[derive(Debug, Clone)]

@@ -105,27 +105,31 @@ fn login_with_auto_profile(
         return Ok(status);
     }
 
-    let email = fetch_profile_email(&login_home).with_context(|| {
+    let identity = fetch_profile_identity(&login_home).with_context(|| {
         format!(
-            "failed to resolve the logged-in account email from {}",
+            "failed to resolve the logged-in account identity from {}",
             login_home.display()
         )
     })?;
+    let email = identity
+        .email
+        .as_deref()
+        .context("logged-in account identity did not include an email")?;
     let auth_json = required_auth_json_text(&login_home)?;
 
-    if let Some(profile_name) = find_profile_by_email(state, &email)? {
+    if let Some(profile_name) = find_profile_by_identity(state, &identity)? {
         finish_auto_login_for_existing_profile(
             paths,
             state,
             &login_home,
             &profile_name,
-            &email,
+            email,
             &auth_json,
         )?;
         return Ok(status);
     }
 
-    finish_auto_login_for_new_profile(paths, state, &login_home, &email)?;
+    finish_auto_login_for_new_profile(paths, state, &login_home, email)?;
     Ok(status)
 }
 

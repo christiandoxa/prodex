@@ -27,13 +27,17 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         None
     };
     let activate_profile = state.active_profile.is_none() || args.activate;
-    let source_email = source_home
+    let source_identity = source_home
         .as_deref()
-        .and_then(|home| fetch_profile_email(home).ok());
+        .and_then(|home| fetch_profile_identity(home).ok());
+    let source_email = source_identity
+        .as_ref()
+        .and_then(|identity| identity.email.clone());
 
     if let Some(source) = source_home.as_deref()
-        && let Some(email) = source_email.as_deref()
-        && let Some(profile_name) = find_profile_by_email(&mut state, email)?
+        && let Some(identity) = source_identity.as_ref()
+        && let Some(email) = identity.email.as_deref()
+        && let Some(profile_name) = find_profile_by_identity(&mut state, identity)?
         && let Ok(Some(auth_json)) = read_auth_json_text(source)
     {
         let updated = update_existing_profile_auth(

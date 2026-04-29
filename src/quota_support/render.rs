@@ -222,9 +222,18 @@ fn build_quota_report_sections(
     detail: bool,
     total_width: usize,
 ) -> Vec<Vec<String>> {
+    let duplicate_workspace_emails = quota_report_duplicate_workspace_emails(reports);
     sort_quota_reports_for_display(reports)
         .into_iter()
-        .map(|report| render_quota_report_section(report, column_widths, detail, total_width))
+        .map(|report| {
+            render_quota_report_section(
+                report,
+                column_widths,
+                detail,
+                total_width,
+                &duplicate_workspace_emails,
+            )
+        })
         .collect()
 }
 
@@ -233,9 +242,17 @@ fn render_quota_report_section(
     column_widths: QuotaReportColumnWidths,
     detail: bool,
     total_width: usize,
+    duplicate_workspace_emails: &BTreeSet<String>,
 ) -> Vec<String> {
     let view = quota_report_view_data(report);
     let mut section = vec![render_quota_report_row(report, column_widths, &view)];
+    if detail && quota_report_should_show_workspace(report, duplicate_workspace_emails) {
+        push_wrapped_quota_report_line(
+            &mut section,
+            &format!("workspace: {}", quota_report_workspace_label(report)),
+            total_width,
+        );
+    }
     push_wrapped_quota_report_line(
         &mut section,
         &format!("status: {}", view.status),
@@ -246,6 +263,78 @@ fn render_quota_report_section(
     }
     section.push(String::new());
     section
+}
+
+fn quota_report_duplicate_workspace_emails(reports: &[QuotaReport]) -> BTreeSet<String> {
+    let mut workspace_ids_by_email = BTreeMap::<String, BTreeSet<String>>::new();
+    for report in reports {
+        let Some(email) = quota_report_openai_email(report) else {
+            continue;
+        };
+        let Some(workspace_id) = report
+            .workspace_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|workspace_id| !workspace_id.is_empty())
+        else {
+            continue;
+        };
+        workspace_ids_by_email
+            .entry(normalize_email(email))
+            .or_default()
+            .insert(workspace_id.to_string());
+    }
+    workspace_ids_by_email
+        .into_iter()
+        .filter_map(|(email, workspace_ids)| (workspace_ids.len() > 1).then_some(email))
+        .collect()
+}
+
+fn quota_report_openai_email(report: &QuotaReport) -> Option<&str> {
+    match report.result.as_ref().ok()? {
+        ProviderQuotaSnapshot::OpenAi(usage) => usage
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|email| !email.is_empty()),
+        ProviderQuotaSnapshot::Copilot(_) => None,
+    }
+}
+
+fn quota_report_should_show_workspace(
+    report: &QuotaReport,
+    duplicate_workspace_emails: &BTreeSet<String>,
+) -> bool {
+    quota_report_openai_email(report)
+        .map(normalize_email)
+        .is_some_and(|email| duplicate_workspace_emails.contains(&email))
+}
+
+fn quota_report_workspace_label(report: &QuotaReport) -> String {
+    report
+        .workspace_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|workspace_id| !workspace_id.is_empty())
+        .map(short_workspace_id)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn short_workspace_id(workspace_id: &str) -> String {
+    let chars = workspace_id.chars().collect::<Vec<_>>();
+    if chars.len() <= 24 {
+        return workspace_id.to_string();
+    }
+    let prefix = chars.iter().take(12).collect::<String>();
+    let suffix = chars
+        .iter()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
 }
 
 fn render_quota_report_row(
