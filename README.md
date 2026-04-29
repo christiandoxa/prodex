@@ -197,6 +197,12 @@ prodex doctor --runtime
 `prodex info` includes the effective runtime tuning values after environment, policy, and default resolution.
 For full policy keys, env overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
+## Support
+
+If you find `prodex` useful and want to support its development, you can donate here:
+
+[<img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" border="0" alt="Donate with PayPal" />](https://paypal.me/christiandoxa)
+
 ## More
 
 See [QUICKSTART.md](./QUICKSTART.md) for a longer walkthrough, [LOCAL.md](./LOCAL.md) for self-hosted local model setup, and [docs/runtime-policy.md](./docs/runtime-policy.md) for runtime policy keys.
