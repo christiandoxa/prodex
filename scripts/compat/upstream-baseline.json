@@ -295,10 +295,10 @@
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.121",
-      "name": "v2.1.121",
-      "published_at": "2026-04-28T00:31:31Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.121"
+      "tag_name": "v2.1.123",
+      "name": "v2.1.123",
+      "published_at": "2026-04-29T03:29:13Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.123"
     },
     "docs": [
       {
