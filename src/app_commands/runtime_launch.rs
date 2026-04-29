@@ -5,14 +5,14 @@ struct RunCommandStrategy {
     args: RunArgs,
     codex_args: Vec<OsString>,
     include_code_review: bool,
-    mem_mode: bool,
+    mem_mode: Option<RuntimeMemTranscriptMode>,
     dry_run: bool,
     model_provider_override: Option<String>,
 }
 
 impl RunCommandStrategy {
     fn new(args: RunArgs) -> Self {
-        let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+        let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
         let (dry_run_arg, codex_args) = extract_prodex_dry_run_flag(&codex_args);
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
@@ -49,9 +49,9 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        if self.mem_mode {
+        if let Some(mem_mode) = self.mem_mode {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
-            ensure_runtime_mem_codex_watch_for_home(&prepared.codex_home)?;
+            ensure_runtime_mem_codex_watch_for_home_with_mode(&prepared.codex_home, mem_mode)?;
         }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);

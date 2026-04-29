@@ -5,14 +5,15 @@ const PRODEX_CAVEMAN_PLUGIN_NAME: &str = "caveman";
 const PRODEX_CAVEMAN_PLUGIN_VERSION: &str = "0.1.0";
 const PRODEX_CAVEMAN_PLUGIN_ID: &str = "caveman@prodex-caveman";
 const PRODEX_CAVEMAN_SOURCE_REPO: &str = "https://github.com/JuliusBrussee/caveman.git";
-const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. Rules: Drop articles/filler/pleasantries/hedging. Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step]. Not: Sure! I would be happy to help you with that. Yes: Bug in auth middleware. Fix: Code/commits/security: write normal. User says stop caveman or normal mode to deactivate.'";
+pub(crate) const PRODEX_CAVEMAN_FULL_ASSETS_ENV: &str = "PRODEX_CAVEMAN_FULL_ASSETS";
+const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. Use $caveman full: terse, no filler, exact technical substance. Code/commits/security normal. Stop: normal mode.'";
 
 struct EmbeddedCavemanFile {
     relative_path: &'static str,
     contents: &'static str,
 }
 
-const CAVEMAN_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
+const CAVEMAN_CORE_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
     EmbeddedCavemanFile {
         relative_path: ".codex-plugin/plugin.json",
         contents: include_str!("caveman_assets/.codex-plugin/plugin.json"),
@@ -41,6 +42,9 @@ const CAVEMAN_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
         relative_path: "skills/caveman/assets/caveman.svg",
         contents: include_str!("caveman_assets/skills/caveman/assets/caveman.svg"),
     },
+];
+
+const CAVEMAN_COMPRESS_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
     EmbeddedCavemanFile {
         relative_path: "skills/compress/SKILL.md",
         contents: include_str!("caveman_assets/skills/compress/SKILL.md"),
@@ -79,13 +83,13 @@ struct CavemanLaunchStrategy {
     args: CavemanArgs,
     codex_args: Vec<OsString>,
     include_code_review: bool,
-    mem_mode: bool,
+    mem_mode: Option<RuntimeMemTranscriptMode>,
     model_provider_override: Option<String>,
 }
 
 impl CavemanLaunchStrategy {
     fn new(args: CavemanArgs) -> Self {
-        let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+        let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
@@ -121,9 +125,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
     ) -> Result<RuntimeLaunchPlan> {
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
-        if self.mem_mode {
+        if let Some(mem_mode) = self.mem_mode {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
-            ensure_runtime_mem_codex_watch_for_home(&caveman_home)?;
+            ensure_runtime_mem_codex_watch_for_home_with_mode(&caveman_home, mem_mode)?;
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
         if self.args.no_proxy && runtime_proxy.is_none() {
@@ -359,7 +363,15 @@ fn install_caveman_plugin_cache(codex_home: &Path) -> Result<()> {
 }
 
 fn write_caveman_plugin_tree(root: &Path) -> Result<()> {
-    for file in CAVEMAN_PLUGIN_FILES {
+    write_caveman_plugin_files(root, CAVEMAN_CORE_PLUGIN_FILES)?;
+    if caveman_full_assets_enabled() {
+        write_caveman_plugin_files(root, CAVEMAN_COMPRESS_PLUGIN_FILES)?;
+    }
+    Ok(())
+}
+
+fn write_caveman_plugin_files(root: &Path, files: &[EmbeddedCavemanFile]) -> Result<()> {
+    for file in files {
         let path = root.join(file.relative_path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -369,6 +381,15 @@ fn write_caveman_plugin_tree(root: &Path) -> Result<()> {
             .with_context(|| format!("failed to write {}", path.display()))?;
     }
     Ok(())
+}
+
+fn caveman_full_assets_enabled() -> bool {
+    env::var(PRODEX_CAVEMAN_FULL_ASSETS_ENV)
+        .ok()
+        .is_some_and(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "" | "0" | "false" | "no" | "off" => false,
+            _ => true,
+        })
 }
 
 fn caveman_marketplace_root(codex_home: &Path) -> PathBuf {

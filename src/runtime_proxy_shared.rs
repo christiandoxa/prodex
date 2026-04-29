@@ -70,16 +70,27 @@ pub(super) struct RuntimeParsedSseEvent {
     pub(super) response_ids: Vec<String>,
     pub(super) event_type: Option<String>,
     pub(super) turn_state: Option<String>,
+    pub(super) token_usage: Option<RuntimeTokenUsage>,
 }
 
 #[derive(Default)]
 pub(super) struct RuntimeSseTapState {
+    pub(super) request_id: u64,
     pub(super) line: Vec<u8>,
     pub(super) data_lines: Vec<String>,
     pub(super) remembered_response_ids: BTreeSet<String>,
     pub(super) response_ids_with_turn_state: BTreeSet<String>,
+    pub(super) logged_token_usage: BTreeSet<RuntimeTokenUsage>,
     pub(super) turn_state: Option<String>,
     pub(super) request_previous_response_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct RuntimeTokenUsage {
+    pub(super) input_tokens: u64,
+    pub(super) cached_input_tokens: u64,
+    pub(super) output_tokens: u64,
+    pub(super) reasoning_tokens: u64,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -270,6 +281,7 @@ pub(super) struct RuntimeInspectedWebsocketTextFrame {
     pub(super) event_type: Option<String>,
     pub(super) turn_state: Option<String>,
     pub(super) response_ids: Vec<String>,
+    pub(super) token_usage: Option<RuntimeTokenUsage>,
     pub(super) retry_kind: Option<RuntimeWebsocketRetryInspectionKind>,
     pub(super) precommit_hold: bool,
     pub(super) terminal_event: bool,

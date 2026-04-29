@@ -43,6 +43,12 @@ pub(crate) enum Commands {
     )]
     Audit(AuditArgs),
     #[command(
+        subcommand,
+        about = "Audit and compact token-heavy shared Codex context files.",
+        after_help = CLI_CONTEXT_AFTER_HELP
+    )]
+    Context(ContextCommands),
+    #[command(
         about = "Remove stale local runtime logs, temp homes, dead broker artifacts, and orphaned managed homes.",
         after_help = CLI_CLEANUP_AFTER_HELP
     )]
@@ -236,7 +242,11 @@ pub(crate) struct QuotaArgs {
 }
 
 #[derive(Args, Debug, Default)]
-pub(crate) struct InfoArgs {}
+pub(crate) struct InfoArgs {
+    /// Include token usage totals parsed from recent runtime logs.
+    #[arg(long)]
+    pub(crate) tokens: bool,
+}
 
 #[derive(Args, Debug)]
 pub(crate) struct DoctorArgs {
@@ -277,6 +287,40 @@ pub(crate) struct AuditArgs {
     /// Filter by outcome, for example `success` or `failure`.
     #[arg(long, value_name = "NAME")]
     pub(crate) outcome: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum ContextCommands {
+    /// Read-only size and approximate token audit for shared Codex context roots.
+    Audit(ContextAuditArgs),
+    /// Deterministically compact prose context files and write .original.md backups.
+    Compress(ContextCompressArgs),
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ContextAuditArgs {
+    /// Shared Codex root to inspect. Defaults to the resolved shared CODEX_HOME.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) root: Option<PathBuf>,
+    /// Show this many largest files in the human table. Use 0 for all.
+    #[arg(long, default_value_t = 20, value_name = "COUNT")]
+    pub(crate) limit: usize,
+    /// Emit machine-readable JSON output.
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ContextCompressArgs {
+    /// Markdown/text file or directory to compact.
+    #[arg(value_name = "PATH")]
+    pub(crate) path: PathBuf,
+    /// Show savings without writing the file or backup.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Emit machine-readable JSON output.
+    #[arg(long)]
+    pub(crate) json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -416,6 +460,9 @@ pub(crate) struct SuperArgs {
         requires = "url"
     )]
     pub(crate) local_auto_compact_token_limit: Option<usize>,
+    /// Use the full Claude-Mem Codex transcript schema instead of Prodex's slim default.
+    #[arg(long)]
+    pub(crate) mem_full: bool,
     /// Arguments passed through to `codex` after the implied `mem` prefix.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub(crate) codex_args: Vec<OsString>,
@@ -440,7 +487,11 @@ impl SuperArgs {
 
         let mut codex_args =
             Vec::with_capacity(self.codex_args.len() + 1 + local_provider_args.len());
-        codex_args.push(OsString::from("mem"));
+        codex_args.push(OsString::from(if self.mem_full {
+            "mem-full"
+        } else {
+            "mem"
+        }));
         codex_args.extend(local_provider_args);
         codex_args.extend(self.codex_args);
         CavemanArgs {
@@ -654,6 +705,15 @@ impl DoctorArgs {
 impl AuditArgs {
     pub(crate) fn execute(self) -> Result<()> {
         handle_audit(self)
+    }
+}
+
+impl ContextCommands {
+    pub(crate) fn execute(self) -> Result<()> {
+        match self {
+            Self::Audit(args) => handle_context_audit(args),
+            Self::Compress(args) => handle_context_compress(args),
+        }
     }
 }
 

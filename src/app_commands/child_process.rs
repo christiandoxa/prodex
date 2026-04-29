@@ -200,7 +200,7 @@ pub(crate) fn prodex_dry_run_requested(codex_args: &[OsString]) -> bool {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
-    let (_mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
+    let (_mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);

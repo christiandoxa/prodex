@@ -17,6 +17,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let request_requires_previous_response_affinity =
             request_metadata.requires_previous_response_affinity;
         let previous_response_id = request_metadata.previous_response_id.clone();
+        let prompt_cache_key = request_metadata.prompt_cache_key.clone();
         let mut request_turn_state = runtime_request_turn_state(&handshake_request);
         let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
         let request_session_id_header_present = explicit_request_session_id.is_some();
@@ -73,6 +74,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             websocket_session,
             request_requires_previous_response_affinity,
             previous_response_id,
+            prompt_cache_key,
             request_turn_state,
             explicit_request_session_id,
             request_session_id_header_present,
@@ -146,7 +148,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 pinned_profile: self.pinned_profile.as_deref(),
                 turn_state_profile: self.turn_state_profile.as_deref(),
                 session_profile: self.session_profile.as_deref(),
-                prompt_cache_key: None,
+                prompt_cache_key: self.prompt_cache_key.as_deref(),
                 discover_previous_response_owner: self.previous_response_id.is_some(),
                 previous_response_id: self.previous_response_id.as_deref(),
                 route_kind: RuntimeRouteKind::Websocket,
@@ -224,6 +226,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             handshake_request: &self.handshake_request,
             request_text: &self.request_text,
             request_previous_response_id: self.previous_response_id.as_deref(),
+            request_prompt_cache_key: self.prompt_cache_key.as_deref(),
             request_session_id: self.request_session_id.as_deref(),
             request_turn_state: self.request_turn_state.as_deref(),
             shared: self.shared,

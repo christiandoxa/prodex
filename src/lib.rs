@@ -402,6 +402,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "info"
             | "doctor"
             | "audit"
+            | "context"
             | "cleanup"
             | "login"
             | "logout"

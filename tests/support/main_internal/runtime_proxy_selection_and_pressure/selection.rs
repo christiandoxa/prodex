@@ -1439,6 +1439,7 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
 #[test]
 fn response_selection_uses_prompt_cache_affinity_for_fresh_ties() {
     let temp_dir = TestDir::isolated();
+    clear_runtime_prompt_cache_profile_bindings();
     let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
     let now = Local::now().timestamp();
     {
@@ -1482,6 +1483,111 @@ fn response_selection_uses_prompt_cache_affinity_for_fresh_ties() {
     .expect("selection should succeed");
 
     assert_eq!(selected.as_deref(), Some("second"));
+}
+
+#[test]
+fn response_selection_prefers_recorded_prompt_cache_owner_for_fresh_request() {
+    let temp_dir = TestDir::isolated();
+    clear_runtime_prompt_cache_profile_bindings();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        for profile_name in ["main", "second"] {
+            runtime.profile_probe_cache.insert(
+                profile_name.to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(95, 18_000, 95, 604_800)),
+                },
+            );
+        }
+    }
+    let prompt_cache_key = (0..256)
+        .map(|index| format!("workspace-cache-bound-{index}"))
+        .find(|key| {
+            runtime_prompt_cache_affinity_sort_key(Some(key.as_str()), "main")
+                < runtime_prompt_cache_affinity_sort_key(Some(key.as_str()), "second")
+        })
+        .expect("test should find a key that would hash-prefer main");
+    remember_runtime_prompt_cache_profile(
+        &shared,
+        "second",
+        Some(prompt_cache_key.as_str()),
+        RuntimeRouteKind::Responses,
+    );
+
+    let selected = select_runtime_response_candidate_for_route_with_selection(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            excluded_profiles: &BTreeSet::new(),
+            strict_affinity_profile: None,
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: None,
+            prompt_cache_key: Some(prompt_cache_key.as_str()),
+            discover_previous_response_owner: false,
+            previous_response_id: None,
+            route_kind: RuntimeRouteKind::Responses,
+        },
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
+}
+
+#[test]
+fn response_selection_keeps_inflight_pressure_ahead_of_prompt_cache_owner() {
+    let temp_dir = TestDir::isolated();
+    clear_runtime_prompt_cache_profile_bindings();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        for profile_name in ["main", "second"] {
+            runtime.profile_probe_cache.insert(
+                profile_name.to_string(),
+                RuntimeProfileProbeCacheEntry {
+                    checked_at: now,
+                    auth: AuthSummary {
+                        label: "chatgpt".to_string(),
+                        quota_compatible: true,
+                    },
+                    result: Ok(usage_with_main_windows(95, 18_000, 95, 604_800)),
+                },
+            );
+        }
+        runtime.profile_inflight.insert("second".to_string(), 1);
+    }
+    let prompt_cache_key = "workspace-cache-bound-inflight";
+    remember_runtime_prompt_cache_profile(
+        &shared,
+        "second",
+        Some(prompt_cache_key),
+        RuntimeRouteKind::Responses,
+    );
+
+    let selected = select_runtime_response_candidate_for_route_with_selection(
+        &shared,
+        RuntimeResponseCandidateSelection {
+            excluded_profiles: &BTreeSet::new(),
+            strict_affinity_profile: None,
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: None,
+            prompt_cache_key: Some(prompt_cache_key),
+            discover_previous_response_owner: false,
+            previous_response_id: None,
+            route_kind: RuntimeRouteKind::Responses,
+        },
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("main"));
 }
 
 #[test]
@@ -2520,6 +2626,28 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_a
             OsString::from("review this repo")
         ]
     );
+}
+
+#[test]
+fn super_command_mem_full_expands_to_full_mem_prefix() {
+    let command = parse_cli_command_from(["prodex", "super", "--mem-full", "exec", "review"])
+        .expect("super mem-full command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    let args = args.into_caveman_args();
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("mem-full"),
+            OsString::from("exec"),
+            OsString::from("review")
+        ]
+    );
+    let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+    assert_eq!(codex_args, vec![OsString::from("exec"), OsString::from("review")]);
 }
 
 #[test]

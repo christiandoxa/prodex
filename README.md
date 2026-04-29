@@ -132,12 +132,13 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 `prodex super` is a shortcut for `prodex caveman mem --full-access`.
 
 Use this when you want Caveman mode, Claude-Mem transcript watching, and launch-time full access together. Full access maps to Codex's sandbox-bypass launch flag, so use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+Super uses Prodex's slim Claude-Mem Codex schema by default to avoid storing full assistant/tool output in recall context. Add `--mem-full` when you need the full transcript schema.
 
 Use `prodex super --url http://127.0.0.1:8131` when you want the same Super mode front end to talk directly to a local OpenAI-compatible server such as `llama-server`. Prodex injects a temporary `prodex-local` Codex provider, appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and skips quota/proxy routing for that launch. The default local model id is `unsloth/qwen3.5-35b-a3b`; override it with `--model`, for example `prodex super --url http://127.0.0.1:8131 --model local/qwen`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 Add `--dry-run` to run, Caveman, or Super launches to print the resolved provider, model, `CODEX_HOME`, proxy args, and launch env with secret-looking values redacted. Dry-run output is prelaunch only and does not start Codex or the TUI.
 
-Prodex respects system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, including `HTTP_PROXY`, `HTTPS_PROXY`, and platform proxy configuration supported by reqwest. The local Codex-to-Prodex broker connection always receives `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1` so a user proxy does not intercept the local runtime proxy. Use `--no-proxy` on `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to bypass proxy settings.
+Prodex respects system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, including `HTTP_PROXY`, `HTTPS_PROXY`, and platform proxy configuration supported by reqwest. Runtime WebSocket upstream connections also honor `HTTPS_PROXY`/`https_proxy` via HTTP CONNECT and respect `NO_PROXY`/`no_proxy`. The local Codex-to-Prodex broker connection always receives `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1` so a user proxy does not intercept the local runtime proxy. Use `--no-proxy` on `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to bypass proxy settings.
 
 ### Run Claude Code
 
@@ -192,9 +193,12 @@ prodex quota --all
 prodex quota --all --once
 prodex info
 prodex doctor --runtime
+prodex context audit
+prodex context compress ~/.codex/AGENTS.md --dry-run
 ```
 
 `prodex info` includes the effective runtime tuning values after environment, policy, and default resolution.
+`prodex context audit` reports approximate token weight for shared instruction and memory files. `prodex context compress` is deterministic, only touches Markdown/text files, skips `.original.md` backups, and writes an `.original.md` backup before replacing a file.
 For full policy keys, env overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
 ## Support

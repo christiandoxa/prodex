@@ -140,6 +140,7 @@ pub(crate) fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSse
         response_ids: extract_runtime_response_ids_from_value(&value),
         event_type: runtime_response_event_type_from_value(&value),
         turn_state: extract_runtime_turn_state_from_value(&value),
+        token_usage: extract_runtime_token_usage_from_value(&value),
     }
 }
 
@@ -520,6 +521,14 @@ pub(crate) fn extract_runtime_turn_state_from_body_bytes(body: &[u8]) -> Option<
         .and_then(|value| extract_runtime_turn_state_from_value(&value))
 }
 
+pub(crate) fn extract_runtime_token_usage_from_body_bytes(
+    body: &[u8],
+) -> Option<RuntimeTokenUsage> {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| extract_runtime_token_usage_from_value(&value))
+}
+
 pub(crate) fn push_runtime_response_id(response_ids: &mut Vec<String>, id: Option<&str>) {
     if let Some(id) = id
         && !response_ids.iter().any(|existing| existing == id)
@@ -581,6 +590,103 @@ pub(crate) fn extract_runtime_turn_state_from_value(value: &serde_json::Value) -
         })
         .or_else(|| value.get("turn_state").and_then(runtime_json_string))
         .or_else(|| value.get("turnState").and_then(runtime_json_string))
+}
+
+pub(crate) fn extract_runtime_token_usage_from_value(
+    value: &serde_json::Value,
+) -> Option<RuntimeTokenUsage> {
+    runtime_json_find(value, extract_runtime_token_usage_candidate)
+}
+
+fn extract_runtime_token_usage_candidate(value: &serde_json::Value) -> Option<RuntimeTokenUsage> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(usage) = map.get("usage")
+                && let Some(token_usage) = runtime_token_usage_from_usage_value(usage)
+            {
+                return Some(token_usage);
+            }
+            runtime_token_usage_from_usage_value(value)
+        }
+        _ => None,
+    }
+}
+
+fn runtime_token_usage_from_usage_value(value: &serde_json::Value) -> Option<RuntimeTokenUsage> {
+    let input_tokens = runtime_json_u64_at(value, &["input_tokens"])
+        .or_else(|| runtime_json_u64_at(value, &["prompt_tokens"]));
+    let cached_input_tokens = runtime_json_u64_at(value, &["cached_input_tokens"])
+        .or_else(|| runtime_json_u64_at(value, &["input_tokens_details", "cached_tokens"]))
+        .or_else(|| runtime_json_u64_at(value, &["input_tokens_details", "cached_input_tokens"]))
+        .or_else(|| runtime_json_u64_at(value, &["prompt_tokens_details", "cached_tokens"]));
+    let output_tokens = runtime_json_u64_at(value, &["output_tokens"])
+        .or_else(|| runtime_json_u64_at(value, &["completion_tokens"]));
+    let reasoning_tokens = runtime_json_u64_at(value, &["reasoning_tokens"])
+        .or_else(|| runtime_json_u64_at(value, &["output_tokens_details", "reasoning_tokens"]))
+        .or_else(|| runtime_json_u64_at(value, &["completion_tokens_details", "reasoning_tokens"]));
+
+    if input_tokens.is_none()
+        && cached_input_tokens.is_none()
+        && output_tokens.is_none()
+        && reasoning_tokens.is_none()
+    {
+        return None;
+    }
+
+    Some(RuntimeTokenUsage {
+        input_tokens: input_tokens.unwrap_or_default(),
+        cached_input_tokens: cached_input_tokens.unwrap_or_default(),
+        output_tokens: output_tokens.unwrap_or_default(),
+        reasoning_tokens: reasoning_tokens.unwrap_or_default(),
+    })
+}
+
+fn runtime_json_u64_at(value: &serde_json::Value, path: &[&str]) -> Option<u64> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    runtime_json_u64(current)
+}
+
+fn runtime_json_u64(value: &serde_json::Value) -> Option<u64> {
+    value.as_u64().or_else(|| {
+        value
+            .as_i64()
+            .and_then(|value| (value >= 0).then_some(value as u64))
+    })
+}
+
+pub(crate) fn log_runtime_token_usage(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    transport: &'static str,
+    profile_name: &str,
+    source: &'static str,
+    usage: Option<RuntimeTokenUsage>,
+) {
+    let Some(usage) = usage else {
+        return;
+    };
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "token_usage",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", transport),
+                runtime_proxy_log_field("profile", profile_name),
+                runtime_proxy_log_field("source", source),
+                runtime_proxy_log_field("input_tokens", usage.input_tokens.to_string()),
+                runtime_proxy_log_field(
+                    "cached_input_tokens",
+                    usage.cached_input_tokens.to_string(),
+                ),
+                runtime_proxy_log_field("output_tokens", usage.output_tokens.to_string()),
+                runtime_proxy_log_field("reasoning_tokens", usage.reasoning_tokens.to_string()),
+            ],
+        ),
+    );
 }
 
 fn runtime_json_string(value: &serde_json::Value) -> Option<String> {
@@ -750,6 +856,36 @@ mod tests {
         assert_eq!(
             events[0].event_type.as_deref(),
             Some("response.in_progress")
+        );
+    }
+
+    #[test]
+    fn runtime_sse_event_extracts_response_token_usage() {
+        let events = collect_runtime_sse_events(&[concat!(
+            "data: {",
+            "\"type\":\"response.completed\",",
+            "\"response\":{",
+            "\"id\":\"resp-token\",",
+            "\"usage\":{",
+            "\"input_tokens\":120,",
+            "\"input_tokens_details\":{\"cached_tokens\":40},",
+            "\"output_tokens\":32,",
+            "\"output_tokens_details\":{\"reasoning_tokens\":7}",
+            "}",
+            "}",
+            "}\n\n"
+        )
+        .as_bytes()]);
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].token_usage,
+            Some(RuntimeTokenUsage {
+                input_tokens: 120,
+                cached_input_tokens: 40,
+                output_tokens: 32,
+                reasoning_tokens: 7,
+            })
         );
     }
 

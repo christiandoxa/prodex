@@ -10,15 +10,42 @@ const CLAUDE_MEM_PRODEX_WATCH_NAME_PREFIX: &str = "prodex-codex-";
 const CLAUDE_MEM_CLAUDE_CODE_PATH_SETTING: &str = "CLAUDE_CODE_PATH";
 const PRODEX_CLAUDE_MEM_DIR_NAME: &str = "claude-mem";
 const PRODEX_CLAUDE_MEM_WRAPPER_NAME: &str = "prodex-claude";
+const CLAUDE_MEM_PREFIX: &str = "mem";
+const CLAUDE_MEM_FULL_PREFIX: &str = "mem-full";
+const CLAUDE_MEM_FULL_FLAG: &str = "--mem-full";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeMemTranscriptMode {
+    Slim,
+    Full,
+}
+
+#[allow(dead_code)]
 pub(super) fn runtime_mem_extract_mode(args: &[OsString]) -> (bool, Vec<OsString>) {
+    let (mode, args) = runtime_mem_extract_mode_with_detail(args);
+    (mode.is_some(), args)
+}
+
+pub(super) fn runtime_mem_extract_mode_with_detail(
+    args: &[OsString],
+) -> (Option<RuntimeMemTranscriptMode>, Vec<OsString>) {
     let Some(first) = args.first().and_then(|arg| arg.to_str()) else {
-        return (false, args.to_vec());
+        return (None, args.to_vec());
     };
-    if first != "mem" {
-        return (false, args.to_vec());
+    if first == CLAUDE_MEM_FULL_PREFIX {
+        return (Some(RuntimeMemTranscriptMode::Full), args[1..].to_vec());
     }
-    (true, args[1..].to_vec())
+    if first != CLAUDE_MEM_PREFIX {
+        return (None, args.to_vec());
+    }
+    if args
+        .get(1)
+        .and_then(|arg| arg.to_str())
+        .is_some_and(|arg| arg == CLAUDE_MEM_FULL_FLAG)
+    {
+        return (Some(RuntimeMemTranscriptMode::Full), args[2..].to_vec());
+    }
+    (Some(RuntimeMemTranscriptMode::Slim), args[1..].to_vec())
 }
 
 pub(super) fn runtime_mem_claude_plugin_dir() -> Result<PathBuf> {
@@ -33,10 +60,18 @@ pub(super) fn runtime_mem_claude_plugin_dir() -> Result<PathBuf> {
     Ok(plugin_dir)
 }
 
+#[allow(dead_code)]
 pub(super) fn ensure_runtime_mem_codex_watch_for_home(codex_home: &Path) -> Result<()> {
+    ensure_runtime_mem_codex_watch_for_home_with_mode(codex_home, RuntimeMemTranscriptMode::Slim)
+}
+
+pub(super) fn ensure_runtime_mem_codex_watch_for_home_with_mode(
+    codex_home: &Path,
+    mode: RuntimeMemTranscriptMode,
+) -> Result<()> {
     let home = home_dir().context("failed to determine home directory for claude-mem")?;
     let config_path = runtime_mem_transcript_watch_config_path_from_home(&home);
-    ensure_runtime_mem_codex_watch_for_home_at_path(&config_path, codex_home)
+    ensure_runtime_mem_codex_watch_for_home_at_path_with_mode(&config_path, codex_home, mode)
 }
 
 pub(super) fn ensure_runtime_mem_prodex_observer(paths: &AppPaths) -> Result<PathBuf> {
@@ -98,17 +133,43 @@ pub(super) fn runtime_mem_transcript_watch_config_path_from_home(home: &Path) ->
     flat.or(nested).map(PathBuf::from).unwrap_or(default_path)
 }
 
+#[allow(dead_code)]
 pub(super) fn ensure_runtime_mem_codex_watch_for_home_at_path(
     config_path: &Path,
     codex_home: &Path,
 ) -> Result<()> {
-    let sessions_root = runtime_mem_codex_sessions_root(codex_home);
-    ensure_runtime_mem_codex_watch_for_sessions_root(config_path, &sessions_root)
+    ensure_runtime_mem_codex_watch_for_home_at_path_with_mode(
+        config_path,
+        codex_home,
+        RuntimeMemTranscriptMode::Slim,
+    )
 }
 
+pub(super) fn ensure_runtime_mem_codex_watch_for_home_at_path_with_mode(
+    config_path: &Path,
+    codex_home: &Path,
+    mode: RuntimeMemTranscriptMode,
+) -> Result<()> {
+    let sessions_root = runtime_mem_codex_sessions_root(codex_home);
+    ensure_runtime_mem_codex_watch_for_sessions_root_with_mode(config_path, &sessions_root, mode)
+}
+
+#[allow(dead_code)]
 pub(super) fn ensure_runtime_mem_codex_watch_for_sessions_root(
     config_path: &Path,
     sessions_root: &Path,
+) -> Result<()> {
+    ensure_runtime_mem_codex_watch_for_sessions_root_with_mode(
+        config_path,
+        sessions_root,
+        RuntimeMemTranscriptMode::Slim,
+    )
+}
+
+pub(super) fn ensure_runtime_mem_codex_watch_for_sessions_root_with_mode(
+    config_path: &Path,
+    sessions_root: &Path,
+    mode: RuntimeMemTranscriptMode,
 ) -> Result<()> {
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
@@ -151,9 +212,10 @@ pub(super) fn ensure_runtime_mem_codex_watch_for_sessions_root(
     let schemas = schemas
         .as_object_mut()
         .expect("transcript watch schemas should be an object");
-    schemas
-        .entry(CLAUDE_MEM_CODEX_SCHEMA_NAME.to_string())
-        .or_insert_with(runtime_mem_default_codex_schema);
+    schemas.insert(
+        CLAUDE_MEM_CODEX_SCHEMA_NAME.to_string(),
+        runtime_mem_codex_schema_for_mode(mode),
+    );
 
     let watch_glob = runtime_mem_codex_watch_glob(sessions_root);
     let watch_name = runtime_mem_prodex_watch_name(sessions_root);
@@ -310,11 +372,16 @@ fn runtime_mem_codex_watch_definition(name: &str, path: &str) -> serde_json::Val
     })
 }
 
+#[allow(dead_code)]
 pub(super) fn runtime_mem_default_codex_schema() -> serde_json::Value {
+    runtime_mem_slim_codex_schema()
+}
+
+pub(super) fn runtime_mem_full_codex_schema() -> serde_json::Value {
     serde_json::json!({
         "name": CLAUDE_MEM_CODEX_SCHEMA_NAME,
         "version": "0.3",
-        "description": "Schema for Codex session JSONL files under ~/.codex/sessions.",
+        "description": "Full schema for Codex session JSONL files under ~/.codex/sessions.",
         "events": [
             {
                 "name": "session-meta",
@@ -367,6 +434,95 @@ pub(super) fn runtime_mem_default_codex_schema() -> serde_json::Value {
                 "fields": {
                     "toolId": "payload.call_id",
                     "toolResponse": "payload.output"
+                }
+            },
+            {
+                "name": "session-end",
+                "match": { "path": "payload.type", "in": ["turn_aborted", "turn_completed"] },
+                "action": "session_end"
+            }
+        ]
+    })
+}
+
+fn runtime_mem_codex_schema_for_mode(mode: RuntimeMemTranscriptMode) -> serde_json::Value {
+    match mode {
+        RuntimeMemTranscriptMode::Slim => runtime_mem_slim_codex_schema(),
+        RuntimeMemTranscriptMode::Full => runtime_mem_full_codex_schema(),
+    }
+}
+
+fn runtime_mem_slim_codex_schema() -> serde_json::Value {
+    serde_json::json!({
+        "name": CLAUDE_MEM_CODEX_SCHEMA_NAME,
+        "version": "0.4-slim",
+        "description": "Slim schema for Codex session JSONL files under ~/.codex/sessions.",
+        "events": [
+            {
+                "name": "session-meta",
+                "match": { "path": "type", "equals": "session_meta" },
+                "action": "session_context",
+                "fields": { "sessionId": "payload.id", "cwd": "payload.cwd" }
+            },
+            {
+                "name": "turn-context",
+                "match": { "path": "type", "equals": "turn_context" },
+                "action": "session_context",
+                "fields": { "cwd": "payload.cwd" }
+            },
+            {
+                "name": "user-message",
+                "match": { "path": "payload.type", "equals": "user_message" },
+                "action": "session_init",
+                "fields": { "prompt": "payload.message" }
+            },
+            {
+                "name": "assistant-message",
+                "match": { "path": "payload.type", "equals": "agent_message" },
+                "action": "assistant_message",
+                "fields": {
+                    "message": {
+                        "coalesce": [
+                            "payload.summary",
+                            "payload.title",
+                            { "value": "assistant response recorded by prodex slim mem" }
+                        ]
+                    }
+                }
+            },
+            {
+                "name": "tool-use",
+                "match": {
+                    "path": "payload.type",
+                    "in": ["function_call", "custom_tool_call", "web_search_call", "exec_command"]
+                },
+                "action": "tool_use",
+                "fields": {
+                    "toolId": "payload.call_id",
+                    "toolName": {
+                        "coalesce": ["payload.name", "payload.type", { "value": "web_search" }]
+                    },
+                    "toolInput": {
+                        "coalesce": ["payload.command", "payload.action", "payload.name", { "value": "tool call" }]
+                    }
+                }
+            },
+            {
+                "name": "tool-result",
+                "match": {
+                    "path": "payload.type",
+                    "in": ["function_call_output", "custom_tool_call_output", "exec_command_output"]
+                },
+                "action": "tool_result",
+                "fields": {
+                    "toolId": "payload.call_id",
+                    "toolResponse": {
+                        "coalesce": [
+                            "payload.summary",
+                            "payload.metadata.summary",
+                            { "value": "tool result recorded by prodex slim mem; output omitted" }
+                        ]
+                    }
                 }
             },
             {

@@ -48,11 +48,11 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.66.0`:
+The current local version in this repo is `0.67.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.66.0
-cargo install prodex --force --version 0.66.0
+npm install -g @christiandoxa/prodex@0.67.0
+cargo install prodex --force --version 0.67.0
 ```
 
 Dependency status in this repo:
@@ -169,12 +169,13 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
+Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-full` when you need full assistant/tool transcript capture.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 Use `--dry-run` on `prodex run`, `prodex caveman`, or `prodex super` when you want to inspect resolved provider/model choices, proxy args, and launch env without starting Codex. Secret-looking values are redacted.
 
-Prodex uses system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, while forcing localhost broker traffic to bypass proxies with `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1`. Add `--no-proxy` to `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to ignore proxy settings.
+Prodex uses system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, and runtime WebSocket upstream connections use HTTP CONNECT when `HTTPS_PROXY`/`https_proxy` is configured. Localhost broker traffic bypasses proxies with `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1`. Add `--no-proxy` to `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to ignore proxy settings.
 
 ## 5. Run Claude Code with `prodex claude`
 
@@ -228,6 +229,8 @@ prodex cleanup
 prodex doctor
 prodex audit
 prodex audit --tail 20 --component profile
+prodex context audit
+prodex context compress ~/.codex/AGENTS.md --dry-run
 prodex doctor --quota
 prodex doctor --runtime
 prodex doctor --runtime --json
@@ -249,6 +252,8 @@ Use `prodex doctor --runtime --json` to find the active `log_path`, resolved `ru
 Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, transient runtime cache files and stale root temp files inside `.prodex`, prune Codex and Claude chat history older than one week, collapse duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, clear dead broker artifacts, and remove old orphaned managed profile homes that are no longer tracked.
 
 Use `prodex audit` when you want to inspect the local append-only audit log. It supports `--tail`, `--component`, `--action`, `--outcome`, and `--json`.
+
+Use `prodex context audit` when shared Codex memory, rule, skill, or AGENTS files feel too token-heavy. Use `prodex context compress PATH --dry-run` first; compression is local and deterministic, skips backups, only edits Markdown/text prose files, and writes an `.original.md` backup before replacement.
 
 For managed local deployments, you can pin runtime logging and proxy tuning in `~/.prodex/policy.toml`:
 

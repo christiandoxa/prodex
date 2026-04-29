@@ -759,6 +759,7 @@ fn runtime_proxy_optimistic_current_candidate_for_route_with_selection(
     prompt_cache_key: Option<&str>,
 ) -> Result<Option<String>> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
+    let prompt_cache_owner_profile = runtime_prompt_cache_bound_profile(prompt_cache_key);
     let (
         current_profile,
         codex_home,
@@ -941,8 +942,12 @@ fn runtime_proxy_optimistic_current_candidate_for_route_with_selection(
     if prompt_cache_key
         .map(str::trim)
         .is_some_and(|prompt_cache_key| !prompt_cache_key.is_empty())
-        && matches!(route_kind, RuntimeRouteKind::Responses)
+        && matches!(
+            route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+        )
         && has_alternative_quota_compatible_profile
+        && prompt_cache_owner_profile.as_deref() != Some(current_profile.as_str())
     {
         runtime_proxy_log(
             shared,
@@ -1178,6 +1183,7 @@ fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
         inflight_soft_limit,
         ready_candidates,
         prompt_cache_key,
+        runtime_prompt_cache_bound_profile(prompt_cache_key).as_deref(),
         |name| runtime_profile_selection_jitter(shared, name, route_kind),
     );
 

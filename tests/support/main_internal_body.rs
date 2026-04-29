@@ -486,7 +486,7 @@ fn cached_update_version_is_scoped_to_release_source() {
 
 #[test]
 fn update_notice_is_suppressed_for_machine_output_modes() {
-    assert!(!should_emit_update_notice(&Commands::Info(InfoArgs {})));
+    assert!(!should_emit_update_notice(&Commands::Info(InfoArgs::default())));
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
         quota: false,
         runtime: true,
@@ -502,6 +502,13 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         action: None,
         outcome: None,
     })));
+    assert!(!should_emit_update_notice(&Commands::Context(
+        ContextCommands::Audit(ContextAuditArgs {
+            root: None,
+            limit: 20,
+            json: true,
+        })
+    )));
     assert!(!should_emit_update_notice(&Commands::Quota(QuotaArgs {
         profile: None,
         all: false,
@@ -512,6 +519,115 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         base_url: None,
     })));
     assert!(should_emit_update_notice(&Commands::Current));
+}
+
+#[test]
+fn context_audit_command_accepts_json_and_root() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "context",
+        "audit",
+        "--root",
+        "/tmp/codex-context",
+        "--limit",
+        "7",
+        "--json",
+    ])
+    .expect("context audit command");
+    let Commands::Context(ContextCommands::Audit(args)) = command else {
+        panic!("expected context audit command");
+    };
+    assert_eq!(args.root.as_deref(), Some(Path::new("/tmp/codex-context")));
+    assert_eq!(args.limit, 7);
+    assert!(args.json);
+}
+
+#[test]
+fn context_audit_reports_shared_context_roots() {
+    let temp_dir = TestDir::new();
+    let root = temp_dir.path.join("codex");
+    fs::create_dir_all(root.join("skills/review")).expect("skills dir should be created");
+    fs::write(
+        root.join("AGENTS.md"),
+        "This repository has a very detailed instruction paragraph for every worker.\n",
+    )
+    .expect("agents file should be written");
+    fs::write(
+        root.join("skills/review/SKILL.md"),
+        "Use this skill in order to review code carefully and report risks.\n",
+    )
+    .expect("skill file should be written");
+    fs::write(
+        root.join("skills/review/SKILL.original.md"),
+        "backup should be skipped\n",
+    )
+    .expect("backup should be written");
+
+    let report = collect_context_audit_report(&root, 20).expect("audit should succeed");
+    let paths = report
+        .files
+        .iter()
+        .map(|entry| entry.relative_path.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(paths.contains(&"AGENTS.md"));
+    assert!(paths.contains(&"skills/review/SKILL.md"));
+    assert!(!paths.contains(&"skills/review/SKILL.original.md"));
+    assert!(report.total_estimated_tokens > 0);
+}
+
+#[test]
+fn context_compress_creates_backup_and_preserves_protected_lines() {
+    let temp_dir = TestDir::new();
+    let path = temp_dir.path.join("AGENTS.md");
+    fs::write(
+        &path,
+        concat!(
+            "# Keep Title\n\n",
+            "This is actually a very verbose paragraph in order to make sure to reduce tokens. ",
+            "It is important to please note that this sentence is really redundant.\n\n",
+            "Run `cargo test` before shipping.\n\n",
+            "```bash\n",
+            "cargo test -q\n",
+            "```\n"
+        ),
+    )
+    .expect("context file should be written");
+
+    let report = compress_context_path(&path, false).expect("compress should succeed");
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].status, "compressed");
+
+    let backup = temp_dir.path.join("AGENTS.original.md");
+    assert!(backup.exists());
+    let compressed = fs::read_to_string(&path).expect("compressed file should be readable");
+    assert!(compressed.contains("# Keep Title"));
+    assert!(compressed.contains("Run `cargo test` before shipping."));
+    assert!(compressed.contains("```bash\ncargo test -q\n```"));
+    assert!(!compressed.contains("actually"));
+    assert!(compressed.len() < fs::read_to_string(&backup).unwrap().len());
+
+    let rerun = compress_context_path(&path, false).expect("second compress should succeed");
+    assert_eq!(rerun.entries[0].status, "skipped_backup_exists");
+}
+
+#[test]
+fn context_compress_skips_non_prose_and_backups() {
+    let temp_dir = TestDir::new();
+    let json_path = temp_dir.path.join("config.json");
+    let backup_path = temp_dir.path.join("notes.original.md");
+    fs::write(&json_path, "{}").expect("json should be written");
+    fs::write(&backup_path, "backup").expect("backup should be written");
+
+    let report = compress_context_path(&temp_dir.path, false).expect("compress should succeed");
+    let statuses = report
+        .entries
+        .iter()
+        .map(|entry| (entry.path.file_name().unwrap().to_string_lossy(), entry.status.as_str()))
+        .collect::<Vec<_>>();
+
+    assert!(statuses.contains(&("config.json".into(), "skipped_not_prose")));
+    assert!(statuses.contains(&("notes.original.md".into(), "skipped_not_prose")));
 }
 
 #[test]
@@ -2257,12 +2373,38 @@ fn runtime_mem_extract_mode_strips_only_leading_mem_prefix() {
     assert_eq!(codex_args, vec![OsString::from("exec")]);
 
     let (mem_mode, codex_args) =
+        runtime_mem_extract_mode_with_detail(&[OsString::from("mem-full"), OsString::from("exec")]);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&[
+        OsString::from("mem"),
+        OsString::from("--mem-full"),
+        OsString::from("exec"),
+    ]);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) =
         runtime_mem_extract_mode(&[OsString::from("exec"), OsString::from("mem")]);
     assert!(!mem_mode);
     assert_eq!(
         codex_args,
         vec![OsString::from("exec"), OsString::from("mem")]
     );
+}
+
+#[test]
+fn runtime_mem_default_schema_is_slim_and_full_schema_preserves_outputs() {
+    let slim = runtime_mem_default_codex_schema().to_string();
+    assert!(slim.contains("0.4-slim"));
+    assert!(slim.contains("output omitted"));
+    assert!(!slim.contains("\"toolResponse\":\"payload.output\""));
+
+    let full = runtime_mem_full_codex_schema().to_string();
+    assert!(full.contains("Full schema"));
+    assert!(full.contains("\"toolResponse\":\"payload.output\""));
+    assert!(full.contains("\"message\":\"payload.message\""));
 }
 
 #[test]
@@ -2496,6 +2638,7 @@ fn ensure_runtime_mem_codex_watch_for_home_adds_prodex_watch_without_clobbering_
 
 #[test]
 fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
+    let _env_guard = TestEnvVarGuard::unset(PRODEX_CAVEMAN_FULL_ASSETS_ENV);
     let temp_dir = TestDir::new();
     let paths = AppPaths {
         root: temp_dir.path.clone(),
@@ -2579,6 +2722,57 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
         caveman_home
             .join("plugins/cache/prodex-caveman/caveman/0.1.0/.codex-plugin/plugin.json")
             .is_file()
+    );
+    assert!(
+        caveman_home
+            .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/skills/caveman/SKILL.md")
+            .is_file(),
+        "core Caveman skill should install by default"
+    );
+    assert!(
+        !caveman_home
+            .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/skills/compress/SKILL.md")
+            .exists(),
+        "compress skill should not install in the default lean overlay"
+    );
+    assert!(
+        !caveman_home
+            .join("plugins/cache/prodex-caveman/caveman/0.1.0/skills/compress/SKILL.md")
+            .exists(),
+        "compress skill should not install in the default plugin cache"
+    );
+}
+
+#[test]
+fn prepare_caveman_launch_home_can_install_full_caveman_assets() {
+    let _env_guard = TestEnvVarGuard::set(PRODEX_CAVEMAN_FULL_ASSETS_ENV, "1");
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.clone(),
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("profiles"),
+        shared_codex_root: temp_dir.path.join(".codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+    };
+    create_codex_home_if_missing(&paths.shared_codex_root).expect("shared codex root");
+    create_codex_home_if_missing(&paths.managed_profiles_root).expect("managed root");
+
+    let base_home = paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&base_home).expect("base home");
+
+    let caveman_home =
+        prepare_caveman_launch_home(&paths, &base_home).expect("caveman home should prepare");
+    assert!(
+        caveman_home
+            .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/skills/compress/SKILL.md")
+            .is_file(),
+        "compress skill should install when full assets are enabled"
+    );
+    assert!(
+        caveman_home
+            .join("plugins/cache/prodex-caveman/caveman/0.1.0/skills/compress/scripts/compress.py")
+            .is_file(),
+        "compress scripts should install when full assets are enabled"
     );
 }
 

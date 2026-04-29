@@ -494,26 +494,127 @@ pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
     shared: &RuntimeRotationProxyShared,
     uri: &tungstenite::http::Uri,
 ) -> std::result::Result<RuntimeWebsocketTcpConnectSuccess, WsError> {
-    let host = uri.host().ok_or(WsError::Url(WsUrlError::NoHostName))?;
-    let host = if host.starts_with('[') && host.ends_with(']') {
-        &host[1..host.len() - 1]
-    } else {
-        host
-    };
-    let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
-        Some("wss") => 443,
-        _ => 80,
-    });
+    let target = runtime_websocket_target_from_uri(uri)?;
     let connect_timeout = Duration::from_millis(runtime_proxy_websocket_connect_timeout_ms());
     let io_timeout = Duration::from_millis(runtime_proxy_websocket_precommit_progress_timeout_ms());
     let happy_eyeballs_delay =
         Duration::from_millis(runtime_proxy_websocket_happy_eyeballs_delay_ms());
+
+    if let Some(proxy) =
+        runtime_websocket_http_proxy_for_uri(shared, uri, &target).map_err(WsError::Io)?
+    {
+        return connect_runtime_proxy_upstream_tcp_stream_via_http_proxy(
+            request_id,
+            shared,
+            &proxy,
+            &target,
+            connect_timeout,
+            io_timeout,
+            happy_eyeballs_delay,
+        );
+    }
+
+    connect_runtime_proxy_tcp_stream_to_host(
+        request_id,
+        shared,
+        &target.host,
+        target.port,
+        connect_timeout,
+        io_timeout,
+        happy_eyeballs_delay,
+    )
+}
+
+fn connect_runtime_proxy_upstream_tcp_stream_via_http_proxy(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    proxy: &RuntimeWebsocketHttpProxy,
+    target: &RuntimeWebsocketTarget,
+    connect_timeout: Duration,
+    io_timeout: Duration,
+    happy_eyeballs_delay: Duration,
+) -> std::result::Result<RuntimeWebsocketTcpConnectSuccess, WsError> {
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "websocket_proxy_connect_start",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "websocket"),
+                runtime_proxy_log_field("proxy", proxy.log_label()),
+                runtime_proxy_log_field("target", target.authority.as_str()),
+            ],
+        ),
+    );
+    let mut connected = connect_runtime_proxy_tcp_stream_to_host(
+        request_id,
+        shared,
+        &proxy.host,
+        proxy.port,
+        connect_timeout,
+        io_timeout,
+        happy_eyeballs_delay,
+    )?;
+
+    match runtime_websocket_establish_http_proxy_tunnel(
+        &mut connected.stream,
+        proxy,
+        target,
+        io_timeout,
+    ) {
+        Ok(status) => {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "websocket_proxy_tunnel_ok",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "websocket"),
+                        runtime_proxy_log_field("proxy", proxy.log_label()),
+                        runtime_proxy_log_field("target", target.authority.as_str()),
+                        runtime_proxy_log_field("status", status.to_string()),
+                        runtime_proxy_log_field("addr", connected.selected_addr.to_string()),
+                    ],
+                ),
+            );
+            Ok(connected)
+        }
+        Err(err) => {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "websocket_proxy_tunnel_failure",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "websocket"),
+                        runtime_proxy_log_field("proxy", proxy.log_label()),
+                        runtime_proxy_log_field("target", target.authority.as_str()),
+                        runtime_proxy_log_field("error", err.to_string()),
+                    ],
+                ),
+            );
+            Err(WsError::Io(err))
+        }
+    }
+}
+
+fn connect_runtime_proxy_tcp_stream_to_host(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    host: &str,
+    port: u16,
+    connect_timeout: Duration,
+    io_timeout: Duration,
+    happy_eyeballs_delay: Duration,
+) -> std::result::Result<RuntimeWebsocketTcpConnectSuccess, WsError> {
     let addrs = runtime_interleave_socket_addrs(
         runtime_resolve_websocket_tcp_addrs(request_id, shared, host, port, connect_timeout)
             .map_err(WsError::Io)?,
     );
     if addrs.is_empty() {
-        return Err(WsError::Url(WsUrlError::UnableToConnect(uri.to_string())));
+        return Err(WsError::Url(WsUrlError::UnableToConnect(
+            runtime_websocket_authority(host, port),
+        )));
     }
 
     let resolved_addrs = addrs.len();
@@ -582,8 +683,283 @@ pub(super) fn connect_runtime_proxy_upstream_tcp_stream(
 
     match last_error {
         Some(err) => Err(WsError::Io(err)),
-        None => Err(WsError::Url(WsUrlError::UnableToConnect(uri.to_string()))),
+        None => Err(WsError::Url(WsUrlError::UnableToConnect(
+            runtime_websocket_authority(host, port),
+        ))),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeWebsocketTarget {
+    host: String,
+    port: u16,
+    authority: String,
+}
+
+fn runtime_websocket_target_from_uri(
+    uri: &tungstenite::http::Uri,
+) -> std::result::Result<RuntimeWebsocketTarget, WsError> {
+    let host = uri.host().ok_or(WsError::Url(WsUrlError::NoHostName))?;
+    let host = runtime_websocket_normalize_host(host);
+    let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
+        Some("wss") | Some("https") => 443,
+        _ => 80,
+    });
+    let authority = runtime_websocket_authority(&host, port);
+    Ok(RuntimeWebsocketTarget {
+        host,
+        port,
+        authority,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeWebsocketHttpProxy {
+    url: reqwest::Url,
+    host: String,
+    port: u16,
+}
+
+impl RuntimeWebsocketHttpProxy {
+    fn log_label(&self) -> String {
+        let mut redacted = self.url.clone();
+        let _ = redacted.set_username("");
+        let _ = redacted.set_password(None);
+        redacted.to_string()
+    }
+}
+
+fn runtime_websocket_http_proxy_for_uri(
+    shared: &RuntimeRotationProxyShared,
+    uri: &tungstenite::http::Uri,
+    target: &RuntimeWebsocketTarget,
+) -> io::Result<Option<RuntimeWebsocketHttpProxy>> {
+    if shared.upstream_no_proxy || runtime_websocket_no_proxy_matches(&target.host, target.port) {
+        return Ok(None);
+    }
+    let Some(proxy_url) = runtime_websocket_proxy_env_url(uri.scheme_str().unwrap_or("wss")) else {
+        return Ok(None);
+    };
+    if proxy_url.scheme() != "http" {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "runtime websocket proxy scheme '{}' is unsupported; use an http:// proxy or --no-proxy",
+                proxy_url.scheme()
+            ),
+        ));
+    }
+    let Some(host) = proxy_url.host_str() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "runtime websocket proxy URL is missing a host",
+        ));
+    };
+    let host = runtime_websocket_normalize_host(host);
+    let port = proxy_url.port_or_known_default().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "runtime websocket proxy URL is missing a port",
+        )
+    })?;
+    Ok(Some(RuntimeWebsocketHttpProxy {
+        url: proxy_url,
+        host,
+        port,
+    }))
+}
+
+fn runtime_websocket_proxy_env_url(scheme: &str) -> Option<reqwest::Url> {
+    const HTTPS_PROXY_KEYS: [&str; 6] = [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "PROXY",
+        "proxy",
+    ];
+    const HTTP_PROXY_KEYS: [&str; 6] = [
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "PROXY",
+        "proxy",
+    ];
+    let keys = if matches!(scheme, "wss" | "https") {
+        HTTPS_PROXY_KEYS.as_slice()
+    } else {
+        HTTP_PROXY_KEYS.as_slice()
+    };
+    keys.iter().find_map(|key| {
+        let value = env::var_os(key)?;
+        runtime_websocket_parse_proxy_url(&value.to_string_lossy())
+    })
+}
+
+fn runtime_websocket_parse_proxy_url(value: &str) -> Option<reqwest::Url> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidate = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
+    reqwest::Url::parse(&candidate).ok()
+}
+
+fn runtime_websocket_no_proxy_matches(host: &str, port: u16) -> bool {
+    ["NO_PROXY", "no_proxy"].into_iter().any(|key| {
+        env::var_os(key).is_some_and(|value| {
+            value
+                .to_string_lossy()
+                .split(',')
+                .any(|pattern| runtime_websocket_no_proxy_pattern_matches(pattern, host, port))
+        })
+    })
+}
+
+fn runtime_websocket_no_proxy_pattern_matches(pattern: &str, host: &str, port: u16) -> bool {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern == "*" {
+        return true;
+    }
+    let (pattern_host, pattern_port) = runtime_websocket_no_proxy_pattern_host_port(pattern);
+    if pattern_port.is_some_and(|candidate_port| candidate_port != port) {
+        return false;
+    }
+    let pattern_host = runtime_websocket_normalize_host(pattern_host);
+    let host = runtime_websocket_normalize_host(host);
+    let pattern_host = pattern_host.trim_start_matches('.').to_ascii_lowercase();
+    let host = host.to_ascii_lowercase();
+    host == pattern_host || host.ends_with(&format!(".{pattern_host}"))
+}
+
+fn runtime_websocket_no_proxy_pattern_host_port(pattern: &str) -> (&str, Option<u16>) {
+    if let Some(stripped) = pattern.strip_prefix('[')
+        && let Some((host, rest)) = stripped.split_once(']')
+    {
+        let port = rest
+            .strip_prefix(':')
+            .and_then(|value| value.parse::<u16>().ok());
+        return (host, port);
+    }
+    if pattern.matches(':').count() == 1
+        && let Some((host, port)) = pattern.rsplit_once(':')
+        && let Ok(port) = port.parse::<u16>()
+    {
+        return (host, Some(port));
+    }
+    (pattern, None)
+}
+
+fn runtime_websocket_normalize_host(host: &str) -> String {
+    host.trim_matches(|ch| ch == '[' || ch == ']').to_string()
+}
+
+fn runtime_websocket_authority(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+fn runtime_websocket_establish_http_proxy_tunnel(
+    stream: &mut TcpStream,
+    proxy: &RuntimeWebsocketHttpProxy,
+    target: &RuntimeWebsocketTarget,
+    io_timeout: Duration,
+) -> io::Result<u16> {
+    stream.set_read_timeout(Some(io_timeout))?;
+    stream.set_write_timeout(Some(io_timeout))?;
+    let mut request = format!(
+        "CONNECT {} HTTP/1.1\r\nHost: {}\r\nProxy-Connection: Keep-Alive\r\n",
+        target.authority, target.authority
+    );
+    if let Some(header) = runtime_websocket_proxy_authorization_header(proxy) {
+        request.push_str("Proxy-Authorization: ");
+        request.push_str(&header);
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes())?;
+    stream.flush()?;
+
+    let (status, response_bytes) = runtime_websocket_read_http_connect_response(stream)?;
+    if status != 200 {
+        return Err(io::Error::other(format!(
+            "runtime websocket proxy CONNECT returned HTTP {status} ({response_bytes} bytes)"
+        )));
+    }
+    Ok(status)
+}
+
+fn runtime_websocket_proxy_authorization_header(
+    proxy: &RuntimeWebsocketHttpProxy,
+) -> Option<String> {
+    let username = proxy.url.username();
+    if username.is_empty() {
+        return None;
+    }
+    let password = proxy.url.password().unwrap_or_default();
+    let credentials = format!("{username}:{password}");
+    Some(format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(credentials)
+    ))
+}
+
+fn runtime_websocket_read_http_connect_response(
+    stream: &mut TcpStream,
+) -> io::Result<(u16, usize)> {
+    const MAX_CONNECT_RESPONSE_BYTES: usize = 8192;
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 512];
+    loop {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "runtime websocket proxy closed before CONNECT response completed",
+            ));
+        }
+        response.extend_from_slice(&buffer[..read]);
+        if response.windows(4).any(|window| window == b"\r\n\r\n")
+            || response.windows(2).any(|window| window == b"\n\n")
+        {
+            break;
+        }
+        if response.len() >= MAX_CONNECT_RESPONSE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "runtime websocket proxy CONNECT response is too large",
+            ));
+        }
+    }
+    let text = std::str::from_utf8(&response).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "runtime websocket proxy CONNECT response is not valid UTF-8",
+        )
+    })?;
+    let status = text
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "runtime websocket proxy CONNECT response is missing a status code",
+            )
+        })?;
+    Ok((status, response.len()))
 }
 
 pub(super) fn send_runtime_proxy_websocket_error(
@@ -776,6 +1152,7 @@ pub(super) fn inspect_runtime_websocket_text_frame(
         event_type,
         turn_state: extract_runtime_turn_state_from_value(&value),
         response_ids: extract_runtime_response_ids_from_value(&value),
+        token_usage: extract_runtime_token_usage_from_value(&value),
         retry_kind,
         precommit_hold,
         terminal_event,
@@ -795,6 +1172,7 @@ pub(super) struct RuntimeWebsocketAttemptRequest<'a> {
     pub(in crate::runtime_proxy) handshake_request: &'a RuntimeProxyRequest,
     pub(in crate::runtime_proxy) request_text: &'a str,
     pub(in crate::runtime_proxy) request_previous_response_id: Option<&'a str>,
+    pub(in crate::runtime_proxy) request_prompt_cache_key: Option<&'a str>,
     pub(in crate::runtime_proxy) request_session_id: Option<&'a str>,
     pub(in crate::runtime_proxy) request_turn_state: Option<&'a str>,
     pub(in crate::runtime_proxy) shared: &'a RuntimeRotationProxyShared,
@@ -813,6 +1191,7 @@ pub(super) fn attempt_runtime_websocket_request(
         handshake_request,
         request_text,
         request_previous_response_id,
+        request_prompt_cache_key,
         request_session_id,
         request_turn_state,
         shared,
@@ -1158,6 +1537,12 @@ pub(super) fn attempt_runtime_websocket_request(
                         RuntimeRouteKind::Websocket,
                         promote_committed_profile,
                     )?;
+                    remember_runtime_prompt_cache_profile(
+                        shared,
+                        profile_name,
+                        request_prompt_cache_key,
+                        RuntimeRouteKind::Websocket,
+                    );
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -1196,6 +1581,18 @@ pub(super) fn attempt_runtime_websocket_request(
                     &inspected.response_ids,
                     &mut previous_response_owner_recorded,
                 )?;
+                if committed
+                    && runtime_token_usage_event_is_loggable(inspected.event_type.as_deref())
+                {
+                    log_runtime_token_usage(
+                        shared,
+                        request_id,
+                        "websocket",
+                        profile_name,
+                        "responses_websocket",
+                        inspected.token_usage,
+                    );
+                }
                 let committed_previous_response_not_found = committed
                     && matches!(
                         inspected.retry_kind,
@@ -1307,6 +1704,12 @@ pub(super) fn attempt_runtime_websocket_request(
                         RuntimeRouteKind::Websocket,
                         promote_committed_profile,
                     )?;
+                    remember_runtime_prompt_cache_profile(
+                        shared,
+                        profile_name,
+                        request_prompt_cache_key,
+                        RuntimeRouteKind::Websocket,
+                    );
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -1753,6 +2156,117 @@ mod tests {
                 standard: 8,
             }),
         }
+    }
+
+    #[test]
+    fn websocket_upstream_connect_uses_http_connect_proxy_from_env() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test proxy should bind");
+        let proxy_addr = listener
+            .local_addr()
+            .expect("test proxy should expose local addr");
+        let (request_tx, request_rx) = mpsc::channel::<String>();
+        let proxy_thread = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("proxy should accept CONNECT");
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 256];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).expect("proxy should read request");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+            request_tx
+                .send(String::from_utf8_lossy(&request).into_owned())
+                .expect("CONNECT request should be recorded");
+            stream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .expect("proxy should accept tunnel");
+            thread::sleep(Duration::from_millis(50));
+        });
+
+        let _env_lock = TestEnvVarGuard::lock();
+        let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
+        let _http_proxy_lower = TestEnvVarGuard::unset("http_proxy");
+        let _https_proxy = TestEnvVarGuard::unset("HTTPS_PROXY");
+        let _all_proxy = TestEnvVarGuard::unset("ALL_PROXY");
+        let _all_proxy_lower = TestEnvVarGuard::unset("all_proxy");
+        let _proxy = TestEnvVarGuard::unset("PROXY");
+        let _proxy_lower = TestEnvVarGuard::unset("proxy");
+        let _no_proxy = TestEnvVarGuard::unset("NO_PROXY");
+        let _no_proxy_lower = TestEnvVarGuard::unset("no_proxy");
+        let proxy_url = format!("http://user:pass@{proxy_addr}");
+        let _https_proxy_lower = TestEnvVarGuard::set("https_proxy", &proxy_url);
+
+        let shared = websocket_test_shared("http-connect-proxy");
+        let uri = "wss://chatgpt.com/backend-api/codex/responses"
+            .parse()
+            .expect("websocket URI should parse");
+        let connected = connect_runtime_proxy_upstream_tcp_stream(90, &shared, &uri)
+            .expect("websocket connect should establish HTTP CONNECT tunnel");
+        drop(connected.stream);
+
+        let connect_request = request_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("proxy should observe CONNECT request");
+        proxy_thread
+            .join()
+            .expect("proxy thread should finish cleanly");
+        assert!(
+            connect_request.starts_with("CONNECT chatgpt.com:443 HTTP/1.1\r\n"),
+            "CONNECT target should be the upstream websocket host: {connect_request:?}"
+        );
+        assert!(
+            connect_request.contains("\r\nHost: chatgpt.com:443\r\n"),
+            "CONNECT request should include target Host header: {connect_request:?}"
+        );
+        assert!(
+            connect_request.contains("\r\nProxy-Authorization: Basic dXNlcjpwYXNz\r\n"),
+            "CONNECT request should forward basic proxy auth without logging secrets: {connect_request:?}"
+        );
+
+        let log =
+            read_websocket_test_log_after_marker(&shared.log_path, "websocket_proxy_tunnel_ok");
+        assert!(
+            log.contains("websocket_proxy_connect_start")
+                && log.contains("websocket_proxy_tunnel_ok")
+                && log.contains("target=chatgpt.com:443"),
+            "proxy tunnel markers should be logged: {log}"
+        );
+        assert!(
+            !log.contains("user:pass"),
+            "proxy credentials must not be written to runtime logs: {log}"
+        );
+        let _ = std::fs::remove_file(&shared.log_path);
+    }
+
+    #[test]
+    fn websocket_proxy_selection_honors_no_proxy_for_upstream_host() {
+        let _env_lock = TestEnvVarGuard::lock();
+        let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
+        let _http_proxy_lower = TestEnvVarGuard::unset("http_proxy");
+        let _https_proxy = TestEnvVarGuard::set("HTTPS_PROXY", "http://127.0.0.1:1086");
+        let _https_proxy_lower = TestEnvVarGuard::unset("https_proxy");
+        let _all_proxy = TestEnvVarGuard::unset("ALL_PROXY");
+        let _all_proxy_lower = TestEnvVarGuard::unset("all_proxy");
+        let _proxy = TestEnvVarGuard::unset("PROXY");
+        let _proxy_lower = TestEnvVarGuard::unset("proxy");
+        let _no_proxy = TestEnvVarGuard::set("NO_PROXY", ".chatgpt.com,example.test:443");
+        let _no_proxy_lower = TestEnvVarGuard::unset("no_proxy");
+
+        let shared = websocket_test_shared("no-proxy");
+        let uri = "wss://chatgpt.com/backend-api/codex/responses"
+            .parse()
+            .expect("websocket URI should parse");
+        let target =
+            runtime_websocket_target_from_uri(&uri).expect("websocket target should parse");
+
+        assert!(
+            runtime_websocket_http_proxy_for_uri(&shared, &uri, &target)
+                .expect("proxy selection should succeed")
+                .is_none(),
+            "NO_PROXY should bypass the configured proxy for chatgpt.com"
+        );
     }
 
     #[test]

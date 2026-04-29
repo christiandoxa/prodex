@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn handle_info(_args: InfoArgs) -> Result<()> {
+pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let policy_summary = runtime_policy_summary()?;
@@ -26,7 +26,11 @@ pub(crate) fn handle_info(_args: InfoArgs) -> Result<()> {
         now,
     );
 
-    let fields = vec![
+    let token_summary = args
+        .tokens
+        .then(|| collect_info_token_usage_summary(&collect_recent_runtime_log_paths(8)));
+
+    let mut fields = vec![
         ("Profiles".to_string(), state.profiles.len().to_string()),
         (
             "Active profile".to_string(),
@@ -108,6 +112,12 @@ pub(crate) fn handle_info(_args: InfoArgs) -> Result<()> {
             ),
         ),
     ];
+    if let Some(token_summary) = token_summary.as_ref() {
+        fields.push((
+            "Token usage".to_string(),
+            format_info_token_usage_summary(token_summary),
+        ));
+    }
     print_panel("Info", &fields);
     Ok(())
 }

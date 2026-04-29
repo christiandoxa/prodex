@@ -996,6 +996,7 @@ pub(crate) fn attempt_runtime_responses_request(
 ) -> Result<RuntimeResponsesAttempt> {
     let request_session_id = runtime_request_session_id(request);
     let request_previous_response_id = runtime_request_previous_response_id(request);
+    let request_prompt_cache_key = runtime_request_prompt_cache_key(request);
     let request_turn_state = runtime_request_turn_state(request);
     let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
         shared,
@@ -1130,6 +1131,14 @@ pub(crate) fn attempt_runtime_responses_request(
                 err,
             );
         });
+        if let Ok(RuntimeResponsesAttempt::Success { profile_name, .. }) = &prepared {
+            remember_runtime_prompt_cache_profile(
+                shared,
+                profile_name,
+                request_prompt_cache_key.as_deref(),
+                RuntimeRouteKind::Responses,
+            );
+        }
         return prepared;
     }
 }

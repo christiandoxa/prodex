@@ -326,6 +326,124 @@ pub(crate) fn collect_info_runtime_load_summary(
     summary
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InfoTokenUsageSummary {
+    pub(crate) log_count: usize,
+    pub(crate) event_count: usize,
+    pub(crate) total: RuntimeTokenUsage,
+    pub(crate) by_profile: BTreeMap<String, InfoTokenUsageProfile>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct InfoTokenUsageProfile {
+    pub(crate) event_count: usize,
+    pub(crate) total: RuntimeTokenUsage,
+}
+
+pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
+    let mut paths = prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir());
+    paths.sort_by(|left, right| {
+        runtime_log_modified(left)
+            .cmp(&runtime_log_modified(right))
+            .then_with(|| left.cmp(right))
+    });
+    paths.reverse();
+    paths.truncate(limit);
+    paths
+}
+
+fn runtime_log_modified(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(UNIX_EPOCH)
+}
+
+pub(crate) fn collect_info_token_usage_summary(log_paths: &[PathBuf]) -> InfoTokenUsageSummary {
+    let mut summary = InfoTokenUsageSummary {
+        log_count: log_paths.len(),
+        ..InfoTokenUsageSummary::default()
+    };
+    for path in log_paths {
+        let Ok(tail) = read_runtime_log_tail(path, INFO_RUNTIME_LOG_TAIL_BYTES) else {
+            continue;
+        };
+        summary.merge(collect_info_token_usage_summary_from_text(
+            &String::from_utf8_lossy(&tail),
+        ));
+    }
+    summary
+}
+
+pub(crate) fn collect_info_token_usage_summary_from_text(text: &str) -> InfoTokenUsageSummary {
+    let mut summary = InfoTokenUsageSummary::default();
+    for line in text.lines() {
+        let Some((profile, usage)) = info_token_usage_from_line(line) else {
+            continue;
+        };
+        summary.event_count += 1;
+        summary.total.add(usage);
+        let profile = summary.by_profile.entry(profile).or_default();
+        profile.event_count += 1;
+        profile.total.add(usage);
+    }
+    summary
+}
+
+impl InfoTokenUsageSummary {
+    fn merge(&mut self, other: InfoTokenUsageSummary) {
+        self.event_count += other.event_count;
+        self.total.add(other.total);
+        for (name, other_profile) in other.by_profile {
+            let profile = self.by_profile.entry(name).or_default();
+            profile.event_count += other_profile.event_count;
+            profile.total.add(other_profile.total);
+        }
+    }
+}
+
+trait InfoTokenUsageAdd {
+    fn add(&mut self, other: RuntimeTokenUsage);
+}
+
+impl InfoTokenUsageAdd for RuntimeTokenUsage {
+    fn add(&mut self, other: RuntimeTokenUsage) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.cached_input_tokens = self
+            .cached_input_tokens
+            .saturating_add(other.cached_input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+    }
+}
+
+pub(crate) fn info_token_usage_from_line(line: &str) -> Option<(String, RuntimeTokenUsage)> {
+    if !line.contains("token_usage") {
+        return None;
+    }
+    let fields = info_runtime_parse_fields(line);
+    Some((
+        fields
+            .get("profile")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+        RuntimeTokenUsage {
+            input_tokens: fields.get("input_tokens")?.parse::<u64>().ok()?,
+            cached_input_tokens: fields
+                .get("cached_input_tokens")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or_default(),
+            output_tokens: fields
+                .get("output_tokens")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or_default(),
+            reasoning_tokens: fields
+                .get("reasoning_tokens")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or_default(),
+        },
+    ))
+}
+
 pub(crate) fn collect_info_runtime_load_summary_from_text(
     text: &str,
     now: i64,
@@ -410,6 +528,12 @@ pub(crate) fn runtime_log_timestamp_epoch(line: &str) -> Option<i64> {
 }
 
 pub(crate) fn info_runtime_line_timestamp(line: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+        return value
+            .get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+    }
     let end = line.find("] ")?;
     line.strip_prefix('[')
         .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
@@ -417,6 +541,16 @@ pub(crate) fn info_runtime_line_timestamp(line: &str) -> Option<String> {
 }
 
 pub(crate) fn info_runtime_parse_fields(line: &str) -> BTreeMap<String, String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+        && let Some(fields) = value.get("fields").and_then(serde_json::Value::as_object)
+    {
+        return fields
+            .iter()
+            .filter_map(|(key, value)| {
+                info_runtime_json_field_value(value).map(|value| (key.clone(), value))
+            })
+            .collect();
+    }
     let message = line
         .split_once("] ")
         .map(|(_, message)| message)
@@ -433,6 +567,15 @@ pub(crate) fn info_runtime_parse_fields(line: &str) -> BTreeMap<String, String> 
         fields.insert(key.to_string(), value.trim_matches('"').to_string());
     }
     fields
+}
+
+fn info_runtime_json_field_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
 }
 
 pub(crate) fn estimate_info_runway(
@@ -615,6 +758,48 @@ pub(crate) fn format_info_quota_data_summary(aggregate: &InfoQuotaAggregate) -> 
         aggregate.live_profiles,
         aggregate.snapshot_profiles,
         aggregate.unavailable_profiles
+    )
+}
+
+pub(crate) fn format_info_token_usage_summary(summary: &InfoTokenUsageSummary) -> String {
+    if summary.event_count == 0 {
+        return format!(
+            "No token_usage events found in {} recent runtime log(s)",
+            summary.log_count
+        );
+    }
+
+    let top_profiles = summary
+        .by_profile
+        .iter()
+        .take(4)
+        .map(|(profile, data)| {
+            format!(
+                "{}:{} in/{} cached/{} out/{} reasoning",
+                profile,
+                data.total.input_tokens,
+                data.total.cached_input_tokens,
+                data.total.output_tokens,
+                data.total.reasoning_tokens
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let suffix = if top_profiles.is_empty() {
+        String::new()
+    } else {
+        format!("; by profile: {top_profiles}")
+    };
+
+    format!(
+        "{} event(s), logs={}: input={}, cached_input={}, output={}, reasoning={}{}",
+        summary.event_count,
+        summary.log_count,
+        summary.total.input_tokens,
+        summary.total.cached_input_tokens,
+        summary.total.output_tokens,
+        summary.total.reasoning_tokens,
+        suffix
     )
 }
 
@@ -839,5 +1024,36 @@ pub(crate) fn format_relative_duration(seconds: i64) -> String {
         format!("{minutes}m")
     } else {
         "<1m".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn info_token_usage_summary_parses_text_runtime_log_markers() {
+        let summary = collect_info_token_usage_summary_from_text(concat!(
+            "[2026-04-29 10:00:00.000 +07:00] token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8\n",
+            "[2026-04-29 10:00:01.000 +07:00] token_usage request=2 transport=http profile=backup source=responses_sse input_tokens=10 cached_input_tokens=0 output_tokens=4 reasoning_tokens=1\n",
+        ));
+
+        assert_eq!(summary.event_count, 2);
+        assert_eq!(summary.total.input_tokens, 110);
+        assert_eq!(summary.total.cached_input_tokens, 25);
+        assert_eq!(summary.total.output_tokens, 44);
+        assert_eq!(summary.total.reasoning_tokens, 9);
+        assert_eq!(summary.by_profile["main"].total.output_tokens, 40);
+    }
+
+    #[test]
+    fn info_token_usage_summary_parses_json_runtime_log_markers() {
+        let summary = collect_info_token_usage_summary_from_text(
+            r#"{"timestamp":"2026-04-29 10:00:00.000 +07:00","message":"token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8","event":"token_usage","fields":{"request":"1","transport":"http","profile":"main","source":"responses_unary","input_tokens":"100","cached_input_tokens":"25","output_tokens":"40","reasoning_tokens":"8"}}"#,
+        );
+
+        assert_eq!(summary.event_count, 1);
+        assert_eq!(summary.total.input_tokens, 100);
+        assert!(format_info_token_usage_summary(&summary).contains("input=100"));
     }
 }

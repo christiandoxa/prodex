@@ -181,7 +181,7 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     provider_priority: usize,
     quota_sort_key: RuntimeQuotaPressureSortKey,
     in_selection_backoff: bool,
-    prompt_cache_affinity_sort_key: u64,
+    prompt_cache_affinity_sort_key: (u8, u64),
     jitter: u64,
 }
 
@@ -213,6 +213,7 @@ pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
     inflight_soft_limit: usize,
     ready_profile_candidates: Vec<ReadyProfileCandidate>,
     prompt_cache_key: Option<&str>,
+    prompt_cache_owner_profile: Option<&str>,
     jitter_for: F,
 ) -> RuntimeResponseCandidateExecutionPlan
 where
@@ -248,8 +249,9 @@ where
                     route_kind,
                 ),
                 in_selection_backoff: entry.in_selection_backoff,
-                prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key(
+                prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key_with_owner(
                     prompt_cache_key,
+                    prompt_cache_owner_profile,
                     &candidate.name,
                 ),
                 jitter: jitter_for(&candidate.name),
@@ -294,6 +296,36 @@ where
         ready_candidates,
         fallback_candidates,
     }
+}
+
+pub(crate) fn runtime_prompt_cache_affinity_sort_key_with_owner(
+    prompt_cache_key: Option<&str>,
+    prompt_cache_owner_profile: Option<&str>,
+    profile_name: &str,
+) -> (u8, u64) {
+    if prompt_cache_key
+        .map(str::trim)
+        .is_none_or(|prompt_cache_key| prompt_cache_key.is_empty())
+    {
+        return (0, 0);
+    }
+    if let Some(owner) = prompt_cache_owner_profile
+        .map(str::trim)
+        .filter(|owner| !owner.is_empty())
+    {
+        return if owner == profile_name {
+            (0, 0)
+        } else {
+            (
+                1,
+                runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name),
+            )
+        };
+    }
+    (
+        0,
+        runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name),
+    )
 }
 
 pub(crate) fn runtime_prompt_cache_affinity_sort_key(
@@ -464,6 +496,7 @@ mod tests {
             3,
             ready_candidates,
             None,
+            None,
             |_| 0,
         );
 
@@ -526,6 +559,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
+            None,
             None,
             |_| 0,
         );
@@ -649,6 +683,7 @@ mod tests {
             3,
             ready_candidates,
             None,
+            None,
             |_| 0,
         );
 
@@ -699,6 +734,7 @@ mod tests {
             3,
             ready_candidates,
             Some(prompt_cache_key),
+            None,
             |_| 0,
         );
 
@@ -757,6 +793,7 @@ mod tests {
             3,
             ready_candidates,
             Some(prompt_cache_key),
+            None,
             |_| 0,
         );
 
@@ -841,6 +878,7 @@ mod tests {
             RuntimeRouteKind::Responses,
             3,
             ready_candidates,
+            None,
             None,
             |_| 0,
         );

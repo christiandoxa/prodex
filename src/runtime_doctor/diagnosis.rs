@@ -876,6 +876,8 @@ fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
             "Recent websocket connect overflow dispatch was observed. Next step: {}",
             runtime_doctor_websocket_connect_overflow_next_step(summary)
         )
+    } else if runtime_doctor_marker_count(summary, "websocket_proxy_tunnel_failure") > 0 {
+        "Recent websocket upstream proxy tunnel failed before the upstream websocket handshake completed. Next step: inspect HTTPS_PROXY/NO_PROXY and the proxy's CONNECT support.".to_string()
     } else if runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0 {
         let profile =
             runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "profile")

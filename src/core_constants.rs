@@ -33,6 +33,9 @@ pub(crate) const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 pub(crate) const RESPONSE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 16_384 };
 pub(crate) const TURN_STATE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
 pub(crate) const SESSION_ID_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
+pub(crate) const RUNTIME_PROMPT_CACHE_AFFINITY_LIMIT: usize = if cfg!(test) { 4 } else { 2_048 };
+pub(crate) const RUNTIME_PROMPT_CACHE_AFFINITY_RETENTION_SECONDS: i64 =
+    if cfg!(test) { 60 } else { 6 * 60 * 60 };
 pub(crate) const RUNTIME_CONTINUATION_RESPONSE_STATUS_LIMIT: usize = RESPONSE_PROFILE_BINDING_LIMIT;
 pub(crate) const RUNTIME_CONTINUATION_TURN_STATE_STATUS_LIMIT: usize =
     TURN_STATE_PROFILE_BINDING_LIMIT;
@@ -306,6 +309,13 @@ Examples:
   prodex audit --tail 50
   prodex audit --component profile --action use
   prodex audit --json";
+pub(crate) const CLI_CONTEXT_AFTER_HELP: &str = "\
+Examples:
+  prodex context audit
+  prodex context audit --limit 30
+  prodex context audit --json
+  prodex context compress ~/.codex/AGENTS.md --dry-run
+  prodex context compress ~/.codex/AGENTS.md";
 pub(crate) const CLI_CLEANUP_AFTER_HELP: &str = "\
 Examples:
   prodex cleanup
