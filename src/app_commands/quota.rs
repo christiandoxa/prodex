@@ -13,15 +13,25 @@ where
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
+    let auth_filter = args
+        .auth
+        .as_deref()
+        .map(QuotaAuthFilter::parse)
+        .transpose()?
+        .unwrap_or(QuotaAuthFilter::All);
 
     if args.all {
         if state.profiles.is_empty() {
             bail!("no profiles configured");
         }
         if quota_watch_enabled(&args) {
-            return watch_all_quotas(&paths, args.base_url.as_deref(), args.detail);
+            return watch_all_quotas(&paths, args.base_url.as_deref(), args.detail, auth_filter);
         }
-        let reports = collect_quota_reports(&state, args.base_url.as_deref());
+        let reports = if matches!(auth_filter, QuotaAuthFilter::All) {
+            collect_quota_reports(&state, args.base_url.as_deref())
+        } else {
+            collect_quota_reports_with_auth_filter(&state, args.base_url.as_deref(), &auth_filter)
+        };
         print_quota_reports(&reports, args.detail);
         return Ok(());
     }

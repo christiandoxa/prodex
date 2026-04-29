@@ -11,6 +11,7 @@ mod info_handler;
 mod quota;
 mod runtime_launch;
 mod selection;
+mod session;
 mod shared;
 
 pub(crate) use self::audit::*;
@@ -23,6 +24,7 @@ pub(crate) use self::info::*;
 pub(crate) use self::info_handler::*;
 pub(crate) use self::quota::*;
 pub(crate) use self::selection::*;
+pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {

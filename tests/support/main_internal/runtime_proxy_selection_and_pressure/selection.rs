@@ -2341,6 +2341,7 @@ fn quota_watch_defaults_to_live_refresh_for_regular_views() {
         raw: false,
         watch: false,
         once: false,
+        auth: None,
         base_url: None,
     };
     assert!(quota_watch_enabled(&profile_args));
@@ -2361,6 +2362,7 @@ fn quota_watch_respects_once_and_raw_modes() {
         raw: false,
         watch: false,
         once: true,
+        auth: None,
         base_url: None,
     };
     assert!(!quota_watch_enabled(&once_args));
@@ -2382,6 +2384,16 @@ fn quota_command_accepts_once_flag() {
     };
     assert!(args.once);
     assert!(!quota_watch_enabled(&args));
+}
+
+#[test]
+fn quota_command_accepts_auth_filter_for_all_profiles() {
+    let command = parse_cli_command_from(["prodex", "quota", "--all", "--auth", "no-auth"])
+        .expect("quota command");
+    let Commands::Quota(args) = command else {
+        panic!("expected quota command");
+    };
+    assert_eq!(args.auth.as_deref(), Some("no-auth"));
 }
 
 #[test]
@@ -2438,6 +2450,15 @@ fn bare_prodex_with_codex_args_defaults_to_run_command() {
 fn cleanup_command_does_not_default_to_run() {
     let command = parse_cli_command_from(["prodex", "cleanup"]).expect("cleanup command");
     assert!(matches!(command, Commands::Cleanup));
+}
+
+#[test]
+fn session_command_does_not_default_to_run() {
+    let command = parse_cli_command_from(["prodex", "session", "list"]).expect("session command");
+    assert!(matches!(
+        command,
+        Commands::Session(SessionCommands::List(_))
+    ));
 }
 
 #[test]

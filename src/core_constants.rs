@@ -229,10 +229,12 @@ Examples:
   prodex quota --profile main --detail
   prodex quota --all --detail
   prodex quota --all --once
+  prodex quota --all --auth no-auth --once
   prodex quota --raw --profile main
 
 Notes:
   `prodex quota` supports OpenAI/Codex profiles and imported Copilot accounts.
+  Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, quota inspection is unavailable for that profile.";
 pub(crate) const CLI_RUN_AFTER_HELP: &str = "\
 Examples:
@@ -318,6 +320,12 @@ Examples:
   prodex context audit --json
   prodex context compress ~/.codex/AGENTS.md --dry-run
   prodex context compress ~/.codex/AGENTS.md";
+pub(crate) const CLI_SESSION_AFTER_HELP: &str = "\
+Examples:
+  prodex session list
+  prodex session list --json
+  prodex session current
+  prodex session current --limit 20";
 pub(crate) const CLI_CLEANUP_AFTER_HELP: &str = "\
 Examples:
   prodex cleanup

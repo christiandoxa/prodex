@@ -118,7 +118,7 @@ pub(crate) fn render_all_quota_watch_output(
     detail: bool,
 ) -> String {
     render_all_quota_watch_snapshot(
-        &collect_all_quota_watch_snapshot(updated, state_result, base_url),
+        &collect_all_quota_watch_snapshot(updated, state_result, base_url, &QuotaAuthFilter::All),
         detail,
         0,
     )
@@ -128,12 +128,13 @@ fn collect_all_quota_watch_snapshot(
     updated: &str,
     state_result: std::result::Result<AppState, String>,
     base_url: Option<&str>,
+    auth_filter: &QuotaAuthFilter,
 ) -> AllQuotaWatchSnapshot {
     match state_result {
         Ok(state) if !state.profiles.is_empty() => AllQuotaWatchSnapshot::Reports {
             updated: updated.to_string(),
             profile_count: state.profiles.len(),
-            reports: collect_quota_reports(&state, base_url),
+            reports: collect_quota_reports_with_auth_filter(&state, base_url, auth_filter),
         },
         Ok(_) => AllQuotaWatchSnapshot::Empty {
             updated: updated.to_string(),
@@ -217,10 +218,11 @@ pub(crate) fn watch_all_quotas(
     paths: &AppPaths,
     base_url: Option<&str>,
     detail: bool,
+    auth_filter: QuotaAuthFilter,
 ) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
-    let mut snapshot = load_all_quota_watch_snapshot(paths, base_url);
+    let mut snapshot = load_all_quota_watch_snapshot(paths, base_url, &auth_filter);
     let mut redraw_needed = true;
     let mut next_refresh_at = quota_watch_next_refresh_at();
 
@@ -233,7 +235,7 @@ pub(crate) fn watch_all_quotas(
         }
 
         if Instant::now() >= next_refresh_at {
-            snapshot = load_all_quota_watch_snapshot(paths, base_url);
+            snapshot = load_all_quota_watch_snapshot(paths, base_url, &auth_filter);
             redraw_needed = true;
             next_refresh_at = quota_watch_next_refresh_at();
             continue;
@@ -266,11 +268,13 @@ fn quota_watch_updated_at() -> String {
 fn load_all_quota_watch_snapshot(
     paths: &AppPaths,
     base_url: Option<&str>,
+    auth_filter: &QuotaAuthFilter,
 ) -> AllQuotaWatchSnapshot {
     collect_all_quota_watch_snapshot(
         &quota_watch_updated_at(),
         AppState::load(paths).map_err(|err| err.to_string()),
         base_url,
+        auth_filter,
     )
 }
 

@@ -109,6 +109,8 @@ prodex profile list
 prodex profile export
 prodex profile import copilot
 prodex quota --all
+prodex quota --all --auth no-auth --once
+prodex session list
 prodex info
 ```
 
@@ -117,6 +119,8 @@ prodex info
 ```bash
 prodex quota --all --once
 ```
+
+Use `prodex session list` to inspect shared Codex sessions, or `prodex session current` to show sessions started from the current directory.
 
 `prodex info` includes the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
 For the full policy key reference, see [docs/runtime-policy.md](./docs/runtime-policy.md).

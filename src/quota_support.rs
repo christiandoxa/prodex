@@ -20,6 +20,42 @@ pub(crate) struct AuthSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum QuotaAuthFilter {
+    All,
+    Label(String),
+    QuotaCompatible,
+    NonQuotaCompatible,
+}
+
+impl QuotaAuthFilter {
+    pub(crate) fn parse(raw: &str) -> Result<Self> {
+        let value = raw.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            bail!("quota auth filter cannot be empty");
+        }
+
+        Ok(match value.as_str() {
+            "all" | "*" => Self::All,
+            "quota-compatible" | "compatible" => Self::QuotaCompatible,
+            "non-quota-compatible"
+            | "not-quota-compatible"
+            | "quota-incompatible"
+            | "incompatible" => Self::NonQuotaCompatible,
+            _ => Self::Label(value),
+        })
+    }
+
+    pub(crate) fn matches(&self, auth: &AuthSummary) -> bool {
+        match self {
+            Self::All => true,
+            Self::Label(label) => auth.label.eq_ignore_ascii_case(label),
+            Self::QuotaCompatible => auth.quota_compatible,
+            Self::NonQuotaCompatible => !auth.quota_compatible,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UsageAuth {
     pub(crate) access_token: String,
     pub(crate) account_id: Option<String>,
@@ -61,6 +97,7 @@ pub(crate) struct QuotaReport {
 struct QuotaFetchJob {
     name: String,
     active: bool,
+    auth: AuthSummary,
     provider: ProfileProvider,
     codex_home: PathBuf,
 }
@@ -93,20 +130,31 @@ pub(crate) struct DoctorProfileReport {
 }
 
 pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
+    collect_quota_reports_with_auth_filter(state, base_url, &QuotaAuthFilter::All)
+}
+
+pub(crate) fn collect_quota_reports_with_auth_filter(
+    state: &AppState,
+    base_url: Option<&str>,
+    auth_filter: &QuotaAuthFilter,
+) -> Vec<QuotaReport> {
     let jobs = state
         .profiles
         .iter()
-        .map(|(name, profile)| QuotaFetchJob {
-            name: name.clone(),
-            active: state.active_profile.as_deref() == Some(name.as_str()),
-            provider: profile.provider.clone(),
-            codex_home: profile.codex_home.clone(),
+        .filter_map(|(name, profile)| {
+            let auth = profile.provider.auth_summary(&profile.codex_home);
+            auth_filter.matches(&auth).then(|| QuotaFetchJob {
+                name: name.clone(),
+                active: state.active_profile.as_deref() == Some(name.as_str()),
+                auth,
+                provider: profile.provider.clone(),
+                codex_home: profile.codex_home.clone(),
+            })
         })
         .collect();
     let base_url = base_url.map(str::to_owned);
 
     map_parallel(jobs, |job| {
-        let auth = job.provider.auth_summary(&job.codex_home);
         let workspace_id = match job.provider {
             ProfileProvider::Openai => read_profile_account_id_from_auth(&job.codex_home)
                 .ok()
@@ -118,7 +166,7 @@ pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) ->
         QuotaReport {
             name: job.name,
             active: job.active,
-            auth,
+            auth: job.auth,
             workspace_id,
             result,
             fetched_at: Local::now().timestamp(),

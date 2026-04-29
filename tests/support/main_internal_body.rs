@@ -516,6 +516,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         raw: true,
         watch: false,
         once: false,
+        auth: None,
         base_url: None,
     })));
     assert!(should_emit_update_notice(&Commands::Current));

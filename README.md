@@ -71,6 +71,8 @@ Check your profiles and quota:
 ```bash
 prodex profile list
 prodex quota --all
+prodex quota --all --auth no-auth --once
+prodex session list
 ```
 
 Run through `prodex`:
@@ -193,6 +195,9 @@ When you import a Copilot profile, Prodex does not move the Copilot token into P
 prodex profile export
 prodex quota --all
 prodex quota --all --once
+prodex quota --all --auth no-auth --once
+prodex session list
+prodex session current
 prodex info
 prodex doctor --runtime
 prodex context audit
@@ -200,6 +205,7 @@ prodex context compress ~/.codex/AGENTS.md --dry-run
 ```
 
 `prodex info` includes the effective runtime tuning values after environment, policy, and default resolution.
+`prodex session list` shows shared Codex session metadata, and `prodex session current` filters that list to sessions started from the current directory.
 `prodex context audit` reports approximate token weight for shared instruction and memory files. `prodex context compress` is deterministic, only touches Markdown/text files, skips `.original.md` backups, and writes an `.original.md` backup before replacing a file.
 For full policy keys, env overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 

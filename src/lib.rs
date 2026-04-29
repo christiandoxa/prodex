@@ -395,6 +395,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "use"
             | "current"
             | "info"
+            | "session"
             | "doctor"
             | "audit"
             | "context"

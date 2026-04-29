@@ -64,6 +64,7 @@ impl_command_action!(
     RemoveProfileArgs,
     RunArgs,
     RuntimeBrokerArgs,
+    SessionCommands,
     SuperArgs,
 );
 
@@ -82,6 +83,7 @@ impl Commands {
             Commands::UseProfile(command) => RoutedCommand::new(command),
             Commands::Current => RoutedCommand::new(CurrentCommand),
             Commands::Info(command) => RoutedCommand::new(command),
+            Commands::Session(command) => RoutedCommand::new(command),
             Commands::Doctor(command) => RoutedCommand::new(command),
             Commands::Audit(command) => RoutedCommand::new(command),
             Commands::Context(command) => RoutedCommand::new(command),

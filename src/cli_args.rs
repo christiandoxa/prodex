@@ -33,6 +33,12 @@ pub(crate) enum Commands {
     )]
     Info(InfoArgs),
     #[command(
+        subcommand,
+        about = "Inspect shared Codex session metadata.",
+        after_help = CLI_SESSION_AFTER_HELP
+    )]
+    Session(SessionCommands),
+    #[command(
         about = "Inspect local state, Codex resolution, quota readiness, and runtime logs.",
         after_help = CLI_DOCTOR_AFTER_HELP
     )]
@@ -225,6 +231,12 @@ pub(crate) struct QuotaArgs {
     /// Show every configured profile in one aggregated view.
     #[arg(long)]
     pub(crate) all: bool,
+    /// Show only profiles whose auth label or compatibility matches this filter.
+    ///
+    /// Supported values: no-auth, chatgpt, api-key, invalid-auth, unreadable-auth,
+    /// quota-compatible, non-quota-compatible, all.
+    #[arg(long, value_name = "AUTH", requires = "all")]
+    pub(crate) auth: Option<String>,
     /// Include exact reset timestamps and expanded window details.
     #[arg(long)]
     pub(crate) detail: bool,
@@ -239,6 +251,37 @@ pub(crate) struct QuotaArgs {
     /// Override the ChatGPT backend base URL used for quota requests.
     #[arg(long, value_name = "URL")]
     pub(crate) base_url: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum SessionCommands {
+    /// List all shared Codex sessions.
+    List(SessionListArgs),
+    /// List shared Codex sessions started from the current directory.
+    Current(SessionCurrentArgs),
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct SessionListArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Limit the number of sessions shown after sorting newest first.
+    #[arg(long, value_name = "N")]
+    pub(crate) limit: Option<usize>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct SessionCurrentArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Limit the number of sessions shown after sorting newest first.
+    #[arg(long, value_name = "N")]
+    pub(crate) limit: Option<usize>,
+    /// Directory used for matching sessions. Defaults to the current working directory.
+    #[arg(long, value_name = "PATH", hide = true)]
+    pub(crate) cwd: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Default)]
@@ -693,6 +736,12 @@ impl ListProfilesCommand {
 impl InfoArgs {
     pub(crate) fn execute(self) -> Result<()> {
         handle_info(self)
+    }
+}
+
+impl SessionCommands {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_session(self)
     }
 }
 
