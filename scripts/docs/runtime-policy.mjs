@@ -4,7 +4,10 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const docsPath = path.join(repoRoot, "docs/runtime-policy.md");
-const runtimePolicyTypesPath = path.join(repoRoot, "src/runtime_policy/types.rs");
+const runtimePolicyTypesPath = path.join(
+  repoRoot,
+  "crates/prodex-runtime-policy/src/types.rs",
+);
 const runtimeEnvSourcePaths = [
   path.join(repoRoot, "src/runtime_core_shared.rs"),
   path.join(repoRoot, "src/runtime_tuning.rs"),
@@ -331,13 +334,18 @@ function replaceGeneratedBlock(contents, generatedTable) {
 
 function extractRuntimeProxyPolicyFields(typesSource) {
   const structMatch = typesSource.match(
-    /pub\(crate\) struct RuntimePolicyProxySettings\s*\{([\s\S]*?)\n\}/m,
+    /pub(?:\(crate\))? struct RuntimePolicyProxySettings\s*\{([\s\S]*?)\n\}/m,
   );
   if (!structMatch) {
-    throw new Error("failed to find RuntimePolicyProxySettings in src/runtime_policy/types.rs");
+    throw new Error(
+      `failed to find RuntimePolicyProxySettings in ${path.relative(
+        repoRoot,
+        runtimePolicyTypesPath,
+      )}`,
+    );
   }
 
-  return [...structMatch[1].matchAll(/pub\(crate\)\s+([a-z0-9_]+):\s+Option</g)].map(
+  return [...structMatch[1].matchAll(/pub(?:\(crate\))?\s+([a-z0-9_]+):\s+Option</g)].map(
     (match) => match[1],
   );
 }

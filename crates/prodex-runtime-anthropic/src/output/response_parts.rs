@@ -6,9 +6,7 @@ pub fn runtime_anthropic_json_response_parts(
     RuntimeBufferedResponseParts {
         status: 200,
         headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
-        body: serde_json::to_vec(&value)
-            .unwrap_or_else(|_| b"{}".to_vec())
-            .into(),
+        body: serde_json::to_vec(&value).unwrap_or_else(|_| b"{}".to_vec()),
     }
 }
 
@@ -288,7 +286,7 @@ pub fn runtime_anthropic_sse_response_parts_from_message_value(
     RuntimeBufferedResponseParts {
         status: 200,
         headers: vec![("Content-Type".to_string(), b"text/event-stream".to_vec())],
-        body: body.into(),
+        body,
     }
 }
 
@@ -503,6 +501,6 @@ pub fn buffer_runtime_streaming_response_parts(
             .into_iter()
             .map(|(name, value)| (name, value.into_bytes()))
             .collect(),
-        body: buffered_body.into(),
+        body: buffered_body,
     })
 }

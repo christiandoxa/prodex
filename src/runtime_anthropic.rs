@@ -276,20 +276,17 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     body: &[u8],
     requested_model: &str,
     want_thinking: bool,
-    carried_web_search_requests: u64,
-    carried_web_fetch_requests: u64,
-    carried_code_execution_requests: u64,
-    carried_tool_search_requests: u64,
+    carried_usage: RuntimeAnthropicServerToolUsage,
     server_tools: &RuntimeAnthropicServerTools,
 ) -> Result<RuntimeBufferedResponseParts> {
     anthropic::runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
         body,
         requested_model,
         want_thinking,
-        carried_web_search_requests,
-        carried_web_fetch_requests,
-        carried_code_execution_requests,
-        carried_tool_search_requests,
+        carried_usage.web_search_requests,
+        carried_usage.web_fetch_requests,
+        carried_usage.code_execution_requests,
+        carried_usage.tool_search_requests,
         server_tools,
     )
     .map(buffered_parts_from_anthropic)

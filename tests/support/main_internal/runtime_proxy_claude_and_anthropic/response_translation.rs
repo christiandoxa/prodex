@@ -1854,10 +1854,12 @@ fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes_preserves_carri
         &body,
         "claude-sonnet-4-6",
         false,
-        1,
-        1,
-        0,
-        1,
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: 1,
+            web_fetch_requests: 1,
+            code_execution_requests: 0,
+            tool_search_requests: 1,
+        },
         &RuntimeAnthropicServerTools::default(),
     )
     .expect("buffered SSE translation should succeed");
