@@ -1,0 +1,14 @@
+[package]
+name = "prodex-terminal-ui"
+version.workspace = true
+edition.workspace = true
+description = "Terminal rendering helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "terminal_ui"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.102"

@@ -1376,8 +1376,11 @@ dependencies = [
  "fs2",
  "getrandom 0.4.2",
  "pbkdf2",
+ "prodex-codex-config",
+ "prodex-redaction",
  "prodex-runtime-metrics",
  "prodex-secret-store",
+ "prodex-terminal-ui",
  "reqwest",
  "rpassword",
  "serde",
@@ -1390,12 +1393,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-codex-config"
+version = "0.67.0"
+
+[[package]]
+name = "prodex-redaction"
+version = "0.67.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "prodex-runtime-metrics"
 version = "0.67.0"
 
 [[package]]
 name = "prodex-secret-store"
 version = "0.67.0"
+
+[[package]]
+name = "prodex-terminal-ui"
+version = "0.67.0"
+dependencies = [
+ "anyhow",
+]
 
 [[package]]
 name = "quinn"

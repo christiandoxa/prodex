@@ -183,12 +183,6 @@ pub(crate) const RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS: u64 = if cfg!(test) { 40
 pub(crate) const RUNTIME_BROKER_POLL_INTERVAL_MS: u64 = if cfg!(test) { 25 } else { 100 };
 pub(crate) const RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS: u64 = if cfg!(test) { 125 } else { 1_000 };
 pub(crate) const RUNTIME_BROKER_IDLE_GRACE_SECONDS: i64 = if cfg!(test) { 1 } else { 5 };
-pub(crate) const CLI_WIDTH: usize = 110;
-pub(crate) const CLI_MIN_WIDTH: usize = 60;
-pub(crate) const CLI_LABEL_WIDTH: usize = 16;
-pub(crate) const CLI_MIN_LABEL_WIDTH: usize = 10;
-pub(crate) const CLI_MAX_LABEL_WIDTH: usize = 24;
-pub(crate) const CLI_TABLE_GAP: &str = "  ";
 pub(crate) const CLI_TOP_LEVEL_AFTER_HELP: &str = "\
 Tips:
   Bare `prodex` invocation defaults to `prodex run`.

@@ -29,7 +29,13 @@ const DOC_VERSION_PATTERNS = [
 ];
 
 const DOC_FILES = ["README.md", "QUICKSTART.md"];
-const INTERNAL_CRATE_PACKAGES = ["prodex-runtime-metrics", "prodex-secret-store"];
+const INTERNAL_CRATE_PACKAGES = [
+  "prodex-codex-config",
+  "prodex-redaction",
+  "prodex-runtime-metrics",
+  "prodex-secret-store",
+  "prodex-terminal-ui",
+];
 const KNOWN_NPM_LOCKFILES = [
   "package-lock.json",
   "npm/package-lock.json",

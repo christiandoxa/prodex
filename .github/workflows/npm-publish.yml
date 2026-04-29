@@ -143,13 +143,19 @@ jobs:
 
       - name: Package internal crates for attestation
         run: |
+          cargo package --locked -p prodex-codex-config
+          cargo package --locked -p prodex-redaction
           cargo package --locked -p prodex-runtime-metrics
           cargo package --locked -p prodex-secret-store
+          cargo package --locked -p prodex-terminal-ui
 
       - name: Verify internal crate publish
         run: |
+          cargo publish --locked --dry-run -p prodex-codex-config
+          cargo publish --locked --dry-run -p prodex-redaction
           cargo publish --locked --dry-run -p prodex-runtime-metrics
           cargo publish --locked --dry-run -p prodex-secret-store
+          cargo publish --locked --dry-run -p prodex-terminal-ui
 
       - name: Attest internal crate package provenance
         uses: actions/attest-build-provenance@v4
@@ -163,8 +169,11 @@ jobs:
 
       - name: Publish internal crates
         run: |
+          cargo publish --locked -p prodex-codex-config
+          cargo publish --locked -p prodex-redaction
           cargo publish --locked -p prodex-runtime-metrics
           cargo publish --locked -p prodex-secret-store
+          cargo publish --locked -p prodex-terminal-ui
 
       - name: Wait for internal crates
         shell: bash
@@ -176,7 +185,7 @@ jobs:
               print(tomllib.load(handle)["package"]["version"])
           PY
           )"
-          for package in prodex-runtime-metrics prodex-secret-store; do
+          for package in prodex-codex-config prodex-redaction prodex-runtime-metrics prodex-secret-store prodex-terminal-ui; do
             for attempt in {1..18}; do
               if cargo search "${package}" --limit 1 | grep -Eq "^${package} = \"${version}\""; then
                 break

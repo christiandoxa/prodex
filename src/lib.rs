@@ -42,7 +42,6 @@ mod app_commands;
 mod app_state;
 mod audit_log;
 mod cli_args;
-mod codex_config;
 mod command_dispatch;
 mod core_constants;
 mod housekeeping;
@@ -50,7 +49,6 @@ mod profile_commands;
 mod profile_identity;
 mod proxy_config;
 mod quota_support;
-mod redaction;
 mod runtime_anthropic;
 mod runtime_background;
 mod runtime_broker;
@@ -74,8 +72,6 @@ mod runtime_state_shared;
 mod runtime_store;
 mod shared_codex_fs;
 mod shared_types;
-#[path = "cli_render.rs"]
-mod terminal_ui;
 mod update_notice;
 
 #[cfg(feature = "bench-support")]

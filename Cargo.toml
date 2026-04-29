@@ -10,8 +10,11 @@ repository = "https://github.com/christiandoxa/prodex"
 [workspace]
 members = [
     ".",
+    "crates/prodex-codex-config",
+    "crates/prodex-redaction",
     "crates/prodex-runtime-metrics",
     "crates/prodex-secret-store",
+    "crates/prodex-terminal-ui",
 ]
 resolver = "3"
 
@@ -35,6 +38,8 @@ dirs = "6.0.0"
 fs2 = "0.4.3"
 getrandom = "0.4.2"
 pbkdf2 = "0.13.0"
+codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "=0.67.0" }
+redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "=0.67.0" }
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 rpassword = "7.4.0"
 runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "=0.67.0" }
@@ -42,6 +47,7 @@ secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-s
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
+terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui", version = "=0.67.0" }
 tiny_http = "0.12.0"
 tokio = { version = "1.52.1", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"

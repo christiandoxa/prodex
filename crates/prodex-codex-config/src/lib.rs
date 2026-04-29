@@ -1,13 +1,22 @@
-use super::*;
+use std::ffi::OsString;
+use std::fs;
+use std::path::Path;
+
+#[cfg(test)]
+use std::env;
+#[cfg(test)]
+use std::path::PathBuf;
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodexModelProviderSource {
+pub enum CodexModelProviderSource {
     ConfigFile,
     CliOverride,
 }
 
 impl CodexModelProviderSource {
-    pub(crate) fn display_name(self) -> &'static str {
+    pub fn display_name(self) -> &'static str {
         match self {
             Self::ConfigFile => "config.toml",
             Self::CliOverride => "CLI override",
@@ -16,18 +25,18 @@ impl CodexModelProviderSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodexModelProviderSetting {
-    pub(crate) provider_id: String,
-    pub(crate) source: CodexModelProviderSource,
+pub struct CodexModelProviderSetting {
+    pub provider_id: String,
+    pub source: CodexModelProviderSource,
 }
 
 impl CodexModelProviderSetting {
-    pub(crate) fn is_openai(&self) -> bool {
+    pub fn is_openai(&self) -> bool {
         self.provider_id.eq_ignore_ascii_case("openai")
     }
 }
 
-pub(crate) fn parse_toml_string_assignment(contents: &str, key: &str) -> Option<String> {
+pub fn parse_toml_string_assignment(contents: &str, key: &str) -> Option<String> {
     for raw_line in contents.lines() {
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -67,16 +76,16 @@ pub(crate) fn parse_toml_string_assignment(contents: &str, key: &str) -> Option<
     None
 }
 
-pub(crate) fn codex_config_value(codex_home: &Path, key: &str) -> Option<String> {
+pub fn codex_config_value(codex_home: &Path, key: &str) -> Option<String> {
     let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
     parse_toml_string_assignment(&contents, key).filter(|value| !value.trim().is_empty())
 }
 
-pub(crate) fn codex_configured_model_provider(codex_home: &Path) -> Option<String> {
+pub fn codex_configured_model_provider(codex_home: &Path) -> Option<String> {
     codex_config_value(codex_home, "model_provider")
 }
 
-pub(crate) fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<String> {
+pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<String> {
     let mut index = 0;
     while index < args.len() {
         let Some(arg) = args[index].to_str() else {
@@ -101,7 +110,7 @@ pub(crate) fn codex_cli_config_override_value(args: &[OsString], key: &str) -> O
     None
 }
 
-pub(crate) fn codex_non_openai_model_provider(
+pub fn codex_non_openai_model_provider(
     codex_home: &Path,
     model_provider_override: Option<&str>,
 ) -> Option<CodexModelProviderSetting> {

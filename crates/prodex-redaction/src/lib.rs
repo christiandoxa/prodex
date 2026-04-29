@@ -5,7 +5,7 @@ const API_KEY_PREFIXES: &[&str] = &[
     "sk-proj-", "sk-ant-", "sk-live-", "sk_test_", "sk_live_", "sk-", "sk_",
 ];
 
-pub(crate) fn redaction_text_snippet(text: &str, max_chars: usize) -> String {
+pub fn redaction_text_snippet(text: &str, max_chars: usize) -> String {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.is_empty() {
         return "-".to_string();
@@ -19,7 +19,7 @@ pub(crate) fn redaction_text_snippet(text: &str, max_chars: usize) -> String {
     }
 }
 
-pub(crate) fn redaction_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {
+pub fn redaction_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {
     let redacted = match serde_json::from_slice::<serde_json::Value>(body) {
         Ok(mut value) => {
             redaction_redact_json_value(&mut value);
@@ -32,7 +32,7 @@ pub(crate) fn redaction_redacted_body_snippet(body: &[u8], max_chars: usize) -> 
     redaction_text_snippet(&redacted, max_chars)
 }
 
-pub(crate) fn redaction_redacted_headers_debug(headers: &[(String, String)]) -> String {
+pub fn redaction_redacted_headers_debug(headers: &[(String, String)]) -> String {
     let redacted_headers = headers
         .iter()
         .map(|(name, value)| {
@@ -47,7 +47,7 @@ pub(crate) fn redaction_redacted_headers_debug(headers: &[(String, String)]) -> 
     format!("{redacted_headers:?}")
 }
 
-pub(crate) fn redaction_redacted_cli_args(args: &[OsString]) -> Vec<String> {
+pub fn redaction_redacted_cli_args(args: &[OsString]) -> Vec<String> {
     let mut redact_next = false;
     let mut redacted = Vec::with_capacity(args.len());
 
@@ -79,7 +79,7 @@ pub(crate) fn redaction_redacted_cli_args(args: &[OsString]) -> Vec<String> {
     redacted
 }
 
-pub(crate) fn redaction_redacted_env_value(key: &OsStr, value: &OsStr) -> String {
+pub fn redaction_redacted_env_value(key: &OsStr, value: &OsStr) -> String {
     if redaction_key_looks_sensitive(&key.to_string_lossy()) {
         return REDACTED.to_string();
     }
@@ -93,11 +93,11 @@ pub(crate) fn redaction_redacted_env_value(key: &OsStr, value: &OsStr) -> String
     }
 }
 
-pub(crate) fn redaction_display_os(value: &OsStr) -> String {
+pub fn redaction_display_os(value: &OsStr) -> String {
     redaction_display_text(&value.to_string_lossy())
 }
 
-pub(crate) fn redaction_key_looks_sensitive(name: &str) -> bool {
+pub fn redaction_key_looks_sensitive(name: &str) -> bool {
     let normalized = name
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric())

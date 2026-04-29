@@ -1,10 +1,21 @@
-use super::*;
+use anyhow::{Context, Result};
+use std::env;
+use std::fs;
+use std::io::{self, Write};
+use std::process::Command;
 
-pub(super) fn section_header(title: &str) -> String {
+pub const CLI_WIDTH: usize = 110;
+pub const CLI_MIN_WIDTH: usize = 60;
+pub const CLI_LABEL_WIDTH: usize = 16;
+pub const CLI_MIN_LABEL_WIDTH: usize = 10;
+pub const CLI_MAX_LABEL_WIDTH: usize = 24;
+pub const CLI_TABLE_GAP: &str = "  ";
+
+pub fn section_header(title: &str) -> String {
     section_header_with_width(title, current_cli_width())
 }
 
-pub(super) fn section_header_with_width(title: &str, total_width: usize) -> String {
+pub fn section_header_with_width(title: &str, total_width: usize) -> String {
     let prefix = format!("[ {title} ] ");
     let width = text_width(&prefix);
     if width >= total_width {
@@ -14,11 +25,11 @@ pub(super) fn section_header_with_width(title: &str, total_width: usize) -> Stri
     format!("{prefix}{}", "=".repeat(total_width - width))
 }
 
-pub(super) fn text_width(value: &str) -> usize {
+pub fn text_width(value: &str) -> usize {
     value.chars().count()
 }
 
-pub(super) fn fit_cell(value: &str, width: usize) -> String {
+pub fn fit_cell(value: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
@@ -39,7 +50,7 @@ pub(super) fn fit_cell(value: &str, width: usize) -> String {
     output
 }
 
-pub(super) fn chunk_token(token: &str, width: usize) -> Vec<String> {
+pub fn chunk_token(token: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
     }
@@ -63,7 +74,7 @@ pub(super) fn chunk_token(token: &str, width: usize) -> Vec<String> {
     chunks
 }
 
-pub(super) fn wrap_text(input: &str, width: usize) -> Vec<String> {
+pub fn wrap_text(input: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
     }
@@ -102,20 +113,20 @@ pub(super) fn wrap_text(input: &str, width: usize) -> Vec<String> {
     lines
 }
 
-pub(super) fn current_cli_width() -> usize {
+pub fn current_cli_width() -> usize {
     terminal_width_chars()
         .unwrap_or(CLI_WIDTH)
         .max(CLI_MIN_WIDTH)
 }
 
-pub(super) fn terminal_size_override_usize(env_key: &str) -> Option<usize> {
+pub fn terminal_size_override_usize(env_key: &str) -> Option<usize> {
     env::var(env_key)
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|value| *value > 0)
 }
 
-pub(super) fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
+pub fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
     let tty = fs::File::open("/dev/tty").ok()?;
     let output = Command::new("stty").arg("size").stdin(tty).output().ok()?;
     if !output.status.success() {
@@ -129,71 +140,71 @@ pub(super) fn terminal_dimensions_from_tty() -> Option<(usize, usize)> {
     Some((rows, cols))
 }
 
-pub(super) fn terminal_width_chars() -> Option<usize> {
+pub fn terminal_width_chars() -> Option<usize> {
     terminal_size_override_usize("PRODEX_TERM_COLUMNS")
         .or_else(|| terminal_dimensions_from_tty().map(|(_, cols)| cols))
 }
 
-pub(super) fn terminal_height_lines() -> Option<usize> {
+pub fn terminal_height_lines() -> Option<usize> {
     terminal_size_override_usize("PRODEX_TERM_LINES")
         .or_else(|| terminal_size_override_usize("LINES"))
         .or_else(|| terminal_dimensions_from_tty().map(|(rows, _)| rows))
 }
 
-pub(super) struct FieldRowsBuilder {
+pub struct FieldRowsBuilder {
     rows: Vec<(String, String)>,
 }
 
 impl FieldRowsBuilder {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self { rows: Vec::new() }
     }
 
-    pub(super) fn push(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
+    pub fn push(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
         self.rows.push((label.into(), value.into()));
         self
     }
 
-    pub(super) fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) -> &mut Self {
+    pub fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) -> &mut Self {
         self.rows.extend(rows);
         self
     }
 
-    pub(super) fn build(self) -> Vec<(String, String)> {
+    pub fn build(self) -> Vec<(String, String)> {
         self.rows
     }
 }
 
-pub(super) struct PanelBuilder {
+pub struct PanelBuilder {
     title: String,
     fields: FieldRowsBuilder,
 }
 
 impl PanelBuilder {
-    pub(super) fn new(title: impl Into<String>) -> Self {
+    pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             fields: FieldRowsBuilder::new(),
         }
     }
 
-    pub(super) fn push(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
+    pub fn push(&mut self, label: impl Into<String>, value: impl Into<String>) -> &mut Self {
         self.fields.push(label, value);
         self
     }
 
-    pub(super) fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) -> &mut Self {
+    pub fn extend(&mut self, rows: impl IntoIterator<Item = (String, String)>) -> &mut Self {
         self.fields.extend(rows);
         self
     }
 
-    pub(super) fn render(self) -> String {
+    pub fn render(self) -> String {
         let fields = self.fields.build();
         render_panel(&self.title, &fields)
     }
 }
 
-pub(super) fn panel_label_width(fields: &[(String, String)], total_width: usize) -> usize {
+pub fn panel_label_width(fields: &[(String, String)], total_width: usize) -> usize {
     let longest = fields
         .iter()
         .map(|(label, _)| text_width(label) + 1)
@@ -206,7 +217,7 @@ pub(super) fn panel_label_width(fields: &[(String, String)], total_width: usize)
     longest.clamp(CLI_MIN_LABEL_WIDTH, max_by_width.min(preferred_cap))
 }
 
-pub(super) fn format_field_lines_with_layout(
+pub fn format_field_lines_with_layout(
     label: &str,
     value: &str,
     total_width: usize,
@@ -246,39 +257,68 @@ fn panel_lines_with_layout(
     lines
 }
 
-pub(super) fn print_panel(title: &str, fields: &[(String, String)]) {
+pub fn print_panel(title: &str, fields: &[(String, String)]) {
     for line in panel_lines_with_layout(title, fields, current_cli_width()) {
         print_stdout_line(&line);
     }
 }
 
-pub(super) fn render_panel(title: &str, fields: &[(String, String)]) -> String {
+pub fn render_panel(title: &str, fields: &[(String, String)]) -> String {
     panel_lines_with_layout(title, fields, current_cli_width()).join("\n")
 }
 
-pub(super) fn print_stdout_text(message: &str) {
+pub fn print_stdout_text(message: &str) {
     print!("{message}");
 }
 
-pub(super) fn print_stdout_line(message: &str) {
+pub fn print_stdout_line(message: &str) {
     println!("{message}");
 }
 
-pub(super) fn print_blank_line() {
+pub fn print_blank_line() {
     println!();
 }
 
-pub(super) fn print_stderr_line(message: &str) {
+pub fn print_stderr_line(message: &str) {
     eprintln!("{message}");
 }
 
-pub(super) fn print_stderr_prompt(prompt: &str) -> Result<()> {
+pub fn print_stderr_prompt(prompt: &str) -> Result<()> {
     eprint!("{prompt}");
     io::stderr().flush().context("failed to flush prompt")
 }
 
-pub(super) fn print_wrapped_stderr(message: &str) {
+pub fn print_wrapped_stderr(message: &str) {
     for line in wrap_text(message, current_cli_width()) {
         print_stderr_line(&line);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn section_headers_expand_to_requested_width() {
+        assert_eq!(text_width(&section_header_with_width("Doctor", 72)), 72);
+    }
+
+    #[test]
+    fn wrapping_respects_requested_width() {
+        let lines = wrap_text("alpha beta-gamma-delta epsilon", 10);
+        assert!(lines.iter().all(|line| text_width(line) <= 10));
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn field_layout_respects_requested_width() {
+        let lines = format_field_lines_with_layout(
+            "Long Label",
+            "some longer value that must wrap",
+            24,
+            10,
+        );
+        assert!(lines.iter().all(|line| text_width(line) <= 24));
+        assert!(lines.len() > 1);
     }
 }

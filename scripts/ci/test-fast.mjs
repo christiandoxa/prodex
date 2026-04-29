@@ -42,6 +42,18 @@ const PREBUILD_STEPS = [
 
 const SAFE_CARGO_TEST_STEPS = [
   {
+    label: "crate:codex-config",
+    command: "cargo",
+    args: ["test", "-p", "prodex-codex-config", "--lib", "--", "--test-threads=1"],
+    failOnZeroTests: true,
+  },
+  {
+    label: "crate:redaction",
+    command: "cargo",
+    args: ["test", "-p", "prodex-redaction", "--lib", "--", "--test-threads=1"],
+    failOnZeroTests: true,
+  },
+  {
     label: "crate:runtime-metrics",
     command: "cargo",
     args: ["test", "-p", "prodex-runtime-metrics", "--lib", "--", "--test-threads=1"],
@@ -53,9 +65,14 @@ const SAFE_CARGO_TEST_STEPS = [
     args: ["test", "-p", "prodex-secret-store", "--lib", "--", "--test-threads=1"],
     failOnZeroTests: true,
   },
+  {
+    label: "crate:terminal-ui",
+    command: "cargo",
+    args: ["test", "-p", "prodex-terminal-ui", "--lib", "--", "--test-threads=1"],
+    failOnZeroTests: true,
+  },
   cargoTestStep("lib:app-commands", "app_commands::"),
   cargoTestStep("lib:audit-log", "audit_log::"),
-  cargoTestStep("lib:codex-config", "codex_config::"),
   cargoTestStep("lib:compat-replay", "compat_replay_tests::"),
   cargoTestStep("lib:profile-identity", "profile_identity::"),
   cargoTestStep("lib:quota-support", "quota_support::"),

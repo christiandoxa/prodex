@@ -81,7 +81,13 @@ async function updateCargoToml(filePath, version) {
   let section = "";
   let changed = false;
 
-  const internalPackages = new Set(["prodex-runtime-metrics", "prodex-secret-store"]);
+  const internalPackages = new Set([
+    "prodex-codex-config",
+    "prodex-redaction",
+    "prodex-runtime-metrics",
+    "prodex-secret-store",
+    "prodex-terminal-ui",
+  ]);
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = lines[index].trim();
     if (trimmed.startsWith("[") && trimmed.endsWith("]")) {

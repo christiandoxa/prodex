@@ -14,8 +14,11 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `src/profile_commands/`, `src/quota_support/`, `src/profile_identity.rs`: profile, quota, and credential identity flows
 - `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker logic
 - `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
+- `crates/prodex-codex-config/`: reusable Codex config parsing helpers
+- `crates/prodex-redaction/`: reusable log/diagnostic redaction helpers
 - `crates/prodex-secret-store/`: reusable secret storage backend primitives
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
+- `crates/prodex-terminal-ui/`: reusable terminal layout and printing helpers
 - `README.md`: full user-facing documentation
 - `QUICKSTART.md`: shorter installation and usage guide
 
@@ -291,10 +294,9 @@ If asked to publish:
 2. run `npm run npm:sync-version`
 3. update `Cargo.lock`
 4. run tests
-5. run `cargo publish --dry-run -p prodex-runtime-metrics`
-6. run `cargo publish --dry-run -p prodex-secret-store`
-7. run `cargo publish --dry-run -p prodex`
-8. publish `prodex-runtime-metrics`, then `prodex-secret-store`, then `prodex`
+5. run dry-run publish for every internal crate under `crates/`
+6. run `cargo publish --dry-run -p prodex`
+7. publish every internal crate under `crates/`, then publish `prodex`
 
 The `.github/workflows/npm-publish.yml` workflow is expected to create or refresh the matching GitHub Release for the published plain `0.x.y` tag after the crate and npm publish jobs succeed. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the release commit matches `origin/main`.
 

@@ -1,0 +1,11 @@
+[package]
+name = "prodex-codex-config"
+version.workspace = true
+edition.workspace = true
+description = "Codex config parsing helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "codex_config"
+path = "src/lib.rs"
