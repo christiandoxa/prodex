@@ -1,4 +1,5 @@
-use super::{AppPaths, secret_store::SecretBackendKind};
+use super::AppPaths;
+use secret_store::SecretBackendKind;
 
 mod cache;
 mod load;

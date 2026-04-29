@@ -54,7 +54,7 @@ npm run ci:runtime-stress -- --suite stress
 npm run ci:runtime-stress -- --suite serialized
 npm run ci:runtime-stress -- --suite continuation
 node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
-cargo test -q --all-features -- --test-threads=1
+cargo test -q --workspace --all-features -- --test-threads=1
 ```
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
@@ -70,7 +70,7 @@ Use `npm run ci:runtime-hotpath-guard` after proxy hot-path work. It strips `#[c
 Use `npm run ci:churn-hygiene` for a lightweight churn report. It is report-only by default and checks `HEAD~1..HEAD` when available; add `-- --check` to fail on thresholds, or pass `-- --range main..HEAD`, `-- --staged`, custom `--max-files`, `--max-lines`, `--max-behavior-files`, or `--max-file-lines` values for stricter local review.
 
 Use `npm run release:prepare` before release work. It checks version/doc sync, available lockfile consistency, generated changelog freshness, docs lint, upstream compatibility baseline, runtime manifest, cargo fmt, and full Rust test binary compilation without publishing.
-The default test-compile guard runs `cargo test --locked --all-targets --all-features --no-run` so lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --all-targets --all-features` instead.
+The default test-compile guard runs `cargo test --locked --workspace --all-targets --all-features --no-run` so workspace lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --workspace --all-targets --all-features` instead.
 
 Use `npm run ci:runtime-manifest` after adding or renaming runtime proxy tests. New `main_internal_tests::runtime_proxy_` tests should normally get a targeted `RUNTIME_CI_TEST_CASES` entry; only add or rely on `RUNTIME_CI_BROAD_SHARD_FILTERS` when a broad CI shard intentionally owns that whole module or prefix. Broad shard filters must mirror the `label|filter` entries in the `main-internal-runtime-proxy` matrix in `.github/workflows/ci.yml` and must not match tests outside runtime CI ownership.
 

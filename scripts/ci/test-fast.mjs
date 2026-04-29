@@ -24,7 +24,7 @@ const CHECK_STEPS = [
 const CARGO_CHECK_STEP = {
   label: "cargo-check",
   command: "cargo",
-  args: ["check", "--locked", "--all-targets", "--all-features"],
+  args: ["check", "--locked", "--workspace", "--all-targets", "--all-features"],
 };
 
 const PREBUILD_STEPS = [
@@ -41,6 +41,18 @@ const PREBUILD_STEPS = [
 ];
 
 const SAFE_CARGO_TEST_STEPS = [
+  {
+    label: "crate:runtime-metrics",
+    command: "cargo",
+    args: ["test", "-p", "prodex-runtime-metrics", "--lib", "--", "--test-threads=1"],
+    failOnZeroTests: true,
+  },
+  {
+    label: "crate:secret-store",
+    command: "cargo",
+    args: ["test", "-p", "prodex-secret-store", "--lib", "--", "--test-threads=1"],
+    failOnZeroTests: true,
+  },
   cargoTestStep("lib:app-commands", "app_commands::"),
   cargoTestStep("lib:audit-log", "audit_log::"),
   cargoTestStep("lib:codex-config", "codex_config::"),
@@ -52,9 +64,7 @@ const SAFE_CARGO_TEST_STEPS = [
   cargoTestStep("lib:runtime-config", "runtime_config::"),
   cargoTestStep("lib:runtime-doctor", "runtime_doctor::"),
   cargoTestStep("lib:runtime-launch", "runtime_launch::"),
-  cargoTestStep("lib:runtime-metrics", "runtime_metrics::"),
   cargoTestStep("lib:runtime-policy", "runtime_policy::"),
-  cargoTestStep("lib:secret-store", "secret_store::"),
   cargoTestStep("lib:test-env-guard", "test_env_guard_tests::"),
   cargoIntegrationTestStep("test:auto-rotate", "auto_rotate"),
 ];
@@ -130,7 +140,7 @@ function printHelp() {
       "Includes:",
       "  - cargo fmt --check",
       "  - docs markdown lint",
-      "  - cargo check --locked --all-targets --all-features",
+      "  - cargo check --locked --workspace --all-targets --all-features",
       "  - optional cargo test --no-run prebuild for cargo test shards",
       "  - safe lib/integration cargo test shards as separate child processes",
       "",

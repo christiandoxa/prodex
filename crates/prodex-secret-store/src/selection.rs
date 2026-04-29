@@ -1,4 +1,4 @@
-use crate::secret_store::{
+use crate::{
     FileSecretBackend, KeyringSecretBackend, SecretBackend, SecretBackendKind, SecretError,
     SecretLocation, SecretManager, SecretRevision, SecretRevisionBackend, SecretValue,
 };

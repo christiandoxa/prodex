@@ -2,6 +2,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import {
+  cargoTomlPath,
   mainPackageName,
   openaiCodexDependencySpecifier,
   platformPackages,
@@ -74,6 +75,47 @@ async function updatePackageJson(filePath, version) {
   return changed;
 }
 
+async function updateCargoToml(filePath, version) {
+  const original = await fs.readFile(filePath, "utf8");
+  const lines = original.split(/\r?\n/);
+  let section = "";
+  let changed = false;
+
+  const internalPackages = new Set(["prodex-runtime-metrics", "prodex-secret-store"]);
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      section = trimmed;
+      continue;
+    }
+
+    if (section === "[workspace.package]" && /^\s*version\s*=/.test(lines[index])) {
+      const updated = lines[index].replace(/version\s*=\s*"[^"]+"/, `version = "${version}"`);
+      if (updated !== lines[index]) {
+        lines[index] = updated;
+        changed = true;
+      }
+      continue;
+    }
+
+    if (
+      section === "[dependencies]" &&
+      [...internalPackages].some((packageName) => lines[index].includes(`package = "${packageName}"`))
+    ) {
+      const updated = lines[index].replace(/version\s*=\s*"=[^"]+"/, `version = "=${version}"`);
+      if (updated !== lines[index]) {
+        lines[index] = updated;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    await fs.writeFile(filePath, lines.join("\n"));
+  }
+  return changed;
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -90,6 +132,11 @@ async function main() {
   const version = await readCargoVersion();
   const stack = [args.root];
   let changedCount = 0;
+  let changedCargoToml = false;
+
+  if (await updateCargoToml(cargoTomlPath, version)) {
+    changedCargoToml = true;
+  }
 
   while (stack.length > 0) {
     const current = stack.pop();
@@ -108,7 +155,9 @@ async function main() {
     }
   }
 
-  process.stdout.write(`synced ${changedCount} package.json file(s) to ${version}\n`);
+  process.stdout.write(
+    `synced ${changedCount} package.json file(s)${changedCargoToml ? " and Cargo.toml" : ""} to ${version}\n`,
+  );
 }
 
 await main();

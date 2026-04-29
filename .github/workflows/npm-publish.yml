@@ -130,7 +130,7 @@ jobs:
           retention-days: 7
 
   publish-crate:
-    name: Publish crate
+    name: Publish crates
     runs-on: ubuntu-latest
     needs: build
 
@@ -141,13 +141,17 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Package crate for attestation
-        run: cargo package --locked
+      - name: Package internal crates for attestation
+        run: |
+          cargo package --locked -p prodex-runtime-metrics
+          cargo package --locked -p prodex-secret-store
 
-      - name: Verify crate publish
-        run: cargo publish --locked --dry-run
+      - name: Verify internal crate publish
+        run: |
+          cargo publish --locked --dry-run -p prodex-runtime-metrics
+          cargo publish --locked --dry-run -p prodex-secret-store
 
-      - name: Attest crate package provenance
+      - name: Attest internal crate package provenance
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: target/package/prodex-*.crate
@@ -157,8 +161,47 @@ jobs:
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
-      - name: Publish crate
-        run: cargo publish --locked
+      - name: Publish internal crates
+        run: |
+          cargo publish --locked -p prodex-runtime-metrics
+          cargo publish --locked -p prodex-secret-store
+
+      - name: Wait for internal crates
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          for package in prodex-runtime-metrics prodex-secret-store; do
+            for attempt in {1..18}; do
+              if cargo search "${package}" --limit 1 | grep -Eq "^${package} = \"${version}\""; then
+                break
+              fi
+              if [ "${attempt}" = 18 ]; then
+                echo "crate ${package}@${version} not visible in crates.io index" >&2
+                exit 1
+              fi
+              sleep 10
+            done
+          done
+
+      - name: Package prodex crate for attestation
+        run: cargo package --locked -p prodex
+
+      - name: Verify prodex crate publish
+        run: cargo publish --locked --dry-run -p prodex
+
+      - name: Attest prodex crate package provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: target/package/prodex-[0-9]*.crate
+
+      - name: Publish prodex crate
+        run: cargo publish --locked -p prodex
 
   publish-npm:
     name: Stage and publish npm packages

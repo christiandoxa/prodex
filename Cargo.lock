@@ -1376,6 +1376,8 @@ dependencies = [
  "fs2",
  "getrandom 0.4.2",
  "pbkdf2",
+ "prodex-runtime-metrics",
+ "prodex-secret-store",
  "reqwest",
  "rpassword",
  "serde",
@@ -1386,6 +1388,14 @@ dependencies = [
  "toml",
  "tungstenite",
 ]
+
+[[package]]
+name = "prodex-runtime-metrics"
+version = "0.67.0"
+
+[[package]]
+name = "prodex-secret-store"
+version = "0.67.0"
 
 [[package]]
 name = "quinn"

@@ -6,14 +6,16 @@ This file applies to the entire repository.
 
 `prodex` is a single-binary Rust CLI that wraps `codex` and manages multiple isolated `CODEX_HOME` profiles.
 
-The codebase is now split across focused modules:
+The codebase is now a Cargo workspace split across focused crates and modules:
 
 - `src/main.rs`: binary entrypoint
 - `src/lib.rs`: shared crate wiring and tests
 - `src/cli_args.rs`, `src/command_dispatch.rs`, `src/app_commands/`: CLI parsing and Prodex-owned commands
-- `src/profile_commands/`, `src/quota_support/`, `src/secret_store/`, `src/profile_identity.rs`: profile, quota, secret storage, and credential identity flows
+- `src/profile_commands/`, `src/quota_support/`, `src/profile_identity.rs`: profile, quota, and credential identity flows
 - `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker logic
 - `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
+- `crates/prodex-secret-store/`: reusable secret storage backend primitives
+- `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
 - `README.md`: full user-facing documentation
 - `QUICKSTART.md`: shorter installation and usage guide
 
@@ -223,7 +225,7 @@ cargo test -q runtime_proxy_ -- --test-threads=1
 Run the full test suite:
 
 ```bash
-cargo test -q -- --test-threads=1
+cargo test -q --workspace -- --test-threads=1
 ```
 
 Summarize the latest runtime log:
@@ -289,8 +291,10 @@ If asked to publish:
 2. run `npm run npm:sync-version`
 3. update `Cargo.lock`
 4. run tests
-5. run `cargo publish --dry-run`
-6. run `cargo publish`
+5. run `cargo publish --dry-run -p prodex-runtime-metrics`
+6. run `cargo publish --dry-run -p prodex-secret-store`
+7. run `cargo publish --dry-run -p prodex`
+8. publish `prodex-runtime-metrics`, then `prodex-secret-store`, then `prodex`
 
 The `.github/workflows/npm-publish.yml` workflow is expected to create or refresh the matching GitHub Release for the published plain `0.x.y` tag after the crate and npm publish jobs succeed. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the release commit matches `origin/main`.
 

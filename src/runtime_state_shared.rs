@@ -1,6 +1,6 @@
 use crate::{
     AppPaths, AppState, AuthSummary, ResponseProfileBinding, RuntimeProxyLaneAdmission,
-    RuntimeQuotaWindowStatus, UsageAuth, UsageResponse, deserialize_null_default, secret_store,
+    RuntimeQuotaWindowStatus, UsageAuth, UsageResponse, deserialize_null_default,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

@@ -65,7 +65,6 @@ mod runtime_doctor;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_mem;
-mod runtime_metrics;
 mod runtime_persistence;
 mod runtime_policy;
 mod runtime_proxy;
@@ -73,7 +72,6 @@ mod runtime_proxy_shared;
 mod runtime_save_shared;
 mod runtime_state_shared;
 mod runtime_store;
-mod secret_store;
 mod shared_codex_fs;
 mod shared_types;
 #[path = "cli_render.rs"]

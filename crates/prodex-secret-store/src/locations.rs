@@ -1,4 +1,4 @@
-use crate::secret_store::{SecretBackendSelection, SecretLocation};
+use crate::{SecretBackendSelection, SecretLocation};
 use std::path::{Path, PathBuf};
 
 pub fn auth_json_path(codex_home: impl AsRef<Path>) -> PathBuf {

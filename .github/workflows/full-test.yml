@@ -48,7 +48,7 @@ jobs:
           run_id=${GITHUB_RUN_ID}
           run_attempt=${GITHUB_RUN_ATTEMPT}
           runner_os=${RUNNER_OS}
-          command=cargo test -q --all-features -- --test-threads=1
+          command=cargo test -q --workspace --all-features -- --test-threads=1
           started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
 
@@ -56,7 +56,7 @@ jobs:
           cargo -Vv > "${artifact_dir}/cargo-version.txt"
 
           set +e
-          cargo test -q --all-features -- --test-threads=1 > "${cargo_log}" 2>&1
+          cargo test -q --workspace --all-features -- --test-threads=1 > "${cargo_log}" 2>&1
           status=$?
           set -e
 

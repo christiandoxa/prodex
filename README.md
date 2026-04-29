@@ -4,6 +4,8 @@
 
 The main feature is auto rotate. If one OpenAI/Codex profile runs out of quota, `prodex` can route new work to another profile that is still available. You do not need to switch accounts manually.
 
+For contributors, this repository is a Cargo workspace: the binary crate stays at the root, while reusable leaf crates live under `crates/` to reduce rebuild scope when those components change.
+
 ## Why use it
 
 Use `prodex` if you want to:

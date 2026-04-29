@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
+  cargoTomlPath,
   mainPackageName,
   openaiCodexDependencySpecifier,
   packageSlug,
@@ -28,6 +29,7 @@ const DOC_VERSION_PATTERNS = [
 ];
 
 const DOC_FILES = ["README.md", "QUICKSTART.md"];
+const INTERNAL_CRATE_PACKAGES = ["prodex-runtime-metrics", "prodex-secret-store"];
 const KNOWN_NPM_LOCKFILES = [
   "package-lock.json",
   "npm/package-lock.json",
@@ -168,6 +170,49 @@ async function checkDocs(version, errors) {
   }
 }
 
+async function checkCargoManifest(version, errors) {
+  const contents = await fs.readFile(cargoTomlPath, "utf8");
+  let section = "";
+  let workspaceVersion = null;
+  const internalDependencyVersions = new Map();
+
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("[") && line.endsWith("]")) {
+      section = line;
+      continue;
+    }
+    if (section === "[workspace.package]") {
+      const match = line.match(/^version\s*=\s*"([^"]+)"/);
+      if (match) {
+        workspaceVersion = match[1];
+      }
+      continue;
+    }
+    if (section === "[dependencies]") {
+      for (const packageName of INTERNAL_CRATE_PACKAGES) {
+        if (!line.includes(`package = "${packageName}"`)) {
+          continue;
+        }
+        const match = line.match(/version\s*=\s*"=([^"]+)"/);
+        if (match) {
+          internalDependencyVersions.set(packageName, match[1]);
+        }
+      }
+    }
+  }
+
+  expectEqual(errors, "Cargo.toml workspace.package version", workspaceVersion, version);
+  for (const packageName of INTERNAL_CRATE_PACKAGES) {
+    expectEqual(
+      errors,
+      `Cargo.toml dependency ${packageName} version`,
+      internalDependencyVersions.get(packageName),
+      version,
+    );
+  }
+}
+
 async function checkCargoLock(version, errors) {
   const relativePath = "Cargo.lock";
   if (!(await fileExists(relativePath))) {
@@ -176,15 +221,17 @@ async function checkCargoLock(version, errors) {
   }
 
   const contents = await fs.readFile(path.join(repoRoot, relativePath), "utf8");
-  const prodexBlock = contents
-    .split(/\n\[\[package\]\]\n/)
-    .find((block) => /(?:^|\n)name = "prodex"(?:\n|$)/.test(block));
-  const match = prodexBlock?.match(/(?:^|\n)version = "([^"]+)"/);
-  if (!match) {
-    errors.push("Cargo.lock prodex package entry missing version");
-    return;
+  for (const packageName of ["prodex", ...INTERNAL_CRATE_PACKAGES]) {
+    const packageBlock = contents
+      .split(/\n\[\[package\]\]\n/)
+      .find((block) => new RegExp(`(?:^|\\n)name = "${packageName}"(?:\\n|$)`).test(block));
+    const match = packageBlock?.match(/(?:^|\n)version = "([^"]+)"/);
+    if (!match) {
+      errors.push(`Cargo.lock ${packageName} package entry missing version`);
+      continue;
+    }
+    expectEqual(errors, `Cargo.lock ${packageName} version`, match[1], version);
   }
-  expectEqual(errors, "Cargo.lock prodex version", match[1], version);
 }
 
 function packageNameForLockEntry(lockPath, entry) {
@@ -252,6 +299,7 @@ async function checkNpmLockfiles(version, errors) {
 async function checkReleaseMetadata() {
   const version = await readCargoVersion();
   const errors = [];
+  await checkCargoManifest(version, errors);
   await checkPackageManifests(version, errors);
   await checkDocs(version, errors);
   await checkCargoLock(version, errors);
@@ -288,12 +336,13 @@ async function main() {
     await runStep("cargo-test-compile:all-targets", "cargo", [
       "test",
       "--locked",
+      "--workspace",
       "--all-targets",
       "--all-features",
       "--no-run",
     ], args);
   } else {
-    await runStep("cargo-check", "cargo", ["check", "--locked", "--all-targets", "--all-features"], args);
+    await runStep("cargo-check", "cargo", ["check", "--locked", "--workspace", "--all-targets", "--all-features"], args);
   }
 }
 

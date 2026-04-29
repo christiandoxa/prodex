@@ -95,10 +95,10 @@ jobs:
           key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0
 
       - name: Check locked compile graph
-        run: cargo check --locked --all-targets --all-features
+        run: cargo check --locked --workspace --all-targets --all-features
 
       - name: Run clippy warning gate
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Install cargo-audit
         shell: bash
@@ -157,7 +157,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run npm:sync-version
-          git diff --exit-code -- Cargo.toml npm README.md QUICKSTART.md scripts/npm
+          git diff --exit-code -- Cargo.toml crates npm README.md QUICKSTART.md scripts/npm
 
   npm-package-smoke:
     runs-on: ubuntu-latest

@@ -1,0 +1,11 @@
+[package]
+name = "prodex-runtime-metrics"
+version.workspace = true
+edition.workspace = true
+description = "Runtime metrics rendering for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "runtime_metrics"
+path = "src/lib.rs"
