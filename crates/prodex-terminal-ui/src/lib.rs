@@ -175,6 +175,12 @@ impl FieldRowsBuilder {
     }
 }
 
+impl Default for FieldRowsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct PanelBuilder {
     title: String,
     fields: FieldRowsBuilder,
