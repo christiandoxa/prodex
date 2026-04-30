@@ -34,7 +34,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
-            allow_auto_rotate: self.args.auto_rotate && !self.args.no_auto_rotate,
+            allow_auto_rotate: !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,
@@ -727,7 +727,7 @@ fn handle_blocked_selected_runtime_profile(
                 "Other profiles that look ready: {}",
                 alternatives.join(", ")
             ));
-            print_wrapped_stderr("Rerun with `--auto-rotate` to allow fallback.");
+            print_wrapped_stderr("Rerun without `--no-auto-rotate` to allow fallback.");
         }
         print_quota_preflight_inspect_hint(&selection.initial_profile_name);
         return Err(command_exit_error(
@@ -1211,7 +1211,6 @@ mod tests {
                     },
                 ),
             ]),
-            ..AppState::default()
         };
 
         let fixed = fixed_runtime_proxy_state(&state, "main").unwrap();

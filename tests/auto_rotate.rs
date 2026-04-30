@@ -657,18 +657,26 @@ fn chatgpt_id_token(email: &str) -> String {
 }
 
 #[test]
-fn run_without_auto_rotate_keeps_active_profile_fixed_when_current_is_blocked() {
+fn run_auto_rotates_active_profile_when_current_is_blocked() {
     let fixture = setup_fixture();
 
     let output = run_prodex(&fixture, &["run"]);
 
-    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Quota preflight blocked profile 'main'"));
-    assert!(stderr.contains("Other profiles that look ready: second"));
-    assert!(stderr.contains("Rerun with `--auto-rotate` to allow fallback."));
-    assert_eq!(active_profile(&fixture.prodex_home), "main");
-    assert!(!fixture.codex_log.exists());
+    assert!(stderr.contains("profile 'second'"));
+    assert_eq!(active_profile(&fixture.prodex_home), "second");
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_log)
+            .expect("failed to read codex log")
+            .trim(),
+        fixture.second_home.display().to_string()
+    );
 }
 
 #[test]
@@ -695,10 +703,10 @@ fn run_auto_rotate_flag_rotates_active_profile_when_current_is_blocked() {
 }
 
 #[test]
-fn explicit_profile_auto_rotates_when_requested() {
+fn explicit_profile_auto_rotates_by_default() {
     let fixture = setup_fixture();
 
-    let output = run_prodex(&fixture, &["run", "--profile", "main", "--auto-rotate"]);
+    let output = run_prodex(&fixture, &["run", "--profile", "main"]);
 
     assert!(
         output.status.success(),
@@ -776,7 +784,7 @@ fn explicit_profile_can_disable_auto_rotate() {
     );
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("Rerun with `--auto-rotate` to allow fallback.")
+            .contains("Rerun without `--no-auto-rotate` to allow fallback.")
     );
     assert_eq!(active_profile(&fixture.prodex_home), "main");
     assert!(!fixture.codex_log.exists());
@@ -836,13 +844,7 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
     let fixture = setup_fixture();
     let mut child = spawn_prodex_with_env(
         &fixture,
-        &[
-            "run",
-            "--profile",
-            "main",
-            "--auto-rotate",
-            "--skip-quota-check",
-        ],
+        &["run", "--profile", "main", "--skip-quota-check"],
         &[("TEST_LONG_RUNNING_RUN", "5")],
     );
 
@@ -869,13 +871,7 @@ fn run_recovers_when_runtime_broker_registry_points_to_a_dead_pid() {
 
     let output = run_prodex(
         &fixture,
-        &[
-            "run",
-            "--profile",
-            "main",
-            "--auto-rotate",
-            "--skip-quota-check",
-        ],
+        &["run", "--profile", "main", "--skip-quota-check"],
     );
     assert!(
         output.status.success(),

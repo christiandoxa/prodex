@@ -386,6 +386,12 @@ mod tests {
 
         assert!(flow.should_promote_committed_profile());
 
+        flow.request_session_id_header_present = true;
+        assert!(
+            flow.should_promote_committed_profile(),
+            "a fresh session_id header should not hide runtime auto-rotation"
+        );
+
         flow.bound_session_profile = Some("alpha".to_string());
         assert!(!flow.should_promote_committed_profile());
     }

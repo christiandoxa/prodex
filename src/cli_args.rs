@@ -74,7 +74,7 @@ pub(crate) enum Commands {
     Quota(QuotaArgs),
     #[command(
         trailing_var_arg = true,
-        about = "Run codex through prodex with quota preflight and optional safe auto-rotate.",
+        about = "Run codex through prodex with quota preflight and safe auto-rotate.",
         after_help = CLI_RUN_AFTER_HELP
     )]
     Run(RunArgs),
@@ -371,10 +371,10 @@ pub(crate) struct RunArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
-    /// Allow fallback to another profile when quota blocks the selected profile.
+    /// Explicitly enable auto-rotate. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub(crate) auto_rotate: bool,
-    /// Keep the selected profile fixed and fail instead of rotating. This is the default behavior.
+    /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub(crate) no_auto_rotate: bool,
     /// Skip the preflight quota gate before launching codex.
@@ -402,10 +402,10 @@ pub(crate) struct ClaudeArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
-    /// Allow fallback to another profile when quota blocks the selected profile.
+    /// Explicitly enable auto-rotate. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub(crate) auto_rotate: bool,
-    /// Keep the selected profile fixed and fail instead of rotating. This is the default behavior.
+    /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub(crate) no_auto_rotate: bool,
     /// Skip the preflight quota gate before launching Claude Code.
@@ -427,10 +427,10 @@ pub(crate) struct CavemanArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
-    /// Allow fallback to another profile when quota blocks the selected profile.
+    /// Explicitly enable auto-rotate. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub(crate) auto_rotate: bool,
-    /// Keep the selected profile fixed and fail instead of rotating. This is the default behavior.
+    /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub(crate) no_auto_rotate: bool,
     /// Skip the preflight quota gate before launching codex.
@@ -458,10 +458,10 @@ pub(crate) struct SuperArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
-    /// Allow fallback to another profile when quota blocks the selected profile.
+    /// Explicitly enable auto-rotate. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub(crate) auto_rotate: bool,
-    /// Keep the selected profile fixed and fail instead of rotating. This is the default behavior.
+    /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub(crate) no_auto_rotate: bool,
     /// Skip the preflight quota gate before launching codex.

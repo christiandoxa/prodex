@@ -2,7 +2,7 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus direct pass-through when a profile selects a different upstream `model_provider`.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing, and auto-rotate is available with `--auto-rotate`. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, command handling lives under `src/app_commands/` and `src/command_dispatch.rs`, profile/quota flows live under `src/profile_commands/` and `src/quota_support/`, runtime proxy code lives under `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, and `src/runtime_broker/`, and reusable leaf crates live under `crates/`.
 
@@ -10,7 +10,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 
 ## Requirements
 
-- An OpenAI account and at least one logged-in Prodex profile for quota-aware routing, plus a second profile if you want `--auto-rotate`
+- An OpenAI account and at least one logged-in Prodex profile for quota-aware routing and auto-rotate
 - Codex CLI 0.124.0 or newer if you want to use Amazon Bedrock or another custom `model_provider`
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
@@ -146,13 +146,12 @@ prodex profile remove --all
 prodex
 prodex run
 prodex run --profile second
-prodex run --auto-rotate
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 prodex exec "review this repo"
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
-Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation when `--auto-rotate` is enabled. Without `--auto-rotate`, the selected active profile stays fixed.
+Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
 
 Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
 

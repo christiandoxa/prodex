@@ -248,7 +248,7 @@ Examples:
   prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 Notes:
-  Auto-rotate is opt-in. Pass `--auto-rotate` to allow fallback to another profile.
+  Auto-rotate is enabled by default.
   Bare `prodex <args>` is treated as `prodex run <args>`.
   A lone session id is forwarded as `codex resume <session-id>`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";

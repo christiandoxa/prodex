@@ -14,7 +14,7 @@ fn runtime_websocket_should_promote_committed_profile(
     request_turn_state: Option<&str>,
     turn_state_profile: Option<&str>,
     compact_followup_profile: Option<&(String, &'static str)>,
-    request_session_id_header_present: bool,
+    _request_session_id_header_present: bool,
     bound_session_profile: Option<&str>,
 ) -> bool {
     previous_response_id.is_none()
@@ -22,7 +22,7 @@ fn runtime_websocket_should_promote_committed_profile(
         && request_turn_state.is_none()
         && turn_state_profile.is_none()
         && compact_followup_profile.is_none()
-        && !(request_session_id_header_present || bound_session_profile.is_some())
+        && bound_session_profile.is_none()
 }
 
 #[allow(clippy::too_many_arguments)]
