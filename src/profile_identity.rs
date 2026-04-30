@@ -1,57 +1,18 @@
 use super::shared_codex_fs::copy_codex_home;
 use super::*;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ProfileIdentity {
-    pub(crate) email: Option<String>,
-    pub(crate) account_id: Option<String>,
-}
-
-impl ProfileIdentity {
-    fn has_email(&self) -> bool {
-        self.email
-            .as_deref()
-            .is_some_and(|email| !email.trim().is_empty())
-    }
-
-    fn has_account_id(&self) -> bool {
-        self.account_id
-            .as_deref()
-            .is_some_and(|account_id| !account_id.trim().is_empty())
-    }
-}
+#[allow(unused_imports)]
+pub(crate) use prodex_profile_identity::{
+    ProfileIdentity, normalize_account_id, normalize_email, parse_account_id_from_access_token,
+    parse_email_from_auth_json, parse_email_from_id_token, parse_identity_from_auth_json,
+    parse_identity_from_id_token, parse_jwt_payload,
+};
 
 #[derive(Debug)]
 struct ProfileIdentityLookupJob {
     name: String,
     codex_home: PathBuf,
     cached_email: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenAccountClaims {
-    #[serde(rename = "https://api.openai.com/auth", default)]
-    auth: Option<TokenAccountAuthClaims>,
-    #[serde(rename = "https://api.openai.com/auth.chatgpt_account_id", default)]
-    auth_chatgpt_account_id: Option<String>,
-    #[serde(default)]
-    chatgpt_account_id: Option<String>,
-}
-
-impl TokenAccountClaims {
-    fn into_account_id(self) -> Option<String> {
-        self.auth
-            .and_then(|auth| auth.chatgpt_account_id)
-            .or(self.auth_chatgpt_account_id)
-            .or(self.chatgpt_account_id)
-            .and_then(normalize_optional_account_id)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenAccountAuthClaims {
-    #[serde(default)]
-    chatgpt_account_id: Option<String>,
 }
 
 pub(crate) fn fetch_profile_email(codex_home: &Path) -> Result<String> {
@@ -143,109 +104,6 @@ fn read_profile_identity_from_auth(codex_home: &Path) -> Result<ProfileIdentity>
             auth_location.display()
         )
     })
-}
-
-pub(crate) fn parse_identity_from_auth_json(raw_auth_json: &str) -> Result<ProfileIdentity> {
-    let stored_auth: StoredAuth =
-        serde_json::from_str(raw_auth_json).context("failed to parse auth JSON")?;
-    parse_identity_from_stored_auth(&stored_auth)
-}
-
-#[allow(dead_code)]
-pub(crate) fn parse_email_from_auth_json(raw_auth_json: &str) -> Result<Option<String>> {
-    Ok(parse_identity_from_auth_json(raw_auth_json)?.email)
-}
-
-fn parse_identity_from_stored_auth(stored_auth: &StoredAuth) -> Result<ProfileIdentity> {
-    let Some(tokens) = stored_auth.tokens.as_ref() else {
-        return Ok(ProfileIdentity::default());
-    };
-
-    let id_token_identity = tokens
-        .id_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(parse_identity_from_id_token)
-        .transpose()?
-        .unwrap_or_default();
-    let stored_account_id = tokens
-        .account_id
-        .as_deref()
-        .and_then(normalize_optional_account_id);
-    let access_token_account_id = tokens
-        .access_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .and_then(|token| parse_account_id_from_access_token(token).ok().flatten());
-
-    Ok(ProfileIdentity {
-        email: id_token_identity.email,
-        account_id: id_token_identity
-            .account_id
-            .or(access_token_account_id)
-            .or(stored_account_id),
-    })
-}
-
-fn parse_identity_from_id_token(raw_jwt: &str) -> Result<ProfileIdentity> {
-    let claims: IdTokenClaims = parse_jwt_payload(raw_jwt)?;
-    Ok(ProfileIdentity {
-        email: claims
-            .email
-            .or_else(|| claims.profile.and_then(|profile| profile.email))
-            .and_then(normalize_optional_email),
-        account_id: claims
-            .auth
-            .and_then(|auth| auth.chatgpt_account_id)
-            .and_then(normalize_optional_account_id),
-    })
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_email_from_id_token(raw_jwt: &str) -> Result<Option<String>> {
-    Ok(parse_identity_from_id_token(raw_jwt)?.email)
-}
-
-fn parse_account_id_from_access_token(raw_jwt: &str) -> Result<Option<String>> {
-    let claims: TokenAccountClaims = parse_jwt_payload(raw_jwt)?;
-    Ok(claims.into_account_id())
-}
-
-fn parse_jwt_payload<T>(raw_jwt: &str) -> Result<T>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let mut parts = raw_jwt.split('.');
-    let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
-        (Some(header), Some(payload), Some(signature))
-            if !header.is_empty() && !payload.is_empty() && !signature.is_empty() =>
-        {
-            (header, payload, signature)
-        }
-        _ => bail!("invalid JWT format"),
-    };
-
-    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_b64)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
-        .context("failed to decode JWT payload")?;
-    serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")
-}
-
-fn normalize_optional_email(email: String) -> Option<String> {
-    let email = email.trim().to_string();
-    (!email.is_empty()).then_some(email)
-}
-
-fn normalize_optional_account_id(account_id: impl AsRef<str>) -> Option<String> {
-    let account_id = account_id.as_ref().trim().to_string();
-    (!account_id.is_empty()).then_some(account_id)
-}
-
-fn normalize_account_id(account_id: &str) -> String {
-    account_id.trim().to_string()
 }
 
 fn fetch_profile_email_from_usage(codex_home: &Path) -> Result<String> {
@@ -345,10 +203,6 @@ pub(crate) fn find_profile_by_email(state: &mut AppState, email: &str) -> Result
             account_id: None,
         },
     )
-}
-
-pub(crate) fn normalize_email(email: &str) -> String {
-    email.trim().to_ascii_lowercase()
 }
 
 pub(crate) fn profile_name_from_email(email: &str) -> String {

@@ -1,73 +1,13 @@
 use super::*;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct AppState {
-    pub(crate) active_profile: Option<String>,
-    #[serde(default)]
-    pub(crate) profiles: BTreeMap<String, ProfileEntry>,
-    #[serde(default)]
-    pub(crate) last_run_selected_at: BTreeMap<String, i64>,
-    #[serde(default)]
-    pub(crate) response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
-    #[serde(default)]
-    pub(crate) session_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
+pub(crate) use prodex_state::{AppState, ProfileEntry, ProfileProvider, ResponseProfileBinding};
+
+pub(crate) trait ProfileProviderExt {
+    fn auth_summary(&self, codex_home: &Path) -> AuthSummary;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ProfileEntry {
-    pub(crate) codex_home: PathBuf,
-    pub(crate) managed: bool,
-    #[serde(default)]
-    pub(crate) email: Option<String>,
-    #[serde(default)]
-    pub(crate) provider: ProfileProvider,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(tag = "provider_kind", rename_all = "snake_case")]
-pub(crate) enum ProfileProvider {
-    #[default]
-    Openai,
-    Copilot {
-        host: String,
-        login: String,
-        api_url: String,
-        #[serde(default)]
-        access_type_sku: Option<String>,
-        #[serde(default)]
-        copilot_plan: Option<String>,
-    },
-}
-
-impl ProfileProvider {
-    pub(crate) fn label(&self) -> &'static str {
-        match self {
-            Self::Openai => "openai",
-            Self::Copilot { .. } => "copilot",
-        }
-    }
-
-    pub(crate) fn display_name(&self) -> &'static str {
-        match self {
-            Self::Openai => "OpenAI/Codex",
-            Self::Copilot { .. } => "GitHub Copilot",
-        }
-    }
-
-    pub(crate) fn runtime_pool_priority(&self) -> usize {
-        match self {
-            // Keep the native OpenAI/Codex pool as the primary family. Other providers are
-            // eligible only after the native pool no longer has a viable fresh candidate.
-            Self::Openai => 0,
-            Self::Copilot { .. } => 1,
-        }
-    }
-
-    pub(crate) fn supports_codex_runtime(&self) -> bool {
-        matches!(self, Self::Openai)
-    }
-
-    pub(crate) fn auth_summary(&self, codex_home: &Path) -> AuthSummary {
+impl ProfileProviderExt for ProfileProvider {
+    fn auth_summary(&self, codex_home: &Path) -> AuthSummary {
         match self {
             Self::Openai => read_auth_summary(codex_home),
             Self::Copilot { .. } => AuthSummary {
@@ -76,27 +16,16 @@ impl ProfileProvider {
             },
         }
     }
-
-    pub(crate) fn copilot_matches(&self, host: &str, login: &str) -> bool {
-        match self {
-            Self::Copilot {
-                host: stored_host,
-                login: stored_login,
-                ..
-            } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
-            Self::Openai => false,
-        }
-    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct ResponseProfileBinding {
-    pub(crate) profile_name: String,
-    pub(crate) bound_at: i64,
+pub(crate) trait AppStateIoExt: Sized {
+    fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>>;
+    fn load(paths: &AppPaths) -> Result<Self>;
+    fn save(&self, paths: &AppPaths) -> Result<()>;
 }
 
-impl AppState {
-    pub(crate) fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>> {
+impl AppStateIoExt for AppState {
+    fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>> {
         cleanup_stale_login_dirs(paths);
         if !paths.state_file.exists() && !state_last_good_file_path(paths).exists() {
             return Ok(RecoveredLoad {
@@ -115,11 +44,11 @@ impl AppState {
         })
     }
 
-    pub(crate) fn load(paths: &AppPaths) -> Result<Self> {
+    fn load(paths: &AppPaths) -> Result<Self> {
         Ok(Self::load_with_recovery(paths)?.value)
     }
 
-    pub(crate) fn save(&self, paths: &AppPaths) -> Result<()> {
+    fn save(&self, paths: &AppPaths) -> Result<()> {
         cleanup_stale_login_dirs(paths);
         let _lock = acquire_state_file_lock(paths)?;
         let existing = Self::load(paths)?;

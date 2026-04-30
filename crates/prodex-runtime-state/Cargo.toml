@@ -1,0 +1,15 @@
+[package]
+name = "prodex-runtime-state"
+version.workspace = true
+edition.workspace = true
+description = "Runtime state data structures for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_state"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }

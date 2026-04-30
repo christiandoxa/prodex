@@ -42,6 +42,45 @@ pub(crate) struct RenderedQuotaReportWindow {
     pub(crate) hidden_after: usize,
 }
 
+fn quota_usage_response(usage: &UsageResponse) -> prodex_quota::UsageResponse {
+    prodex_quota::UsageResponse {
+        email: usage.email.clone(),
+        plan_type: usage.plan_type.clone(),
+        rate_limit: usage.rate_limit.as_ref().map(quota_window_pair),
+        code_review_rate_limit: usage.code_review_rate_limit.as_ref().map(quota_window_pair),
+        additional_rate_limits: usage
+            .additional_rate_limits
+            .iter()
+            .map(quota_additional_rate_limit)
+            .collect(),
+    }
+}
+
+fn quota_additional_rate_limit(
+    rate_limit: &AdditionalRateLimit,
+) -> prodex_quota::AdditionalRateLimit {
+    prodex_quota::AdditionalRateLimit {
+        limit_name: rate_limit.limit_name.clone(),
+        metered_feature: rate_limit.metered_feature.clone(),
+        rate_limit: quota_window_pair(&rate_limit.rate_limit),
+    }
+}
+
+fn quota_window_pair(pair: &WindowPair) -> prodex_quota::WindowPair {
+    prodex_quota::WindowPair {
+        primary_window: pair.primary_window.as_ref().map(quota_usage_window),
+        secondary_window: pair.secondary_window.as_ref().map(quota_usage_window),
+    }
+}
+
+fn quota_usage_window(window: &UsageWindow) -> prodex_quota::UsageWindow {
+    prodex_quota::UsageWindow {
+        used_percent: window.used_percent,
+        reset_at: window.reset_at,
+        limit_window_seconds: window.limit_window_seconds,
+    }
+}
+
 pub(crate) fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
     render_quota_reports_with_layout(reports, detail, None, current_cli_width())
 }
@@ -594,196 +633,36 @@ fn quota_report_earliest_main_reset_epoch(report: &QuotaReport) -> Option<i64> {
 }
 
 fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
-    ["5h", "weekly"]
-        .into_iter()
-        .filter_map(|label| {
-            find_main_window(usage.rate_limit.as_ref()?, label).and_then(|window| window.reset_at)
-        })
-        .min()
+    prodex_quota::earliest_required_main_reset_epoch(&quota_usage_response(usage))
 }
 
 pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
-    usage
-        .rate_limit
-        .as_ref()
-        .map(format_window_pair)
-        .unwrap_or_else(|| "-".to_string())
+    prodex_quota::format_main_windows(&quota_usage_response(usage))
 }
 
 pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
-    usage
-        .rate_limit
-        .as_ref()
-        .map(format_window_pair_compact)
-        .unwrap_or_else(|| "-".to_string())
+    prodex_quota::format_main_windows_compact(&quota_usage_response(usage))
 }
 
 pub(crate) fn format_main_reset_summary(usage: &UsageResponse) -> String {
-    usage
-        .rate_limit
-        .as_ref()
-        .map(format_main_reset_pair)
-        .unwrap_or_else(|| "5h unavailable | weekly unavailable".to_string())
+    prodex_quota::format_main_reset_summary(&quota_usage_response(usage))
 }
 
-fn format_main_reset_pair(rate_limit: &WindowPair) -> String {
-    [
-        format_main_reset_window(rate_limit, "5h"),
-        format_main_reset_window(rate_limit, "weekly"),
-    ]
-    .join(" | ")
-}
-
-fn format_main_reset_window(rate_limit: &WindowPair, label: &str) -> String {
-    match find_main_window(rate_limit, label) {
-        Some(window) => {
-            let reset = window
-                .reset_at
-                .map(|epoch| format_precise_reset_time(Some(epoch)))
-                .unwrap_or_else(|| "unknown".to_string());
-            format!("{label} {reset}")
-        }
-        None => format!("{label} unavailable"),
-    }
-}
-
-fn format_window_pair(rate_limit: &WindowPair) -> String {
-    let mut parts = Vec::new();
-    if let Some(primary) = rate_limit.primary_window.as_ref() {
-        parts.push(format_window_status(primary));
-    }
-    if let Some(secondary) = rate_limit.secondary_window.as_ref() {
-        parts.push(format_window_status(secondary));
-    }
-
-    if parts.is_empty() {
-        "-".to_string()
-    } else {
-        parts.join(" | ")
-    }
-}
-
-fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
-    let mut parts = Vec::new();
-    if let Some(primary) = rate_limit.primary_window.as_ref() {
-        parts.push(format_window_status_compact(primary));
-    }
-    if let Some(secondary) = rate_limit.secondary_window.as_ref() {
-        parts.push(format_window_status_compact(secondary));
-    }
-
-    if parts.is_empty() {
-        "-".to_string()
-    } else {
-        parts.join(" | ")
-    }
-}
-
-fn format_named_window_status(label: &str, window: &UsageWindow) -> String {
-    format!("{label}: {}", format_window_details(window))
-}
-
+#[allow(dead_code)]
 pub(crate) fn format_window_status(window: &UsageWindow) -> String {
-    format_named_window_status(&window_label(window.limit_window_seconds), window)
+    prodex_quota::format_window_status(&quota_usage_window(window))
 }
 
+#[allow(dead_code)]
 pub(crate) fn format_window_status_compact(window: &UsageWindow) -> String {
-    let label = window_label(window.limit_window_seconds);
-    match window.used_percent {
-        Some(used) => {
-            let remaining = remaining_percent(Some(used));
-            format!("{label} {remaining}% left")
-        }
-        None => format!("{label} ?"),
-    }
-}
-
-fn format_window_details(window: &UsageWindow) -> String {
-    let reset = format_reset_time(window.reset_at);
-    match window.used_percent {
-        Some(used) => {
-            let remaining = remaining_percent(window.used_percent);
-            format!("{remaining}% left ({used}% used), resets {reset}")
-        }
-        None => format!("usage unknown, resets {reset}"),
-    }
+    prodex_quota::format_window_status_compact(&quota_usage_window(window))
 }
 
 pub(crate) fn collect_blocked_limits(
     usage: &UsageResponse,
     include_code_review: bool,
 ) -> Vec<BlockedLimit> {
-    let mut blocked = Vec::new();
-
-    if let Some(main) = usage.rate_limit.as_ref() {
-        push_required_main_window(&mut blocked, main, "5h");
-        push_required_main_window(&mut blocked, main, "weekly");
-    } else {
-        blocked.push(BlockedLimit {
-            message: "5h quota unavailable".to_string(),
-        });
-        blocked.push(BlockedLimit {
-            message: "weekly quota unavailable".to_string(),
-        });
-    }
-
-    for additional in &usage.additional_rate_limits {
-        let label = additional
-            .limit_name
-            .as_deref()
-            .or(additional.metered_feature.as_deref());
-        push_blocked_window(
-            &mut blocked,
-            label,
-            additional.rate_limit.primary_window.as_ref(),
-        );
-        push_blocked_window(
-            &mut blocked,
-            label,
-            additional.rate_limit.secondary_window.as_ref(),
-        );
-    }
-
-    if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        push_blocked_window(
-            &mut blocked,
-            Some("code-review"),
-            code_review.primary_window.as_ref(),
-        );
-        push_blocked_window(
-            &mut blocked,
-            Some("code-review"),
-            code_review.secondary_window.as_ref(),
-        );
-    }
-
-    blocked
-}
-
-fn push_required_main_window(
-    blocked: &mut Vec<BlockedLimit>,
-    main: &WindowPair,
-    required_label: &str,
-) {
-    let Some(window) = find_main_window(main, required_label) else {
-        blocked.push(BlockedLimit {
-            message: format!("{required_label} quota unavailable"),
-        });
-        return;
-    };
-
-    match window.used_percent {
-        Some(used) if used < 100 => {}
-        Some(_) => blocked.push(BlockedLimit {
-            message: format!(
-                "{required_label} exhausted until {}",
-                format_reset_time(window.reset_at)
-            ),
-        }),
-        None => blocked.push(BlockedLimit {
-            message: format!("{required_label} quota unknown"),
-        }),
-    }
+    prodex_quota::collect_blocked_limits(&quota_usage_response(usage), include_code_review)
 }
 
 pub(crate) fn find_main_window<'a>(
@@ -796,91 +675,29 @@ pub(crate) fn find_main_window<'a>(
         .find(|window| window_label(window.limit_window_seconds) == expected_label)
 }
 
-fn push_blocked_window(
-    blocked: &mut Vec<BlockedLimit>,
-    name: Option<&str>,
-    window: Option<&UsageWindow>,
-) {
-    let Some(window) = window else {
-        return;
-    };
-    let Some(used) = window.used_percent else {
-        return;
-    };
-    if used < 100 {
-        return;
-    }
-
-    let label = match name {
-        Some(base) if !base.is_empty() => {
-            format!("{base} {}", window_label(window.limit_window_seconds))
-        }
-        _ => window_label(window.limit_window_seconds),
-    };
-
-    blocked.push(BlockedLimit {
-        message: format!(
-            "{label} exhausted until {}",
-            format_reset_time(window.reset_at)
-        ),
-    });
-}
-
 pub(crate) fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
-    blocked
-        .iter()
-        .map(|limit| limit.message.clone())
-        .collect::<Vec<_>>()
-        .join(", ")
+    prodex_quota::format_blocked_limits(blocked)
 }
 
 pub(crate) fn remaining_percent(used_percent: Option<i64>) -> i64 {
-    let Some(used) = used_percent else {
-        return 0;
-    };
-    (100 - used).clamp(0, 100)
+    prodex_quota::remaining_percent(used_percent)
 }
 
 pub(crate) fn window_label(seconds: Option<i64>) -> String {
-    let Some(seconds) = seconds else {
-        return "usage".to_string();
-    };
-
-    if (17_700..=18_300).contains(&seconds) {
-        return "5h".to_string();
-    }
-    if (601_200..=608_400).contains(&seconds) {
-        return "weekly".to_string();
-    }
-    if (2_505_600..=2_678_400).contains(&seconds) {
-        return "monthly".to_string();
-    }
-
-    format!("{seconds}s")
+    prodex_quota::window_label(seconds)
 }
 
+#[allow(dead_code)]
 pub(crate) fn format_reset_time(epoch: Option<i64>) -> String {
-    format_local_epoch(epoch, "%Y-%m-%d %H:%M %:z")
+    prodex_quota::format_reset_time(epoch)
 }
 
 pub(crate) fn format_precise_reset_time(epoch: Option<i64>) -> String {
-    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S %:z")
+    prodex_quota::format_precise_reset_time(epoch)
 }
 
 fn format_quota_snapshot_time(epoch: Option<i64>) -> String {
-    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S %:z")
-}
-
-fn format_local_epoch(epoch: Option<i64>, pattern: &str) -> String {
-    let Some(epoch) = epoch else {
-        return "-".to_string();
-    };
-
-    Local
-        .timestamp_opt(epoch, 0)
-        .single()
-        .map(|dt| dt.format(pattern).to_string())
-        .unwrap_or_else(|| epoch.to_string())
+    prodex_quota::format_quota_snapshot_time(epoch)
 }
 
 fn display_optional(value: Option<&str>) -> &str {
@@ -969,25 +786,7 @@ pub(crate) fn format_copilot_reset_summary(info: &CopilotUserInfo) -> Option<Str
 }
 
 pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
-    let blocked = collect_blocked_limits(usage, false);
-    let status = if blocked.is_empty() {
-        "Ready".to_string()
-    } else {
-        format!("Blocked ({})", format_blocked_limits(&blocked))
-    };
-    let mut panel = PanelBuilder::new(format!("Quota {profile_name}"));
-    panel.push("Profile", profile_name);
-    panel.push("Account", display_optional(usage.email.as_deref()));
-    panel.push("Plan", display_optional(usage.plan_type.as_deref()));
-    panel.push("Status", status);
-    panel.push("Main", format_main_windows(usage));
-
-    if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
-        panel.push("Code review", format_window_pair(code_review));
-    }
-
-    panel.extend(format_additional_limits(usage));
-    panel.render()
+    prodex_quota::render_profile_quota(profile_name, &quota_usage_response(usage))
 }
 
 pub(crate) fn render_profile_quota_snapshot(
@@ -1025,44 +824,8 @@ fn render_profile_copilot_quota(profile_name: &str, info: &CopilotUserInfo) -> S
     panel.render()
 }
 
-fn format_additional_limits(usage: &UsageResponse) -> Vec<(String, String)> {
-    let mut lines = Vec::new();
-
-    for additional in &usage.additional_rate_limits {
-        let name = additional
-            .limit_name
-            .as_deref()
-            .or(additional.metered_feature.as_deref())
-            .unwrap_or("Additional");
-
-        if let Some(primary) = additional.rate_limit.primary_window.as_ref() {
-            lines.push((
-                additional_window_label(name, primary),
-                format_window_details(primary),
-            ));
-        }
-        if let Some(secondary) = additional.rate_limit.secondary_window.as_ref() {
-            lines.push((
-                additional_window_label(name, secondary),
-                format_window_details(secondary),
-            ));
-        }
-    }
-
-    lines
-}
-
-fn additional_window_label(base: &str, window: &UsageWindow) -> String {
-    format!("{base} {}", window_label(window.limit_window_seconds))
-}
-
 pub(crate) fn first_line_of_error(input: &str) -> String {
-    input
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("-")
-        .trim()
-        .to_string()
+    prodex_quota::first_line_of_error(input)
 }
 
 pub(super) fn render_quota_watch_error_panel(title: &str, message: &str) -> String {

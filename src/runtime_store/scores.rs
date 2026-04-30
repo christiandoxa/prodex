@@ -8,8 +8,8 @@ use super::io::{
     save_versioned_json_file_with_fence,
 };
 use crate::{
-    AppPaths, AppState, ProfileEntry, RUNTIME_SCORE_RETENTION_SECONDS, RecoveredLoad,
-    RuntimeProfileHealth,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RUNTIME_SCORE_RETENTION_SECONDS,
+    RecoveredLoad, RuntimeProfileHealth,
 };
 
 pub(crate) fn compact_runtime_profile_scores(

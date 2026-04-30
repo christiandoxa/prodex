@@ -1,0 +1,18 @@
+[package]
+name = "prodex-profile-identity"
+version.workspace = true
+edition.workspace = true
+description = "Profile identity parsing helpers for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_profile_identity"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+base64 = "0.22.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

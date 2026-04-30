@@ -8,7 +8,7 @@ use super::io::{
     save_versioned_json_file_with_fence,
 };
 use crate::{
-    AppPaths, AppState, ProfileEntry, RecoveredLoad, RuntimeProfileBackoffs,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RecoveredLoad, RuntimeProfileBackoffs,
     runtime_profile_route_circuit_profile_name,
     runtime_profile_transport_backoff_key_matches_profiles,
 };

@@ -8,8 +8,8 @@ use super::io::{
     save_versioned_json_file_with_fence,
 };
 use crate::{
-    AppPaths, AppState, ProfileEntry, RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS, RecoveredLoad,
-    RuntimeProfileUsageSnapshot,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS,
+    RecoveredLoad, RuntimeProfileUsageSnapshot,
 };
 
 pub(crate) fn compact_runtime_usage_snapshots(

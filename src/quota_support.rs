@@ -7,75 +7,10 @@ mod watch;
 pub(super) use self::auth::*;
 pub(super) use self::render::*;
 pub(super) use self::watch::*;
-
-#[derive(Debug)]
-pub(crate) struct BlockedLimit {
-    pub(crate) message: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AuthSummary {
-    pub(crate) label: String,
-    pub(crate) quota_compatible: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum QuotaAuthFilter {
-    All,
-    Label(String),
-    QuotaCompatible,
-    NonQuotaCompatible,
-}
-
-impl QuotaAuthFilter {
-    pub(crate) fn parse(raw: &str) -> Result<Self> {
-        let value = raw.trim().to_ascii_lowercase();
-        if value.is_empty() {
-            bail!("quota auth filter cannot be empty");
-        }
-
-        Ok(match value.as_str() {
-            "all" | "*" => Self::All,
-            "quota-compatible" | "compatible" => Self::QuotaCompatible,
-            "non-quota-compatible"
-            | "not-quota-compatible"
-            | "quota-incompatible"
-            | "incompatible" => Self::NonQuotaCompatible,
-            _ => Self::Label(value),
-        })
-    }
-
-    pub(crate) fn matches(&self, auth: &AuthSummary) -> bool {
-        match self {
-            Self::All => true,
-            Self::Label(label) => auth.label.eq_ignore_ascii_case(label),
-            Self::QuotaCompatible => auth.quota_compatible,
-            Self::NonQuotaCompatible => !auth.quota_compatible,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UsageAuth {
-    pub(crate) access_token: String,
-    pub(crate) account_id: Option<String>,
-    pub(crate) refresh_token: Option<String>,
-    pub(crate) expires_at: Option<i64>,
-    pub(crate) last_refresh: Option<i64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UsageAuthSyncSource {
-    Reloaded,
-    Refreshed,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct UsageAuthSyncOutcome {
-    pub(crate) auth: UsageAuth,
-    pub(crate) source: UsageAuthSyncSource,
-    pub(crate) auth_changed: bool,
-}
+pub(crate) use prodex_quota::{
+    AuthSummary, BlockedLimit, QuotaAuthFilter, UsageAuth, UsageAuthSyncOutcome,
+    UsageAuthSyncSource,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProviderQuotaSnapshot {
@@ -308,25 +243,11 @@ pub(crate) fn quota_base_url(explicit: Option<&str>) -> String {
 }
 
 pub(crate) fn usage_url(base_url: &str) -> String {
-    let base_url = base_url.trim_end_matches('/');
-    if base_url.contains("/backend-api") {
-        format!("{base_url}/wham/usage")
-    } else {
-        format!("{base_url}/api/codex/usage")
-    }
+    prodex_quota::usage_url(base_url)
 }
 
 pub(crate) fn format_response_body(body: &[u8]) -> String {
-    if body.is_empty() {
-        return String::new();
-    }
-
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
-        return serde_json::to_string_pretty(&value)
-            .unwrap_or_else(|_| String::from_utf8_lossy(body).trim().to_string());
-    }
-
-    String::from_utf8_lossy(body).trim().to_string()
+    prodex_quota::format_response_body(body)
 }
 
 pub(crate) fn format_binary_resolution(binary: &OsString) -> String {

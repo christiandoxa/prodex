@@ -245,7 +245,7 @@ pub(super) fn remove_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn create_codex_home_if_missing(path: &Path) -> Result<()> {
+pub fn create_codex_home_if_missing(path: &Path) -> Result<()> {
     fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
     #[cfg(unix)]
     {

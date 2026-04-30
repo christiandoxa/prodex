@@ -7,12 +7,34 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+mod attempt_outcome;
+mod buffered_response;
+mod failure_response;
+mod health;
+mod payload_detection;
+mod transport_failure;
+mod websocket_message;
+
+pub use self::attempt_outcome::*;
+pub use self::buffered_response::*;
+pub use self::failure_response::*;
+pub use self::health::*;
+pub use self::payload_detection::*;
+pub use self::transport_failure::*;
+pub use self::websocket_message::*;
+
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 pub const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
 pub const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 pub const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
+pub const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
+pub const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
+pub const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 25 } else { 200 };
+pub const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
+    if cfg!(test) { 25 } else { 200 };
+pub const RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER: u64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeProxyRequest {
@@ -161,6 +183,54 @@ pub fn runtime_proxy_request_prefers_interactive_inflight_wait(
 pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
     is_runtime_responses_path(&request.path_and_query)
         || runtime_proxy_request_prefers_interactive_inflight_wait(request)
+}
+
+pub fn runtime_proxy_interactive_wait_budget_ms(path: &str, base_budget_ms: u64) -> u64 {
+    if is_runtime_anthropic_messages_path(path) {
+        base_budget_ms.saturating_mul(RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER)
+    } else {
+        base_budget_ms
+    }
+}
+
+pub fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> std::time::Duration {
+    let base_budget_ms = if pressure_mode {
+        RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS
+    } else {
+        RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS
+    };
+    std::time::Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
+        path,
+        base_budget_ms,
+    ))
+}
+
+pub fn runtime_proxy_request_inflight_wait_budget(
+    request: &RuntimeProxyRequest,
+    pressure_mode: bool,
+) -> std::time::Duration {
+    if runtime_proxy_request_prefers_interactive_inflight_wait(request) {
+        runtime_proxy_admission_wait_budget(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, pressure_mode)
+    } else if runtime_proxy_request_prefers_inflight_wait(request) {
+        runtime_proxy_admission_wait_budget(&request.path_and_query, pressure_mode)
+    } else {
+        std::time::Duration::ZERO
+    }
+}
+
+pub fn runtime_proxy_long_lived_queue_wait_budget(
+    path: &str,
+    pressure_mode: bool,
+) -> std::time::Duration {
+    let base_budget_ms = if pressure_mode {
+        RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS
+    } else {
+        RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS
+    };
+    std::time::Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
+        path,
+        base_budget_ms,
+    ))
 }
 
 pub fn is_runtime_realtime_call_path(path_and_query: &str) -> bool {

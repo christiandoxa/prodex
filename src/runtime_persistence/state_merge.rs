@@ -1,48 +1,51 @@
 use super::*;
 
-pub(crate) fn merge_last_run_selection(
-    existing: &BTreeMap<String, i64>,
-    incoming: &BTreeMap<String, i64>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> BTreeMap<String, i64> {
-    let mut merged = existing.clone();
-    for (profile_name, timestamp) in incoming {
-        merged
-            .entry(profile_name.clone())
-            .and_modify(|current| *current = (*current).max(*timestamp))
-            .or_insert(*timestamp);
+pub(crate) use prodex_state::{
+    merge_last_run_selection, merge_profile_bindings,
+    prune_profile_bindings_for_housekeeping_without_retention,
+};
+
+fn app_state_compaction_policy() -> prodex_state::AppStateCompactionPolicy {
+    prodex_state::AppStateCompactionPolicy {
+        last_run_retention_seconds: APP_STATE_LAST_RUN_RETENTION_SECONDS,
+        session_binding_retention_seconds: APP_STATE_SESSION_BINDING_RETENTION_SECONDS,
+        session_binding_limit: SESSION_ID_PROFILE_BINDING_LIMIT,
     }
-    merged.retain(|profile_name, _| profiles.contains_key(profile_name));
-    merged
 }
 
+pub(crate) fn compact_app_state(state: AppState, now: i64) -> AppState {
+    prodex_state::compact_app_state_with_policy(state, now, app_state_compaction_policy())
+}
+
+#[allow(dead_code)]
 pub(crate) fn prune_last_run_selection(
     selections: &mut BTreeMap<String, i64>,
     profiles: &BTreeMap<String, ProfileEntry>,
     now: i64,
 ) {
-    let oldest_allowed = now.saturating_sub(APP_STATE_LAST_RUN_RETENTION_SECONDS);
-    selections.retain(|profile_name, timestamp| {
-        profiles.contains_key(profile_name) && *timestamp >= oldest_allowed
-    });
+    prodex_state::prune_last_run_selection_with_retention(
+        selections,
+        profiles,
+        now,
+        APP_STATE_LAST_RUN_RETENTION_SECONDS,
+    );
 }
 
-pub(crate) fn merge_profile_bindings(
-    existing: &BTreeMap<String, ResponseProfileBinding>,
-    incoming: &BTreeMap<String, ResponseProfileBinding>,
+#[allow(dead_code)]
+pub(crate) fn prune_profile_bindings_for_housekeeping(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     profiles: &BTreeMap<String, ProfileEntry>,
-) -> BTreeMap<String, ResponseProfileBinding> {
-    let mut merged = existing.clone();
-    for (response_id, binding) in incoming {
-        let should_replace = merged
-            .get(response_id)
-            .is_none_or(|current| current.bound_at <= binding.bound_at);
-        if should_replace {
-            merged.insert(response_id.clone(), binding.clone());
-        }
-    }
-    merged.retain(|_, binding| profiles.contains_key(&binding.profile_name));
-    merged
+    now: i64,
+    retention_seconds: i64,
+    max_entries: usize,
+) {
+    prodex_state::prune_profile_bindings_for_housekeeping(
+        bindings,
+        profiles,
+        now,
+        retention_seconds,
+        max_entries,
+    );
 }
 
 pub(crate) fn runtime_continuation_binding_lifecycle_rank(
@@ -423,76 +426,11 @@ pub(crate) fn prune_runtime_continuation_response_bindings(
     }
 }
 
-pub(crate) fn prune_profile_bindings_for_housekeeping(
-    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-    retention_seconds: i64,
-    max_entries: usize,
-) {
-    let oldest_allowed = now.saturating_sub(retention_seconds);
-    bindings.retain(|_, binding| {
-        profiles.contains_key(&binding.profile_name) && binding.bound_at >= oldest_allowed
-    });
-    prune_profile_bindings(bindings, max_entries);
-}
-
-pub(crate) fn prune_profile_bindings_for_housekeeping_without_retention(
-    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) {
-    bindings.retain(|_, binding| profiles.contains_key(&binding.profile_name));
-}
-
-pub(crate) fn compact_app_state(mut state: AppState, now: i64) -> AppState {
-    state.active_profile = state
-        .active_profile
-        .filter(|profile_name| state.profiles.contains_key(profile_name));
-    prune_last_run_selection(&mut state.last_run_selected_at, &state.profiles, now);
-    prune_profile_bindings_for_housekeeping_without_retention(
-        &mut state.response_profile_bindings,
-        &state.profiles,
-    );
-    prune_profile_bindings_for_housekeeping(
-        &mut state.session_profile_bindings,
-        &state.profiles,
-        now,
-        APP_STATE_SESSION_BINDING_RETENTION_SECONDS,
-        SESSION_ID_PROFILE_BINDING_LIMIT,
-    );
-    state
-}
-
 pub(crate) fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppState {
-    let profiles = if existing.profiles.is_empty() {
-        snapshot.profiles.clone()
-    } else {
-        existing.profiles.clone()
-    };
-    let active_profile = snapshot
-        .active_profile
-        .clone()
-        .or(existing.active_profile.clone())
-        .filter(|profile_name| profiles.contains_key(profile_name));
-
-    let merged = AppState {
-        active_profile,
-        profiles: profiles.clone(),
-        last_run_selected_at: merge_last_run_selection(
-            &existing.last_run_selected_at,
-            &snapshot.last_run_selected_at,
-            &profiles,
-        ),
-        response_profile_bindings: merge_profile_bindings(
-            &existing.response_profile_bindings,
-            &snapshot.response_profile_bindings,
-            &profiles,
-        ),
-        session_profile_bindings: merge_profile_bindings(
-            &existing.session_profile_bindings,
-            &snapshot.session_profile_bindings,
-            &profiles,
-        ),
-    };
-    compact_app_state(merged, Local::now().timestamp())
+    prodex_state::merge_runtime_state_snapshot_with_policy(
+        existing,
+        snapshot,
+        Local::now().timestamp(),
+        app_state_compaction_policy(),
+    )
 }

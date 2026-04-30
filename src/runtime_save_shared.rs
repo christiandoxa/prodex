@@ -2,188 +2,59 @@ use crate::{
     AppPaths, AppState, ProfileEntry, RuntimeContinuationStore, RuntimeProfileBackoffs,
     RuntimeProfileHealth, RuntimeProfileUsageSnapshot, RuntimeRotationProxyShared,
 };
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
 
-#[derive(Debug)]
-pub(crate) struct RuntimeStateSaveQueue {
-    pub(crate) pending: Mutex<BTreeMap<PathBuf, RuntimeStateSaveJob>>,
-    pub(crate) wake: Condvar,
-    pub(crate) active: Arc<AtomicUsize>,
-}
+pub(crate) use prodex_runtime_state::{
+    RuntimeDueJobs, RuntimeScheduledSaveJob, RuntimeStateSaveSections,
+    RuntimeStateSaveStateSection, runtime_take_due_scheduled_jobs,
+};
 
-#[derive(Debug)]
-pub(crate) struct RuntimeContinuationJournalSaveQueue {
-    pub(crate) pending: Mutex<BTreeMap<PathBuf, RuntimeContinuationJournalSaveJob>>,
-    pub(crate) wake: Condvar,
-    pub(crate) active: Arc<AtomicUsize>,
-}
+pub(crate) type RuntimeStateSaveQueue =
+    prodex_runtime_state::RuntimeStateSaveQueue<RuntimeStateSaveJob>;
+pub(crate) type RuntimeContinuationJournalSaveQueue =
+    prodex_runtime_state::RuntimeContinuationJournalSaveQueue<RuntimeContinuationJournalSaveJob>;
 
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeStateSaveSnapshot {
-    pub(crate) paths: AppPaths,
-    pub(crate) state: AppState,
-    pub(crate) continuations: RuntimeContinuationStore,
-    pub(crate) profile_scores: BTreeMap<String, RuntimeProfileHealth>,
-    pub(crate) usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    pub(crate) backoffs: RuntimeProfileBackoffs,
-}
+pub(crate) type RuntimeStateSaveSnapshot = prodex_runtime_state::RuntimeStateSaveSnapshot<
+    AppPaths,
+    AppState,
+    RuntimeContinuationStore,
+    RuntimeProfileHealth,
+    RuntimeProfileUsageSnapshot,
+    RuntimeProfileBackoffs,
+>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeStateSaveStateSection {
-    None,
-    Core,
-    Full,
-}
+pub(crate) type RuntimeStateSaveSelectedSnapshot =
+    prodex_runtime_state::RuntimeStateSaveSelectedSnapshot<
+        AppPaths,
+        AppState,
+        ProfileEntry,
+        RuntimeContinuationStore,
+        RuntimeProfileHealth,
+        RuntimeProfileUsageSnapshot,
+        RuntimeProfileBackoffs,
+    >;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RuntimeStateSaveSections {
-    pub(crate) state: RuntimeStateSaveStateSection,
-    pub(crate) continuations: bool,
-    pub(crate) profile_scores: bool,
-    pub(crate) usage_snapshots: bool,
-    pub(crate) backoffs: bool,
-}
+pub(crate) type RuntimeStateSavePayload = prodex_runtime_state::RuntimeStateSavePayload<
+    RuntimeStateSaveSnapshot,
+    RuntimeRotationProxyShared,
+>;
+pub(crate) type RuntimeStateSaveJob =
+    prodex_runtime_state::RuntimeStateSaveJob<RuntimeStateSavePayload>;
 
-impl RuntimeStateSaveSections {
-    pub(crate) fn full() -> Self {
-        Self {
-            state: RuntimeStateSaveStateSection::Full,
-            continuations: true,
-            profile_scores: true,
-            usage_snapshots: true,
-            backoffs: true,
-        }
-    }
-}
+pub(crate) type RuntimeContinuationJournalSnapshot =
+    prodex_runtime_state::RuntimeContinuationJournalSnapshot<
+        AppPaths,
+        RuntimeContinuationStore,
+        ProfileEntry,
+    >;
+pub(crate) type RuntimeContinuationJournalSavePayload =
+    prodex_runtime_state::RuntimeContinuationJournalSavePayload<
+        RuntimeContinuationJournalSnapshot,
+        RuntimeRotationProxyShared,
+    >;
+pub(crate) type RuntimeContinuationJournalSaveJob =
+    prodex_runtime_state::RuntimeContinuationJournalSaveJob<RuntimeContinuationJournalSavePayload>;
 
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeStateSaveSelectedSnapshot {
-    pub(crate) paths: AppPaths,
-    pub(crate) state: Option<AppState>,
-    pub(crate) profiles: Option<BTreeMap<String, ProfileEntry>>,
-    pub(crate) continuations: Option<RuntimeContinuationStore>,
-    pub(crate) profile_scores: Option<BTreeMap<String, RuntimeProfileHealth>>,
-    pub(crate) usage_snapshots: Option<BTreeMap<String, RuntimeProfileUsageSnapshot>>,
-    pub(crate) backoffs: Option<RuntimeProfileBackoffs>,
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
-pub(crate) enum RuntimeStateSavePayload {
-    Snapshot(RuntimeStateSaveSnapshot),
-    Live {
-        shared: RuntimeRotationProxyShared,
-        sections: RuntimeStateSaveSections,
-    },
-}
-
-#[derive(Debug)]
-pub(crate) struct RuntimeStateSaveJob {
-    pub(crate) payload: RuntimeStateSavePayload,
-    pub(crate) revision: u64,
-    pub(crate) latest_revision: Arc<AtomicU64>,
-    pub(crate) log_path: PathBuf,
-    pub(crate) reason: String,
-    pub(crate) queued_at: Instant,
-    pub(crate) ready_at: Instant,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeContinuationJournalSnapshot {
-    pub(crate) paths: AppPaths,
-    pub(crate) continuations: RuntimeContinuationStore,
-    pub(crate) profiles: BTreeMap<String, ProfileEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum RuntimeContinuationJournalSavePayload {
-    Snapshot(RuntimeContinuationJournalSnapshot),
-    Live(RuntimeRotationProxyShared),
-}
-
-#[derive(Debug)]
-pub(crate) struct RuntimeContinuationJournalSaveJob {
-    pub(crate) payload: RuntimeContinuationJournalSavePayload,
-    pub(crate) log_path: PathBuf,
-    pub(crate) reason: String,
-    pub(crate) saved_at: i64,
-    pub(crate) queued_at: Instant,
-    pub(crate) ready_at: Instant,
-}
-
-pub(crate) trait RuntimeScheduledSaveJob {
-    fn ready_at(&self) -> Instant;
-}
-
-impl RuntimeScheduledSaveJob for RuntimeStateSaveJob {
-    fn ready_at(&self) -> Instant {
-        self.ready_at
-    }
-}
-
-impl RuntimeScheduledSaveJob for RuntimeContinuationJournalSaveJob {
-    fn ready_at(&self) -> Instant {
-        self.ready_at
-    }
-}
-
-pub(crate) enum RuntimeDueJobs<K, J> {
-    Due(BTreeMap<K, J>),
-    Wait(Duration),
-}
-
-pub(crate) fn runtime_take_due_scheduled_jobs<K, J>(
-    pending: &mut BTreeMap<K, J>,
-    now: Instant,
-) -> RuntimeDueJobs<K, J>
-where
-    K: Ord + Clone,
-    J: RuntimeScheduledSaveJob,
-{
-    if pending.is_empty() {
-        return RuntimeDueJobs::Due(BTreeMap::new());
-    }
-
-    let next_ready_at = pending
-        .values()
-        .map(RuntimeScheduledSaveJob::ready_at)
-        .min()
-        .expect("pending scheduled save jobs should be non-empty after guard");
-    if next_ready_at > now {
-        return RuntimeDueJobs::Wait(next_ready_at.saturating_duration_since(now));
-    }
-
-    let due_keys = pending
-        .iter()
-        .filter_map(|(key, job)| (job.ready_at() <= now).then_some(key.clone()))
-        .collect::<Vec<_>>();
-    let mut due = BTreeMap::new();
-    for key in due_keys {
-        if let Some(job) = pending.remove(&key) {
-            due.insert(key, job);
-        }
-    }
-    RuntimeDueJobs::Due(due)
-}
-
-#[derive(Debug)]
-pub(crate) struct RuntimeProbeRefreshQueue {
-    pub(crate) pending: Mutex<BTreeMap<(PathBuf, String), RuntimeProbeRefreshJob>>,
-    pub(crate) wake: Condvar,
-    pub(crate) active: Arc<AtomicUsize>,
-    pub(crate) wait: Arc<(Mutex<()>, Condvar)>,
-    pub(crate) revision: Arc<AtomicU64>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeProbeRefreshJob {
-    pub(crate) shared: RuntimeRotationProxyShared,
-    pub(crate) profile_name: String,
-    pub(crate) codex_home: PathBuf,
-    pub(crate) upstream_base_url: String,
-    pub(crate) queued_at: Instant,
-}
+pub(crate) type RuntimeProbeRefreshQueue =
+    prodex_runtime_state::RuntimeProbeRefreshQueue<RuntimeProbeRefreshJob>;
+pub(crate) type RuntimeProbeRefreshJob =
+    prodex_runtime_state::RuntimeProbeRefreshJob<RuntimeRotationProxyShared>;

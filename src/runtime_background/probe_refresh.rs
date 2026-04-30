@@ -713,7 +713,11 @@ pub(crate) fn execute_runtime_probe_attempt_queued_for_test(
     );
 }
 
-impl RuntimeProbeRefreshJob {
+trait RuntimeProbeRefreshJobExt {
+    fn execute(self);
+}
+
+impl RuntimeProbeRefreshJobExt for RuntimeProbeRefreshJob {
     fn execute(self) {
         runtime_proxy_log(
             &self.shared,

@@ -1374,17 +1374,23 @@ dependencies = [
  "criterion",
  "dirs",
  "fs2",
+ "prodex-audit-log",
  "prodex-caveman-assets",
  "prodex-codex-config",
  "prodex-core",
  "prodex-profile-export",
+ "prodex-profile-identity",
+ "prodex-quota",
  "prodex-redaction",
  "prodex-runtime-anthropic",
  "prodex-runtime-doctor",
  "prodex-runtime-mem",
  "prodex-runtime-metrics",
  "prodex-runtime-policy",
+ "prodex-runtime-state",
  "prodex-secret-store",
+ "prodex-shared-codex-fs",
+ "prodex-state",
  "prodex-terminal-ui",
  "reqwest",
  "rpassword",
@@ -1395,6 +1401,16 @@ dependencies = [
  "tokio",
  "toml",
  "tungstenite",
+]
+
+[[package]]
+name = "prodex-audit-log"
+version = "0.68.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1429,6 +1445,28 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "prodex-profile-identity"
+version = "0.68.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prodex-quota"
+version = "0.68.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "prodex-terminal-ui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1489,8 +1527,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-runtime-state"
+version = "0.68.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "prodex-secret-store"
 version = "0.68.0"
+
+[[package]]
+name = "prodex-shared-codex-fs"
+version = "0.68.0"
+dependencies = [
+ "anyhow",
+ "prodex-core",
+ "serde_json",
+]
+
+[[package]]
+name = "prodex-state"
+version = "0.68.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "prodex-terminal-ui"

@@ -48,28 +48,6 @@ pub(crate) struct StoredTokens {
     pub(crate) refresh_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct IdTokenClaims {
-    #[serde(default)]
-    pub(crate) email: Option<String>,
-    #[serde(rename = "https://api.openai.com/profile", default)]
-    pub(crate) profile: Option<IdTokenProfileClaims>,
-    #[serde(rename = "https://api.openai.com/auth", default)]
-    pub(crate) auth: Option<IdTokenAuthClaims>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct IdTokenProfileClaims {
-    #[serde(default)]
-    pub(crate) email: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct IdTokenAuthClaims {
-    #[serde(default)]
-    pub(crate) chatgpt_account_id: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InfoQuotaSource {
     LiveProbe,

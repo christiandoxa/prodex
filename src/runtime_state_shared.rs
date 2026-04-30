@@ -1,8 +1,7 @@
 use crate::{
     AppPaths, AppState, AuthSummary, ResponseProfileBinding, RuntimeProxyLaneAdmission,
-    RuntimeQuotaWindowStatus, UsageAuth, UsageResponse, deserialize_null_default,
+    RuntimeQuotaWindowStatus, UsageAuth, UsageResponse,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -10,6 +9,19 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime as TokioRuntime;
+
+pub(crate) use prodex_runtime_state::{
+    RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
+    RuntimeContinuationStatuses, RuntimeProbeCacheFreshness, RuntimeProfileBackoffs,
+    RuntimeProfileHealth, RuntimeRouteKind,
+};
+
+pub(crate) type RuntimeContinuationJournal =
+    prodex_runtime_state::RuntimeContinuationJournal<ResponseProfileBinding>;
+pub(crate) type RuntimeContinuationStore =
+    prodex_runtime_state::RuntimeContinuationStore<ResponseProfileBinding>;
+pub(crate) type RuntimeProfileUsageSnapshot =
+    prodex_runtime_state::RuntimeProfileUsageSnapshot<RuntimeQuotaWindowStatus>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeRotationProxyShared {
@@ -28,7 +40,7 @@ pub(crate) struct RuntimeRotationProxyShared {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub(crate) struct RuntimeStateLockWaitMetrics {
     pub(crate) wait_total_ns: u64,
     pub(crate) wait_count: u64,
@@ -153,111 +165,6 @@ pub(crate) struct RuntimeProfileProbeCacheEntry {
     pub(crate) checked_at: i64,
     pub(crate) auth: AuthSummary,
     pub(crate) result: std::result::Result<UsageResponse, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct RuntimeProfileUsageSnapshot {
-    pub(crate) checked_at: i64,
-    pub(crate) five_hour_status: RuntimeQuotaWindowStatus,
-    pub(crate) five_hour_remaining_percent: i64,
-    pub(crate) five_hour_reset_at: i64,
-    pub(crate) weekly_status: RuntimeQuotaWindowStatus,
-    pub(crate) weekly_remaining_percent: i64,
-    pub(crate) weekly_reset_at: i64,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct RuntimeProfileBackoffs {
-    #[serde(default, deserialize_with = "deserialize_null_default")]
-    pub(crate) retry_backoff_until: BTreeMap<String, i64>,
-    #[serde(default, deserialize_with = "deserialize_null_default")]
-    pub(crate) transport_backoff_until: BTreeMap<String, i64>,
-    #[serde(default, deserialize_with = "deserialize_null_default")]
-    pub(crate) route_circuit_open_until: BTreeMap<String, i64>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct RuntimeContinuationJournal {
-    #[serde(default)]
-    pub(crate) saved_at: i64,
-    #[serde(default)]
-    pub(crate) continuations: RuntimeContinuationStore,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct RuntimeContinuationStore {
-    #[serde(default)]
-    pub(crate) response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
-    #[serde(default)]
-    pub(crate) session_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
-    #[serde(default)]
-    pub(crate) turn_state_bindings: BTreeMap<String, ResponseProfileBinding>,
-    #[serde(default)]
-    pub(crate) session_id_bindings: BTreeMap<String, ResponseProfileBinding>,
-    #[serde(default)]
-    pub(crate) statuses: RuntimeContinuationStatuses,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct RuntimeContinuationStatuses {
-    #[serde(default)]
-    pub(crate) response: BTreeMap<String, RuntimeContinuationBindingStatus>,
-    #[serde(default)]
-    pub(crate) turn_state: BTreeMap<String, RuntimeContinuationBindingStatus>,
-    #[serde(default)]
-    pub(crate) session_id: BTreeMap<String, RuntimeContinuationBindingStatus>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub(crate) enum RuntimeContinuationBindingLifecycle {
-    #[default]
-    Warm,
-    Verified,
-    Suspect,
-    Dead,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct RuntimeContinuationBindingStatus {
-    #[serde(default)]
-    pub(crate) state: RuntimeContinuationBindingLifecycle,
-    #[serde(default)]
-    pub(crate) confidence: u32,
-    #[serde(default)]
-    pub(crate) last_touched_at: Option<i64>,
-    #[serde(default)]
-    pub(crate) last_verified_at: Option<i64>,
-    #[serde(default)]
-    pub(crate) last_verified_route: Option<String>,
-    #[serde(default)]
-    pub(crate) last_not_found_at: Option<i64>,
-    #[serde(default)]
-    pub(crate) not_found_streak: u32,
-    #[serde(default)]
-    pub(crate) success_count: u32,
-    #[serde(default)]
-    pub(crate) failure_count: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeProbeCacheFreshness {
-    Fresh,
-    StaleUsable,
-    Expired,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct RuntimeProfileHealth {
-    pub(crate) score: u32,
-    pub(crate) updated_at: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeRouteKind {
-    Responses,
-    Compact,
-    Websocket,
-    Standard,
 }
 
 pub(crate) const RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX: &str = "__compact_session__:";

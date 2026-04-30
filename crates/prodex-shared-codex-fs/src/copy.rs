@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
+pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
     if !source.is_dir() {
         bail!("copy source {} is not a directory", source.display());
     }

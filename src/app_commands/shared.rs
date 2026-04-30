@@ -25,10 +25,6 @@ pub(crate) fn legacy_default_codex_home() -> Result<PathBuf> {
     prodex_core::legacy_default_codex_home()
 }
 
-pub(crate) fn prodex_previous_default_shared_codex_root(root: &Path) -> PathBuf {
-    prodex_core::prodex_previous_default_shared_codex_root(root)
-}
-
 pub(crate) fn select_default_codex_home(
     shared_codex_root: &Path,
     legacy_codex_home: &Path,
