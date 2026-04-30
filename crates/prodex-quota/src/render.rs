@@ -414,18 +414,19 @@ pub fn render_profile_quota_with_width(
     } else {
         format!("Blocked ({})", format_blocked_limits(&blocked))
     };
-    let mut fields = Vec::new();
-    fields.push(("Profile".to_string(), profile_name.to_string()));
-    fields.push((
-        "Account".to_string(),
-        display_optional(usage.email.as_deref()).to_string(),
-    ));
-    fields.push((
-        "Plan".to_string(),
-        display_optional(usage.plan_type.as_deref()).to_string(),
-    ));
-    fields.push(("Status".to_string(), status));
-    fields.push(("Main".to_string(), format_main_windows(usage)));
+    let mut fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        (
+            "Account".to_string(),
+            display_optional(usage.email.as_deref()).to_string(),
+        ),
+        (
+            "Plan".to_string(),
+            display_optional(usage.plan_type.as_deref()).to_string(),
+        ),
+        ("Status".to_string(), status),
+        ("Main".to_string(), format_main_windows(usage)),
+    ];
 
     if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
         fields.push(("Code review".to_string(), format_window_pair(code_review)));
