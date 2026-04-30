@@ -48,16 +48,17 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.68.0`:
+The current local version in this repo is `0.69.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.68.0
+npm install -g @christiandoxa/prodex@0.69.0
 ```
 
 Dependency status in this repo:
 
 - The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest
 - Source installs still use whatever `codex` binary is on your `PATH`
+- `prodex update` passes through to `codex update` directly without profile selection, quota preflight, or the local runtime proxy
 - Run `cargo update` whenever dependency metadata changes so the workspace lockfile stays in sync
 - Versioned npm install snippets in this guide and `README.md` are synced from `Cargo.toml`
 

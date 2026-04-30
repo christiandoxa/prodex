@@ -84,7 +84,7 @@ pub(super) struct RuntimeContinuationHeader {
 
 pub(super) type RuntimeContinuationClientWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
 
-fn runtime_continuation_header(
+pub(super) fn runtime_continuation_header(
     name: &'static str,
     value: impl Into<String>,
 ) -> RuntimeContinuationHeader {

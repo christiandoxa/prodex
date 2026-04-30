@@ -71,6 +71,12 @@ const SAFE_CARGO_TEST_STEPS = [
     args: ["test", "-p", "prodex-terminal-ui", "--lib", "--", "--test-threads=1"],
     failOnZeroTests: true,
   },
+  {
+    label: "crate:runtime-policy",
+    command: "cargo",
+    args: ["test", "-p", "prodex-runtime-policy", "--lib", "--", "--test-threads=1"],
+    failOnZeroTests: true,
+  },
   cargoTestStep("lib:app-commands", "app_commands::"),
   cargoTestStep("lib:audit-log", "audit_log::"),
   cargoTestStep("lib:compat-replay", "compat_replay_tests::"),
@@ -81,7 +87,6 @@ const SAFE_CARGO_TEST_STEPS = [
   cargoTestStep("lib:runtime-config", "runtime_config::"),
   cargoTestStep("lib:runtime-doctor", "runtime_doctor::"),
   cargoTestStep("lib:runtime-launch", "runtime_launch::"),
-  cargoTestStep("lib:runtime-policy", "runtime_policy::"),
   cargoTestStep("lib:test-env-guard", "test_env_guard_tests::"),
   cargoIntegrationTestStep("test:auto-rotate", "auto_rotate"),
 ];

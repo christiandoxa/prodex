@@ -402,6 +402,7 @@ fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "cleanup"
             | "login"
             | "logout"
+            | "update"
             | "quota"
             | "run"
             | "caveman"

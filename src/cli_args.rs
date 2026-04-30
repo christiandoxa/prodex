@@ -68,6 +68,12 @@ pub(crate) enum Commands {
     #[command(about = "Run codex logout for the selected or active profile.")]
     Logout(LogoutArgs),
     #[command(
+        trailing_var_arg = true,
+        disable_help_flag = true,
+        about = "Run codex update directly without Prodex profile or runtime routing."
+    )]
+    Update(CodexUpdateArgs),
+    #[command(
         about = "Inspect live quota for one profile or the whole profile pool.",
         after_help = CLI_QUOTA_AFTER_HELP
     )]
@@ -219,6 +225,13 @@ pub(crate) struct CodexPassthroughArgs {
     #[arg(short, long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
     /// Extra arguments passed through to `codex login` unchanged.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub(crate) codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CodexUpdateArgs {
+    /// Extra arguments passed through to `codex update` unchanged.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub(crate) codex_args: Vec<OsString>,
 }
@@ -712,6 +725,12 @@ impl RemoveProfileArgs {
 impl CodexPassthroughArgs {
     pub(crate) fn execute(self) -> Result<()> {
         handle_codex_login(self)
+    }
+}
+
+impl CodexUpdateArgs {
+    pub(crate) fn execute(self) -> Result<()> {
+        handle_codex_update(self)
     }
 }
 

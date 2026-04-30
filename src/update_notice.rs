@@ -56,6 +56,7 @@ pub(crate) fn should_emit_update_notice(command: &Commands) -> bool {
         Commands::Audit(args) => !args.json,
         Commands::Context(ContextCommands::Audit(args)) => !args.json,
         Commands::Context(ContextCommands::Compress(args)) => !args.json,
+        Commands::Update(_) => false,
         Commands::Quota(args) => !args.raw,
         _ => true,
     }

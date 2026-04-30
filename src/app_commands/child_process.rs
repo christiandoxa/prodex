@@ -164,6 +164,29 @@ pub(crate) fn run_child_plan(
     Ok(status)
 }
 
+pub(crate) fn run_codex_direct_passthrough(args: Vec<OsString>) -> Result<ExitStatus> {
+    let binary = codex_bin();
+    let mut command = Command::new(&binary);
+    command.args(args);
+    for key in codex_sandbox_removed_env() {
+        command.env_remove(key);
+    }
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to execute {}", binary.to_string_lossy()))?;
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for {}", binary.to_string_lossy()))?;
+    Ok(status)
+}
+
+pub(crate) fn handle_codex_update(args: CodexUpdateArgs) -> Result<()> {
+    let mut command_args = Vec::with_capacity(args.codex_args.len() + 1);
+    command_args.push(OsString::from("update"));
+    command_args.extend(args.codex_args);
+    exit_with_status(run_codex_direct_passthrough(command_args)?)
+}
+
 pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }

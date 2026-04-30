@@ -277,18 +277,18 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.125.0",
-      "name": "0.125.0",
-      "published_at": "2026-04-24T18:00:38Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.125.0",
+      "tag_name": "rust-v0.128.0",
+      "name": "0.128.0",
+      "published_at": "2026-04-30T16:40:28Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.128.0",
       "body_head": [
         "## New Features",
-        "- App-server integrations now support Unix socket transport, pagination-friendly resume/fork, sticky environments, and remote thread config/store plumbing. (#18255, #18892, #18897, #18908, #19008, #19014)",
-        "- App-server plugin management can install remote plugins and upgrade configured marketplaces. (#18917, #19074)",
-        "- Permission profiles now round-trip across TUI sessions, user turns, MCP sandbox state, shell escalation, and app-server APIs. (#18284, #18285, #18286, #18287, #19231)",
-        "- Model providers now own model discovery, with AWS/Bedrock account state exposed to app clients. (#18950, #19048)",
-        "- `codex exec --json` now reports reasoning-token usage for programmatic consumers. (#19308)",
-        "- Rollout tracing now records tool, code-mode, session, and multi-agent relationships, with a debug reducer command for inspection. (#18878, #18879, #18880)",
+        "- Added persisted `/goal` workflows with app-server APIs, model tools, runtime continuation, and TUI controls for create, pause, resume, and clear. (#18073, #18074, #18075, #18076, #18077, #20082)",
+        "- Added `codex update`, configurable TUI keymaps, plan-mode nudges, action-required terminal titles, and active-turn `/statusline` and `/title` edits. (#19933, #18593, #19901, #18372, #19917)",
+        "- Expanded permission profiles with built-in defaults, sandbox CLI profile selection, cwd controls, and active-profile metadata for clients. (#19900, #20117, #20118, #20095)",
+        "- Improved plugin workflows with marketplace installation, remote bundle caching, remote uninstall, plugin-bundled hooks, hook enablement state, and external-agent config import. (#18704, #19914, #19456, #19705, #19840, #19949)",
+        "- Added external agent session import, including background imports and imported-session title handling. (#19895, #20284, #20261)",
+        "- Made MultiAgentV2 configuration more explicit with thread caps, wait-time controls, root/subagent hints, and v2-specific depth handling. (#19360, #19792, #19805, #20052, #20180)",
         "## Bug Fixes"
       ]
     }

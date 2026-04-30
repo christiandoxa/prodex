@@ -516,6 +516,9 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         auth: None,
         base_url: None,
     })));
+    assert!(!should_emit_update_notice(&Commands::Update(CodexUpdateArgs {
+        codex_args: Vec::new(),
+    })));
     assert!(should_emit_update_notice(&Commands::Current));
 }
 
@@ -814,6 +817,40 @@ fn prepare_codex_launch_args_preserves_review_detection_after_normalization() {
         ]
     );
     assert!(include_code_review);
+}
+
+#[test]
+fn goal_slash_args_survive_default_run_and_resume_normalization() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "/goal",
+        "resume saved objective",
+    ])
+    .expect("bare resume goal invocation should parse as run command");
+    let Commands::Run(run_args) = command else {
+        panic!("expected run command");
+    };
+    assert_eq!(
+        run_args.codex_args,
+        vec![
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("/goal"),
+            OsString::from("resume saved objective"),
+        ],
+    );
+
+    let (launch_args, include_code_review) = prepare_codex_launch_args(&run_args.codex_args, false);
+    assert_eq!(
+        launch_args,
+        vec![
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("/goal"),
+            OsString::from("resume saved objective"),
+        ],
+    );
+    assert!(!include_code_review);
 }
 
 #[test]
@@ -2213,7 +2250,7 @@ fn runtime_broker_startup_grace_covers_ready_timeout() {
 }
 
 #[test]
-fn runtime_broker_command_is_the_only_command_without_update_notice() {
+fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
     let runtime_broker = Commands::RuntimeBroker(RuntimeBrokerArgs {
         current_profile: "main".to_string(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -2223,6 +2260,9 @@ fn runtime_broker_command_is_the_only_command_without_update_notice() {
         instance_token: "instance".to_string(),
         admin_token: "admin".to_string(),
         listen_addr: None,
+    });
+    let update = Commands::Update(CodexUpdateArgs {
+        codex_args: vec![OsString::from("--check")],
     });
     let run = Commands::Run(RunArgs {
         profile: None,
@@ -2237,7 +2277,38 @@ fn runtime_broker_command_is_the_only_command_without_update_notice() {
     });
 
     assert!(!runtime_broker.should_show_update_notice());
+    assert!(!update.should_show_update_notice());
     assert!(run.should_show_update_notice());
+}
+
+#[test]
+fn update_command_accepts_passthrough_args() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "update",
+        "--check",
+        "rust-v0.128.0",
+        "--force",
+    ])
+    .expect("update command should parse");
+    let Commands::Update(args) = command else {
+        panic!("expected update command");
+    };
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("--check"),
+            OsString::from("rust-v0.128.0"),
+            OsString::from("--force"),
+        ]
+    );
+
+    let command =
+        parse_cli_command_from(["prodex", "update", "--help"]).expect("update help should pass");
+    let Commands::Update(args) = command else {
+        panic!("expected update command");
+    };
+    assert_eq!(args.codex_args, vec![OsString::from("--help")]);
 }
 
 #[test]

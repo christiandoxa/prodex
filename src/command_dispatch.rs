@@ -51,6 +51,7 @@ impl_command_action!(
     CleanupCommand,
     ContextCommands,
     CodexPassthroughArgs,
+    CodexUpdateArgs,
     CurrentCommand,
     DoctorArgs,
     ExportProfileArgs,
@@ -74,7 +75,7 @@ impl Commands {
     }
 
     pub(super) fn should_show_update_notice(&self) -> bool {
-        !matches!(self, Commands::RuntimeBroker(_))
+        !matches!(self, Commands::RuntimeBroker(_) | Commands::Update(_))
     }
 
     fn into_routed_command(self) -> RoutedCommand {
@@ -90,6 +91,7 @@ impl Commands {
             Commands::Cleanup => RoutedCommand::new(CleanupCommand),
             Commands::Login(command) => RoutedCommand::new(command),
             Commands::Logout(command) => RoutedCommand::new(command),
+            Commands::Update(command) => RoutedCommand::new(command),
             Commands::Quota(command) => RoutedCommand::new(command),
             Commands::Run(command) => RoutedCommand::new(command),
             Commands::Caveman(command) => RoutedCommand::new(command),

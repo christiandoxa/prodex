@@ -102,10 +102,13 @@ prodex
 prodex run
 prodex run --profile main
 prodex run --dry-run
+prodex update --help
 prodex exec "review this repo"
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
+
+`prodex update` passes through to `codex update` directly and does not use Prodex profile selection, quota preflight, or the local runtime proxy.
 
 ### Run Caveman mode
 
