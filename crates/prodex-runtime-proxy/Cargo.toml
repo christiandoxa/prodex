@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Runtime proxy boundary primitives for prodex"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "runtime_proxy"

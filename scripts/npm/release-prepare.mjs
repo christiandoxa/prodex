@@ -22,20 +22,9 @@ const DOC_VERSION_PATTERNS = [
     label: "npm versioned install",
     pattern: /(npm install -g @christiandoxa\/prodex@)([^\s`]+)/g,
   },
-  {
-    label: "cargo versioned install",
-    pattern: /(cargo install prodex --force --version )([^\s`]+)/g,
-  },
 ];
 
 const DOC_FILES = ["README.md", "QUICKSTART.md"];
-const INTERNAL_CRATE_PACKAGES = [
-  "prodex-codex-config",
-  "prodex-redaction",
-  "prodex-runtime-metrics",
-  "prodex-secret-store",
-  "prodex-terminal-ui",
-];
 const KNOWN_NPM_LOCKFILES = [
   "package-lock.json",
   "npm/package-lock.json",
@@ -180,7 +169,6 @@ async function checkCargoManifest(version, errors) {
   const contents = await fs.readFile(cargoTomlPath, "utf8");
   let section = "";
   let workspaceVersion = null;
-  const internalDependencyVersions = new Map();
 
   for (const rawLine of contents.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -195,28 +183,9 @@ async function checkCargoManifest(version, errors) {
       }
       continue;
     }
-    if (section === "[dependencies]") {
-      for (const packageName of INTERNAL_CRATE_PACKAGES) {
-        if (!line.includes(`package = "${packageName}"`)) {
-          continue;
-        }
-        const match = line.match(/version\s*=\s*"=([^"]+)"/);
-        if (match) {
-          internalDependencyVersions.set(packageName, match[1]);
-        }
-      }
-    }
   }
 
   expectEqual(errors, "Cargo.toml workspace.package version", workspaceVersion, version);
-  for (const packageName of INTERNAL_CRATE_PACKAGES) {
-    expectEqual(
-      errors,
-      `Cargo.toml dependency ${packageName} version`,
-      internalDependencyVersions.get(packageName),
-      version,
-    );
-  }
 }
 
 async function checkCargoLock(version, errors) {
@@ -227,7 +196,7 @@ async function checkCargoLock(version, errors) {
   }
 
   const contents = await fs.readFile(path.join(repoRoot, relativePath), "utf8");
-  for (const packageName of ["prodex", ...INTERNAL_CRATE_PACKAGES]) {
+  for (const packageName of ["prodex"]) {
     const packageBlock = contents
       .split(/\n\[\[package\]\]\n/)
       .find((block) => new RegExp(`(?:^|\\n)name = "${packageName}"(?:\\n|$)`).test(block));

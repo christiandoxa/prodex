@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Redaction helpers for prodex logs and diagnostics"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "redaction"

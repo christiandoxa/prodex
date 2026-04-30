@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Runtime policy parsing and validation for prodex"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "prodex_runtime_policy"
@@ -12,6 +13,6 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-secret_store = { package = "prodex-secret-store", path = "../prodex-secret-store", version = "=0.68.0" }
+secret_store = { package = "prodex-secret-store", path = "../prodex-secret-store" }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"

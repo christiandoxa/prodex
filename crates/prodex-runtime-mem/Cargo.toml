@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Claude-Mem integration helpers for prodex runtime launches"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "prodex_runtime_mem"
@@ -14,4 +15,3 @@ path = "src/lib.rs"
 anyhow = "1.0.102"
 dirs = "6.0.0"
 serde_json = "1.0.149"
-

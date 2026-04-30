@@ -36,10 +36,6 @@ function syncDocVersion(contents, version) {
     /(npm install -g @christiandoxa\/prodex@)([^\s`]+)/g,
     `$1${version}`,
   );
-  next = next.replace(
-    /(cargo install prodex --force --version )([^\s`]+)/g,
-    `$1${version}`,
-  );
   return next;
 }
 

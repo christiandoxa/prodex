@@ -6,6 +6,7 @@ description = "OpenAI profile pooling and safe auto-rotate for Codex CLI and Cla
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/christiandoxa/prodex"
+publish = false
 
 [workspace]
 members = [
@@ -43,23 +44,23 @@ chrono = { version = "0.4.44", features = ["clock"] }
 clap = { version = "4.6.1", features = ["derive"] }
 dirs = "6.0.0"
 fs2 = "0.4.3"
-codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "=0.68.0" }
-prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets", version = "=0.68.0" }
-prodex_core = { package = "prodex-core", path = "crates/prodex-core", version = "=0.68.0" }
-prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export", version = "=0.68.0" }
-prodex_runtime_mem = { package = "prodex-runtime-mem", path = "crates/prodex-runtime-mem", version = "=0.68.0" }
-redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "=0.68.0" }
+codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config" }
+prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets" }
+prodex_core = { package = "prodex-core", path = "crates/prodex-core" }
+prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export" }
+prodex_runtime_mem = { package = "prodex-runtime-mem", path = "crates/prodex-runtime-mem" }
+redaction = { package = "prodex-redaction", path = "crates/prodex-redaction" }
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 rpassword = "7.4.0"
-runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "=0.68.0" }
-prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor", version = "=0.68.0" }
-runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "=0.68.0" }
-prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "=0.68.0" }
-secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "=0.68.0" }
+runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic" }
+prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor" }
+runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics" }
+prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy" }
+secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
-terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui", version = "=0.68.0" }
+terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui" }
 tiny_http = "0.12.0"
 tokio = { version = "1.52.1", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"

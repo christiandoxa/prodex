@@ -431,11 +431,11 @@ fn version_is_newer_compares_semver_like_versions() {
 }
 
 #[test]
-fn prodex_update_command_prefers_cargo_for_native_installations() {
+fn prodex_update_command_prefers_npm_for_native_installations() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
     assert_eq!(
         prodex_update_command_for_version("0.2.99"),
-        "cargo install prodex --force --version 0.2.99"
+        "npm install -g @christiandoxa/prodex@0.2.99 or npm install -g @christiandoxa/prodex@latest"
     );
 }
 
@@ -455,12 +455,9 @@ fn current_prodex_release_source_is_npm_when_wrapped_by_npm() {
 }
 
 #[test]
-fn current_prodex_release_source_defaults_to_crates_io() {
+fn current_prodex_release_source_defaults_to_npm() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
-    assert_eq!(
-        current_prodex_release_source(),
-        ProdexReleaseSource::CratesIo
-    );
+    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::Npm);
 }
 
 #[test]
@@ -739,7 +736,7 @@ fn format_info_prodex_version_reports_up_to_date_from_cache() {
     fs::write(
         update_check_cache_file_path(&paths),
         serde_json::to_string_pretty(&serde_json::json!({
-            "source": "CratesIo",
+            "source": "Npm",
             "latest_version": current_prodex_version(),
             "checked_at": Local::now().timestamp(),
         }))
@@ -768,7 +765,7 @@ fn format_info_prodex_version_reports_available_update_from_cache() {
     fs::write(
         update_check_cache_file_path(&paths),
         serde_json::to_string_pretty(&serde_json::json!({
-            "source": "CratesIo",
+            "source": "Npm",
             "latest_version": "99.0.0",
             "checked_at": Local::now().timestamp(),
         }))

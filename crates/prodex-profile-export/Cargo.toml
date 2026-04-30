@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Profile export envelope crypto helpers for prodex"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "prodex_profile_export"
@@ -19,4 +20,3 @@ pbkdf2 = "0.13.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
-

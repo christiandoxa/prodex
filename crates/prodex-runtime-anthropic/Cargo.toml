@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Anthropic compatibility translation helpers for prodex"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "runtime_anthropic"

@@ -35,13 +35,13 @@ Depending on your setup, you may also need:
 npm install -g @christiandoxa/prodex
 ````
 
-### Cargo
+### Source checkout
 
 ```bash
-cargo install prodex
+cargo install --path .
 ```
 
-If you install with Cargo, make sure the `codex` binary in your `PATH` is already installed and up to date.
+If you install from source, make sure the `codex` binary in your `PATH` is already installed and up to date.
 
 ## Quick start
 

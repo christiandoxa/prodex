@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Terminal rendering helpers for prodex"
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [lib]
 name = "terminal_ui"

@@ -34,10 +34,10 @@ Install from npm:
 npm install -g @christiandoxa/prodex
 ```
 
-Or install from [crates.io](https://crates.io/crates/prodex):
+Or install from a source checkout:
 
 ```bash
-cargo install prodex
+cargo install --path .
 ```
 
 ## Update
@@ -52,15 +52,14 @@ The current local version in this repo is `0.68.0`:
 
 ```bash
 npm install -g @christiandoxa/prodex@0.68.0
-cargo install prodex --force --version 0.68.0
 ```
 
 Dependency status in this repo:
 
 - The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest
-- Cargo installs still use whatever `codex` binary is on your `PATH`
-- Run `cargo update` whenever dependency metadata changes so the published lockfile stays in sync
-- Versioned install snippets in this guide and `README.md` are synced from `Cargo.toml`
+- Source installs still use whatever `codex` binary is on your `PATH`
+- Run `cargo update` whenever dependency metadata changes so the workspace lockfile stays in sync
+- Versioned npm install snippets in this guide and `README.md` are synced from `Cargo.toml`
 
 If you want to switch from a Cargo-installed binary to npm:
 

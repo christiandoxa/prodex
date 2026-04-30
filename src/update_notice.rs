@@ -10,20 +10,9 @@ struct UpdateCheckCache {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum ProdexReleaseSource {
-    Npm,
     #[default]
+    Npm,
     CratesIo,
-}
-
-#[derive(Debug, Deserialize)]
-struct CratesIoVersionResponse {
-    #[serde(rename = "crate")]
-    crate_info: CratesIoCrateInfo,
-}
-
-#[derive(Debug, Deserialize)]
-struct CratesIoCrateInfo {
-    max_version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,18 +77,13 @@ pub(crate) fn current_prodex_release_source() -> ProdexReleaseSource {
         return ProdexReleaseSource::Npm;
     }
 
-    ProdexReleaseSource::CratesIo
+    ProdexReleaseSource::Npm
 }
 
 pub(crate) fn prodex_update_command_for_version(latest_version: &str) -> String {
-    match current_prodex_release_source() {
-        ProdexReleaseSource::Npm => format!(
-            "npm install -g @christiandoxa/prodex@{latest_version} or npm install -g @christiandoxa/prodex@latest"
-        ),
-        ProdexReleaseSource::CratesIo => {
-            format!("cargo install prodex --force --version {latest_version}")
-        }
-    }
+    format!(
+        "npm install -g @christiandoxa/prodex@{latest_version} or npm install -g @christiandoxa/prodex@latest"
+    )
 }
 
 pub(crate) fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {
@@ -203,37 +187,8 @@ fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result
     Ok(())
 }
 
-fn fetch_latest_prodex_version(source: ProdexReleaseSource) -> Result<String> {
-    match source {
-        ProdexReleaseSource::Npm => fetch_latest_prodex_npm_version(),
-        ProdexReleaseSource::CratesIo => fetch_latest_prodex_crates_version(),
-    }
-}
-
-fn fetch_latest_prodex_crates_version() -> Result<String> {
-    let client = Client::builder()
-        .connect_timeout(Duration::from_millis(UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS))
-        .timeout(Duration::from_millis(UPDATE_CHECK_HTTP_READ_TIMEOUT_MS))
-        .build()
-        .context("failed to build update-check HTTP client")?;
-    let response = client
-        .get("https://crates.io/api/v1/crates/prodex")
-        .header(
-            "User-Agent",
-            format!("prodex/{}", env!("CARGO_PKG_VERSION")),
-        )
-        .send()
-        .context("failed to request crates.io prodex metadata")?;
-    let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read crates.io prodex metadata")?;
-    if !status.is_success() {
-        bail!("crates.io returned HTTP {}", status.as_u16());
-    }
-    let payload: CratesIoVersionResponse =
-        serde_json::from_slice(&body).context("failed to parse crates.io prodex metadata")?;
-    Ok(payload.crate_info.max_version)
+fn fetch_latest_prodex_version(_source: ProdexReleaseSource) -> Result<String> {
+    fetch_latest_prodex_npm_version()
 }
 
 fn fetch_latest_prodex_npm_version() -> Result<String> {
