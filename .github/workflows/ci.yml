@@ -200,7 +200,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run auto-rotate integration tests
-        run: cargo test --test auto_rotate
+        run: cargo test --test auto_rotate -- --test-threads=1
 
   profile-commands-internal:
     runs-on: ubuntu-latest
