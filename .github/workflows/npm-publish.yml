@@ -142,20 +142,48 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package internal crates for attestation
+        shell: bash
         run: |
-          cargo package --locked -p prodex-codex-config
-          cargo package --locked -p prodex-redaction
-          cargo package --locked -p prodex-runtime-metrics
-          cargo package --locked -p prodex-secret-store
-          cargo package --locked -p prodex-terminal-ui
+          set -euo pipefail
+          for package in \
+            prodex-codex-config \
+            prodex-caveman-assets \
+            prodex-core \
+            prodex-profile-export \
+            prodex-redaction \
+            prodex-runtime-anthropic \
+            prodex-runtime-mem \
+            prodex-runtime-metrics \
+            prodex-runtime-proxy \
+            prodex-secret-store \
+            prodex-terminal-ui \
+            prodex-runtime-doctor \
+            prodex-runtime-policy
+          do
+            cargo package --locked -p "${package}"
+          done
 
       - name: Verify internal crate publish
+        shell: bash
         run: |
-          cargo publish --locked --dry-run -p prodex-codex-config
-          cargo publish --locked --dry-run -p prodex-redaction
-          cargo publish --locked --dry-run -p prodex-runtime-metrics
-          cargo publish --locked --dry-run -p prodex-secret-store
-          cargo publish --locked --dry-run -p prodex-terminal-ui
+          set -euo pipefail
+          for package in \
+            prodex-codex-config \
+            prodex-caveman-assets \
+            prodex-core \
+            prodex-profile-export \
+            prodex-redaction \
+            prodex-runtime-anthropic \
+            prodex-runtime-mem \
+            prodex-runtime-metrics \
+            prodex-runtime-proxy \
+            prodex-secret-store \
+            prodex-terminal-ui \
+            prodex-runtime-doctor \
+            prodex-runtime-policy
+          do
+            cargo publish --locked --dry-run -p "${package}"
+          done
 
       - name: Attest internal crate package provenance
         uses: actions/attest-build-provenance@v4
@@ -168,12 +196,56 @@ jobs:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
       - name: Publish internal crates
+        shell: bash
         run: |
-          cargo publish --locked -p prodex-codex-config
-          cargo publish --locked -p prodex-redaction
-          cargo publish --locked -p prodex-runtime-metrics
-          cargo publish --locked -p prodex-secret-store
-          cargo publish --locked -p prodex-terminal-ui
+          set -euo pipefail
+          version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          crate_visible() {
+            local package="$1"
+            cargo search "${package}" --limit 1 | grep -Eq "^${package} = \"${version}\""
+          }
+          publish_crate() {
+            local package="$1"
+            if crate_visible "${package}"; then
+              echo "crate ${package}@${version} already visible; skipping publish"
+              return
+            fi
+            set +e
+            output="$(cargo publish --locked -p "${package}" 2>&1)"
+            status="$?"
+            set -e
+            printf '%s\n' "${output}"
+            if [ "${status}" -eq 0 ]; then
+              return
+            fi
+            if printf '%s\n' "${output}" | grep -Eiq 'already (uploaded|exists)|is already uploaded'; then
+              echo "crate ${package}@${version} already published; waiting for index visibility"
+              return
+            fi
+            return "${status}"
+          }
+          for package in \
+            prodex-codex-config \
+            prodex-caveman-assets \
+            prodex-core \
+            prodex-profile-export \
+            prodex-redaction \
+            prodex-runtime-anthropic \
+            prodex-runtime-mem \
+            prodex-runtime-metrics \
+            prodex-runtime-proxy \
+            prodex-secret-store \
+            prodex-terminal-ui \
+            prodex-runtime-doctor \
+            prodex-runtime-policy
+          do
+            publish_crate "${package}"
+          done
 
       - name: Wait for internal crates
         shell: bash
@@ -185,15 +257,31 @@ jobs:
               print(tomllib.load(handle)["package"]["version"])
           PY
           )"
-          for package in prodex-codex-config prodex-redaction prodex-runtime-metrics prodex-secret-store prodex-terminal-ui; do
-            for attempt in {1..18}; do
+          for package in \
+            prodex-codex-config \
+            prodex-caveman-assets \
+            prodex-core \
+            prodex-profile-export \
+            prodex-redaction \
+            prodex-runtime-anthropic \
+            prodex-runtime-mem \
+            prodex-runtime-metrics \
+            prodex-runtime-proxy \
+            prodex-secret-store \
+            prodex-terminal-ui \
+            prodex-runtime-doctor \
+            prodex-runtime-policy
+          do
+            for attempt in {1..60}; do
               if cargo search "${package}" --limit 1 | grep -Eq "^${package} = \"${version}\""; then
+                echo "crate ${package}@${version} is visible in crates.io index"
                 break
               fi
-              if [ "${attempt}" = 18 ]; then
+              if [ "${attempt}" = 60 ]; then
                 echo "crate ${package}@${version} not visible in crates.io index" >&2
                 exit 1
               fi
+              echo "waiting for crate ${package}@${version} to appear in crates.io index (${attempt}/60)"
               sleep 10
             done
           done
@@ -210,7 +298,32 @@ jobs:
           subject-path: target/package/prodex-[0-9]*.crate
 
       - name: Publish prodex crate
-        run: cargo publish --locked -p prodex
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          if cargo search prodex --limit 1 | grep -Eq "^prodex = \"${version}\""; then
+            echo "crate prodex@${version} already visible; skipping publish"
+            exit 0
+          fi
+          set +e
+          output="$(cargo publish --locked -p prodex 2>&1)"
+          status="$?"
+          set -e
+          printf '%s\n' "${output}"
+          if [ "${status}" -eq 0 ]; then
+            exit 0
+          fi
+          if printf '%s\n' "${output}" | grep -Eiq 'already (uploaded|exists)|is already uploaded'; then
+            echo "crate prodex@${version} already published"
+            exit 0
+          fi
+          exit "${status}"
 
   publish-npm:
     name: Stage and publish npm packages

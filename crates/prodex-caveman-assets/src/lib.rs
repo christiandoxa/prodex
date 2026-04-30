@@ -18,68 +18,66 @@ struct EmbeddedCavemanFile {
 const CAVEMAN_CORE_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
     EmbeddedCavemanFile {
         relative_path: ".codex-plugin/plugin.json",
-        contents: include_str!("../../../src/caveman_assets/.codex-plugin/plugin.json"),
+        contents: include_str!("../caveman_assets/.codex-plugin/plugin.json"),
     },
     EmbeddedCavemanFile {
         relative_path: "assets/caveman-small.svg",
-        contents: include_str!("../../../src/caveman_assets/assets/caveman-small.svg"),
+        contents: include_str!("../caveman_assets/assets/caveman-small.svg"),
     },
     EmbeddedCavemanFile {
         relative_path: "assets/caveman.svg",
-        contents: include_str!("../../../src/caveman_assets/assets/caveman.svg"),
+        contents: include_str!("../caveman_assets/assets/caveman.svg"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/caveman/SKILL.md",
-        contents: include_str!("../../../src/caveman_assets/skills/caveman/SKILL.md"),
+        contents: include_str!("../caveman_assets/skills/caveman/SKILL.md"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/caveman/agents/openai.yaml",
-        contents: include_str!("../../../src/caveman_assets/skills/caveman/agents/openai.yaml"),
+        contents: include_str!("../caveman_assets/skills/caveman/agents/openai.yaml"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/caveman/assets/caveman-small.svg",
-        contents: include_str!(
-            "../../../src/caveman_assets/skills/caveman/assets/caveman-small.svg"
-        ),
+        contents: include_str!("../caveman_assets/skills/caveman/assets/caveman-small.svg"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/caveman/assets/caveman.svg",
-        contents: include_str!("../../../src/caveman_assets/skills/caveman/assets/caveman.svg"),
+        contents: include_str!("../caveman_assets/skills/caveman/assets/caveman.svg"),
     },
 ];
 
 const CAVEMAN_COMPRESS_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
     EmbeddedCavemanFile {
         relative_path: "skills/compress/SKILL.md",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/SKILL.md"),
+        contents: include_str!("../caveman_assets/skills/compress/SKILL.md"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/__init__.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/__init__.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/__init__.py"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/__main__.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/__main__.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/__main__.py"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/benchmark.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/benchmark.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/benchmark.py"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/cli.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/cli.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/cli.py"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/compress.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/compress.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/compress.py"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/detect.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/detect.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/detect.py"),
     },
     EmbeddedCavemanFile {
         relative_path: "skills/compress/scripts/validate.py",
-        contents: include_str!("../../../src/caveman_assets/skills/compress/scripts/validate.py"),
+        contents: include_str!("../caveman_assets/skills/compress/scripts/validate.py"),
     },
 ];
 
