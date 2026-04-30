@@ -2,7 +2,7 @@
 
 `prodex` is a wrapper for Codex and Claude Code for working with multiple profiles.
 
-The main feature is auto rotate. If one OpenAI/Codex profile runs out of quota, `prodex` can route new work to another profile that is still available. You do not need to switch accounts manually.
+The main feature is optional auto rotate. If one OpenAI/Codex profile runs out of quota, `prodex run --auto-rotate` can route new work to another profile that is still available. Without `--auto-rotate`, the selected active profile stays fixed.
 
 For contributors, this repository is a Cargo workspace: the binary crate stays at the root, while reusable leaf crates live under `crates/` to reduce rebuild scope when those components change.
 
@@ -10,7 +10,7 @@ For contributors, this repository is a Cargo workspace: the binary crate stays a
 
 Use `prodex` if you want to:
 
-- automatically use another available profile when quota runs out
+- use `--auto-rotate` to automatically route to another available profile when quota runs out
 - work with multiple accounts
 - keep each profile isolated
 - keep sessions tied to the original profile
@@ -101,6 +101,7 @@ This matches direct Codex behavior: logging out or switching accounts does not h
 prodex
 prodex run
 prodex run --profile main
+prodex run --auto-rotate
 prodex run --dry-run
 prodex exec "review this repo"
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -142,6 +143,8 @@ Use `prodex super --url http://127.0.0.1:8131` when you want the same Super mode
 
 Add `--dry-run` to run, Caveman, or Super launches to print the resolved provider, model, `CODEX_HOME`, proxy args, and launch env with secret-looking values redacted. Dry-run output is prelaunch only and does not start Codex or the TUI.
 
+By default, `prodex run`, `prodex caveman`, `prodex super`, and `prodex claude` keep the selected active profile fixed. Pass `--auto-rotate` when you want Prodex to fall back to another profile before launch or through the local runtime proxy after quota blocks the selected account.
+
 Prodex respects system and environment proxy settings for upstream OpenAI quota/auth/runtime HTTP by default, including `HTTP_PROXY`, `HTTPS_PROXY`, and platform proxy configuration supported by reqwest. Runtime WebSocket upstream connections also honor `HTTPS_PROXY`/`https_proxy` via HTTP CONNECT and respect `NO_PROXY`/`no_proxy`. The local Codex-to-Prodex broker connection always receives `NO_PROXY` entries for `127.0.0.1`, `localhost`, and `::1` so a user proxy does not intercept the local runtime proxy. Use `--no-proxy` on `prodex run`, `prodex caveman`, `prodex super`, or `prodex claude` only when you explicitly want Prodex upstream requests to bypass proxy settings.
 
 ### Run Claude Code
@@ -179,7 +182,7 @@ prodex profile remove --all
 
 ## Bedrock and custom providers
 
-Auto rotate and quota checks apply to supported OpenAI/Codex profiles.
+Quota checks apply to supported OpenAI/Codex profiles. Auto rotate applies when `--auto-rotate` is passed.
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy. Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 

@@ -98,7 +98,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
-            allow_auto_rotate: !self.args.no_auto_rotate,
+            allow_auto_rotate: self.args.auto_rotate && !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,

@@ -34,7 +34,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
-            allow_auto_rotate: !self.args.no_auto_rotate,
+            allow_auto_rotate: self.args.auto_rotate && !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,
@@ -305,6 +305,15 @@ impl RuntimeProxyStartupFactory {
         }
 
         let runtime_upstream_base_url = quota_base_url(request.base_url);
+        if request.force_runtime_proxy && !request.allow_auto_rotate {
+            return Ok(Some(start_fixed_runtime_proxy_endpoint(
+                paths,
+                state,
+                selection,
+                request,
+                runtime_upstream_base_url,
+            )?));
+        }
         if request.force_runtime_proxy
             || should_enable_runtime_rotation_proxy(
                 state,
@@ -392,7 +401,55 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         lease_dir: paths.root.join("runtime-broker-dry-run-leases"),
         _lease: None,
+        _direct_proxy: None,
     })
+}
+
+fn start_fixed_runtime_proxy_endpoint(
+    paths: &AppPaths,
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+    runtime_upstream_base_url: String,
+) -> Result<RuntimeProxyEndpoint> {
+    let fixed_state = fixed_runtime_proxy_state(state, &selection.selected_profile_name)?;
+    let proxy = start_runtime_rotation_proxy_with_listen_addr(
+        paths,
+        &fixed_state,
+        &selection.selected_profile_name,
+        runtime_upstream_base_url,
+        request.include_code_review,
+        request.upstream_no_proxy,
+        None,
+    )?;
+    Ok(RuntimeProxyEndpoint {
+        listen_addr: proxy.listen_addr,
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        lease_dir: paths.root.join("runtime-fixed-proxy-leases"),
+        _lease: None,
+        _direct_proxy: Some(proxy),
+    })
+}
+
+fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {
+    let mut fixed = state.clone();
+    if !fixed.profiles.contains_key(profile_name) {
+        bail!("profile '{}' is missing", profile_name);
+    }
+    fixed
+        .profiles
+        .retain(|candidate_name, _| candidate_name == profile_name);
+    fixed.active_profile = Some(profile_name.to_string());
+    fixed
+        .last_run_selected_at
+        .retain(|candidate_name, _| candidate_name == profile_name);
+    fixed
+        .response_profile_bindings
+        .retain(|_, binding| binding.profile_name == profile_name);
+    fixed
+        .session_profile_bindings
+        .retain(|_, binding| binding.profile_name == profile_name);
+    Ok(fixed)
 }
 
 fn select_runtime_launch_profile(
@@ -670,7 +727,7 @@ fn handle_blocked_selected_runtime_profile(
                 "Other profiles that look ready: {}",
                 alternatives.join(", ")
             ));
-            print_wrapped_stderr("Rerun without `--no-auto-rotate` to allow fallback.");
+            print_wrapped_stderr("Rerun with `--auto-rotate` to allow fallback.");
         }
         print_quota_preflight_inspect_hint(&selection.initial_profile_name);
         return Err(command_exit_error(
@@ -1089,6 +1146,109 @@ mod tests {
         let message = format!("{err:#}");
         assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
         assert!(message.contains("prodex claude"));
+    }
+
+    #[test]
+    fn fixed_runtime_proxy_state_keeps_only_selected_profile() {
+        let root = temp_dir("fixed-runtime-proxy-state");
+        let main_home = root.join("main-home");
+        let second_home = root.join("second-home");
+        let state = AppState {
+            active_profile: Some("second".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: true,
+                        email: Some("second@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+            ]),
+            last_run_selected_at: BTreeMap::from([
+                ("main".to_string(), 1_000),
+                ("second".to_string(), 2_000),
+            ]),
+            response_profile_bindings: BTreeMap::from([
+                (
+                    "resp-main".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: 1_000,
+                    },
+                ),
+                (
+                    "resp-second".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "second".to_string(),
+                        bound_at: 2_000,
+                    },
+                ),
+            ]),
+            session_profile_bindings: BTreeMap::from([
+                (
+                    "session-main".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: 1_000,
+                    },
+                ),
+                (
+                    "session-second".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "second".to_string(),
+                        bound_at: 2_000,
+                    },
+                ),
+            ]),
+            ..AppState::default()
+        };
+
+        let fixed = fixed_runtime_proxy_state(&state, "main").unwrap();
+
+        assert_eq!(fixed.active_profile.as_deref(), Some("main"));
+        assert_eq!(
+            fixed
+                .profiles
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["main"]
+        );
+        assert_eq!(
+            fixed
+                .last_run_selected_at
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["main"]
+        );
+        assert_eq!(
+            fixed
+                .response_profile_bindings
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["resp-main"]
+        );
+        assert_eq!(
+            fixed
+                .session_profile_bindings
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["session-main"]
+        );
     }
 
     #[test]

@@ -138,6 +138,7 @@ fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
         openai_mount_path: "/backend-api/prodex/v0.2.99".to_string(),
         lease_dir: temp_dir.path.join("leases"),
         _lease: None,
+        _direct_proxy: None,
     };
 
     let rendered = runtime_proxy_codex_passthrough_args(

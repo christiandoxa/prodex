@@ -207,7 +207,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let model_provider_override = codex_cli_config_override_value(&codex_args, "model_provider");
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
-        allow_auto_rotate: !args.no_auto_rotate,
+        allow_auto_rotate: args.auto_rotate && !args.no_auto_rotate,
         skip_quota_check: args.skip_quota_check,
         base_url: args.base_url.as_deref(),
         upstream_no_proxy: args.no_proxy,

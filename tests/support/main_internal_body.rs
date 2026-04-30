@@ -1858,6 +1858,7 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         lease_dir: lease_dir.clone(),
         _lease: None,
+        _direct_proxy: None,
     };
 
     let child_pid = 424242u32;

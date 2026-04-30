@@ -153,12 +153,24 @@ pub(super) struct RuntimeBrokerLease {
     pub(super) path: PathBuf,
 }
 
-#[derive(Debug)]
 pub(super) struct RuntimeProxyEndpoint {
     pub(super) listen_addr: std::net::SocketAddr,
     pub(super) openai_mount_path: String,
     pub(super) lease_dir: PathBuf,
     pub(super) _lease: Option<RuntimeBrokerLease>,
+    pub(super) _direct_proxy: Option<RuntimeRotationProxy>,
+}
+
+impl std::fmt::Debug for RuntimeProxyEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeProxyEndpoint")
+            .field("listen_addr", &self.listen_addr)
+            .field("openai_mount_path", &self.openai_mount_path)
+            .field("lease_dir", &self.lease_dir)
+            .field("has_lease", &self._lease.is_some())
+            .field("has_direct_proxy", &self._direct_proxy.is_some())
+            .finish()
+    }
 }
 
 impl Drop for RuntimeBrokerLease {

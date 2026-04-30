@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1399,7 +1399,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-caveman-assets"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -1407,11 +1407,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.67.0"
+version = "0.68.0"
 
 [[package]]
 name = "prodex-core"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1433,14 +1433,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1449,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-mem"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1469,11 +1469,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-metrics"
-version = "0.67.0"
+version = "0.68.0"
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
  "prodex-secret-store",
@@ -1483,18 +1483,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.67.0"
+version = "0.68.0"
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.67.0"
+version = "0.68.0"
 dependencies = [
  "anyhow",
 ]

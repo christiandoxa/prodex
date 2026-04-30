@@ -714,5 +714,6 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
         openai_mount_path: runtime_broker_openai_mount_path(registry)?,
         lease_dir,
         _lease: Some(lease),
+        _direct_proxy: None,
     })
 }
