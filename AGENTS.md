@@ -15,10 +15,13 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `src/profile_commands/`, `src/quota_support/`, `src/profile_identity.rs`: profile, quota, and credential identity flows
 - `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker logic
 - `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
+- `crates/prodex-audit-log/`: audit log append, query, and rendering helpers
 - `crates/prodex-caveman-assets/`: embedded Codex/Claude Caveman plugin assets and Caveman home/config preparation
 - `crates/prodex-cli/`: reusable CLI argument model, help text, and parse/default-run rewrite helpers
 - `crates/prodex-codex-config/`: reusable Codex config parsing helpers
+- `crates/prodex-context/`: context audit and compression helpers
 - `crates/prodex-core/`: common path discovery and core filesystem helpers
+- `crates/prodex-profile-export/`: encrypted profile export/import envelope helpers
 - `crates/prodex-profile-identity/`: account identity parsing and profile-name normalization helpers
 - `crates/prodex-proxy-config/`: reusable upstream proxy/client configuration helpers
 - `crates/prodex-quota/`: quota API models and quota classification helpers

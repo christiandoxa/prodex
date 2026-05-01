@@ -15,6 +15,7 @@ members = [
     "crates/prodex-cli",
     "crates/prodex-audit-log",
     "crates/prodex-codex-config",
+    "crates/prodex-context",
     "crates/prodex-core",
     "crates/prodex-profile-export",
     "crates/prodex-profile-identity",
@@ -61,6 +62,7 @@ prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-l
 codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config" }
 prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets" }
 prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli" }
+prodex_context = { package = "prodex-context", path = "crates/prodex-context" }
 prodex_core = { package = "prodex-core", path = "crates/prodex-core" }
 prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export" }
 prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity" }

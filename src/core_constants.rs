@@ -15,8 +15,6 @@ pub(crate) const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
-pub(crate) const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
-pub(crate) const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
 #[allow(dead_code)]
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 pub(crate) const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;

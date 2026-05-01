@@ -1378,6 +1378,7 @@ dependencies = [
  "prodex-caveman-assets",
  "prodex-cli",
  "prodex-codex-config",
+ "prodex-context",
  "prodex-core",
  "prodex-profile-export",
  "prodex-profile-identity",
@@ -1443,6 +1444,15 @@ dependencies = [
 [[package]]
 name = "prodex-codex-config"
 version = "0.69.0"
+
+[[package]]
+name = "prodex-context"
+version = "0.69.0"
+dependencies = [
+ "anyhow",
+ "prodex-terminal-ui",
+ "serde",
+]
 
 [[package]]
 name = "prodex-core"
