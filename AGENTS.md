@@ -32,8 +32,8 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-runtime-mem/`: runtime memory mode helpers
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
 - `crates/prodex-runtime-policy/`: runtime policy parsing, validation, caching, and summary helpers
-- `crates/prodex-runtime-proxy/`: side-effect-free runtime proxy boundary types, classifiers, payload parsing, and transport helper logic
-- `crates/prodex-runtime-state/`: runtime state and scheduled-save data structures
+- `crates/prodex-runtime-proxy/`: side-effect-free runtime proxy boundary types, classifiers, path/log parsing, payload parsing, and transport helper logic
+- `crates/prodex-runtime-state/`: runtime state, lane admission counters, and scheduled-save data structures
 - `crates/prodex-shared-codex-fs/`: shared Codex home file operations
 - `crates/prodex-shared-types/`: shared serializable command/runtime models used across modules
 - `crates/prodex-state/`: state models and merge/compaction helpers

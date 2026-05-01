@@ -413,12 +413,41 @@ pub fn runtime_proxy_log_fields(message: &str) -> BTreeMap<String, String> {
         let value_start = index;
         index = runtime_proxy_skip_log_field_value(message, index);
         let raw_value = &message[value_start..index];
+        if key.is_empty() || raw_value.is_empty() {
+            continue;
+        }
         fields.insert(
             key.to_string(),
             runtime_proxy_parse_log_field_value(raw_value),
         );
     }
     fields
+}
+
+pub fn runtime_proxy_log_event(message: &str) -> Option<&str> {
+    let bytes = message.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        index = runtime_proxy_skip_log_whitespace(message, index);
+        if index >= bytes.len() {
+            break;
+        }
+        let token_start = index;
+        while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
+            index += 1;
+        }
+        if index < bytes.len() && bytes[index] == b'=' {
+            index = runtime_proxy_skip_log_field_value(message, index + 1);
+            continue;
+        }
+        if token_start < index {
+            return Some(&message[token_start..index]);
+        }
+        while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -521,5 +550,6 @@ mod tests {
         );
         assert_eq!(fields.get("error").map(String::as_str), Some("line break"));
         assert!(!fields.contains_key("bad key"));
+        assert_eq!(runtime_proxy_log_event(&message), Some("event"));
     }
 }
