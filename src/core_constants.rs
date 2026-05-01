@@ -16,17 +16,8 @@ pub(crate) const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
-pub(crate) const PRODEX_CLAUDE_PROXY_API_KEY: &str = "prodex-runtime-proxy";
 pub(crate) const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub(crate) const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
-pub(crate) const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5.4";
-pub(crate) const PRODEX_CLAUDE_CONFIG_DIR_NAME: &str = ".claude-code";
-pub(crate) const PRODEX_SHARED_CLAUDE_DIR_NAME: &str = "claude";
-pub(crate) const DEFAULT_CLAUDE_CONFIG_DIR_NAME: &str = ".claude";
-pub(crate) const DEFAULT_CLAUDE_CONFIG_FILE_NAME: &str = ".claude.json";
-pub(crate) const DEFAULT_CLAUDE_SETTINGS_FILE_NAME: &str = "settings.json";
-pub(crate) const PRODEX_CLAUDE_DEFAULT_WEB_TOOLS: &[&str] = &["WebSearch", "WebFetch"];
-pub(crate) const PRODEX_CLAUDE_LEGACY_IMPORT_MARKER_NAME: &str = ".prodex-legacy-imported";
 #[allow(dead_code)]
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 pub(crate) const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;

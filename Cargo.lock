@@ -1386,6 +1386,7 @@ dependencies = [
  "prodex-redaction",
  "prodex-runtime-anthropic",
  "prodex-runtime-capabilities",
+ "prodex-runtime-claude",
  "prodex-runtime-doctor",
  "prodex-runtime-launch",
  "prodex-runtime-mem",
@@ -1425,7 +1426,10 @@ name = "prodex-caveman-assets"
 version = "0.69.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "prodex-shared-codex-fs",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -1514,6 +1518,20 @@ version = "0.69.0"
 dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-proxy",
+ "serde_json",
+]
+
+[[package]]
+name = "prodex-runtime-claude"
+version = "0.69.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "prodex-codex-config",
+ "prodex-core",
+ "prodex-runtime-anthropic",
+ "prodex-runtime-launch",
+ "prodex-shared-codex-fs",
  "serde_json",
 ]
 

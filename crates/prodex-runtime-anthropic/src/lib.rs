@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
+use std::ffi::OsString;
 use std::io::{self, Read};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -171,6 +172,14 @@ pub fn runtime_proxy_responses_model_supported_effort_levels(
     }
 }
 
+pub fn runtime_proxy_responses_model_capabilities(model_id: &str) -> &'static str {
+    if runtime_proxy_responses_model_supports_xhigh(model_id) {
+        "effort,max_effort,thinking,adaptive_thinking,interleaved_thinking"
+    } else {
+        "effort,thinking,adaptive_thinking,interleaved_thinking"
+    }
+}
+
 pub fn runtime_proxy_responses_model_supports_xhigh(model_id: &str) -> bool {
     runtime_proxy_responses_model_descriptor(model_id)
         .map(|descriptor| descriptor.supports_xhigh)
@@ -187,6 +196,10 @@ pub fn runtime_proxy_responses_model_supports_xhigh(model_id: &str) -> bool {
 
 pub fn runtime_proxy_responses_model_supports_native_computer_tool(model_id: &str) -> bool {
     model_id.trim().eq_ignore_ascii_case("gpt-5.4")
+}
+
+pub fn runtime_proxy_claude_use_foundry_compat() -> bool {
+    true
 }
 
 pub fn runtime_proxy_claude_alias_picker_value(
@@ -206,6 +219,31 @@ pub fn runtime_proxy_claude_alias_model(
         .iter()
         .find(|descriptor| descriptor.claude_alias == Some(alias))
         .expect("Claude alias model should exist")
+}
+
+pub fn runtime_proxy_claude_alias_env_keys(
+    alias: RuntimeProxyClaudeModelAlias,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    match alias {
+        RuntimeProxyClaudeModelAlias::Opus => (
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+        ),
+        RuntimeProxyClaudeModelAlias::Sonnet => (
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+        ),
+        RuntimeProxyClaudeModelAlias::Haiku => (
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+        ),
+    }
 }
 
 pub fn runtime_proxy_claude_picker_model_descriptor(
@@ -256,6 +294,95 @@ pub fn runtime_proxy_responses_model_descriptors() -> &'static [RuntimeProxyResp
             supports_xhigh: true,
         },
     ]
+}
+
+pub fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> {
+    let mut env = Vec::new();
+    for alias in [
+        RuntimeProxyClaudeModelAlias::Opus,
+        RuntimeProxyClaudeModelAlias::Sonnet,
+        RuntimeProxyClaudeModelAlias::Haiku,
+    ] {
+        let descriptor = runtime_proxy_claude_alias_model(alias);
+        let (model_key, name_key, description_key, caps_key) =
+            runtime_proxy_claude_alias_env_keys(alias);
+        env.push((model_key, OsString::from(descriptor.id)));
+        env.push((name_key, OsString::from(descriptor.id)));
+        env.push((description_key, OsString::from(descriptor.description)));
+        env.push((
+            caps_key,
+            OsString::from(runtime_proxy_responses_model_capabilities(descriptor.id)),
+        ));
+    }
+    env
+}
+
+pub fn runtime_proxy_claude_picker_model(target_model: &str) -> String {
+    runtime_proxy_responses_model_descriptor(target_model)
+        .map(|descriptor| {
+            if runtime_proxy_claude_use_foundry_compat() {
+                descriptor.claude_picker_value()
+            } else {
+                descriptor.id
+            }
+        })
+        .unwrap_or(target_model)
+        .to_string()
+}
+
+pub fn runtime_proxy_claude_custom_model_option_env(
+    target_model: &str,
+) -> Vec<(&'static str, OsString)> {
+    if runtime_proxy_responses_model_descriptor(target_model).is_some() {
+        return Vec::new();
+    }
+
+    let descriptor = runtime_proxy_responses_model_descriptor(target_model);
+    let display_name = descriptor
+        .map(|descriptor| descriptor.display_name)
+        .unwrap_or(target_model);
+    let description = descriptor
+        .map(|descriptor| descriptor.description.to_string())
+        .unwrap_or_else(|| format!("Custom OpenAI model routed through prodex ({target_model})"));
+
+    vec![
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+            OsString::from(target_model),
+        ),
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+            OsString::from(display_name),
+        ),
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+            OsString::from(description),
+        ),
+    ]
+}
+
+pub fn runtime_proxy_claude_additional_model_option_entries() -> Vec<serde_json::Value> {
+    runtime_proxy_responses_model_descriptors()
+        .iter()
+        .filter(|descriptor| {
+            !(runtime_proxy_claude_use_foundry_compat() && descriptor.claude_alias.is_some())
+        })
+        .map(|descriptor| {
+            let supported_effort_levels =
+                runtime_proxy_responses_model_supported_effort_levels(descriptor.id);
+            serde_json::json!({
+                "value": descriptor.id,
+                "label": descriptor.id,
+                "description": descriptor.description,
+                "supportsEffort": true,
+                "supportedEffortLevels": supported_effort_levels,
+            })
+        })
+        .collect()
+}
+
+pub fn runtime_proxy_claude_managed_model_option_value(value: &str) -> bool {
+    runtime_proxy_claude_picker_model_descriptor(value).is_some()
 }
 
 pub fn runtime_proxy_claude_target_model(requested_model: &str) -> String {

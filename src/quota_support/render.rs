@@ -42,45 +42,6 @@ pub(crate) struct RenderedQuotaReportWindow {
     pub(crate) hidden_after: usize,
 }
 
-fn quota_usage_response(usage: &UsageResponse) -> prodex_quota::UsageResponse {
-    prodex_quota::UsageResponse {
-        email: usage.email.clone(),
-        plan_type: usage.plan_type.clone(),
-        rate_limit: usage.rate_limit.as_ref().map(quota_window_pair),
-        code_review_rate_limit: usage.code_review_rate_limit.as_ref().map(quota_window_pair),
-        additional_rate_limits: usage
-            .additional_rate_limits
-            .iter()
-            .map(quota_additional_rate_limit)
-            .collect(),
-    }
-}
-
-fn quota_additional_rate_limit(
-    rate_limit: &AdditionalRateLimit,
-) -> prodex_quota::AdditionalRateLimit {
-    prodex_quota::AdditionalRateLimit {
-        limit_name: rate_limit.limit_name.clone(),
-        metered_feature: rate_limit.metered_feature.clone(),
-        rate_limit: quota_window_pair(&rate_limit.rate_limit),
-    }
-}
-
-fn quota_window_pair(pair: &WindowPair) -> prodex_quota::WindowPair {
-    prodex_quota::WindowPair {
-        primary_window: pair.primary_window.as_ref().map(quota_usage_window),
-        secondary_window: pair.secondary_window.as_ref().map(quota_usage_window),
-    }
-}
-
-fn quota_usage_window(window: &UsageWindow) -> prodex_quota::UsageWindow {
-    prodex_quota::UsageWindow {
-        used_percent: window.used_percent,
-        reset_at: window.reset_at,
-        limit_window_seconds: window.limit_window_seconds,
-    }
-}
-
 pub(crate) fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
     render_quota_reports_with_layout(reports, detail, None, current_cli_width())
 }
@@ -633,36 +594,36 @@ fn quota_report_earliest_main_reset_epoch(report: &QuotaReport) -> Option<i64> {
 }
 
 fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
-    prodex_quota::earliest_required_main_reset_epoch(&quota_usage_response(usage))
+    prodex_quota::earliest_required_main_reset_epoch(usage)
 }
 
 pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
-    prodex_quota::format_main_windows(&quota_usage_response(usage))
+    prodex_quota::format_main_windows(usage)
 }
 
 pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
-    prodex_quota::format_main_windows_compact(&quota_usage_response(usage))
+    prodex_quota::format_main_windows_compact(usage)
 }
 
 pub(crate) fn format_main_reset_summary(usage: &UsageResponse) -> String {
-    prodex_quota::format_main_reset_summary(&quota_usage_response(usage))
+    prodex_quota::format_main_reset_summary(usage)
 }
 
 #[allow(dead_code)]
 pub(crate) fn format_window_status(window: &UsageWindow) -> String {
-    prodex_quota::format_window_status(&quota_usage_window(window))
+    prodex_quota::format_window_status(window)
 }
 
 #[allow(dead_code)]
 pub(crate) fn format_window_status_compact(window: &UsageWindow) -> String {
-    prodex_quota::format_window_status_compact(&quota_usage_window(window))
+    prodex_quota::format_window_status_compact(window)
 }
 
 pub(crate) fn collect_blocked_limits(
     usage: &UsageResponse,
     include_code_review: bool,
 ) -> Vec<BlockedLimit> {
-    prodex_quota::collect_blocked_limits(&quota_usage_response(usage), include_code_review)
+    prodex_quota::collect_blocked_limits(usage, include_code_review)
 }
 
 pub(crate) fn find_main_window<'a>(
@@ -786,7 +747,7 @@ pub(crate) fn format_copilot_reset_summary(info: &CopilotUserInfo) -> Option<Str
 }
 
 pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
-    prodex_quota::render_profile_quota(profile_name, &quota_usage_response(usage))
+    prodex_quota::render_profile_quota(profile_name, usage)
 }
 
 pub(crate) fn render_profile_quota_snapshot(

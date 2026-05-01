@@ -1,8 +1,9 @@
 use super::*;
-
+#[cfg(test)]
+pub(crate) use prodex_runtime_launch::local_proxy_bypass_env;
 pub(crate) use prodex_runtime_launch::{
-    codex_sandbox_removed_env, extract_prodex_dry_run_flag, local_proxy_bypass_env,
-    prepare_codex_launch_args, prodex_dry_run_requested, remove_upstream_proxy_env,
+    codex_sandbox_removed_env, extract_prodex_dry_run_flag, prepare_codex_launch_args,
+    prodex_dry_run_requested, remove_upstream_proxy_env,
 };
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {

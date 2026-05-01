@@ -1,7 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use chrono::Local;
 use std::env;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PRODEX_CAVEMAN_MARKETPLACE_NAME: &str = "prodex-caveman";
 pub const PRODEX_CAVEMAN_PLUGIN_NAME: &str = "caveman";
@@ -9,6 +12,8 @@ pub const PRODEX_CAVEMAN_PLUGIN_VERSION: &str = "0.1.0";
 pub const PRODEX_CAVEMAN_PLUGIN_ID: &str = "caveman@prodex-caveman";
 pub const PRODEX_CAVEMAN_SOURCE_REPO: &str = "https://github.com/JuliusBrussee/caveman.git";
 pub const PRODEX_CAVEMAN_FULL_ASSETS_ENV: &str = "PRODEX_CAVEMAN_FULL_ASSETS";
+pub const PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME: &str = "caveman";
+const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. Use $caveman full: terse, no filler, exact technical substance. Code/commits/security normal. Stop: normal mode.'";
 
 struct EmbeddedCavemanFile {
     relative_path: &'static str,
@@ -81,6 +86,61 @@ const CAVEMAN_COMPRESS_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
     },
 ];
 
+const CLAUDE_CAVEMAN_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
+    EmbeddedCavemanFile {
+        relative_path: ".claude-plugin/plugin.json",
+        contents: include_str!("../caveman_assets/claude/.claude-plugin/plugin.json"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "commands/caveman.toml",
+        contents: include_str!("../caveman_assets/claude/commands/caveman.toml"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "commands/caveman-commit.toml",
+        contents: include_str!("../caveman_assets/claude/commands/caveman-commit.toml"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "commands/caveman-review.toml",
+        contents: include_str!("../caveman_assets/claude/commands/caveman-review.toml"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "hooks/caveman-activate.js",
+        contents: include_str!("../caveman_assets/claude/hooks/caveman-activate.js"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "hooks/caveman-config.js",
+        contents: include_str!("../caveman_assets/claude/hooks/caveman-config.js"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "hooks/caveman-mode-tracker.js",
+        contents: include_str!("../caveman_assets/claude/hooks/caveman-mode-tracker.js"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "hooks/caveman-statusline.ps1",
+        contents: include_str!("../caveman_assets/claude/hooks/caveman-statusline.ps1"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "hooks/caveman-statusline.sh",
+        contents: include_str!("../caveman_assets/claude/hooks/caveman-statusline.sh"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "skills/caveman/SKILL.md",
+        contents: include_str!("../caveman_assets/skills/caveman/SKILL.md"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "skills/caveman-commit/SKILL.md",
+        contents: include_str!("../caveman_assets/claude/skills/caveman-commit/SKILL.md"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "skills/caveman-help/SKILL.md",
+        contents: include_str!("../caveman_assets/claude/skills/caveman-help/SKILL.md"),
+    },
+    EmbeddedCavemanFile {
+        relative_path: "skills/caveman-review/SKILL.md",
+        contents: include_str!("../caveman_assets/claude/skills/caveman-review/SKILL.md"),
+    },
+];
+
 pub fn install_caveman_marketplace(codex_home: &Path) -> Result<()> {
     let marketplace_root = caveman_marketplace_root(codex_home);
     let plugin_root = marketplace_root
@@ -145,6 +205,174 @@ pub fn caveman_marketplace_root(codex_home: &Path) -> PathBuf {
     codex_home
         .join(".tmp/marketplaces")
         .join(PRODEX_CAVEMAN_MARKETPLACE_NAME)
+}
+
+pub fn prepare_caveman_launch_home(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+) -> Result<PathBuf> {
+    let caveman_home = create_temporary_caveman_home(managed_profiles_root)?;
+    if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &caveman_home)
+        .and_then(|_| configure_caveman_launch_home(&caveman_home))
+    {
+        let _ = fs::remove_dir_all(&caveman_home);
+        return Err(err);
+    }
+    Ok(caveman_home)
+}
+
+pub fn configure_caveman_launch_home(codex_home: &Path) -> Result<()> {
+    localize_caveman_config_file(codex_home)?;
+    configure_caveman_config(codex_home)?;
+    install_caveman_marketplace(codex_home)?;
+    install_caveman_plugin_cache(codex_home)?;
+    Ok(())
+}
+
+pub fn install_claude_caveman_plugin(prodex_root: &Path) -> Result<PathBuf> {
+    let plugin_dir = prodex_root
+        .join("claude-plugins")
+        .join(PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME);
+    write_caveman_plugin_files(&plugin_dir, CLAUDE_CAVEMAN_PLUGIN_FILES)?;
+    Ok(plugin_dir)
+}
+
+fn create_temporary_caveman_home(managed_profiles_root: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(managed_profiles_root).with_context(|| {
+        format!(
+            "failed to create managed profile root {}",
+            managed_profiles_root.display()
+        )
+    })?;
+
+    for attempt in 0..100 {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let candidate = managed_profiles_root
+            .join(format!(".caveman-{}-{stamp}-{attempt}", std::process::id()));
+        if candidate.exists() {
+            continue;
+        }
+        prodex_shared_codex_fs::create_codex_home_if_missing(&candidate)?;
+        return Ok(candidate);
+    }
+
+    bail!("failed to allocate a temporary CODEX_HOME for Caveman")
+}
+
+fn localize_caveman_config_file(codex_home: &Path) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    match fs::symlink_metadata(&config_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let contents = fs::read_to_string(&config_path)
+                .with_context(|| format!("failed to read {}", config_path.display()))?;
+            fs::remove_file(&config_path)
+                .with_context(|| format!("failed to remove {}", config_path.display()))?;
+            fs::write(&config_path, contents)
+                .with_context(|| format!("failed to write {}", config_path.display()))?;
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            bail!("{} is a directory, expected a file", config_path.display());
+        }
+        Ok(_) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            fs::write(&config_path, "")
+                .with_context(|| format!("failed to write {}", config_path.display()))?;
+        }
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to inspect {}", config_path.display()));
+        }
+    }
+    Ok(())
+}
+
+fn configure_caveman_config(codex_home: &Path) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    let contents = fs::read_to_string(&config_path).unwrap_or_default();
+    let mut table = if contents.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        match toml::from_str::<toml::Value>(&contents)
+            .with_context(|| format!("failed to parse {}", config_path.display()))?
+        {
+            toml::Value::Table(table) => table,
+            _ => bail!("{} did not parse as a TOML table", config_path.display()),
+        }
+    };
+
+    let features = ensure_child_table(&mut table, "features");
+    features.insert("plugins".to_string(), toml::Value::Boolean(true));
+
+    configure_caveman_session_start_hook(&mut table);
+
+    let marketplaces = ensure_child_table(&mut table, "marketplaces");
+    let caveman_marketplace = ensure_child_table(marketplaces, PRODEX_CAVEMAN_MARKETPLACE_NAME);
+    caveman_marketplace.insert(
+        "last_updated".to_string(),
+        toml::Value::String(Local::now().to_rfc3339()),
+    );
+    caveman_marketplace.insert(
+        "source_type".to_string(),
+        toml::Value::String("git".to_string()),
+    );
+    caveman_marketplace.insert(
+        "source".to_string(),
+        toml::Value::String(PRODEX_CAVEMAN_SOURCE_REPO.to_string()),
+    );
+    caveman_marketplace.insert("ref".to_string(), toml::Value::String("main".to_string()));
+
+    let plugins = ensure_child_table(&mut table, "plugins");
+    let caveman_plugin = ensure_child_table(plugins, PRODEX_CAVEMAN_PLUGIN_ID);
+    caveman_plugin.insert("enabled".to_string(), toml::Value::Boolean(true));
+
+    let rendered = toml::to_string(&toml::Value::Table(table))
+        .context("failed to render Caveman config overlay")?;
+    fs::write(&config_path, rendered)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+fn configure_caveman_session_start_hook(table: &mut toml::Table) {
+    let hooks = ensure_child_table(table, "hooks");
+    let session_start = hooks
+        .entry("SessionStart".to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    if !session_start.is_array() {
+        *session_start = toml::Value::Array(Vec::new());
+    }
+    let Some(session_start_groups) = session_start.as_array_mut() else {
+        unreachable!("SessionStart should be an array after insertion");
+    };
+
+    let mut command_hook = toml::Table::new();
+    command_hook.insert(
+        "type".to_string(),
+        toml::Value::String("command".to_string()),
+    );
+    command_hook.insert(
+        "command".to_string(),
+        toml::Value::String(PRODEX_CAVEMAN_HOOK_COMMAND.to_string()),
+    );
+
+    let mut group = toml::Table::new();
+    group.insert(
+        "hooks".to_string(),
+        toml::Value::Array(vec![toml::Value::Table(command_hook)]),
+    );
+    session_start_groups.push(toml::Value::Table(group));
+}
+
+fn ensure_child_table<'a>(parent: &'a mut toml::Table, key: &str) -> &'a mut toml::Table {
+    if !matches!(parent.get(key), Some(toml::Value::Table(_))) {
+        parent.insert(key.to_string(), toml::Value::Table(toml::Table::new()));
+    }
+    match parent.get_mut(key) {
+        Some(toml::Value::Table(table)) => table,
+        _ => unreachable!("child table should exist after insertion"),
+    }
 }
 
 fn write_caveman_plugin_tree(root: &Path) -> Result<()> {
