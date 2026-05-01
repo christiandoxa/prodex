@@ -1,135 +1,12 @@
 use super::*;
 
-const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
-const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
-const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
-const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
-const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
-const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "PROXY",
-    "proxy",
-];
+pub(crate) use prodex_runtime_launch::{
+    codex_sandbox_removed_env, extract_prodex_dry_run_flag, local_proxy_bypass_env,
+    prepare_codex_launch_args, prodex_dry_run_requested, remove_upstream_proxy_env,
+};
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
-    let local_provider_hosts = local_proxy_bypass_hosts_from_args(&args);
-    ChildProcessPlan::new(codex_bin(), codex_home)
-        .with_args(args)
-        .with_extra_env(local_proxy_bypass_env_for_hosts(&local_provider_hosts))
-        .with_removed_env(codex_sandbox_removed_env())
-}
-
-pub(crate) fn local_proxy_bypass_env() -> Vec<(&'static str, OsString)> {
-    local_proxy_bypass_env_for_hosts(std::iter::empty::<&str>())
-}
-
-pub(crate) fn local_proxy_bypass_env_for_hosts<I, S>(
-    extra_hosts: I,
-) -> Vec<(&'static str, OsString)>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut parts = Vec::<String>::new();
-    for key in LOCAL_PROXY_BYPASS_ENV_KEYS {
-        if let Some(value) = env::var_os(key) {
-            push_proxy_bypass_parts(&mut parts, &value.to_string_lossy());
-        }
-    }
-    for host in LOCAL_PROXY_BYPASS_HOSTS {
-        push_proxy_bypass_part(&mut parts, host);
-    }
-    for host in extra_hosts {
-        push_proxy_bypass_part(&mut parts, host.as_ref());
-    }
-    let merged = OsString::from(parts.join(","));
-    LOCAL_PROXY_BYPASS_ENV_KEYS
-        .into_iter()
-        .map(|key| (key, merged.clone()))
-        .collect()
-}
-
-fn local_proxy_bypass_hosts_from_args(args: &[OsString]) -> Vec<String> {
-    let mut hosts = Vec::new();
-    let local_provider_key = format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url");
-    for key in [
-        "chatgpt_base_url",
-        "openai_base_url",
-        local_provider_key.as_str(),
-    ] {
-        if let Some(base_url) = codex_cli_config_override_value(args, key) {
-            push_proxy_bypass_url_hosts(&mut hosts, &base_url);
-        }
-    }
-    hosts
-}
-
-fn push_proxy_bypass_url_hosts(parts: &mut Vec<String>, base_url: &str) {
-    let Ok(parsed) = reqwest::Url::parse(base_url) else {
-        return;
-    };
-    let Some(host) = parsed.host_str() else {
-        return;
-    };
-    push_proxy_bypass_part(parts, host);
-    if let Some(port) = parsed.port() {
-        let host_port = if host.contains(':') {
-            format!("[{host}]:{port}")
-        } else {
-            format!("{host}:{port}")
-        };
-        push_proxy_bypass_part(parts, &host_port);
-    }
-}
-
-fn push_proxy_bypass_parts(parts: &mut Vec<String>, value: &str) {
-    for part in value.split(',') {
-        push_proxy_bypass_part(parts, part);
-    }
-}
-
-fn push_proxy_bypass_part(parts: &mut Vec<String>, value: &str) {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    if !parts
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
-    {
-        parts.push(trimmed.to_string());
-    }
-}
-
-pub(crate) fn codex_sandbox_removed_env() -> Vec<OsString> {
-    let mut removed = BTreeSet::from([
-        OsString::from("CODEX_SANDBOX"),
-        OsString::from("CODEX_SANDBOX_NETWORK_DISABLED"),
-    ]);
-    removed.extend(env::vars_os().filter_map(|(key, _)| {
-        key.to_str()
-            .is_some_and(|value| value.starts_with("CODEX_SANDBOX"))
-            .then_some(key)
-    }));
-    removed.into_iter().collect()
-}
-
-pub(crate) fn upstream_proxy_removed_env() -> Vec<OsString> {
-    UPSTREAM_PROXY_ENV_KEYS
-        .into_iter()
-        .map(OsString::from)
-        .collect()
-}
-
-pub(crate) fn remove_upstream_proxy_env(plan: &mut ChildProcessPlan) {
-    let mut removed = BTreeSet::<OsString>::from_iter(plan.removed_env.iter().cloned());
-    removed.extend(upstream_proxy_removed_env());
-    plan.removed_env = removed.into_iter().collect();
+    prodex_runtime_launch::codex_child_plan(codex_bin(), codex_home, args, SUPER_LOCAL_PROVIDER_ID)
 }
 
 pub(crate) fn run_child_plan(
@@ -189,37 +66,6 @@ pub(crate) fn handle_codex_update(args: CodexUpdateArgs) -> Result<()> {
 
 pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
-}
-
-pub(crate) fn prepare_codex_launch_args(
-    codex_args: &[OsString],
-    full_access_requested: bool,
-) -> (Vec<OsString>, bool) {
-    let (passthrough_full_access, codex_args) = extract_prodex_full_access_flag(codex_args);
-    let codex_args = normalize_run_codex_args(&codex_args);
-    let include_code_review = is_review_invocation(&codex_args);
-    let codex_args = codex_launch_args_with_full_access(
-        &codex_args,
-        full_access_requested || passthrough_full_access,
-    );
-    (codex_args, include_code_review)
-}
-
-pub(crate) fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
-    let mut dry_run = false;
-    let mut filtered = Vec::with_capacity(codex_args.len());
-    for arg in codex_args {
-        if arg == PRODEX_DRY_RUN_ARG {
-            dry_run = true;
-            continue;
-        }
-        filtered.push(arg.clone());
-    }
-    (dry_run, filtered)
-}
-
-pub(crate) fn prodex_dry_run_requested(codex_args: &[OsString]) -> bool {
-    codex_args.iter().any(|arg| arg == PRODEX_DRY_RUN_ARG)
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
@@ -359,34 +205,6 @@ pub(crate) fn runtime_launch_dry_run_report(
 
 fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
     codex_cli_config_override_value(args, key).or_else(|| codex_config_value(codex_home, key))
-}
-
-pub(crate) fn is_review_invocation(args: &[OsString]) -> bool {
-    args.iter().any(|arg| arg == "review")
-}
-
-fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
-    let mut full_access = false;
-    let mut filtered = Vec::with_capacity(codex_args.len());
-    for arg in codex_args {
-        if arg == PRODEX_CODEX_FULL_ACCESS_ARG {
-            full_access = true;
-            continue;
-        }
-        filtered.push(arg.clone());
-    }
-    (full_access, filtered)
-}
-
-fn codex_launch_args_with_full_access(codex_args: &[OsString], full_access: bool) -> Vec<OsString> {
-    if !full_access {
-        return codex_args.to_vec();
-    }
-
-    let mut args = Vec::with_capacity(codex_args.len() + 1);
-    args.push(OsString::from(CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG));
-    args.extend(codex_args.iter().cloned());
-    args
 }
 
 #[cfg(test)]

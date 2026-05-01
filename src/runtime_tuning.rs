@@ -497,10 +497,6 @@ pub(super) fn runtime_startup_sync_probe_warm_limit() -> usize {
     .min(RUNTIME_STARTUP_PROBE_WARM_LIMIT)
 }
 
-pub(super) fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,3 +10,8 @@ publish = false
 [lib]
 name = "prodex_runtime_launch"
 path = "src/lib.rs"
+
+[dependencies]
+codex_config = { package = "prodex-codex-config", path = "../prodex-codex-config" }
+reqwest = { version = "0.13.2", default-features = false }
+runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy" }

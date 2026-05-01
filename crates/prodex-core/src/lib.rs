@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use dirs::home_dir;
 use std::env;
+use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_PRODEX_DIR: &str = ".prodex";
@@ -51,6 +53,27 @@ pub fn legacy_default_codex_home() -> Result<PathBuf> {
         .join(DEFAULT_CODEX_DIR))
 }
 
+pub fn default_codex_home(paths: &AppPaths) -> Result<PathBuf> {
+    let legacy = legacy_default_codex_home()?;
+    Ok(select_default_codex_home(
+        &paths.shared_codex_root,
+        &legacy,
+        env::var_os("PRODEX_SHARED_CODEX_HOME").is_some(),
+    ))
+}
+
+pub fn select_default_codex_home(
+    shared_codex_root: &Path,
+    legacy_codex_home: &Path,
+    override_active: bool,
+) -> PathBuf {
+    if override_active || shared_codex_root.exists() || !legacy_codex_home.exists() {
+        shared_codex_root.to_path_buf()
+    } else {
+        legacy_codex_home.to_path_buf()
+    }
+}
+
 pub fn prodex_default_shared_codex_root(_root: &Path) -> Result<PathBuf> {
     legacy_default_codex_home()
 }
@@ -65,4 +88,40 @@ pub fn resolve_shared_codex_root(root: &Path, path: PathBuf) -> PathBuf {
     } else {
         root.join(path)
     }
+}
+
+pub fn same_path(left: &Path, right: &Path) -> bool {
+    normalize_path_for_compare(left) == normalize_path_for_compare(right)
+}
+
+pub fn normalize_path_for_compare(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub fn format_binary_resolution(binary: &OsString) -> String {
+    let configured = binary.to_string_lossy();
+    match resolve_binary_path(binary) {
+        Some(path) => format!("{configured} ({})", path.display()),
+        None => format!("{configured} (not found)"),
+    }
+}
+
+pub fn resolve_binary_path(binary: &OsString) -> Option<PathBuf> {
+    let candidate = PathBuf::from(binary);
+    if candidate.components().count() > 1 {
+        if candidate.is_file() {
+            return Some(fs::canonicalize(&candidate).unwrap_or(candidate));
+        }
+        return None;
+    }
+
+    let path_var = env::var_os("PATH")?;
+    for directory in env::split_paths(&path_var) {
+        let full_path = directory.join(&candidate);
+        if full_path.is_file() {
+            return Some(full_path);
+        }
+    }
+
+    None
 }

@@ -13,7 +13,9 @@ pub(super) use profile::{
     ensure_path_is_unique, record_run_selection, resolve_profile_name,
     should_enable_runtime_rotation_proxy, validate_profile_name,
 };
-pub(super) use proxy_args::{normalize_run_codex_args, runtime_proxy_codex_passthrough_args};
+#[cfg(test)]
+pub(super) use proxy_args::normalize_run_codex_args;
+pub(super) use proxy_args::runtime_proxy_codex_passthrough_args;
 #[cfg(test)]
 pub(super) use proxy_args::{runtime_proxy_codex_args, runtime_proxy_codex_args_with_mount_path};
 #[cfg(test)]

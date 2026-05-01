@@ -19,6 +19,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-codex-config/`: reusable Codex config parsing helpers
 - `crates/prodex-core/`: common path discovery and core filesystem helpers
 - `crates/prodex-profile-identity/`: account identity parsing and profile-name normalization helpers
+- `crates/prodex-proxy-config/`: reusable upstream proxy/client configuration helpers
 - `crates/prodex-quota/`: quota API models and quota classification helpers
 - `crates/prodex-redaction/`: reusable log/diagnostic redaction helpers
 - `crates/prodex-secret-store/`: reusable secret storage backend primitives
