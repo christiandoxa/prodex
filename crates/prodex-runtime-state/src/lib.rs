@@ -163,6 +163,13 @@ pub enum RuntimeRouteKind {
     Standard,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeStateLockWaitMetrics {
+    pub wait_total_ns: u64,
+    pub wait_count: u64,
+    pub wait_max_ns: u64,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeProxyLaneLimits {
     pub responses: usize,

@@ -248,10 +248,11 @@ pub(crate) fn runtime_request_value_requires_previous_response_affinity(
         })
 }
 
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::runtime_previous_response_fresh_fallback_shape_label;
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseFreshFallbackPolicy, RuntimePreviousResponseFreshFallbackPolicyInput,
     RuntimePreviousResponseFreshFallbackShape, runtime_previous_response_fresh_fallback_policy,
-    runtime_previous_response_fresh_fallback_shape_label,
     runtime_previous_response_fresh_fallback_shape_with_session,
 };
 #[cfg(test)]

@@ -13,7 +13,7 @@ use tokio::runtime::Runtime as TokioRuntime;
 pub(crate) use prodex_runtime_state::{
     RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
     RuntimeContinuationStatuses, RuntimeProbeCacheFreshness, RuntimeProfileBackoffs,
-    RuntimeProfileHealth, RuntimeRouteKind,
+    RuntimeProfileHealth, RuntimeRouteKind, RuntimeStateLockWaitMetrics,
 };
 
 pub(crate) type RuntimeContinuationJournal =
@@ -37,14 +37,6 @@ pub(crate) struct RuntimeRotationProxyShared {
     pub(crate) active_request_limit: usize,
     pub(crate) runtime_state_lock_wait_counters: Arc<RuntimeStateLockWaitMetricCounters>,
     pub(crate) lane_admission: RuntimeProxyLaneAdmission,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub(crate) struct RuntimeStateLockWaitMetrics {
-    pub(crate) wait_total_ns: u64,
-    pub(crate) wait_count: u64,
-    pub(crate) wait_max_ns: u64,
 }
 
 #[derive(Debug, Default)]

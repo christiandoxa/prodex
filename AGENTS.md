@@ -28,6 +28,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-redaction/`: reusable log/diagnostic redaction helpers
 - `crates/prodex-secret-store/`: reusable secret storage backend primitives
 - `crates/prodex-runtime-anthropic/`: Anthropic compatibility translation helpers
+- `crates/prodex-runtime-broker/`: side-effect-free runtime broker registry, health, and metrics DTOs
 - `crates/prodex-runtime-capabilities/`: runtime request compatibility surface detection
 - `crates/prodex-runtime-claude/`: Claude Code runtime launch configuration helpers
 - `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers

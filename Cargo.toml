@@ -23,6 +23,7 @@ members = [
     "crates/prodex-quota",
     "crates/prodex-redaction",
     "crates/prodex-runtime-anthropic",
+    "crates/prodex-runtime-broker",
     "crates/prodex-runtime-doctor",
     "crates/prodex-runtime-capabilities",
     "crates/prodex-runtime-claude",
@@ -76,6 +77,7 @@ reqwest = { version = "0.13.2", default-features = false, features = ["blocking"
 rpassword = "7.4.0"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic" }
 prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor" }
+prodex_runtime_broker = { package = "prodex-runtime-broker", path = "crates/prodex-runtime-broker" }
 prodex_runtime_capabilities = { package = "prodex-runtime-capabilities", path = "crates/prodex-runtime-capabilities" }
 prodex_runtime_claude = { package = "prodex-runtime-claude", path = "crates/prodex-runtime-claude" }
 prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch" }

@@ -12,6 +12,7 @@ mod buffered_response;
 mod failure_response;
 mod health;
 mod payload_detection;
+mod previous_response_log;
 mod transport_failure;
 mod websocket_message;
 
@@ -20,6 +21,7 @@ pub use self::buffered_response::*;
 pub use self::failure_response::*;
 pub use self::health::*;
 pub use self::payload_detection::*;
+pub use self::previous_response_log::*;
 pub use self::transport_failure::*;
 pub use self::websocket_message::*;
 

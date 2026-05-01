@@ -1,0 +1,16 @@
+[package]
+name = "prodex-runtime-broker"
+version.workspace = true
+edition.workspace = true
+description = "Runtime broker registry, health, and metrics DTOs for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_broker"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state" }
+serde = { version = "1.0.228", features = ["derive"] }

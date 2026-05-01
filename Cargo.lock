@@ -1386,6 +1386,7 @@ dependencies = [
  "prodex-quota",
  "prodex-redaction",
  "prodex-runtime-anthropic",
+ "prodex-runtime-broker",
  "prodex-runtime-capabilities",
  "prodex-runtime-claude",
  "prodex-runtime-doctor",
@@ -1521,6 +1522,14 @@ dependencies = [
  "anyhow",
  "base64",
  "serde_json",
+]
+
+[[package]]
+name = "prodex-runtime-broker"
+version = "0.69.0"
+dependencies = [
+ "prodex-runtime-state",
+ "serde",
 ]
 
 [[package]]
