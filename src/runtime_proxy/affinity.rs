@@ -248,132 +248,17 @@ pub(crate) fn runtime_request_value_requires_previous_response_affinity(
         })
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RuntimePreviousResponseFreshFallbackShape {
-    ToolOutputOnly,
-    EmptyInputOnly,
-    SessionScopedFreshReplay,
-    ContextDependentContinuation,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RuntimePreviousResponseFreshFallbackPolicy {
-    NotApplicable,
-    FailClosed {
-        request_shape: RuntimePreviousResponseFreshFallbackPolicyShape,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RuntimePreviousResponseFreshFallbackPolicyShape {
-    Unknown,
-    ToolOutputOnly,
-    EmptyInputOnly,
-    SessionScopedFreshReplay,
-    ContextDependentContinuation,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct RuntimePreviousResponseFreshFallbackPolicyInput {
-    pub(crate) has_previous_response_context: bool,
-    pub(crate) request_requires_locked_previous_response_affinity: bool,
-    pub(crate) fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-}
-
-impl RuntimePreviousResponseFreshFallbackPolicy {
-    pub(crate) fn allows_fresh_fallback(self) -> bool {
-        false
-    }
-
-    pub(crate) fn blocks_without_affinity(
-        self,
-        has_turn_state_retry: bool,
-        request_requires_locked_previous_response_affinity: bool,
-    ) -> bool {
-        matches!(self, Self::FailClosed { .. })
-            && !has_turn_state_retry
-            && !request_requires_locked_previous_response_affinity
-    }
-
-    pub(crate) fn is_fail_closed(self) -> bool {
-        matches!(self, Self::FailClosed { .. })
-    }
-}
-
-pub(crate) fn runtime_previous_response_fresh_fallback_policy(
-    input: RuntimePreviousResponseFreshFallbackPolicyInput,
-) -> RuntimePreviousResponseFreshFallbackPolicy {
-    if !input.has_previous_response_context
-        && !input.request_requires_locked_previous_response_affinity
-        && input.fresh_fallback_shape.is_none()
-    {
-        return RuntimePreviousResponseFreshFallbackPolicy::NotApplicable;
-    }
-
-    RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-        request_shape: match input.fresh_fallback_shape {
-            Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => {
-                RuntimePreviousResponseFreshFallbackPolicyShape::ToolOutputOnly
-            }
-            Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => {
-                RuntimePreviousResponseFreshFallbackPolicyShape::EmptyInputOnly
-            }
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay) => {
-                RuntimePreviousResponseFreshFallbackPolicyShape::SessionScopedFreshReplay
-            }
-            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation) => {
-                RuntimePreviousResponseFreshFallbackPolicyShape::ContextDependentContinuation
-            }
-            None => RuntimePreviousResponseFreshFallbackPolicyShape::Unknown,
-        },
-    }
-}
-
-pub(crate) fn runtime_previous_response_fresh_fallback_shape_label(
-    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-) -> &'static str {
-    match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => "tool_output_only",
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => "empty_input",
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay) => {
-            "session_replayable"
-        }
-        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation) => {
-            "continuation_only"
-        }
-        None => "none",
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
-    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-) -> bool {
-    runtime_previous_response_fresh_fallback_policy(
-        RuntimePreviousResponseFreshFallbackPolicyInput {
-            has_previous_response_context: shape.is_some(),
-            request_requires_locked_previous_response_affinity: false,
-            fresh_fallback_shape: shape,
-        },
-    )
-    .allows_fresh_fallback()
-}
-
-pub(crate) fn runtime_previous_response_fresh_fallback_shape_with_session(
-    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-    has_session_affinity: bool,
-) -> Option<RuntimePreviousResponseFreshFallbackShape> {
-    if !has_session_affinity {
-        return shape;
-    }
-
-    match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => {
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
-        }
-        other => other,
-    }
-}
+pub(crate) use runtime_proxy_crate::{
+    RuntimePreviousResponseFreshFallbackPolicy, RuntimePreviousResponseFreshFallbackPolicyInput,
+    RuntimePreviousResponseFreshFallbackShape, runtime_previous_response_fresh_fallback_policy,
+    runtime_previous_response_fresh_fallback_shape_label,
+    runtime_previous_response_fresh_fallback_shape_with_session,
+};
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::{
+    RuntimePreviousResponseFreshFallbackPolicyShape,
+    runtime_previous_response_fresh_fallback_shape_allows_recovery,
+};
 
 fn runtime_request_value_previous_response_input_item_is_tool_output(
     item: &serde_json::Value,

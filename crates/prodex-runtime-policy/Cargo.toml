@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
+prodex_core = { package = "prodex-core", path = "../prodex-core" }
 secret_store = { package = "prodex-secret-store", path = "../prodex-secret-store" }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"

@@ -63,15 +63,7 @@ pub(super) enum RuntimeSseInspectionProgress {
     PreviousResponseNotFound,
 }
 
-#[derive(Default)]
-pub(super) struct RuntimeParsedSseEvent {
-    pub(super) quota_blocked: bool,
-    pub(super) previous_response_not_found: bool,
-    pub(super) response_ids: Vec<String>,
-    pub(super) event_type: Option<String>,
-    pub(super) turn_state: Option<String>,
-    pub(super) token_usage: Option<RuntimeTokenUsage>,
-}
+pub(super) type RuntimeParsedSseEvent = runtime_proxy_crate::RuntimeParsedSseEvent;
 
 #[derive(Default)]
 pub(super) struct RuntimeSseTapState {
@@ -85,13 +77,7 @@ pub(super) struct RuntimeSseTapState {
     pub(super) request_previous_response_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct RuntimeTokenUsage {
-    pub(super) input_tokens: u64,
-    pub(super) cached_input_tokens: u64,
-    pub(super) output_tokens: u64,
-    pub(super) reasoning_tokens: u64,
-}
+pub(super) type RuntimeTokenUsage = runtime_proxy_crate::RuntimeTokenUsage;
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum RuntimeResponsesReply {
@@ -262,12 +248,7 @@ pub(super) struct RuntimeWebsocketTcpAttemptResult {
     pub(super) result: io::Result<TcpStream>,
 }
 
-#[derive(Debug, Clone)]
-pub(super) enum RuntimeWebsocketErrorPayload {
-    Text(String),
-    Binary(Vec<u8>),
-    Empty,
-}
+pub(super) type RuntimeWebsocketErrorPayload = runtime_proxy_crate::RuntimeWebsocketErrorPayload;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeWebsocketRetryInspectionKind {

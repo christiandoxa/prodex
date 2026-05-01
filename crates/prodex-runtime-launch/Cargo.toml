@@ -1,0 +1,12 @@
+[package]
+name = "prodex-runtime-launch"
+version.workspace = true
+edition.workspace = true
+description = "Runtime launch planning primitives for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_launch"
+path = "src/lib.rs"

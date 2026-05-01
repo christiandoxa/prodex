@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use chrono::{Local, TimeZone};
-use clap::{Args, Parser, Subcommand};
 use dirs::home_dir;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -83,6 +82,7 @@ pub(crate) use app_state::*;
 use audit_log::*;
 pub(crate) use cli_args::*;
 pub(crate) use codex_config::*;
+use command_dispatch::CommandDispatchExt;
 pub(crate) use core_constants::*;
 use housekeeping::*;
 pub(crate) use prodex_core::AppPaths;
@@ -372,58 +372,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString>,
 {
-    let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
-    let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
-        rewrite_cli_args_as_run(&raw_args)
-    } else {
-        raw_args
-    };
-    Ok(Cli::try_parse_from(parse_args)?.command)
-}
-
-fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
-    let Some(first_arg) = args.get(1).and_then(|arg| arg.to_str()) else {
-        return true;
-    };
-
-    !matches!(
-        first_arg,
-        "-h" | "--help"
-            | "-V"
-            | "--version"
-            | "profile"
-            | "use"
-            | "current"
-            | "info"
-            | "session"
-            | "doctor"
-            | "audit"
-            | "context"
-            | "cleanup"
-            | "login"
-            | "logout"
-            | "update"
-            | "quota"
-            | "run"
-            | "caveman"
-            | "super"
-            | "s"
-            | "claude"
-            | "help"
-            | "__runtime-broker"
-    )
-}
-
-fn rewrite_cli_args_as_run(args: &[OsString]) -> Vec<OsString> {
-    let mut rewritten = Vec::with_capacity(args.len() + 1);
-    rewritten.push(
-        args.first()
-            .cloned()
-            .unwrap_or_else(|| OsString::from("prodex")),
-    );
-    rewritten.push(OsString::from("run"));
-    rewritten.extend(args.iter().skip(1).cloned());
-    rewritten
+    prodex_cli::parse_cli_command_from(args)
 }
 
 fn codex_bin() -> OsString {

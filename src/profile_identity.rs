@@ -1,11 +1,11 @@
-use super::shared_codex_fs::copy_codex_home;
+pub(crate) use super::shared_codex_fs::{persist_login_home, remove_dir_if_exists};
 use super::*;
 
 #[allow(unused_imports)]
 pub(crate) use prodex_profile_identity::{
     ProfileIdentity, normalize_account_id, normalize_email, parse_account_id_from_access_token,
     parse_email_from_auth_json, parse_email_from_id_token, parse_identity_from_auth_json,
-    parse_identity_from_id_token, parse_jwt_payload,
+    parse_identity_from_id_token, parse_jwt_payload, profile_name_from_email,
 };
 
 #[derive(Debug)]
@@ -205,28 +205,6 @@ pub(crate) fn find_profile_by_email(state: &mut AppState, email: &str) -> Result
     )
 }
 
-pub(crate) fn profile_name_from_email(email: &str) -> String {
-    let normalized = normalize_email(email);
-    let mut profile_name = String::new();
-
-    for ch in normalized.chars() {
-        match ch {
-            'a'..='z' | '0'..='9' | '.' | '_' | '-' => profile_name.push(ch),
-            '@' => profile_name.push('_'),
-            _ => profile_name.push('-'),
-        }
-    }
-
-    let profile_name = profile_name
-        .trim_matches(|ch| matches!(ch, '.' | '_' | '-'))
-        .to_string();
-    if profile_name.is_empty() || profile_name == "." || profile_name == ".." {
-        "profile".to_string()
-    } else {
-        profile_name
-    }
-}
-
 pub(crate) fn unique_profile_name_for_email(
     paths: &AppPaths,
     state: &AppState,
@@ -261,36 +239,6 @@ fn reclaim_stale_managed_profile_path(paths: &AppPaths, state: &AppState, candid
     if candidate_path.exists() {
         let _ = remove_dir_if_exists(&candidate_path);
     }
-}
-
-pub(crate) fn persist_login_home(source: &Path, destination: &Path) -> Result<()> {
-    if destination.exists() {
-        bail!(
-            "refusing to overwrite existing login destination {}",
-            destination.display()
-        );
-    }
-
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-
-    match fs::rename(source, destination) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            copy_codex_home(source, destination)?;
-            remove_dir_if_exists(source)
-        }
-    }
-}
-
-pub(crate) fn remove_dir_if_exists(path: &Path) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    fs::remove_dir_all(path).with_context(|| format!("failed to delete {}", path.display()))
 }
 
 #[cfg(test)]

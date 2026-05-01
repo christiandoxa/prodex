@@ -189,6 +189,28 @@ pub fn normalize_account_id(account_id: &str) -> String {
     account_id.trim().to_string()
 }
 
+pub fn profile_name_from_email(email: &str) -> String {
+    let normalized = normalize_email(email);
+    let mut profile_name = String::new();
+
+    for ch in normalized.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' | '.' | '_' | '-' => profile_name.push(ch),
+            '@' => profile_name.push('_'),
+            _ => profile_name.push('-'),
+        }
+    }
+
+    let profile_name = profile_name
+        .trim_matches(|ch| matches!(ch, '.' | '_' | '-'))
+        .to_string();
+    if profile_name.is_empty() || profile_name == "." || profile_name == ".." {
+        "profile".to_string()
+    } else {
+        profile_name
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

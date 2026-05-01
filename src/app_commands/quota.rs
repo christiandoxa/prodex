@@ -1,15 +1,5 @@
 use super::*;
 
-pub(crate) fn deserialize_null_default<'de, D, T>(
-    deserializer: D,
-) -> std::result::Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de> + Default,
-{
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
-}
-
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;

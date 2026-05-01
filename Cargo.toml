@@ -12,6 +12,7 @@ publish = false
 members = [
     ".",
     "crates/prodex-caveman-assets",
+    "crates/prodex-cli",
     "crates/prodex-audit-log",
     "crates/prodex-codex-config",
     "crates/prodex-core",
@@ -21,15 +22,19 @@ members = [
     "crates/prodex-redaction",
     "crates/prodex-runtime-anthropic",
     "crates/prodex-runtime-doctor",
+    "crates/prodex-runtime-capabilities",
+    "crates/prodex-runtime-launch",
     "crates/prodex-runtime-policy",
     "crates/prodex-runtime-metrics",
     "crates/prodex-runtime-mem",
     "crates/prodex-runtime-state",
     "crates/prodex-secret-store",
     "crates/prodex-shared-codex-fs",
+    "crates/prodex-shared-types",
     "crates/prodex-state",
     "crates/prodex-runtime-proxy",
     "crates/prodex-terminal-ui",
+    "crates/prodex-update-notice",
 ]
 resolver = "3"
 
@@ -53,6 +58,7 @@ fs2 = "0.4.3"
 prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log" }
 codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config" }
 prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets" }
+prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli" }
 prodex_core = { package = "prodex-core", path = "crates/prodex-core" }
 prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export" }
 prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity" }
@@ -64,15 +70,20 @@ reqwest = { version = "0.13.2", default-features = false, features = ["blocking"
 rpassword = "7.4.0"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic" }
 prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor" }
+prodex_runtime_capabilities = { package = "prodex-runtime-capabilities", path = "crates/prodex-runtime-capabilities" }
+prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch" }
 runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics" }
 prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy" }
+runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy" }
 prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "crates/prodex-shared-codex-fs" }
+prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-shared-types" }
 prodex_state = { package = "prodex-state", path = "crates/prodex-state" }
 secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
 terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui" }
+prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice" }
 tiny_http = "0.12.0"
 tokio = { version = "1.52.1", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"

@@ -63,13 +63,6 @@ pub(crate) use self::websocket::*;
 use self::websocket_message::proxy_runtime_websocket_text_message;
 use self::websocket_message::runtime_profile_uncached_auth_summary_for_selection;
 
-pub(super) fn runtime_previous_response_retry_delay(retry_index: usize) -> Option<Duration> {
-    RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS
-        .get(retry_index)
-        .copied()
-        .map(Duration::from_millis)
-}
-
 pub(super) fn runtime_proxy_precommit_budget(
     continuation: bool,
     pressure_mode: bool,

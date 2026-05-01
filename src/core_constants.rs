@@ -65,6 +65,7 @@ pub(crate) const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
 pub(crate) const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
 pub(crate) const PRODEX_CHAT_HISTORY_RETENTION_SECONDS: i64 = 7 * 24 * 60 * 60;
+#[cfg(test)]
 pub(crate) const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 
 pub(crate) const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
@@ -96,10 +97,6 @@ pub(crate) const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 
 pub(crate) const RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT: usize = if cfg!(test) { 2 } else { 8 };
 pub(crate) const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 pub(crate) const RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS: i64 = if cfg!(test) { 30 } else { 300 };
-pub(crate) const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 5 } else { 21_600 };
-pub(crate) const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 300 };
-pub(crate) const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
-pub(crate) const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
 pub(crate) const RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS: i64 =
     if cfg!(test) { 300 } else { 1800 };
 pub(crate) const RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS: i64 =
@@ -124,8 +121,6 @@ pub(crate) const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) 
 pub(crate) const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 =
     if cfg!(test) { 8 } else { 300 };
 pub(crate) const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
-pub(crate) const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
-pub(crate) const RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY: u32 = 5;
 pub(crate) const RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY: u32 = 2;
 pub(crate) const RUNTIME_PROFILE_LATENCY_PENALTY_MAX: u32 = 12;
 pub(crate) const RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE: u32 = 2;
@@ -162,7 +157,6 @@ pub(crate) const RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT: usize =
     if cfg!(test) { 2 } else { 4 };
 pub(crate) const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 pub(crate) const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
-pub(crate) const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
 pub(crate) const PRODEX_SECRET_BACKEND_ENV: &str = "PRODEX_SECRET_BACKEND";
 pub(crate) const PRODEX_SECRET_KEYRING_SERVICE_ENV: &str = "PRODEX_SECRET_KEYRING_SERVICE";
 pub(crate) const CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
@@ -191,147 +185,6 @@ pub(crate) const RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS: u64 = if cfg!(test) { 40
 pub(crate) const RUNTIME_BROKER_POLL_INTERVAL_MS: u64 = if cfg!(test) { 25 } else { 100 };
 pub(crate) const RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS: u64 = if cfg!(test) { 125 } else { 1_000 };
 pub(crate) const RUNTIME_BROKER_IDLE_GRACE_SECONDS: i64 = if cfg!(test) { 1 } else { 5 };
-pub(crate) const CLI_TOP_LEVEL_AFTER_HELP: &str = "\
-Tips:
-  Bare `prodex` invocation defaults to `prodex run`.
-  Use `prodex quota --all --detail` for the clearest quota view across profiles.
-  Use `prodex <command> -h` to see every parameter for that command.
-
-Examples:
-  prodex
-  prodex exec \"review this repo\"
-  prodex profile list
-  prodex quota --all --detail
-  prodex run --profile main";
-pub(crate) const CLI_PROFILE_AFTER_HELP: &str = "\
-Examples:
-  prodex profile list
-  prodex profile add main --activate
-  prodex profile export
-  prodex profile export backup.json
-  prodex profile import backup.json
-  prodex profile import copilot
-  prodex profile import copilot --name copilot-main --activate
-  prodex profile import-current main
-  prodex profile remove main
-  prodex profile remove --all";
-pub(crate) const CLI_LOGIN_AFTER_HELP: &str = "\
-Examples:
-  prodex login
-  prodex login --profile main
-  prodex login --device-auth";
-pub(crate) const CLI_QUOTA_AFTER_HELP: &str = "\
-Best practice:
-  Use `prodex quota --all --detail` for the clearest live quota view across profiles.
-
-Examples:
-  prodex quota
-  prodex quota --profile main --detail
-  prodex quota --all --detail
-  prodex quota --all --once
-  prodex quota --all --auth no-auth --once
-  prodex quota --raw --profile main
-
-Notes:
-  `prodex quota` supports OpenAI/Codex profiles and imported Copilot accounts.
-  Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
-  If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, quota inspection is unavailable for that profile.";
-pub(crate) const CLI_RUN_AFTER_HELP: &str = "\
-Examples:
-  prodex
-  prodex run
-  prodex super
-  prodex run mem
-  prodex exec \"review this repo\"
-  prodex run --profile main
-  prodex run exec \"review this repo\"
-  prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-
-Notes:
-  Auto-rotate is enabled by default.
-  Bare `prodex <args>` is treated as `prodex run <args>`.
-  A lone session id is forwarded as `codex resume <session-id>`.
-  If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";
-pub(crate) const CLI_CLAUDE_AFTER_HELP: &str = "\
-Examples:
-  prodex claude --print \"summarize this repo\"
-  prodex claude mem
-  prodex claude caveman
-  prodex claude caveman mem
-  prodex claude caveman -- -p \"summarize this repo briefly\"
-  prodex claude --profile main --print \"review the latest changes\"
-  prodex claude --skip-quota-check -- --help
-
-Notes:
-  Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
-  Prefix Claude args with `caveman` and/or `mem` to load the Caveman or Claude-Mem plugin for that session only.
-  Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
-  `prodex claude` requires the default OpenAI/Codex provider; profiles that set `model_provider` to a non-OpenAI backend are not supported on this path.
-  Claude defaults to the current Codex model from `config.toml` when available.
-  Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.
-  Use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream Responses reasoning effort.
-  Use `PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS=shell,computer` to opt into native client-tool translation on supported models.";
-pub(crate) const CLI_CAVEMAN_AFTER_HELP: &str = "\
-Examples:
-  prodex caveman
-  prodex caveman mem
-  prodex super
-  prodex caveman --profile main
-  prodex caveman exec \"review latest diff in caveman mode\"
-  prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-
-Notes:
-  Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
-  The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
-  If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
-  Prefix Codex args with `mem` to point Claude-Mem transcript watching at the selected Prodex session path.
-  Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
-pub(crate) const CLI_SUPER_AFTER_HELP: &str = "\
-Examples:
-  prodex super
-  prodex super --url http://127.0.0.1:8131
-  prodex super exec \"review latest diff in super mode\"
-  prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
-  prodex super --profile main
-
-Notes:
-  `prodex super` is a shortcut for `prodex caveman mem --full-access`.
-  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, and launch-time full access.
-  Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
-  When `--url` is set, Prodex injects a temporary `prodex-local` model provider and skips quota/proxy routing.
-  Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
-  Additional Codex args are appended after the implied `mem` prefix.";
-pub(crate) const CLI_DOCTOR_AFTER_HELP: &str = "\
-Examples:
-  prodex doctor
-  prodex doctor --quota
-  prodex doctor --runtime
-  prodex doctor --runtime --json";
-pub(crate) const CLI_AUDIT_AFTER_HELP: &str = "\
-Examples:
-  prodex audit
-  prodex audit --tail 50
-  prodex audit --component profile --action use
-  prodex audit --json";
-pub(crate) const CLI_CONTEXT_AFTER_HELP: &str = "\
-Examples:
-  prodex context audit
-  prodex context audit --limit 30
-  prodex context audit --json
-  prodex context compress ~/.codex/AGENTS.md --dry-run
-  prodex context compress ~/.codex/AGENTS.md";
-pub(crate) const CLI_SESSION_AFTER_HELP: &str = "\
-Examples:
-  prodex session list
-  prodex session list --json
-  prodex session current
-  prodex session current --limit 20";
-pub(crate) const CLI_CLEANUP_AFTER_HELP: &str = "\
-Examples:
-  prodex cleanup
-
-Notes:
-  Removes stale local artifacts and prunes Codex/Claude chat history older than one week.";
 pub(crate) static STATE_SAVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub(crate) static RUNTIME_PROXY_LOG_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub(crate) static RUNTIME_STATE_SAVE_QUEUE: OnceLock<Arc<RuntimeStateSaveQueue>> = OnceLock::new();

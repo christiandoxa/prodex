@@ -1376,6 +1376,7 @@ dependencies = [
  "fs2",
  "prodex-audit-log",
  "prodex-caveman-assets",
+ "prodex-cli",
  "prodex-codex-config",
  "prodex-core",
  "prodex-profile-export",
@@ -1383,15 +1384,20 @@ dependencies = [
  "prodex-quota",
  "prodex-redaction",
  "prodex-runtime-anthropic",
+ "prodex-runtime-capabilities",
  "prodex-runtime-doctor",
+ "prodex-runtime-launch",
  "prodex-runtime-mem",
  "prodex-runtime-metrics",
  "prodex-runtime-policy",
+ "prodex-runtime-proxy",
  "prodex-runtime-state",
  "prodex-secret-store",
  "prodex-shared-codex-fs",
+ "prodex-shared-types",
  "prodex-state",
  "prodex-terminal-ui",
+ "prodex-update-notice",
  "reqwest",
  "rpassword",
  "serde",
@@ -1419,6 +1425,14 @@ version = "0.69.0"
 dependencies = [
  "anyhow",
  "serde_json",
+]
+
+[[package]]
+name = "prodex-cli"
+version = "0.69.0"
+dependencies = [
+ "clap",
+ "reqwest",
 ]
 
 [[package]]
@@ -1486,6 +1500,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-runtime-capabilities"
+version = "0.69.0"
+dependencies = [
+ "prodex-runtime-anthropic",
+ "prodex-runtime-proxy",
+ "serde_json",
+]
+
+[[package]]
 name = "prodex-runtime-doctor"
 version = "0.69.0"
 dependencies = [
@@ -1495,6 +1518,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "prodex-runtime-launch"
+version = "0.69.0"
 
 [[package]]
 name = "prodex-runtime-mem"
@@ -1514,6 +1541,7 @@ name = "prodex-runtime-policy"
 version = "0.69.0"
 dependencies = [
  "anyhow",
+ "prodex-core",
  "prodex-secret-store",
  "serde",
  "toml",
@@ -1547,6 +1575,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-shared-types"
+version = "0.69.0"
+dependencies = [
+ "prodex-quota",
+ "prodex-runtime-proxy",
+ "prodex-state",
+ "serde",
+]
+
+[[package]]
 name = "prodex-state"
 version = "0.69.0"
 dependencies = [
@@ -1558,6 +1596,20 @@ name = "prodex-terminal-ui"
 version = "0.69.0"
 dependencies = [
  "anyhow",
+]
+
+[[package]]
+name = "prodex-update-notice"
+version = "0.69.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "prodex-cli",
+ "prodex-core",
+ "prodex-terminal-ui",
+ "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

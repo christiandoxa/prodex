@@ -10,15 +10,32 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 
 - `src/main.rs`: binary entrypoint
 - `src/lib.rs`: shared crate wiring and tests
-- `src/cli_args.rs`, `src/command_dispatch.rs`, `src/app_commands/`: CLI parsing and Prodex-owned commands
+- `src/cli_args.rs`, `src/shared_types.rs`, `src/update_notice.rs`, and similar small root modules may be compatibility shims over workspace crates
+- `src/command_dispatch.rs`, `src/app_commands/`: command routing and Prodex-owned command handlers
 - `src/profile_commands/`, `src/quota_support/`, `src/profile_identity.rs`: profile, quota, and credential identity flows
 - `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker logic
 - `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
+- `crates/prodex-cli/`: reusable CLI argument model, help text, and parse/default-run rewrite helpers
 - `crates/prodex-codex-config/`: reusable Codex config parsing helpers
+- `crates/prodex-core/`: common path discovery and core filesystem helpers
+- `crates/prodex-profile-identity/`: account identity parsing and profile-name normalization helpers
+- `crates/prodex-quota/`: quota API models and quota classification helpers
 - `crates/prodex-redaction/`: reusable log/diagnostic redaction helpers
 - `crates/prodex-secret-store/`: reusable secret storage backend primitives
+- `crates/prodex-runtime-anthropic/`: Anthropic compatibility translation helpers
+- `crates/prodex-runtime-capabilities/`: runtime request compatibility surface detection
+- `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers
+- `crates/prodex-runtime-launch/`: child process and runtime launch planning primitives
+- `crates/prodex-runtime-mem/`: runtime memory mode helpers
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
+- `crates/prodex-runtime-policy/`: runtime policy parsing, validation, caching, and summary helpers
+- `crates/prodex-runtime-proxy/`: side-effect-free runtime proxy boundary types, classifiers, payload parsing, and transport helper logic
+- `crates/prodex-runtime-state/`: runtime state and scheduled-save data structures
+- `crates/prodex-shared-codex-fs/`: shared Codex home file operations
+- `crates/prodex-shared-types/`: shared serializable command/runtime models used across modules
+- `crates/prodex-state/`: state models and merge/compaction helpers
 - `crates/prodex-terminal-ui/`: reusable terminal layout and printing helpers
+- `crates/prodex-update-notice/`: npm/latest-version update notice cache and rendering helpers
 - `README.md`: full user-facing documentation
 - `QUICKSTART.md`: shorter installation and usage guide
 

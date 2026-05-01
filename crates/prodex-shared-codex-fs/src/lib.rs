@@ -56,3 +56,33 @@ fn same_path(left: &Path, right: &Path) -> bool {
 fn normalize_path_for_compare(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
+
+pub fn persist_login_home(source: &Path, destination: &Path) -> Result<()> {
+    if destination.exists() {
+        bail!(
+            "refusing to overwrite existing login destination {}",
+            destination.display()
+        );
+    }
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    match fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_codex_home(source, destination)?;
+            remove_dir_if_exists(source)
+        }
+    }
+}
+
+pub fn remove_dir_if_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_dir_all(path).with_context(|| format!("failed to delete {}", path.display()))
+}

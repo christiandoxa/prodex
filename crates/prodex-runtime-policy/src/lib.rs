@@ -17,6 +17,74 @@ pub use self::validate::{
     parse_secret_backend_kind, validate_runtime_policy_file, validate_runtime_proxy_policy,
 };
 
+use anyhow::Result;
+use prodex_core::AppPaths;
+
+pub fn ensure_runtime_policy_valid() -> Result<()> {
+    if !runtime_policy_enabled_for_current_process() {
+        return Ok(());
+    }
+    let paths = AppPaths::discover()?;
+    let _ = load_runtime_policy_cached(&paths.root)?;
+    Ok(())
+}
+
+pub fn runtime_policy_summary() -> Result<Option<RuntimePolicySummary>> {
+    if !runtime_policy_enabled_for_current_process() {
+        return Ok(None);
+    }
+    let paths = AppPaths::discover()?;
+    Ok(
+        load_runtime_policy_cached(&paths.root)?.map(|config| RuntimePolicySummary {
+            path: config.path,
+            version: config.version,
+        }),
+    )
+}
+
+pub fn runtime_policy_runtime() -> Option<RuntimePolicyRuntimeSettings> {
+    if !runtime_policy_enabled_for_current_process() {
+        return None;
+    }
+    let paths = AppPaths::discover().ok()?;
+    load_runtime_policy_cached(&paths.root)
+        .ok()
+        .flatten()
+        .map(|config| config.runtime)
+}
+
+pub fn runtime_policy_proxy() -> Option<RuntimePolicyProxySettings> {
+    if !runtime_policy_enabled_for_current_process() {
+        return None;
+    }
+    let paths = AppPaths::discover().ok()?;
+    load_runtime_policy_cached(&paths.root)
+        .ok()
+        .flatten()
+        .map(|config| config.runtime_proxy)
+}
+
+pub fn runtime_policy_secrets() -> Option<RuntimePolicySecretsSettings> {
+    if !runtime_policy_enabled_for_current_process() {
+        return None;
+    }
+    let paths = AppPaths::discover().ok()?;
+    load_runtime_policy_cached(&paths.root)
+        .ok()
+        .flatten()
+        .map(|config| config.secrets)
+}
+
+#[cfg(test)]
+fn runtime_policy_enabled_for_current_process() -> bool {
+    std::env::var_os("PRODEX_HOME").is_some()
+}
+
+#[cfg(not(test))]
+fn runtime_policy_enabled_for_current_process() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
