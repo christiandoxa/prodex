@@ -1,105 +1,10 @@
 use super::*;
 
-#[derive(Debug, Clone)]
-struct RuntimeFaultBudget {
-    raw_value: String,
-    remaining: usize,
-}
-
-pub(super) fn timeout_override_ms_with_policy(
-    env_key: &str,
-    policy_value: Option<u64>,
-    default_ms: u64,
-) -> u64 {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .or(policy_value.filter(|value| *value > 0))
-        .unwrap_or(default_ms)
-}
-
-fn percent_override_with_policy(
-    env_key: &str,
-    policy_value: Option<i64>,
-    default_value: i64,
-) -> i64 {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.parse::<i64>().ok())
-        .filter(|value| *value > 0)
-        .or(policy_value.filter(|value| *value > 0))
-        .unwrap_or(default_value)
-}
-
-pub(super) fn usize_override_with_policy(
-    env_key: &str,
-    policy_value: Option<usize>,
-    default_value: usize,
-) -> usize {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .or(policy_value.filter(|value| *value > 0))
-        .unwrap_or(default_value)
-}
-
-pub(super) fn usize_override_with_policy_allow_zero(
-    env_key: &str,
-    policy_value: Option<usize>,
-    default_value: usize,
-) -> usize {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .or(policy_value)
-        .unwrap_or(default_value)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RuntimeTuningLaneLimits {
-    pub(crate) responses: usize,
-    pub(crate) compact: usize,
-    pub(crate) websocket: usize,
-    pub(crate) standard: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RuntimeTuningSnapshot {
-    pub(crate) worker_count: usize,
-    pub(crate) long_lived_worker_count: usize,
-    pub(crate) async_worker_count: usize,
-    pub(crate) probe_refresh_worker_count: usize,
-    pub(crate) long_lived_queue_capacity: usize,
-    pub(crate) active_request_limit: usize,
-    pub(crate) lane_limits: RuntimeTuningLaneLimits,
-    pub(crate) precommit_attempt_limit: usize,
-    pub(crate) precommit_budget_ms: u64,
-    pub(crate) pressure_precommit_attempt_limit: usize,
-    pub(crate) pressure_precommit_budget_ms: u64,
-    pub(crate) continuation_precommit_attempt_limit: usize,
-    pub(crate) continuation_precommit_budget_ms: u64,
-    pub(crate) admission_wait_budget_ms: u64,
-    pub(crate) pressure_admission_wait_budget_ms: u64,
-    pub(crate) long_lived_queue_wait_budget_ms: u64,
-    pub(crate) pressure_long_lived_queue_wait_budget_ms: u64,
-    pub(crate) http_connect_timeout_ms: u64,
-    pub(crate) stream_idle_timeout_ms: u64,
-    pub(crate) sse_lookahead_timeout_ms: u64,
-    pub(crate) websocket_connect_timeout_ms: u64,
-    pub(crate) websocket_happy_eyeballs_delay_ms: u64,
-    pub(crate) websocket_precommit_progress_timeout_ms: u64,
-    pub(crate) websocket_connect_worker_count: usize,
-    pub(crate) websocket_connect_queue_capacity: usize,
-    pub(crate) websocket_connect_overflow_capacity: usize,
-    pub(crate) websocket_dns_worker_count: usize,
-    pub(crate) websocket_dns_queue_capacity: usize,
-    pub(crate) websocket_dns_overflow_capacity: usize,
-    pub(crate) websocket_previous_response_reuse_stale_ms: u64,
-    pub(crate) profile_inflight_soft_limit: usize,
-    pub(crate) profile_inflight_hard_limit: usize,
-}
+pub(super) use prodex_runtime_tuning::{
+    RuntimeTuningLaneLimits, RuntimeTuningSnapshot, percent_override_with_policy,
+    runtime_duration_ms, runtime_take_fault_injection, timeout_override_ms_with_policy,
+    usize_override_with_policy, usize_override_with_policy_allow_zero,
+};
 
 pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
     let worker_count = runtime_proxy_worker_count();
@@ -170,45 +75,6 @@ pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
         profile_inflight_soft_limit: runtime_proxy_profile_inflight_soft_limit(),
         profile_inflight_hard_limit: runtime_proxy_profile_inflight_hard_limit(),
     }
-}
-
-fn runtime_duration_ms(duration: Duration) -> u64 {
-    duration.as_millis().min(u128::from(u64::MAX)) as u64
-}
-
-fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudget>> {
-    static COUNTERS: OnceLock<Mutex<BTreeMap<String, RuntimeFaultBudget>>> = OnceLock::new();
-    COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-pub(super) fn runtime_take_fault_injection(env_key: &str) -> bool {
-    let raw_value = env::var(env_key).ok().unwrap_or_default();
-    let configured = raw_value.parse::<usize>().unwrap_or(0);
-    if configured == 0 {
-        if let Ok(mut counters) = runtime_fault_counters().lock() {
-            counters.remove(env_key);
-        }
-        return false;
-    }
-
-    let Ok(mut counters) = runtime_fault_counters().lock() else {
-        return false;
-    };
-    let counter = counters
-        .entry(env_key.to_string())
-        .or_insert_with(|| RuntimeFaultBudget {
-            raw_value: raw_value.clone(),
-            remaining: configured,
-        });
-    if counter.raw_value != raw_value {
-        counter.raw_value = raw_value;
-        counter.remaining = configured;
-    }
-    if counter.remaining == 0 {
-        return false;
-    }
-    counter.remaining -= 1;
-    true
 }
 
 pub(super) fn runtime_proxy_http_connect_timeout_ms() -> u64 {

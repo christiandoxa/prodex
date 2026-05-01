@@ -1,0 +1,12 @@
+[package]
+name = "prodex-runtime-tuning"
+version.workspace = true
+edition.workspace = true
+description = "Runtime tuning override and snapshot helpers for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_tuning"
+path = "src/lib.rs"
