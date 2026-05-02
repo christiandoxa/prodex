@@ -7,6 +7,7 @@ mod watch;
 pub(super) use self::auth::*;
 pub(super) use self::render::*;
 pub(super) use self::watch::*;
+pub(crate) use prodex_core::format_binary_resolution;
 pub(crate) use prodex_quota::{
     AuthSummary, BlockedLimit, QuotaAuthFilter, UsageAuth, UsageAuthSyncOutcome,
     UsageAuthSyncSource,
@@ -248,32 +249,4 @@ pub(crate) fn usage_url(base_url: &str) -> String {
 
 pub(crate) fn format_response_body(body: &[u8]) -> String {
     prodex_quota::format_response_body(body)
-}
-
-pub(crate) fn format_binary_resolution(binary: &OsString) -> String {
-    let configured = binary.to_string_lossy();
-    match resolve_binary_path(binary) {
-        Some(path) => format!("{configured} ({})", path.display()),
-        None => format!("{configured} (not found)"),
-    }
-}
-
-pub(crate) fn resolve_binary_path(binary: &OsString) -> Option<PathBuf> {
-    let candidate = PathBuf::from(binary);
-    if candidate.components().count() > 1 {
-        if candidate.is_file() {
-            return Some(fs::canonicalize(&candidate).unwrap_or(candidate));
-        }
-        return None;
-    }
-
-    let path_var = env::var_os("PATH")?;
-    for directory in env::split_paths(&path_var) {
-        let full_path = directory.join(&candidate);
-        if full_path.is_file() {
-            return Some(full_path);
-        }
-    }
-
-    None
 }

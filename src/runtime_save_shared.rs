@@ -4,10 +4,12 @@ use crate::{
 };
 
 #[cfg(test)]
-pub(crate) use prodex_runtime_state::RuntimeStateSaveStateSection;
 pub(crate) use prodex_runtime_state::{
-    RuntimeDueJobs, RuntimeScheduledSaveJob, RuntimeStateSaveSections,
+    RuntimeDueJobs, RuntimeScheduledSaveJob, RuntimeStateSaveStateSection,
     runtime_take_due_scheduled_jobs,
+};
+pub(crate) use prodex_runtime_state::{
+    RuntimeStateSaveSections, runtime_run_scheduled_save_worker_loop,
 };
 
 pub(crate) type RuntimeStateSaveQueue =

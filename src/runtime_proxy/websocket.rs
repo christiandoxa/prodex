@@ -12,12 +12,13 @@ pub(super) use self::unauthorized_recovery::{
     runtime_try_recover_profile_auth_from_unauthorized_steps,
 };
 use runtime_proxy_crate::{
-    inspect_runtime_websocket_text_frame, runtime_interleave_socket_addrs,
+    RuntimeWebsocketTarget, inspect_runtime_websocket_text_frame, runtime_interleave_socket_addrs,
     runtime_proxy_websocket_error_payload_text, runtime_realtime_websocket_terminal_event_kind,
     runtime_translate_precommit_previous_response_websocket_text_frame,
     runtime_translate_previous_response_websocket_text_frame, runtime_websocket_authority,
-    runtime_websocket_error_payload_from_http_body, runtime_websocket_no_proxy_pattern_matches,
-    runtime_websocket_normalize_host,
+    runtime_websocket_error_payload_from_http_body, runtime_websocket_no_proxy_value_matches,
+    runtime_websocket_normalize_host, runtime_websocket_proxy_env_keys,
+    runtime_websocket_proxy_url_candidate, runtime_websocket_target_from_parts,
 };
 
 pub(super) fn run_runtime_proxy_websocket_session(
@@ -658,28 +659,15 @@ fn connect_runtime_proxy_tcp_stream_to_host(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeWebsocketTarget {
-    host: String,
-    port: u16,
-    authority: String,
-}
-
 fn runtime_websocket_target_from_uri(
     uri: &tungstenite::http::Uri,
 ) -> std::result::Result<RuntimeWebsocketTarget, WsError> {
     let host = uri.host().ok_or(WsError::Url(WsUrlError::NoHostName))?;
-    let host = runtime_websocket_normalize_host(host);
-    let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
-        Some("wss") | Some("https") => 443,
-        _ => 80,
-    });
-    let authority = runtime_websocket_authority(&host, port);
-    Ok(RuntimeWebsocketTarget {
+    Ok(runtime_websocket_target_from_parts(
         host,
-        port,
-        authority,
-    })
+        uri.port_u16(),
+        uri.scheme_str(),
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -739,53 +727,23 @@ fn runtime_websocket_http_proxy_for_uri(
 }
 
 fn runtime_websocket_proxy_env_url(scheme: &str) -> Option<reqwest::Url> {
-    const HTTPS_PROXY_KEYS: [&str; 6] = [
-        "HTTPS_PROXY",
-        "https_proxy",
-        "ALL_PROXY",
-        "all_proxy",
-        "PROXY",
-        "proxy",
-    ];
-    const HTTP_PROXY_KEYS: [&str; 6] = [
-        "HTTP_PROXY",
-        "http_proxy",
-        "ALL_PROXY",
-        "all_proxy",
-        "PROXY",
-        "proxy",
-    ];
-    let keys = if matches!(scheme, "wss" | "https") {
-        HTTPS_PROXY_KEYS.as_slice()
-    } else {
-        HTTP_PROXY_KEYS.as_slice()
-    };
-    keys.iter().find_map(|key| {
-        let value = env::var_os(key)?;
-        runtime_websocket_parse_proxy_url(&value.to_string_lossy())
-    })
+    runtime_websocket_proxy_env_keys(scheme)
+        .iter()
+        .find_map(|key| {
+            let value = env::var_os(key)?;
+            runtime_websocket_parse_proxy_url(&value.to_string_lossy())
+        })
 }
 
 fn runtime_websocket_parse_proxy_url(value: &str) -> Option<reqwest::Url> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let candidate = if trimmed.contains("://") {
-        trimmed.to_string()
-    } else {
-        format!("http://{trimmed}")
-    };
+    let candidate = runtime_websocket_proxy_url_candidate(value)?;
     reqwest::Url::parse(&candidate).ok()
 }
 
 fn runtime_websocket_no_proxy_matches(host: &str, port: u16) -> bool {
     ["NO_PROXY", "no_proxy"].into_iter().any(|key| {
         env::var_os(key).is_some_and(|value| {
-            value
-                .to_string_lossy()
-                .split(',')
-                .any(|pattern| runtime_websocket_no_proxy_pattern_matches(pattern, host, port))
+            runtime_websocket_no_proxy_value_matches(&value.to_string_lossy(), host, port)
         })
     })
 }

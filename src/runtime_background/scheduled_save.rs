@@ -842,56 +842,6 @@ pub(crate) fn runtime_allocator_trim_best_effort() {
     }
 }
 
-fn runtime_wait_for_due_scheduled_jobs<K, J>(
-    pending: &Mutex<BTreeMap<K, J>>,
-    wake: &Condvar,
-) -> BTreeMap<K, J>
-where
-    K: Ord + Clone,
-    J: RuntimeScheduledSaveJob,
-{
-    let mut pending = pending
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    while pending.is_empty() {
-        pending = wake
-            .wait(pending)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-    }
-    loop {
-        match runtime_take_due_scheduled_jobs(&mut pending, Instant::now()) {
-            RuntimeDueJobs::Due(jobs) => break jobs,
-            RuntimeDueJobs::Wait(wait_for) => {
-                let (next_pending, _) = wake
-                    .wait_timeout(pending, wait_for)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                pending = next_pending;
-            }
-        }
-    }
-}
-
-fn runtime_run_scheduled_save_worker_loop<K, J, F>(
-    pending: &Mutex<BTreeMap<K, J>>,
-    wake: &Condvar,
-    active: &AtomicUsize,
-    mut run_job: F,
-) -> !
-where
-    K: Ord + Clone,
-    J: RuntimeScheduledSaveJob,
-    F: FnMut(J),
-{
-    loop {
-        let jobs = runtime_wait_for_due_scheduled_jobs(pending, wake);
-        for (_, job) in jobs {
-            active.fetch_add(1, Ordering::SeqCst);
-            run_job(job);
-            active.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-}
-
 fn runtime_state_save_enqueue_plan(
     reason: &str,
     queued_at: Instant,
