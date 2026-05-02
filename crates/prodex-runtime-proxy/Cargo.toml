@@ -12,5 +12,6 @@ name = "runtime_proxy"
 path = "src/lib.rs"
 
 [dependencies]
+base64 = "0.22.1"
 prodex-runtime-tuning = { path = "../prodex-runtime-tuning" }
 serde_json = "1.0.149"

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+#[cfg(test)]
 use base64::Engine;
 use chrono::{Local, TimeZone};
 use dirs::home_dir;

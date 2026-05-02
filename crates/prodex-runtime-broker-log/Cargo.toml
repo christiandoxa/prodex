@@ -1,0 +1,15 @@
+[package]
+name = "prodex-runtime-broker-log"
+version.workspace = true
+edition.workspace = true
+description = "Runtime broker log parsing and cached continuity metrics for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_broker_log"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_runtime_broker = { package = "prodex-runtime-broker", path = "../prodex-runtime-broker" }

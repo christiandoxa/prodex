@@ -16,9 +16,11 @@ use runtime_proxy_crate::{
     runtime_proxy_websocket_error_payload_text, runtime_realtime_websocket_terminal_event_kind,
     runtime_translate_precommit_previous_response_websocket_text_frame,
     runtime_translate_previous_response_websocket_text_frame, runtime_websocket_authority,
-    runtime_websocket_error_payload_from_http_body, runtime_websocket_no_proxy_value_matches,
-    runtime_websocket_normalize_host, runtime_websocket_proxy_env_keys,
-    runtime_websocket_proxy_url_candidate, runtime_websocket_target_from_parts,
+    runtime_websocket_error_payload_from_http_body, runtime_websocket_http_connect_request,
+    runtime_websocket_no_proxy_value_matches, runtime_websocket_normalize_host,
+    runtime_websocket_proxy_authorization_header, runtime_websocket_proxy_env_keys,
+    runtime_websocket_proxy_url_candidate, runtime_websocket_read_http_connect_response,
+    runtime_websocket_target_from_parts,
 };
 
 pub(super) fn run_runtime_proxy_websocket_session(
@@ -756,16 +758,10 @@ fn runtime_websocket_establish_http_proxy_tunnel(
 ) -> io::Result<u16> {
     stream.set_read_timeout(Some(io_timeout))?;
     stream.set_write_timeout(Some(io_timeout))?;
-    let mut request = format!(
-        "CONNECT {} HTTP/1.1\r\nHost: {}\r\nProxy-Connection: Keep-Alive\r\n",
-        target.authority, target.authority
-    );
-    if let Some(header) = runtime_websocket_proxy_authorization_header(proxy) {
-        request.push_str("Proxy-Authorization: ");
-        request.push_str(&header);
-        request.push_str("\r\n");
-    }
-    request.push_str("\r\n");
+    let proxy_authorization =
+        runtime_websocket_proxy_authorization_header(proxy.url.username(), proxy.url.password());
+    let request =
+        runtime_websocket_http_connect_request(&target.authority, proxy_authorization.as_deref());
     stream.write_all(request.as_bytes())?;
     stream.flush()?;
 
@@ -776,68 +772,6 @@ fn runtime_websocket_establish_http_proxy_tunnel(
         )));
     }
     Ok(status)
-}
-
-fn runtime_websocket_proxy_authorization_header(
-    proxy: &RuntimeWebsocketHttpProxy,
-) -> Option<String> {
-    let username = proxy.url.username();
-    if username.is_empty() {
-        return None;
-    }
-    let password = proxy.url.password().unwrap_or_default();
-    let credentials = format!("{username}:{password}");
-    Some(format!(
-        "Basic {}",
-        base64::engine::general_purpose::STANDARD.encode(credentials)
-    ))
-}
-
-fn runtime_websocket_read_http_connect_response(
-    stream: &mut TcpStream,
-) -> io::Result<(u16, usize)> {
-    const MAX_CONNECT_RESPONSE_BYTES: usize = 8192;
-    let mut response = Vec::new();
-    let mut buffer = [0u8; 512];
-    loop {
-        let read = stream.read(&mut buffer)?;
-        if read == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "runtime websocket proxy closed before CONNECT response completed",
-            ));
-        }
-        response.extend_from_slice(&buffer[..read]);
-        if response.windows(4).any(|window| window == b"\r\n\r\n")
-            || response.windows(2).any(|window| window == b"\n\n")
-        {
-            break;
-        }
-        if response.len() >= MAX_CONNECT_RESPONSE_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "runtime websocket proxy CONNECT response is too large",
-            ));
-        }
-    }
-    let text = std::str::from_utf8(&response).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "runtime websocket proxy CONNECT response is not valid UTF-8",
-        )
-    })?;
-    let status = text
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "runtime websocket proxy CONNECT response is missing a status code",
-            )
-        })?;
-    Ok((status, response.len()))
 }
 
 pub(super) fn send_runtime_proxy_websocket_error(

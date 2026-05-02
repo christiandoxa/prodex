@@ -1389,6 +1389,7 @@ dependencies = [
  "prodex-redaction",
  "prodex-runtime-anthropic",
  "prodex-runtime-broker",
+ "prodex-runtime-broker-log",
  "prodex-runtime-capabilities",
  "prodex-runtime-claude",
  "prodex-runtime-cookies",
@@ -1558,6 +1559,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-runtime-broker-log"
+version = "0.69.0"
+dependencies = [
+ "prodex-runtime-broker",
+]
+
+[[package]]
 name = "prodex-runtime-capabilities"
 version = "0.69.0"
 dependencies = [
@@ -1595,6 +1603,8 @@ version = "0.69.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "prodex-quota",
+ "prodex-runtime-state",
  "prodex-terminal-ui",
  "serde",
  "serde_json",
@@ -1654,6 +1664,7 @@ dependencies = [
 name = "prodex-runtime-proxy"
 version = "0.69.0"
 dependencies = [
+ "base64",
  "prodex-runtime-tuning",
  "serde_json",
 ]

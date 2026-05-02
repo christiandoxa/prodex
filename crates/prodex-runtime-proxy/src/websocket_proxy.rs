@@ -1,4 +1,6 @@
+use base64::Engine;
 use std::collections::VecDeque;
+use std::io::{self, Read};
 use std::net::SocketAddr;
 
 const HTTPS_PROXY_KEYS: [&str; 6] = [
@@ -93,6 +95,83 @@ pub fn runtime_websocket_no_proxy_value_matches(value: &str, host: &str, port: u
     value
         .split(',')
         .any(|pattern| runtime_websocket_no_proxy_pattern_matches(pattern, host, port))
+}
+
+pub fn runtime_websocket_http_connect_request(
+    authority: &str,
+    proxy_authorization: Option<&str>,
+) -> String {
+    let mut request = format!(
+        "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: Keep-Alive\r\n",
+    );
+    if let Some(header) = proxy_authorization {
+        request.push_str("Proxy-Authorization: ");
+        request.push_str(header);
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+    request
+}
+
+pub fn runtime_websocket_proxy_authorization_header(
+    username: &str,
+    password: Option<&str>,
+) -> Option<String> {
+    if username.is_empty() {
+        return None;
+    }
+    let credentials = format!("{}:{}", username, password.unwrap_or_default());
+    Some(format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(credentials)
+    ))
+}
+
+pub fn runtime_websocket_read_http_connect_response(
+    stream: &mut impl Read,
+) -> io::Result<(u16, usize)> {
+    const MAX_CONNECT_RESPONSE_BYTES: usize = 8192;
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 512];
+    loop {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "runtime websocket proxy closed before CONNECT response completed",
+            ));
+        }
+        response.extend_from_slice(&buffer[..read]);
+        if response.windows(4).any(|window| window == b"\r\n\r\n")
+            || response.windows(2).any(|window| window == b"\n\n")
+        {
+            break;
+        }
+        if response.len() >= MAX_CONNECT_RESPONSE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "runtime websocket proxy CONNECT response is too large",
+            ));
+        }
+    }
+    let text = std::str::from_utf8(&response).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "runtime websocket proxy CONNECT response is not valid UTF-8",
+        )
+    })?;
+    let status = text
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "runtime websocket proxy CONNECT response is missing a status code",
+            )
+        })?;
+    Ok((status, response.len()))
 }
 
 pub fn runtime_websocket_no_proxy_pattern_matches(pattern: &str, host: &str, port: u16) -> bool {
@@ -252,6 +331,39 @@ mod tests {
             "api.openai.com",
             443
         ));
+    }
+
+    #[test]
+    fn proxy_authorization_header_encodes_basic_credentials() {
+        assert_eq!(
+            runtime_websocket_proxy_authorization_header("user", Some("pass")).as_deref(),
+            Some("Basic dXNlcjpwYXNz")
+        );
+        assert_eq!(
+            runtime_websocket_proxy_authorization_header("", Some("pass")),
+            None
+        );
+    }
+
+    #[test]
+    fn http_connect_request_includes_target_and_optional_authorization() {
+        assert_eq!(
+            runtime_websocket_http_connect_request("chatgpt.com:443", None),
+            "CONNECT chatgpt.com:443 HTTP/1.1\r\nHost: chatgpt.com:443\r\nProxy-Connection: Keep-Alive\r\n\r\n"
+        );
+        assert_eq!(
+            runtime_websocket_http_connect_request("chatgpt.com:443", Some("Basic token")),
+            "CONNECT chatgpt.com:443 HTTP/1.1\r\nHost: chatgpt.com:443\r\nProxy-Connection: Keep-Alive\r\nProxy-Authorization: Basic token\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn read_http_connect_response_parses_status_and_byte_count() {
+        let mut response = std::io::Cursor::new(b"HTTP/1.1 200 OK\r\nHeader: value\r\n\r\nbody");
+        assert_eq!(
+            runtime_websocket_read_http_connect_response(&mut response).expect("connect response"),
+            (200, "HTTP/1.1 200 OK\r\nHeader: value\r\n\r\nbody".len())
+        );
     }
 
     #[test]

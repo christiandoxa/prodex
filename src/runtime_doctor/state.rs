@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use prodex_runtime_doctor::{
-    RuntimeDoctorBackoffMaps, RuntimeDoctorBinaryIdentity, RuntimeDoctorBindingSourceInput,
-    RuntimeDoctorBindingStateInput, RuntimeDoctorHealthScore,
-    RuntimeDoctorQuotaWindowStatus as DoctorQuotaWindowStatus, RuntimeDoctorStateSummaryConfig,
-    RuntimeDoctorUsageSnapshot,
+    RuntimeDoctorBinaryIdentity, RuntimeDoctorBindingSourceInput, RuntimeDoctorBindingStateInput,
+    RuntimeDoctorStateSummaryConfig, runtime_doctor_backoff_maps_from_runtime,
+    runtime_doctor_health_scores_from_runtime, runtime_doctor_usage_snapshots_from_runtime,
 };
 
 fn runtime_doctor_state_summary_config() -> RuntimeDoctorStateSummaryConfig {
@@ -18,69 +17,6 @@ fn runtime_doctor_state_summary_config() -> RuntimeDoctorStateSummaryConfig {
         performance_decay_seconds: RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
         usage_snapshot_stale_grace_seconds: RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
     }
-}
-
-fn runtime_doctor_backoff_maps(backoffs: &RuntimeProfileBackoffs) -> RuntimeDoctorBackoffMaps<'_> {
-    RuntimeDoctorBackoffMaps {
-        retry_backoff_until: &backoffs.retry_backoff_until,
-        transport_backoff_until: &backoffs.transport_backoff_until,
-        route_circuit_open_until: &backoffs.route_circuit_open_until,
-    }
-}
-
-fn runtime_doctor_health_scores(
-    scores: &BTreeMap<String, RuntimeProfileHealth>,
-) -> BTreeMap<String, RuntimeDoctorHealthScore> {
-    scores
-        .iter()
-        .map(|(key, health)| {
-            (
-                key.clone(),
-                RuntimeDoctorHealthScore {
-                    score: health.score,
-                    updated_at: health.updated_at,
-                },
-            )
-        })
-        .collect()
-}
-
-fn runtime_doctor_quota_window_status(status: RuntimeQuotaWindowStatus) -> DoctorQuotaWindowStatus {
-    match status {
-        RuntimeQuotaWindowStatus::Ready => DoctorQuotaWindowStatus::Ready,
-        RuntimeQuotaWindowStatus::Thin => DoctorQuotaWindowStatus::Thin,
-        RuntimeQuotaWindowStatus::Critical => DoctorQuotaWindowStatus::Critical,
-        RuntimeQuotaWindowStatus::Exhausted => DoctorQuotaWindowStatus::Exhausted,
-        RuntimeQuotaWindowStatus::Unknown => DoctorQuotaWindowStatus::Unknown,
-    }
-}
-
-fn runtime_doctor_usage_snapshot(
-    snapshot: &RuntimeProfileUsageSnapshot,
-) -> RuntimeDoctorUsageSnapshot {
-    RuntimeDoctorUsageSnapshot {
-        checked_at: snapshot.checked_at,
-        five_hour_status: runtime_doctor_quota_window_status(snapshot.five_hour_status),
-        five_hour_remaining_percent: snapshot.five_hour_remaining_percent,
-        five_hour_reset_at: snapshot.five_hour_reset_at,
-        weekly_status: runtime_doctor_quota_window_status(snapshot.weekly_status),
-        weekly_remaining_percent: snapshot.weekly_remaining_percent,
-        weekly_reset_at: snapshot.weekly_reset_at,
-    }
-}
-
-fn runtime_doctor_usage_snapshots(
-    usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-) -> BTreeMap<String, RuntimeDoctorUsageSnapshot> {
-    usage_snapshots
-        .iter()
-        .map(|(profile_name, snapshot)| {
-            (
-                profile_name.clone(),
-                runtime_doctor_usage_snapshot(snapshot),
-            )
-        })
-        .collect()
 }
 
 fn runtime_doctor_binary_identity(
@@ -101,9 +37,9 @@ pub(crate) fn runtime_doctor_degraded_routes(
     scores: &BTreeMap<String, RuntimeProfileHealth>,
     now: i64,
 ) -> Vec<String> {
-    let scores = runtime_doctor_health_scores(scores);
+    let scores = runtime_doctor_health_scores_from_runtime(scores);
     prodex_runtime_doctor::runtime_doctor_degraded_routes(
-        runtime_doctor_backoff_maps(backoffs),
+        runtime_doctor_backoff_maps_from_runtime(backoffs),
         &scores,
         now,
         runtime_doctor_state_summary_config(),
@@ -206,13 +142,13 @@ fn runtime_doctor_profile_summaries(
     now: i64,
 ) -> Vec<RuntimeDoctorProfileSummary> {
     let profile_names = state.profiles.keys().cloned().collect::<Vec<_>>();
-    let usage_snapshots = runtime_doctor_usage_snapshots(usage_snapshots);
-    let scores = runtime_doctor_health_scores(scores);
+    let usage_snapshots = runtime_doctor_usage_snapshots_from_runtime(usage_snapshots);
+    let scores = runtime_doctor_health_scores_from_runtime(scores);
     prodex_runtime_doctor::runtime_doctor_profile_summaries(
         &profile_names,
         &usage_snapshots,
         &scores,
-        runtime_doctor_backoff_maps(backoffs),
+        runtime_doctor_backoff_maps_from_runtime(backoffs),
         now,
         runtime_doctor_state_summary_config(),
     )

@@ -26,6 +26,7 @@ members = [
     "crates/prodex-redaction",
     "crates/prodex-runtime-anthropic",
     "crates/prodex-runtime-broker",
+    "crates/prodex-runtime-broker-log",
     "crates/prodex-runtime-doctor",
     "crates/prodex-runtime-capabilities",
     "crates/prodex-runtime-claude",
@@ -85,6 +86,7 @@ rpassword = "7.4.0"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic" }
 prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor" }
 prodex_runtime_broker = { package = "prodex-runtime-broker", path = "crates/prodex-runtime-broker" }
+prodex_runtime_broker_log = { package = "prodex-runtime-broker-log", path = "crates/prodex-runtime-broker-log" }
 prodex_runtime_capabilities = { package = "prodex-runtime-capabilities", path = "crates/prodex-runtime-capabilities" }
 prodex_runtime_claude = { package = "prodex-runtime-claude", path = "crates/prodex-runtime-claude" }
 prodex_runtime_cookies = { package = "prodex-runtime-cookies", path = "crates/prodex-runtime-cookies" }
