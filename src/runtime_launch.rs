@@ -10,7 +10,7 @@ pub(super) use execution::{RuntimeLaunchStrategy, execute_runtime_launch};
 use plan::cleanup_runtime_launch_plan;
 pub(super) use plan::{ChildProcessPlan, RuntimeLaunchPlan};
 #[cfg(test)]
-pub(super) use profile::validate_profile_name;
+pub(super) use prodex_profile_identity::validate_profile_name;
 pub(super) use profile::{
     ensure_path_is_unique, record_run_selection, resolve_profile_name,
     should_enable_runtime_rotation_proxy,

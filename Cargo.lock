@@ -1617,6 +1617,7 @@ version = "0.69.0"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
+ "prodex-core",
  "prodex-quota",
  "prodex-redaction",
  "prodex-runtime-proxy",

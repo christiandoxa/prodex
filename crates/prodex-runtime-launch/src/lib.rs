@@ -74,6 +74,65 @@ pub fn fixed_runtime_proxy_state(
     Ok(fixed)
 }
 
+pub fn record_run_selection_at(
+    state: &mut prodex_state::AppState,
+    profile_name: &str,
+    selected_at: i64,
+) {
+    state
+        .last_run_selected_at
+        .retain(|name, _| state.profiles.contains_key(name));
+    state
+        .last_run_selected_at
+        .insert(profile_name.to_string(), selected_at);
+}
+
+pub fn resolve_profile_name(
+    state: &prodex_state::AppState,
+    requested: Option<&str>,
+) -> anyhow::Result<String> {
+    if let Some(name) = requested {
+        if state.profiles.contains_key(name) {
+            return Ok(name.to_string());
+        }
+        bail!("profile '{}' does not exist", name);
+    }
+
+    if let Some(active) = state.active_profile.as_deref() {
+        if state.profiles.contains_key(active) {
+            return Ok(active.to_string());
+        }
+        bail!("active profile '{}' no longer exists", active);
+    }
+
+    if state.profiles.len() == 1 {
+        let (name, _) = state
+            .profiles
+            .iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("single profile lookup failed unexpectedly"))?;
+        return Ok(name.clone());
+    }
+
+    bail!("no active profile selected; use `prodex use --profile <name>` or pass --profile")
+}
+
+pub fn ensure_profile_path_is_unique(
+    state: &prodex_state::AppState,
+    candidate: &Path,
+) -> anyhow::Result<()> {
+    for (name, profile) in &state.profiles {
+        if prodex_core::same_path(&profile.codex_home, candidate) {
+            bail!(
+                "path {} is already used by profile '{}'",
+                candidate.display(),
+                name
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn dry_run_caveman_home_placeholder(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
@@ -697,6 +756,16 @@ pub fn blocked_selected_runtime_profile_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    fn test_profile(path: &str) -> prodex_state::ProfileEntry {
+        prodex_state::ProfileEntry {
+            codex_home: PathBuf::from(path),
+            managed: true,
+            email: None,
+            provider: prodex_state::ProfileProvider::Openai,
+        }
+    }
 
     #[test]
     fn runtime_proxy_codex_args_preserve_user_overrides_after_proxy_overrides() {
@@ -780,6 +849,68 @@ mod tests {
             "prodex-local"
         ));
         assert!(!allow_profileless_local_home(None, None, "prodex-local"));
+    }
+
+    #[test]
+    fn resolve_profile_name_prefers_requested_then_active_then_single_profile() {
+        let state = prodex_state::AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                ("backup".to_string(), test_profile("/tmp/backup")),
+                ("main".to_string(), test_profile("/tmp/main")),
+            ]),
+            ..prodex_state::AppState::default()
+        };
+
+        assert_eq!(
+            resolve_profile_name(&state, Some("backup")).expect("requested profile"),
+            "backup"
+        );
+        assert_eq!(
+            resolve_profile_name(&state, None).expect("active profile"),
+            "main"
+        );
+
+        let single = prodex_state::AppState {
+            profiles: BTreeMap::from([("only".to_string(), test_profile("/tmp/only"))]),
+            ..prodex_state::AppState::default()
+        };
+        assert_eq!(
+            resolve_profile_name(&single, None).expect("single profile"),
+            "only"
+        );
+    }
+
+    #[test]
+    fn record_run_selection_prunes_missing_profiles_before_insert() {
+        let mut state = prodex_state::AppState {
+            profiles: BTreeMap::from([("main".to_string(), test_profile("/tmp/main"))]),
+            last_run_selected_at: BTreeMap::from([
+                ("deleted".to_string(), 10),
+                ("main".to_string(), 20),
+            ]),
+            ..prodex_state::AppState::default()
+        };
+
+        record_run_selection_at(&mut state, "main", 30);
+
+        assert_eq!(
+            state.last_run_selected_at,
+            BTreeMap::from([("main".to_string(), 30)])
+        );
+    }
+
+    #[test]
+    fn ensure_profile_path_is_unique_rejects_existing_profile_home() {
+        let state = prodex_state::AppState {
+            profiles: BTreeMap::from([("main".to_string(), test_profile("/tmp/main"))]),
+            ..prodex_state::AppState::default()
+        };
+
+        let err = ensure_profile_path_is_unique(&state, Path::new("/tmp/main"))
+            .expect_err("duplicate profile path should fail");
+
+        assert!(err.to_string().contains("already used by profile 'main'"));
     }
 
     #[test]

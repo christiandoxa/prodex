@@ -1,8 +1,8 @@
 use super::*;
 
+pub(crate) use prodex_core::{absolutize, default_codex_home};
 #[cfg(test)]
-pub(crate) use prodex_core::select_default_codex_home;
-pub(crate) use prodex_core::{absolutize, default_codex_home, same_path};
+pub(crate) use prodex_core::{same_path, select_default_codex_home};
 
 pub(crate) fn audit_log_event_best_effort(
     component: &str,
