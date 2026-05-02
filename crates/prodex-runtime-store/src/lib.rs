@@ -19,6 +19,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
 pub const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
+pub const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
+pub const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
+pub const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 
 #[derive(Debug, Clone)]
 pub struct RuntimeMergedStateAndContinuations {
@@ -405,6 +408,299 @@ pub fn runtime_route_kind_from_label(label: &str) -> Option<RuntimeRouteKind> {
     }
 }
 
+pub fn runtime_route_coupled_kinds(route_kind: RuntimeRouteKind) -> &'static [RuntimeRouteKind] {
+    match route_kind {
+        RuntimeRouteKind::Responses => &[RuntimeRouteKind::Websocket],
+        RuntimeRouteKind::Websocket => &[RuntimeRouteKind::Responses],
+        RuntimeRouteKind::Compact => &[RuntimeRouteKind::Standard],
+        RuntimeRouteKind::Standard => &[RuntimeRouteKind::Compact],
+    }
+}
+
+pub fn runtime_profile_effective_health_score(entry: &RuntimeProfileHealth, now: i64) -> u32 {
+    runtime_profile_effective_score(entry, now, RUNTIME_PROFILE_HEALTH_DECAY_SECONDS)
+}
+
+pub fn runtime_profile_effective_score(
+    entry: &RuntimeProfileHealth,
+    now: i64,
+    decay_seconds: i64,
+) -> u32 {
+    let decay = now
+        .saturating_sub(entry.updated_at)
+        .saturating_div(decay_seconds.max(1))
+        .clamp(0, i64::from(u32::MAX)) as u32;
+    entry.score.saturating_sub(decay)
+}
+
+pub fn runtime_profile_effective_health_score_from_map(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    key: &str,
+    now: i64,
+) -> u32 {
+    profile_health
+        .get(key)
+        .map(|entry| runtime_profile_effective_health_score(entry, now))
+        .unwrap_or(0)
+}
+
+pub fn runtime_profile_effective_score_from_map(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    key: &str,
+    now: i64,
+    decay_seconds: i64,
+) -> u32 {
+    profile_health
+        .get(key)
+        .map(|entry| runtime_profile_effective_score(entry, now, decay_seconds))
+        .unwrap_or(0)
+}
+
+pub fn runtime_profile_route_health_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_health__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+pub fn runtime_profile_route_bad_pairing_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_bad_pairing__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+pub fn runtime_profile_route_success_streak_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_success__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+pub fn runtime_profile_route_performance_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_performance__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+pub fn runtime_profile_global_health_score(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+) -> u32 {
+    runtime_profile_effective_health_score_from_map(profile_health, profile_name, now)
+}
+
+pub fn runtime_profile_route_health_score(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    runtime_profile_effective_health_score_from_map(
+        profile_health,
+        &runtime_profile_route_health_key(profile_name, route_kind),
+        now,
+    )
+}
+
+pub fn runtime_profile_route_coupling_score(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    runtime_route_coupled_kinds(route_kind)
+        .iter()
+        .copied()
+        .map(|coupled_kind| {
+            let route_score = runtime_profile_effective_health_score_from_map(
+                profile_health,
+                &runtime_profile_route_health_key(profile_name, coupled_kind),
+                now,
+            );
+            let bad_pairing_score = runtime_profile_effective_score_from_map(
+                profile_health,
+                &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+                now,
+                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+            );
+            route_score
+                .saturating_add(bad_pairing_score)
+                .saturating_div(2)
+        })
+        .fold(0, u32::saturating_add)
+}
+
+pub fn runtime_profile_route_performance_score(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    let route_score = runtime_profile_effective_score_from_map(
+        profile_health,
+        &runtime_profile_route_performance_key(profile_name, route_kind),
+        now,
+        RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+    );
+    let coupled_score = runtime_route_coupled_kinds(route_kind)
+        .iter()
+        .copied()
+        .map(|coupled_kind| {
+            runtime_profile_effective_score_from_map(
+                profile_health,
+                &runtime_profile_route_performance_key(profile_name, coupled_kind),
+                now,
+                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+            )
+            .saturating_div(2)
+        })
+        .fold(0, u32::saturating_add);
+    route_score.saturating_add(coupled_score)
+}
+
+pub fn runtime_profile_health_score(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    runtime_profile_global_health_score(profile_health, profile_name, now)
+        .saturating_add(runtime_profile_route_health_score(
+            profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
+        .saturating_add(runtime_profile_route_coupling_score(
+            profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
+}
+
+pub fn runtime_profile_health_sort_key(
+    profile_name: &str,
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    runtime_profile_effective_health_score_from_map(profile_health, profile_name, now)
+        .saturating_add(runtime_profile_route_health_score(
+            profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
+        .saturating_add(runtime_profile_effective_score_from_map(
+            profile_health,
+            &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+            now,
+            RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+        ))
+        .saturating_add(runtime_profile_route_coupling_score(
+            profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
+        .saturating_add(runtime_profile_route_performance_score(
+            profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
+}
+
+pub fn runtime_previous_response_negative_cache_key(
+    previous_response_id: &str,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__previous_response_not_found__:{}:{}:{profile_name}",
+        runtime_route_kind_label(route_kind),
+        previous_response_id
+    )
+}
+
+pub fn runtime_previous_response_negative_cache_failures(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    previous_response_id: &str,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+    decay_seconds: i64,
+) -> u32 {
+    runtime_profile_effective_score_from_map(
+        profile_health,
+        &runtime_previous_response_negative_cache_key(
+            previous_response_id,
+            profile_name,
+            route_kind,
+        ),
+        now,
+        decay_seconds,
+    )
+}
+
+pub fn runtime_previous_response_negative_cache_active(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    previous_response_id: &str,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+    decay_seconds: i64,
+) -> bool {
+    runtime_previous_response_negative_cache_failures(
+        profile_health,
+        previous_response_id,
+        profile_name,
+        route_kind,
+        now,
+        decay_seconds,
+    ) > 0
+}
+
+pub fn clear_runtime_previous_response_negative_cache(
+    profile_health: &mut BTreeMap<String, RuntimeProfileHealth>,
+    previous_response_id: &str,
+    profile_name: &str,
+) -> bool {
+    let mut changed = false;
+    for route_kind in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Standard,
+    ] {
+        changed = profile_health
+            .remove(&runtime_previous_response_negative_cache_key(
+                previous_response_id,
+                profile_name,
+                route_kind,
+            ))
+            .is_some()
+            || changed;
+    }
+    changed
+}
+
 pub fn runtime_profile_route_key_parts<'a>(
     key: &'a str,
     prefix: &str,
@@ -492,6 +788,7 @@ fn runtime_profile_route_circuit_profile_name(key: &str) -> &str {
 }
 
 pub const RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX: &str = "__compact_session__:";
+pub const RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX: &str = "__compact_turn_state__:";
 pub const RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX: &str = "__response_turn_state__:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -534,6 +831,17 @@ impl Default for RuntimeContinuationCompactionPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeContinuationStatusPolicy {
+    pub touch_persist_interval_seconds: i64,
+    pub suspect_grace_seconds: i64,
+    pub suspect_not_found_streak_limit: u32,
+    pub confidence_max: u32,
+    pub verified_confidence_bonus: u32,
+    pub touch_confidence_bonus: u32,
+    pub suspect_confidence_penalty: u32,
+}
+
 pub fn runtime_continuation_store_from_app_state(
     state: &AppState,
 ) -> RuntimeContinuationStore<ResponseProfileBinding> {
@@ -546,6 +854,21 @@ pub fn runtime_continuation_store_from_app_state(
         session_id_bindings: runtime_external_session_id_bindings(&state.session_profile_bindings),
         statuses: RuntimeContinuationStatuses::default(),
     }
+}
+
+pub fn runtime_compact_session_lineage_key(session_id: &str) -> String {
+    format!("{RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX}{session_id}")
+}
+
+pub fn runtime_compact_turn_state_lineage_key(turn_state: &str) -> String {
+    format!("{RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX}{turn_state}")
+}
+
+pub fn runtime_response_turn_state_lineage_key(response_id: &str, turn_state: &str) -> String {
+    format!(
+        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{response_id}:{turn_state}",
+        response_id.len()
+    )
 }
 
 pub fn runtime_is_response_turn_state_lineage_key(key: &str) -> bool {
@@ -587,6 +910,17 @@ pub fn runtime_external_session_id_bindings(
         .filter(|(key, _)| !runtime_is_compact_session_lineage_key(key))
         .map(|(key, binding)| (key.clone(), binding.clone()))
         .collect()
+}
+
+pub fn runtime_continuation_status_map(
+    statuses: &RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+) -> &BTreeMap<String, RuntimeContinuationBindingStatus> {
+    match kind {
+        RuntimeContinuationBindingKind::Response => &statuses.response,
+        RuntimeContinuationBindingKind::TurnState => &statuses.turn_state,
+        RuntimeContinuationBindingKind::SessionId => &statuses.session_id,
+    }
 }
 
 pub fn runtime_continuation_status_map_mut(
@@ -680,6 +1014,241 @@ pub fn runtime_continuation_status_last_event_at(
     .into_iter()
     .flatten()
     .max()
+}
+
+pub fn runtime_binding_touch_should_persist(
+    bound_at: i64,
+    now: i64,
+    touch_persist_interval_seconds: i64,
+) -> bool {
+    // Timestamps use second precision. Require strictly more than the interval
+    // so a boundary-crossing lookup does not persist nearly a second early.
+    now.saturating_sub(bound_at) > touch_persist_interval_seconds
+}
+
+pub fn runtime_continuation_status_is_terminal_for_status_policy(
+    status: &RuntimeContinuationBindingStatus,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    status.state == RuntimeContinuationBindingLifecycle::Dead
+        || status.not_found_streak >= policy.suspect_not_found_streak_limit
+        || (status.state == RuntimeContinuationBindingLifecycle::Suspect
+            && status.confidence == 0
+            && status.failure_count > 0)
+}
+
+pub fn runtime_continuation_next_event_at(
+    status: &RuntimeContinuationBindingStatus,
+    now: i64,
+) -> i64 {
+    runtime_continuation_status_last_event_at(status)
+        .filter(|last| *last >= now)
+        .map_or(now, |last| last.saturating_add(1))
+}
+
+pub fn runtime_continuation_status_touches(
+    status: &mut RuntimeContinuationBindingStatus,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let previous = status.clone();
+    let event_at = runtime_continuation_next_event_at(&previous, now);
+    status.last_touched_at = Some(event_at);
+    if status.state == RuntimeContinuationBindingLifecycle::Suspect {
+        if status
+            .last_not_found_at
+            .is_some_and(|last| event_at.saturating_sub(last) >= policy.suspect_grace_seconds)
+        {
+            status.state = RuntimeContinuationBindingLifecycle::Warm;
+            status.not_found_streak = 0;
+            status.last_not_found_at = None;
+        }
+        status.confidence = status
+            .confidence
+            .saturating_add(policy.touch_confidence_bonus)
+            .min(policy.confidence_max);
+    } else if status.state != RuntimeContinuationBindingLifecycle::Dead {
+        status.confidence = status
+            .confidence
+            .saturating_add(policy.touch_confidence_bonus)
+            .min(policy.confidence_max);
+    }
+    *status != previous
+}
+
+pub fn runtime_continuation_status_should_refresh_verified(
+    status: Option<&RuntimeContinuationBindingStatus>,
+    now: i64,
+    verified_route_label: Option<&str>,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let Some(status) = status else {
+        return true;
+    };
+
+    if status.state != RuntimeContinuationBindingLifecycle::Verified {
+        return true;
+    }
+
+    if status.last_verified_route.as_deref() != verified_route_label {
+        return true;
+    }
+
+    status.last_verified_at.is_none_or(|last_verified_at| {
+        runtime_binding_touch_should_persist(
+            last_verified_at,
+            now,
+            policy.touch_persist_interval_seconds,
+        )
+    })
+}
+
+pub fn runtime_continuation_status_should_persist_touch(
+    status: Option<&RuntimeContinuationBindingStatus>,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let Some(status) = status else {
+        return true;
+    };
+
+    if status.state == RuntimeContinuationBindingLifecycle::Suspect
+        && status.last_not_found_at.is_some_and(|last_not_found_at| {
+            now.saturating_sub(last_not_found_at) >= policy.suspect_grace_seconds
+        })
+    {
+        return true;
+    }
+
+    status.last_touched_at.is_none_or(|last_touched_at| {
+        runtime_binding_touch_should_persist(
+            last_touched_at,
+            now,
+            policy.touch_persist_interval_seconds,
+        )
+    })
+}
+
+pub fn runtime_mark_continuation_status_touched(
+    statuses: &mut RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let status = runtime_continuation_status_map_mut(statuses, kind)
+        .entry(key.to_string())
+        .or_default();
+    runtime_continuation_status_touches(status, now, policy)
+}
+
+pub fn runtime_mark_continuation_status_verified(
+    statuses: &mut RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+    verified_route_label: Option<&str>,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let status = runtime_continuation_status_map_mut(statuses, kind)
+        .entry(key.to_string())
+        .or_default();
+    let previous = status.clone();
+    let event_at = runtime_continuation_next_event_at(&previous, now);
+    status.state = RuntimeContinuationBindingLifecycle::Verified;
+    status.last_touched_at = Some(event_at);
+    status.last_verified_at = Some(event_at);
+    status.last_verified_route = verified_route_label.map(str::to_string);
+    status.last_not_found_at = None;
+    status.not_found_streak = 0;
+    status.success_count = status.success_count.saturating_add(1);
+    status.failure_count = 0;
+    status.confidence = status
+        .confidence
+        .saturating_add(policy.verified_confidence_bonus)
+        .min(policy.confidence_max);
+    *status != previous
+}
+
+pub fn runtime_mark_continuation_status_suspect(
+    statuses: &mut RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let status = runtime_continuation_status_map_mut(statuses, kind)
+        .entry(key.to_string())
+        .or_default();
+    let previous = status.clone();
+    let event_at = runtime_continuation_next_event_at(&previous, now);
+    status.not_found_streak = status.not_found_streak.saturating_add(1);
+    status.last_touched_at = Some(event_at);
+    status.last_not_found_at = Some(event_at);
+    status.failure_count = status.failure_count.saturating_add(1);
+    let previous_confidence = status.confidence;
+    status.confidence = status
+        .confidence
+        .saturating_sub(policy.suspect_confidence_penalty);
+    if previous_confidence == 0 {
+        status.confidence = 1;
+    }
+    status.state = if status.not_found_streak >= policy.suspect_not_found_streak_limit
+        || (previous_confidence > 0 && status.confidence == 0)
+    {
+        RuntimeContinuationBindingLifecycle::Dead
+    } else {
+        RuntimeContinuationBindingLifecycle::Suspect
+    };
+    *status != previous
+}
+
+pub fn runtime_mark_continuation_status_dead(
+    statuses: &mut RuntimeContinuationStatuses,
+    kind: RuntimeContinuationBindingKind,
+    key: &str,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    let status = runtime_continuation_status_map_mut(statuses, kind)
+        .entry(key.to_string())
+        .or_default();
+    let previous = status.clone();
+    let event_at = runtime_continuation_next_event_at(&previous, now);
+    status.state = RuntimeContinuationBindingLifecycle::Dead;
+    status.confidence = 0;
+    status.last_touched_at = Some(event_at);
+    status.last_not_found_at = Some(event_at);
+    status.not_found_streak = status
+        .not_found_streak
+        .max(policy.suspect_not_found_streak_limit);
+    status.failure_count = status.failure_count.saturating_add(1);
+    *status != previous
+}
+
+pub fn runtime_continuation_status_recently_suspect(
+    status: Option<&RuntimeContinuationBindingStatus>,
+    now: i64,
+    policy: RuntimeContinuationStatusPolicy,
+) -> bool {
+    status.is_some_and(|status| {
+        status.state == RuntimeContinuationBindingLifecycle::Suspect
+            && !runtime_continuation_status_is_terminal_for_status_policy(status, policy)
+            && status
+                .last_not_found_at
+                .is_some_and(|last| now.saturating_sub(last) < policy.suspect_grace_seconds)
+    })
+}
+
+pub fn runtime_continuation_status_label(
+    status: &RuntimeContinuationBindingStatus,
+) -> &'static str {
+    match status.state {
+        RuntimeContinuationBindingLifecycle::Warm => "warm",
+        RuntimeContinuationBindingLifecycle::Verified => "verified",
+        RuntimeContinuationBindingLifecycle::Suspect => "suspect",
+        RuntimeContinuationBindingLifecycle::Dead => "dead",
+    }
 }
 
 pub fn runtime_continuation_status_is_terminal(
@@ -1493,6 +2062,120 @@ mod tests {
     }
 
     #[test]
+    fn profile_health_sort_key_includes_route_coupling_and_performance() {
+        let scores = BTreeMap::from([
+            (
+                "alpha".to_string(),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_profile_route_health_key("alpha", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 2,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_profile_route_bad_pairing_key("alpha", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 3,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_profile_route_health_key("alpha", RuntimeRouteKind::Websocket),
+                RuntimeProfileHealth {
+                    score: 4,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_profile_route_bad_pairing_key("alpha", RuntimeRouteKind::Websocket),
+                RuntimeProfileHealth {
+                    score: 2,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_profile_route_performance_key("alpha", RuntimeRouteKind::Responses),
+                RuntimeProfileHealth {
+                    score: 8,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_profile_route_performance_key("alpha", RuntimeRouteKind::Websocket),
+                RuntimeProfileHealth {
+                    score: 4,
+                    updated_at: 100,
+                },
+            ),
+        ]);
+
+        assert_eq!(
+            runtime_profile_health_sort_key("alpha", &scores, 100, RuntimeRouteKind::Responses),
+            19
+        );
+    }
+
+    #[test]
+    fn previous_response_negative_cache_helpers_decay_and_clear_route_keys() {
+        let mut scores = BTreeMap::from([
+            (
+                runtime_previous_response_negative_cache_key(
+                    "resp",
+                    "alpha",
+                    RuntimeRouteKind::Responses,
+                ),
+                RuntimeProfileHealth {
+                    score: 3,
+                    updated_at: 100,
+                },
+            ),
+            (
+                runtime_previous_response_negative_cache_key(
+                    "resp",
+                    "alpha",
+                    RuntimeRouteKind::Websocket,
+                ),
+                RuntimeProfileHealth {
+                    score: 1,
+                    updated_at: 100,
+                },
+            ),
+        ]);
+
+        assert_eq!(
+            runtime_previous_response_negative_cache_failures(
+                &scores,
+                "resp",
+                "alpha",
+                RuntimeRouteKind::Responses,
+                102,
+                2,
+            ),
+            2
+        );
+        assert!(runtime_previous_response_negative_cache_active(
+            &scores,
+            "resp",
+            "alpha",
+            RuntimeRouteKind::Websocket,
+            100,
+            2,
+        ));
+        assert!(clear_runtime_previous_response_negative_cache(
+            &mut scores,
+            "resp",
+            "alpha",
+        ));
+        assert!(scores.is_empty());
+    }
+
+    #[test]
     fn backoff_compaction_keeps_valid_route_keys_and_future_backoffs() {
         let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
         let backoffs = RuntimeProfileBackoffs {
@@ -1647,6 +2330,111 @@ mod tests {
             !compacted
                 .response_profile_bindings
                 .contains_key("missing-profile")
+        );
+    }
+
+    #[test]
+    fn continuation_status_helpers_touch_verify_and_mark_suspect() {
+        let policy = RuntimeContinuationStatusPolicy {
+            touch_persist_interval_seconds: 10,
+            suspect_grace_seconds: 5,
+            suspect_not_found_streak_limit: 2,
+            confidence_max: 8,
+            verified_confidence_bonus: 2,
+            touch_confidence_bonus: 1,
+            suspect_confidence_penalty: 1,
+        };
+        let mut statuses = RuntimeContinuationStatuses::default();
+
+        assert!(runtime_mark_continuation_status_verified(
+            &mut statuses,
+            RuntimeContinuationBindingKind::Response,
+            "resp-1",
+            100,
+            Some("responses"),
+            policy,
+        ));
+        let status = statuses.response.get("resp-1").expect("verified status");
+        assert_eq!(status.state, RuntimeContinuationBindingLifecycle::Verified);
+        assert_eq!(status.confidence, 2);
+        assert_eq!(status.last_verified_route.as_deref(), Some("responses"));
+        assert!(!runtime_continuation_status_should_refresh_verified(
+            Some(status),
+            105,
+            Some("responses"),
+            policy,
+        ));
+        assert!(runtime_continuation_status_should_refresh_verified(
+            Some(status),
+            111,
+            Some("responses"),
+            policy,
+        ));
+
+        assert!(runtime_mark_continuation_status_suspect(
+            &mut statuses,
+            RuntimeContinuationBindingKind::Response,
+            "resp-1",
+            112,
+            policy,
+        ));
+        assert!(runtime_continuation_status_recently_suspect(
+            statuses.response.get("resp-1"),
+            113,
+            policy,
+        ));
+        assert!(runtime_mark_continuation_status_suspect(
+            &mut statuses,
+            RuntimeContinuationBindingKind::Response,
+            "resp-1",
+            114,
+            policy,
+        ));
+        assert_eq!(
+            statuses.response.get("resp-1").map(|status| status.state),
+            Some(RuntimeContinuationBindingLifecycle::Dead)
+        );
+    }
+
+    #[test]
+    fn lineage_key_helpers_round_trip_and_filter_internal_keys() {
+        let lineage_key = runtime_response_turn_state_lineage_key("resp:with:colon", "turn");
+        assert_eq!(
+            runtime_response_turn_state_lineage_parts(&lineage_key),
+            Some(("resp:with:colon", "turn"))
+        );
+        assert_eq!(
+            runtime_compact_session_lineage_key("session"),
+            "__compact_session__:session"
+        );
+        assert_eq!(
+            runtime_compact_turn_state_lineage_key("turn"),
+            "__compact_turn_state__:turn"
+        );
+
+        let bindings = BTreeMap::from([
+            (
+                "external".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "alpha".to_string(),
+                    bound_at: 100,
+                },
+            ),
+            (
+                lineage_key,
+                ResponseProfileBinding {
+                    profile_name: "alpha".to_string(),
+                    bound_at: 100,
+                },
+            ),
+        ]);
+
+        assert_eq!(
+            runtime_external_response_profile_bindings(&bindings)
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["external".to_string()]
         );
     }
 }

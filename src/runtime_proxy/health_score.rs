@@ -11,18 +11,6 @@ fn runtime_route_kind_to_proxy(
     }
 }
 
-fn runtime_profile_health_snapshot(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    key: &str,
-) -> Option<runtime_proxy_crate::RuntimeProfileHealthSnapshot> {
-    profile_health
-        .get(key)
-        .map(|entry| runtime_proxy_crate::RuntimeProfileHealthSnapshot {
-            score: entry.score,
-            updated_at: entry.updated_at,
-        })
-}
-
 pub(crate) fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {
     Ok(shared
         .runtime
@@ -100,26 +88,21 @@ pub(crate) fn runtime_profile_in_selection_backoff(
 }
 
 pub(crate) fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
-    runtime_proxy_crate::runtime_route_kind_label(runtime_route_kind_to_proxy(route_kind))
+    prodex_runtime_store::runtime_route_kind_label(route_kind)
 }
 
 #[allow(dead_code)]
 pub(crate) fn runtime_route_coupled_kinds(
     route_kind: RuntimeRouteKind,
 ) -> &'static [RuntimeRouteKind] {
-    match route_kind {
-        RuntimeRouteKind::Responses => &[RuntimeRouteKind::Websocket],
-        RuntimeRouteKind::Websocket => &[RuntimeRouteKind::Responses],
-        RuntimeRouteKind::Compact => &[RuntimeRouteKind::Standard],
-        RuntimeRouteKind::Standard => &[RuntimeRouteKind::Compact],
-    }
+    prodex_runtime_store::runtime_route_coupled_kinds(route_kind)
 }
 
 pub(crate) fn runtime_profile_effective_health_score(
     entry: &RuntimeProfileHealth,
     now: i64,
 ) -> u32 {
-    runtime_profile_effective_score(entry, now, RUNTIME_PROFILE_HEALTH_DECAY_SECONDS)
+    prodex_runtime_store::runtime_profile_effective_health_score(entry, now)
 }
 
 #[allow(dead_code)]
@@ -128,11 +111,7 @@ pub(crate) fn runtime_profile_effective_score(
     now: i64,
     decay_seconds: i64,
 ) -> u32 {
-    let decay = now
-        .saturating_sub(entry.updated_at)
-        .saturating_div(decay_seconds.max(1))
-        .clamp(0, i64::from(u32::MAX)) as u32;
-    entry.score.saturating_sub(decay)
+    prodex_runtime_store::runtime_profile_effective_score(entry, now, decay_seconds)
 }
 
 pub(crate) fn runtime_profile_effective_health_score_from_map(
@@ -140,11 +119,7 @@ pub(crate) fn runtime_profile_effective_health_score_from_map(
     key: &str,
     now: i64,
 ) -> u32 {
-    runtime_proxy_crate::runtime_profile_effective_health_score_by_key(
-        |key| runtime_profile_health_snapshot(profile_health, key),
-        key,
-        now,
-    )
+    prodex_runtime_store::runtime_profile_effective_health_score_from_map(profile_health, key, now)
 }
 
 pub(crate) fn runtime_profile_effective_score_from_map(
@@ -153,60 +128,40 @@ pub(crate) fn runtime_profile_effective_score_from_map(
     now: i64,
     decay_seconds: i64,
 ) -> u32 {
-    runtime_proxy_crate::runtime_profile_effective_score_by_key(
-        |key| runtime_profile_health_snapshot(profile_health, key),
+    prodex_runtime_store::runtime_profile_effective_score_from_map(
+        profile_health,
         key,
         now,
         decay_seconds,
     )
 }
 
-pub(crate) fn runtime_profile_global_health_score(
-    runtime: &RuntimeRotationState,
-    profile_name: &str,
-    now: i64,
-) -> u32 {
-    runtime_profile_effective_health_score_from_map(&runtime.profile_health, profile_name, now)
-}
-
 pub(crate) fn runtime_profile_route_health_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    runtime_proxy_crate::runtime_profile_route_health_key(
-        profile_name,
-        runtime_route_kind_to_proxy(route_kind),
-    )
+    prodex_runtime_store::runtime_profile_route_health_key(profile_name, route_kind)
 }
 
 pub(crate) fn runtime_profile_route_bad_pairing_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    runtime_proxy_crate::runtime_profile_route_bad_pairing_key(
-        profile_name,
-        runtime_route_kind_to_proxy(route_kind),
-    )
+    prodex_runtime_store::runtime_profile_route_bad_pairing_key(profile_name, route_kind)
 }
 
 pub(crate) fn runtime_profile_route_success_streak_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    runtime_proxy_crate::runtime_profile_route_success_streak_key(
-        profile_name,
-        runtime_route_kind_to_proxy(route_kind),
-    )
+    prodex_runtime_store::runtime_profile_route_success_streak_key(profile_name, route_kind)
 }
 
 pub(crate) fn runtime_profile_route_performance_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    runtime_proxy_crate::runtime_profile_route_performance_key(
-        profile_name,
-        runtime_route_kind_to_proxy(route_kind),
-    )
+    prodex_runtime_store::runtime_profile_route_performance_key(profile_name, route_kind)
 }
 
 pub(crate) fn runtime_profile_route_health_score(
@@ -215,38 +170,11 @@ pub(crate) fn runtime_profile_route_health_score(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_profile_effective_health_score_from_map(
-        &runtime.profile_health,
-        &runtime_profile_route_health_key(profile_name, route_kind),
-        now,
-    )
-}
-
-pub(crate) fn runtime_profile_route_coupling_score(
-    runtime: &RuntimeRotationState,
-    profile_name: &str,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    runtime_profile_route_coupling_score_from_map(
+    prodex_runtime_store::runtime_profile_route_health_score(
         &runtime.profile_health,
         profile_name,
         now,
         route_kind,
-    )
-}
-
-pub(crate) fn runtime_profile_route_coupling_score_from_map(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    profile_name: &str,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    runtime_proxy_crate::runtime_profile_route_coupling_score_by_key(
-        |key| runtime_profile_health_snapshot(profile_health, key),
-        profile_name,
-        now,
-        runtime_route_kind_to_proxy(route_kind),
     )
 }
 
@@ -256,11 +184,11 @@ pub(crate) fn runtime_profile_route_performance_score(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_proxy_crate::runtime_profile_route_performance_score_by_key(
-        |key| runtime_profile_health_snapshot(profile_health, key),
+    prodex_runtime_store::runtime_profile_route_performance_score(
+        profile_health,
         profile_name,
         now,
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
     )
 }
 
@@ -270,19 +198,12 @@ pub(crate) fn runtime_profile_health_score(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_profile_global_health_score(runtime, profile_name, now)
-        .saturating_add(runtime_profile_route_health_score(
-            runtime,
-            profile_name,
-            now,
-            route_kind,
-        ))
-        .saturating_add(runtime_profile_route_coupling_score(
-            runtime,
-            profile_name,
-            now,
-            route_kind,
-        ))
+    prodex_runtime_store::runtime_profile_health_score(
+        &runtime.profile_health,
+        profile_name,
+        now,
+        route_kind,
+    )
 }
 
 pub(crate) fn runtime_profile_selection_jitter(
@@ -306,11 +227,11 @@ pub(crate) fn runtime_profile_health_sort_key(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_proxy_crate::runtime_profile_health_sort_key_by_key(
+    prodex_runtime_store::runtime_profile_health_sort_key(
         profile_name,
-        |key| runtime_profile_health_snapshot(profile_health, key),
+        profile_health,
         now,
-        runtime_route_kind_to_proxy(route_kind),
+        route_kind,
     )
 }
 

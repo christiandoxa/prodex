@@ -27,22 +27,6 @@ pub(crate) fn runtime_continuation_compaction_policy()
     }
 }
 
-fn runtime_store_continuation_binding_kind(
-    kind: RuntimeContinuationBindingKind,
-) -> prodex_runtime_store::RuntimeContinuationBindingKind {
-    match kind {
-        RuntimeContinuationBindingKind::Response => {
-            prodex_runtime_store::RuntimeContinuationBindingKind::Response
-        }
-        RuntimeContinuationBindingKind::TurnState => {
-            prodex_runtime_store::RuntimeContinuationBindingKind::TurnState
-        }
-        RuntimeContinuationBindingKind::SessionId => {
-            prodex_runtime_store::RuntimeContinuationBindingKind::SessionId
-        }
-    }
-}
-
 pub(crate) fn compact_app_state(state: AppState, now: i64) -> AppState {
     prodex_state::compact_app_state_with_policy(state, now, app_state_compaction_policy())
 }
@@ -95,7 +79,7 @@ pub(crate) fn runtime_age_stale_verified_continuation_status(
 ) -> bool {
     prodex_runtime_store::runtime_age_stale_verified_continuation_status(
         statuses,
-        runtime_store_continuation_binding_kind(kind),
+        kind,
         key,
         now,
         runtime_continuation_compaction_policy(),

@@ -158,7 +158,3 @@ pub(crate) struct RuntimeProfileProbeCacheEntry {
     pub(crate) auth: AuthSummary,
     pub(crate) result: std::result::Result<UsageResponse, String>,
 }
-
-pub(crate) const RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX: &str = "__compact_session__:";
-pub(crate) const RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX: &str = "__compact_turn_state__:";
-pub(crate) const RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX: &str = "__response_turn_state__:";
