@@ -322,6 +322,55 @@ mod tests {
     }
 
     #[test]
+    fn websocket_direct_previous_response_frame_is_forwarded_without_translation() {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "status": 400,
+            "error": {
+                "code": "previous_response_not_found",
+                "message": "Previous response with id 'resp-123' not found.",
+            }
+        })
+        .to_string();
+
+        let translated = runtime_translate_previous_response_websocket_text_frame(&payload);
+        let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
+
+        assert_eq!(translated, payload);
+        assert_eq!(
+            value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("previous_response_not_found")
+        );
+    }
+
+    #[test]
+    fn websocket_precommit_previous_response_plain_text_translation_uses_proxy_error_shape() {
+        let translated = runtime_translate_precommit_previous_response_websocket_text_frame(
+            "previous_response_not_found: Previous response with id 'resp-123' not found.",
+        );
+
+        let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
+        assert_eq!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some("error")
+        );
+        assert_eq!(
+            value.get("status").and_then(serde_json::Value::as_u64),
+            Some(409)
+        );
+        assert_eq!(
+            value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("stale_continuation")
+        );
+    }
+
+    #[test]
     fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
         let payload = serde_json::json!({
             "type": "response.failed",
