@@ -7,7 +7,6 @@ pub(crate) use runtime_proxy_crate::{
     extract_runtime_proxy_quota_message_from_websocket_payload,
     extract_runtime_response_ids_from_body_bytes, extract_runtime_token_usage_from_body_bytes,
     extract_runtime_turn_state_from_body_bytes, inspect_runtime_sse_buffer,
-    runtime_sse_consume_chunk, runtime_sse_finish_pending,
 };
 
 #[cfg(test)]

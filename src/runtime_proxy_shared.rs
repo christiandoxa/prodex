@@ -51,19 +51,9 @@ pub(super) enum RuntimeSseInspection {
 
 pub(super) type RuntimeSseInspectionProgress = runtime_proxy_crate::RuntimeSseInspectionProgress;
 
-pub(super) type RuntimeParsedSseEvent = runtime_proxy_crate::RuntimeParsedSseEvent;
-
-#[derive(Default)]
-pub(super) struct RuntimeSseTapState {
-    pub(super) request_id: u64,
-    pub(super) line: Vec<u8>,
-    pub(super) data_lines: Vec<String>,
-    pub(super) remembered_response_ids: BTreeSet<String>,
-    pub(super) response_ids_with_turn_state: BTreeSet<String>,
-    pub(super) logged_token_usage: BTreeSet<RuntimeTokenUsage>,
-    pub(super) turn_state: Option<String>,
-    pub(super) request_previous_response_id: Option<String>,
-}
+pub(super) type RuntimeSseTapEffect = runtime_proxy_crate::RuntimeSseTapEffect;
+pub(super) type RuntimeSseTapState = runtime_proxy_crate::RuntimeSseTapState;
+pub(super) type RuntimeSseTapStateInit<'a> = runtime_proxy_crate::RuntimeSseTapStateInit<'a>;
 
 pub(super) type RuntimeTokenUsage = runtime_proxy_crate::RuntimeTokenUsage;
 

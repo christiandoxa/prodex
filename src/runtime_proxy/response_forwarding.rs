@@ -275,184 +275,45 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
     Ok(response)
 }
 
-impl RuntimeSseTapState {
-    fn consume_chunk_events<F>(&mut self, chunk: &[u8], mut on_event: F)
-    where
-        F: FnMut(&mut Self, RuntimeParsedSseEvent),
-    {
-        let mut line = std::mem::take(&mut self.line);
-        let mut data_lines = std::mem::take(&mut self.data_lines);
-        runtime_sse_consume_chunk(&mut line, &mut data_lines, chunk, |event| {
-            on_event(self, event);
-        });
-        self.line = line;
-        self.data_lines = data_lines;
-    }
-
-    fn finish_pending_events<F>(&mut self, mut on_event: F)
-    where
-        F: FnMut(&mut Self, RuntimeParsedSseEvent),
-    {
-        let mut line = std::mem::take(&mut self.line);
-        let mut data_lines = std::mem::take(&mut self.data_lines);
-        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
-            on_event(self, event);
-        });
-        self.line = line;
-        self.data_lines = data_lines;
-    }
-
-    fn prime_from_prelude(
-        &mut self,
-        shared: &RuntimeRotationProxyShared,
-        profile_name: &str,
-        chunk: &[u8],
-    ) {
-        self.consume_chunk_events(chunk, |state, event| {
-            state.observe_stream_event(shared, profile_name, event);
-        });
-    }
-
-    fn observe(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str, chunk: &[u8]) {
-        self.consume_chunk_events(chunk, |state, event| {
-            state.observe_stream_event(shared, profile_name, event);
-        });
-    }
-
-    fn finish(&mut self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
-        self.finish_pending_events(|state, event| {
-            state.observe_stream_event(shared, profile_name, event);
-        });
-    }
-
-    fn observe_stream_event(
-        &mut self,
-        shared: &RuntimeRotationProxyShared,
-        profile_name: &str,
-        event: RuntimeParsedSseEvent,
-    ) {
-        if let Some(turn_state) = event.turn_state {
-            self.turn_state = Some(turn_state);
-        }
-        self.remember_response_ids(
-            shared,
-            profile_name,
-            &event.response_ids,
-            RuntimeRouteKind::Responses,
-        );
-        if event.previous_response_not_found {
-            self.clear_dead_chain(shared, profile_name);
-        }
-        self.log_token_usage(
-            shared,
-            profile_name,
-            event.event_type.as_deref(),
-            event.token_usage,
-        );
-    }
-
-    fn remember_response_ids(
-        &mut self,
-        shared: &RuntimeRotationProxyShared,
-        profile_name: &str,
-        response_ids: &[String],
-        verified_route: RuntimeRouteKind,
-    ) {
-        let turn_state = self.turn_state.as_deref();
-        let mut fresh_ids = Vec::new();
-        for response_id in response_ids {
-            if self.remembered_response_ids.contains(response_id.as_str()) {
-                continue;
-            }
-            let fresh_id = response_id.clone();
-            self.remembered_response_ids.insert(fresh_id.clone());
-            if turn_state.is_some() {
-                self.response_ids_with_turn_state.insert(fresh_id.clone());
-            }
-            fresh_ids.push(fresh_id);
-        }
-
-        let mut response_ids_needing_turn_state = Vec::new();
-        if turn_state.is_some()
-            && self.response_ids_with_turn_state.len() < self.remembered_response_ids.len()
-        {
-            for response_id in &self.remembered_response_ids {
-                if self
-                    .response_ids_with_turn_state
-                    .contains(response_id.as_str())
-                {
-                    continue;
-                }
-                let rebound_id = response_id.clone();
-                self.response_ids_with_turn_state.insert(rebound_id.clone());
-                response_ids_needing_turn_state.push(rebound_id);
-            }
-        }
-
-        if fresh_ids.is_empty() && response_ids_needing_turn_state.is_empty() {
-            return;
-        }
-        if !fresh_ids.is_empty() {
-            let _ = remember_runtime_response_ids_with_turn_state(
-                shared,
-                profile_name,
-                &fresh_ids,
+fn apply_runtime_sse_tap_effects(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_id: u64,
+    effects: Vec<RuntimeSseTapEffect>,
+) {
+    for effect in effects {
+        match effect {
+            RuntimeSseTapEffect::RememberResponseIds {
+                response_ids,
                 turn_state,
-                verified_route,
-            );
+            } => {
+                let _ = remember_runtime_response_ids_with_turn_state(
+                    shared,
+                    profile_name,
+                    &response_ids,
+                    turn_state.as_deref(),
+                    RuntimeRouteKind::Responses,
+                );
+            }
+            RuntimeSseTapEffect::ClearDeadResponseBindings { response_ids } => {
+                let _ = clear_runtime_dead_response_bindings(
+                    shared,
+                    profile_name,
+                    &response_ids,
+                    "previous_response_not_found_after_commit",
+                );
+            }
+            RuntimeSseTapEffect::LogTokenUsage(token_usage) => {
+                log_runtime_token_usage(
+                    shared,
+                    request_id,
+                    "http",
+                    profile_name,
+                    "responses_sse",
+                    Some(token_usage),
+                );
+            }
         }
-        if !response_ids_needing_turn_state.is_empty() {
-            let _ = remember_runtime_response_ids_with_turn_state(
-                shared,
-                profile_name,
-                &response_ids_needing_turn_state,
-                turn_state,
-                verified_route,
-            );
-        }
-    }
-
-    fn clear_dead_chain(&self, shared: &RuntimeRotationProxyShared, profile_name: &str) {
-        let mut dead_response_ids = self
-            .remembered_response_ids
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        if let Some(previous_response_id) = self.request_previous_response_id.as_deref() {
-            dead_response_ids.push(previous_response_id.to_string());
-        }
-        let _ = clear_runtime_dead_response_bindings(
-            shared,
-            profile_name,
-            &dead_response_ids,
-            "previous_response_not_found_after_commit",
-        );
-    }
-
-    fn log_token_usage(
-        &mut self,
-        shared: &RuntimeRotationProxyShared,
-        profile_name: &str,
-        event_type: Option<&str>,
-        token_usage: Option<RuntimeTokenUsage>,
-    ) {
-        if !runtime_token_usage_event_is_loggable(event_type) {
-            return;
-        }
-        let Some(token_usage) = token_usage else {
-            return;
-        };
-        if !self.logged_token_usage.insert(token_usage) {
-            return;
-        }
-        log_runtime_token_usage(
-            shared,
-            self.request_id,
-            "http",
-            profile_name,
-            "responses_sse",
-            Some(token_usage),
-        );
     }
 }
 
@@ -460,6 +321,7 @@ pub(crate) struct RuntimeSseTapReader {
     inner: Box<dyn Read + Send>,
     shared: RuntimeRotationProxyShared,
     profile_name: String,
+    request_id: u64,
     state: RuntimeSseTapState,
 }
 
@@ -553,21 +415,18 @@ impl RuntimeSseTapReader {
             turn_state,
             request_id,
         } = init;
-        let mut state = RuntimeSseTapState {
-            request_id,
-            remembered_response_ids: remembered_response_ids.iter().cloned().collect(),
-            response_ids_with_turn_state: turn_state
-                .map(|_| remembered_response_ids.iter().cloned().collect())
-                .unwrap_or_default(),
-            turn_state: turn_state.map(str::to_string),
-            request_previous_response_id: request_previous_response_id.map(str::to_string),
-            ..RuntimeSseTapState::default()
-        };
-        state.prime_from_prelude(&shared, &profile_name, prelude);
+        let mut state = RuntimeSseTapState::new(RuntimeSseTapStateInit {
+            remembered_response_ids,
+            request_previous_response_id,
+            turn_state,
+        });
+        let effects = state.observe_chunk(prelude);
+        apply_runtime_sse_tap_effects(&shared, &profile_name, request_id, effects);
         Self {
             inner: Box::new(inner),
             shared,
             profile_name,
+            request_id,
             state,
         }
     }
@@ -591,11 +450,17 @@ impl Read for RuntimeSseTapReader {
             }
         };
         if read == 0 {
-            self.state.finish(&self.shared, &self.profile_name);
+            let effects = self.state.finish_pending();
+            apply_runtime_sse_tap_effects(
+                &self.shared,
+                &self.profile_name,
+                self.request_id,
+                effects,
+            );
             return Ok(0);
         }
-        self.state
-            .observe(&self.shared, &self.profile_name, &buf[..read]);
+        let effects = self.state.observe_chunk(&buf[..read]);
+        apply_runtime_sse_tap_effects(&self.shared, &self.profile_name, self.request_id, effects);
         Ok(read)
     }
 }

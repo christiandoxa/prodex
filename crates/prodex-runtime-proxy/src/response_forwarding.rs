@@ -1,3 +1,7 @@
+use std::collections::BTreeSet;
+
+use crate::{RuntimeTokenUsage, runtime_sse_consume_chunk, runtime_sse_finish_pending};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeResponseForwardingBodyKind {
     Unary,
@@ -127,6 +131,171 @@ pub fn runtime_token_usage_event_is_loggable(event_type: Option<&str>) -> bool {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeSseTapEffect {
+    RememberResponseIds {
+        response_ids: Vec<String>,
+        turn_state: Option<String>,
+    },
+    ClearDeadResponseBindings {
+        response_ids: Vec<String>,
+    },
+    LogTokenUsage(RuntimeTokenUsage),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeSseTapStateInit<'a> {
+    pub remembered_response_ids: &'a [String],
+    pub request_previous_response_id: Option<&'a str>,
+    pub turn_state: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeSseTapState {
+    line: Vec<u8>,
+    data_lines: Vec<String>,
+    remembered_response_ids: BTreeSet<String>,
+    response_ids_with_turn_state: BTreeSet<String>,
+    logged_token_usage: BTreeSet<RuntimeTokenUsage>,
+    turn_state: Option<String>,
+    request_previous_response_id: Option<String>,
+}
+
+impl RuntimeSseTapState {
+    pub fn new(init: RuntimeSseTapStateInit<'_>) -> Self {
+        Self {
+            remembered_response_ids: init.remembered_response_ids.iter().cloned().collect(),
+            response_ids_with_turn_state: init
+                .turn_state
+                .map(|_| init.remembered_response_ids.iter().cloned().collect())
+                .unwrap_or_default(),
+            turn_state: init.turn_state.map(str::to_string),
+            request_previous_response_id: init.request_previous_response_id.map(str::to_string),
+            ..Self::default()
+        }
+    }
+
+    pub fn observe_chunk(&mut self, chunk: &[u8]) -> Vec<RuntimeSseTapEffect> {
+        let mut effects = Vec::new();
+        let mut line = std::mem::take(&mut self.line);
+        let mut data_lines = std::mem::take(&mut self.data_lines);
+        runtime_sse_consume_chunk(&mut line, &mut data_lines, chunk, |event| {
+            self.observe_stream_event(event, &mut effects);
+        });
+        self.line = line;
+        self.data_lines = data_lines;
+        effects
+    }
+
+    pub fn finish_pending(&mut self) -> Vec<RuntimeSseTapEffect> {
+        let mut effects = Vec::new();
+        let mut line = std::mem::take(&mut self.line);
+        let mut data_lines = std::mem::take(&mut self.data_lines);
+        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
+            self.observe_stream_event(event, &mut effects);
+        });
+        self.line = line;
+        self.data_lines = data_lines;
+        effects
+    }
+
+    fn observe_stream_event(
+        &mut self,
+        event: crate::RuntimeParsedSseEvent,
+        effects: &mut Vec<RuntimeSseTapEffect>,
+    ) {
+        if let Some(turn_state) = event.turn_state {
+            self.turn_state = Some(turn_state);
+        }
+        self.remember_response_ids(&event.response_ids, effects);
+        if event.previous_response_not_found {
+            effects.push(RuntimeSseTapEffect::ClearDeadResponseBindings {
+                response_ids: self.dead_chain_response_ids(),
+            });
+        }
+        self.log_token_usage(event.event_type.as_deref(), event.token_usage, effects);
+    }
+
+    fn remember_response_ids(
+        &mut self,
+        response_ids: &[String],
+        effects: &mut Vec<RuntimeSseTapEffect>,
+    ) {
+        let turn_state = self.turn_state.clone();
+        let mut fresh_ids = Vec::new();
+        for response_id in response_ids {
+            if self.remembered_response_ids.contains(response_id.as_str()) {
+                continue;
+            }
+            let fresh_id = response_id.clone();
+            self.remembered_response_ids.insert(fresh_id.clone());
+            if turn_state.is_some() {
+                self.response_ids_with_turn_state.insert(fresh_id.clone());
+            }
+            fresh_ids.push(fresh_id);
+        }
+
+        let mut response_ids_needing_turn_state = Vec::new();
+        if turn_state.is_some()
+            && self.response_ids_with_turn_state.len() < self.remembered_response_ids.len()
+        {
+            for response_id in &self.remembered_response_ids {
+                if self
+                    .response_ids_with_turn_state
+                    .contains(response_id.as_str())
+                {
+                    continue;
+                }
+                let rebound_id = response_id.clone();
+                self.response_ids_with_turn_state.insert(rebound_id.clone());
+                response_ids_needing_turn_state.push(rebound_id);
+            }
+        }
+
+        if !fresh_ids.is_empty() {
+            effects.push(RuntimeSseTapEffect::RememberResponseIds {
+                response_ids: fresh_ids,
+                turn_state: turn_state.clone(),
+            });
+        }
+        if !response_ids_needing_turn_state.is_empty() {
+            effects.push(RuntimeSseTapEffect::RememberResponseIds {
+                response_ids: response_ids_needing_turn_state,
+                turn_state,
+            });
+        }
+    }
+
+    fn dead_chain_response_ids(&self) -> Vec<String> {
+        let mut dead_response_ids = self
+            .remembered_response_ids
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(previous_response_id) = self.request_previous_response_id.as_deref() {
+            dead_response_ids.push(previous_response_id.to_string());
+        }
+        dead_response_ids
+    }
+
+    fn log_token_usage(
+        &mut self,
+        event_type: Option<&str>,
+        token_usage: Option<RuntimeTokenUsage>,
+        effects: &mut Vec<RuntimeSseTapEffect>,
+    ) {
+        if !runtime_token_usage_event_is_loggable(event_type) {
+            return;
+        }
+        let Some(token_usage) = token_usage else {
+            return;
+        };
+        if self.logged_token_usage.insert(token_usage) {
+            effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,5 +397,69 @@ mod tests {
         assert!(!runtime_token_usage_event_is_loggable(Some(
             "response.delta"
         )));
+    }
+
+    #[test]
+    fn sse_tap_state_rebinds_remembered_response_ids_when_turn_state_arrives() {
+        let mut state = RuntimeSseTapState::new(RuntimeSseTapStateInit {
+            remembered_response_ids: &["resp-1".to_string()],
+            request_previous_response_id: None,
+            turn_state: None,
+        });
+
+        let effects =
+            state.observe_chunk(br#"data: {"type":"response.in_progress","turn_state":"ts-1"}"#);
+        assert!(effects.is_empty());
+
+        let effects = state.observe_chunk(b"\r\n\r\n");
+        assert_eq!(
+            effects,
+            vec![RuntimeSseTapEffect::RememberResponseIds {
+                response_ids: vec!["resp-1".to_string()],
+                turn_state: Some("ts-1".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn sse_tap_state_reports_dead_chain_after_previous_response_error() {
+        let mut state = RuntimeSseTapState::new(RuntimeSseTapStateInit {
+            remembered_response_ids: &["resp-live".to_string()],
+            request_previous_response_id: Some("resp-prev"),
+            turn_state: None,
+        });
+
+        let effects = state.observe_chunk(
+            br#"data: {"type":"response.failed","response":{"error":{"code":"previous_response_not_found"}}}"#,
+        );
+        assert!(effects.is_empty());
+
+        let effects = state.observe_chunk(b"\r\n\r\n");
+        assert_eq!(
+            effects,
+            vec![RuntimeSseTapEffect::ClearDeadResponseBindings {
+                response_ids: vec!["resp-live".to_string(), "resp-prev".to_string()],
+            }]
+        );
+    }
+
+    #[test]
+    fn sse_tap_state_deduplicates_token_usage_logs() {
+        let usage_event = br#"data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":5}}}"#;
+        let mut state = RuntimeSseTapState::default();
+
+        let mut effects = state.observe_chunk(usage_event);
+        effects.extend(state.observe_chunk(b"\r\n\r\n"));
+        effects.extend(state.observe_chunk(usage_event));
+        effects.extend(state.observe_chunk(b"\r\n\r\n"));
+
+        assert_eq!(
+            effects,
+            vec![RuntimeSseTapEffect::LogTokenUsage(RuntimeTokenUsage {
+                input_tokens: 3,
+                output_tokens: 5,
+                ..RuntimeTokenUsage::default()
+            })]
+        );
     }
 }
