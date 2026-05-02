@@ -1,0 +1,16 @@
+[package]
+name = "prodex-runtime-store"
+version.workspace = true
+edition.workspace = true
+description = "Runtime store merge and compaction helpers for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_store"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state" }
+prodex_state = { package = "prodex-state", path = "../prodex-state" }

@@ -9,30 +9,9 @@ use super::io::{
 };
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, RecoveredLoad, RuntimeProfileBackoffs,
-    runtime_profile_route_circuit_profile_name,
-    runtime_profile_transport_backoff_key_matches_profiles,
 };
 
-pub(crate) fn compact_runtime_profile_backoffs(
-    mut backoffs: RuntimeProfileBackoffs,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> RuntimeProfileBackoffs {
-    backoffs
-        .retry_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
-    backoffs.transport_backoff_until.retain(|key, until| {
-        runtime_profile_transport_backoff_key_matches_profiles(key, profiles) && *until > now
-    });
-    backoffs
-        .route_circuit_open_until
-        .retain(|route_profile_key, _| {
-            profiles.contains_key(runtime_profile_route_circuit_profile_name(
-                route_profile_key,
-            ))
-        });
-    backoffs
-}
+pub(crate) use prodex_runtime_store::compact_runtime_profile_backoffs;
 
 pub(crate) fn merge_runtime_profile_backoffs(
     existing: &RuntimeProfileBackoffs,
@@ -40,23 +19,7 @@ pub(crate) fn merge_runtime_profile_backoffs(
     profiles: &BTreeMap<String, ProfileEntry>,
     now: i64,
 ) -> RuntimeProfileBackoffs {
-    let mut merged = existing.clone();
-    for (profile_name, until) in &incoming.retry_backoff_until {
-        merged
-            .retry_backoff_until
-            .insert(profile_name.clone(), *until);
-    }
-    for (profile_name, until) in &incoming.transport_backoff_until {
-        merged
-            .transport_backoff_until
-            .insert(profile_name.clone(), *until);
-    }
-    for (route_profile_key, until) in &incoming.route_circuit_open_until {
-        merged
-            .route_circuit_open_until
-            .insert(route_profile_key.clone(), *until);
-    }
-    compact_runtime_profile_backoffs(merged, profiles, now)
+    prodex_runtime_store::merge_runtime_profile_backoffs(existing, incoming, profiles, now)
 }
 
 pub(crate) fn load_runtime_profile_backoffs(

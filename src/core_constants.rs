@@ -41,10 +41,8 @@ pub(crate) const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 pub(crate) const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
-pub(crate) const RUNTIME_SCORE_RETENTION_SECONDS: i64 =
-    if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
-pub(crate) const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
-    if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
+#[cfg(test)]
+pub(crate) use prodex_runtime_store::RUNTIME_SCORE_RETENTION_SECONDS;
 pub(crate) const PROD_EX_TMP_LOGIN_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 24 * 60 * 60 };
 pub(crate) const ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS: i64 =

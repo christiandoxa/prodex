@@ -8,37 +8,22 @@ use super::io::{
     save_versioned_json_file_with_fence,
 };
 use crate::{
-    AppPaths, AppState, AppStateIoExt, ProfileEntry, RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS,
-    RecoveredLoad, RuntimeProfileUsageSnapshot,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RecoveredLoad, RuntimeProfileUsageSnapshot,
 };
 
-pub(crate) fn compact_runtime_usage_snapshots(
-    mut snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
-    let oldest_allowed = now.saturating_sub(RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS);
-    snapshots.retain(|profile_name, snapshot| {
-        profiles.contains_key(profile_name) && snapshot.checked_at >= oldest_allowed
-    });
-    snapshots
-}
+pub(crate) use prodex_runtime_store::compact_runtime_usage_snapshots;
 
 pub(crate) fn merge_runtime_usage_snapshots(
     existing: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     incoming: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
-    let mut merged = existing.clone();
-    for (profile_name, snapshot) in incoming {
-        let should_replace = merged
-            .get(profile_name)
-            .is_none_or(|current| current.checked_at <= snapshot.checked_at);
-        if should_replace {
-            merged.insert(profile_name.clone(), snapshot.clone());
-        }
-    }
-    compact_runtime_usage_snapshots(merged, profiles, Local::now().timestamp())
+    prodex_runtime_store::merge_runtime_usage_snapshots(
+        existing,
+        incoming,
+        profiles,
+        chrono::Local::now().timestamp(),
+    )
 }
 
 pub(crate) fn load_runtime_usage_snapshots(

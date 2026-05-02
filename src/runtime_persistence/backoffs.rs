@@ -40,17 +40,6 @@ pub(crate) fn runtime_profile_transport_backoff_key_valid(
         .unwrap_or_else(|| valid_profiles.contains(key))
 }
 
-pub(crate) fn runtime_profile_transport_backoff_key_matches_profiles(
-    key: &str,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> bool {
-    runtime_profile_transport_backoff_key_parts(key)
-        .map(|(route, profile_name)| {
-            runtime_route_kind_from_label(route).is_some() && profiles.contains_key(profile_name)
-        })
-        .unwrap_or_else(|| profiles.contains_key(key))
-}
-
 pub(crate) fn runtime_profile_transport_backoff_until_from_map(
     transport_backoff_until: &BTreeMap<String, i64>,
     profile_name: &str,

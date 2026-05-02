@@ -7,39 +7,23 @@ use super::io::{
     runtime_scores_file_path, runtime_scores_last_good_file_path,
     save_versioned_json_file_with_fence,
 };
-use crate::{
-    AppPaths, AppState, AppStateIoExt, ProfileEntry, RUNTIME_SCORE_RETENTION_SECONDS,
-    RecoveredLoad, RuntimeProfileHealth,
-};
+use crate::{AppPaths, AppState, AppStateIoExt, ProfileEntry, RecoveredLoad, RuntimeProfileHealth};
 
-pub(crate) fn compact_runtime_profile_scores(
-    mut scores: BTreeMap<String, RuntimeProfileHealth>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) -> BTreeMap<String, RuntimeProfileHealth> {
-    let oldest_allowed = now.saturating_sub(RUNTIME_SCORE_RETENTION_SECONDS);
-    scores.retain(|key, value| {
-        profiles.contains_key(runtime_profile_score_profile_name(key))
-            && value.updated_at >= oldest_allowed
-    });
-    scores
-}
+pub(crate) use prodex_runtime_store::{
+    compact_runtime_profile_scores, runtime_profile_score_profile_name,
+};
 
 pub(crate) fn merge_runtime_profile_scores(
     existing: &BTreeMap<String, RuntimeProfileHealth>,
     incoming: &BTreeMap<String, RuntimeProfileHealth>,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> BTreeMap<String, RuntimeProfileHealth> {
-    let mut merged = existing.clone();
-    for (key, value) in incoming {
-        let should_replace = merged
-            .get(key)
-            .is_none_or(|current| current.updated_at <= value.updated_at);
-        if should_replace {
-            merged.insert(key.clone(), value.clone());
-        }
-    }
-    compact_runtime_profile_scores(merged, profiles, Local::now().timestamp())
+    prodex_runtime_store::merge_runtime_profile_scores(
+        existing,
+        incoming,
+        profiles,
+        Local::now().timestamp(),
+    )
 }
 
 pub(crate) fn load_runtime_profile_scores(
@@ -109,8 +93,4 @@ pub(crate) fn save_runtime_profile_scores_for_profiles(
         &compacted,
     )?;
     Ok(())
-}
-
-pub(crate) fn runtime_profile_score_profile_name(key: &str) -> &str {
-    key.rsplit(':').next().unwrap_or(key)
 }
