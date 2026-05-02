@@ -108,6 +108,42 @@ pub fn runtime_duration_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
+pub fn runtime_websocket_tcp_connect_worker_count_default(parallelism: usize) -> usize {
+    parallelism.clamp(4, 16)
+}
+
+pub fn runtime_websocket_tcp_connect_queue_capacity_default(worker_count: usize) -> usize {
+    worker_count.saturating_mul(8).clamp(32, 128)
+}
+
+pub fn runtime_websocket_tcp_connect_overflow_capacity_default(
+    worker_count: usize,
+    queue_capacity: usize,
+) -> usize {
+    queue_capacity
+        .saturating_mul(4)
+        .max(worker_count)
+        .clamp(32, 512)
+}
+
+pub fn runtime_websocket_dns_resolve_worker_count_default(parallelism: usize) -> usize {
+    parallelism.clamp(2, 8)
+}
+
+pub fn runtime_websocket_dns_resolve_queue_capacity_default(worker_count: usize) -> usize {
+    worker_count.saturating_mul(4).clamp(16, 64)
+}
+
+pub fn runtime_websocket_dns_resolve_overflow_capacity_default(
+    worker_count: usize,
+    queue_capacity: usize,
+) -> usize {
+    queue_capacity
+        .saturating_mul(2)
+        .max(worker_count)
+        .clamp(16, 128)
+}
+
 fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudget>> {
     static COUNTERS: OnceLock<Mutex<BTreeMap<String, RuntimeFaultBudget>>> = OnceLock::new();
     COUNTERS.get_or_init(|| Mutex::new(BTreeMap::new()))
@@ -222,5 +258,48 @@ mod tests {
         let _guard = EnvGuard::set("PRODEX_TEST_TUNING_FAULT", "1");
         assert!(runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
         assert!(!runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
+    }
+
+    #[test]
+    fn websocket_tcp_connect_defaults_are_bounded() {
+        assert_eq!(runtime_websocket_tcp_connect_worker_count_default(1), 4);
+        assert_eq!(runtime_websocket_tcp_connect_worker_count_default(8), 8);
+        assert_eq!(runtime_websocket_tcp_connect_worker_count_default(64), 16);
+
+        assert_eq!(runtime_websocket_tcp_connect_queue_capacity_default(1), 32);
+        assert_eq!(runtime_websocket_tcp_connect_queue_capacity_default(8), 64);
+        assert_eq!(
+            runtime_websocket_tcp_connect_queue_capacity_default(64),
+            128
+        );
+
+        assert_eq!(
+            runtime_websocket_tcp_connect_overflow_capacity_default(2, 8),
+            32
+        );
+        assert_eq!(
+            runtime_websocket_tcp_connect_overflow_capacity_default(16, 128),
+            512
+        );
+    }
+
+    #[test]
+    fn websocket_dns_defaults_are_bounded() {
+        assert_eq!(runtime_websocket_dns_resolve_worker_count_default(1), 2);
+        assert_eq!(runtime_websocket_dns_resolve_worker_count_default(6), 6);
+        assert_eq!(runtime_websocket_dns_resolve_worker_count_default(32), 8);
+
+        assert_eq!(runtime_websocket_dns_resolve_queue_capacity_default(1), 16);
+        assert_eq!(runtime_websocket_dns_resolve_queue_capacity_default(8), 32);
+        assert_eq!(runtime_websocket_dns_resolve_queue_capacity_default(64), 64);
+
+        assert_eq!(
+            runtime_websocket_dns_resolve_overflow_capacity_default(2, 8),
+            16
+        );
+        assert_eq!(
+            runtime_websocket_dns_resolve_overflow_capacity_default(16, 64),
+            128
+        );
     }
 }

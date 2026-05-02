@@ -169,6 +169,101 @@ pub fn merge_profile_bindings(
     merged
 }
 
+pub fn remap_profile_binding_targets(
+    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
+    from_profile: &str,
+    to_profile: &str,
+) {
+    if from_profile == to_profile {
+        return;
+    }
+    for binding in bindings.values_mut() {
+        if binding.profile_name == from_profile {
+            binding.profile_name = to_profile.to_string();
+        }
+    }
+}
+
+pub fn duplicate_profile_identity_key(
+    account_id: Option<&str>,
+    email: Option<&str>,
+) -> Option<String> {
+    account_id
+        .map(str::trim)
+        .filter(|account_id| !account_id.is_empty())
+        .map(|account_id| format!("account:{account_id}"))
+        .or_else(|| {
+            email
+                .map(str::trim)
+                .filter(|email| !email.is_empty())
+                .map(|email| format!("email:{}", email.to_ascii_lowercase()))
+        })
+}
+
+pub fn select_canonical_duplicate_profile(
+    state: &AppState,
+    profile_names: &[String],
+) -> Option<String> {
+    profile_names.iter().cloned().max_by(|left, right| {
+        duplicate_profile_cleanup_priority(state, left)
+            .cmp(&duplicate_profile_cleanup_priority(state, right))
+            .then_with(|| right.cmp(left))
+    })
+}
+
+pub fn remove_duplicate_profile_from_state(
+    state: &mut AppState,
+    duplicate_name: &str,
+    canonical_name: &str,
+) -> Option<ProfileEntry> {
+    let duplicate_last_selected_at = state.last_run_selected_at.remove(duplicate_name);
+    if let Some(last_selected_at) = duplicate_last_selected_at {
+        let target = state
+            .last_run_selected_at
+            .entry(canonical_name.to_string())
+            .or_insert(last_selected_at);
+        *target = (*target).max(last_selected_at);
+    }
+
+    remap_profile_binding_targets(
+        &mut state.response_profile_bindings,
+        duplicate_name,
+        canonical_name,
+    );
+    remap_profile_binding_targets(
+        &mut state.session_profile_bindings,
+        duplicate_name,
+        canonical_name,
+    );
+
+    if state.active_profile.as_deref() == Some(duplicate_name) {
+        state.active_profile = Some(canonical_name.to_string());
+    }
+
+    state.profiles.remove(duplicate_name)
+}
+
+pub fn ensure_active_profile_after_duplicate_cleanup(state: &mut AppState) {
+    if state.active_profile.is_none() {
+        state.active_profile = state.profiles.keys().next().cloned();
+    }
+}
+
+fn duplicate_profile_cleanup_priority(state: &AppState, profile_name: &str) -> (bool, i64, bool) {
+    let active = state.active_profile.as_deref() == Some(profile_name);
+    let last_selected_at = state
+        .last_run_selected_at
+        .get(profile_name)
+        .copied()
+        .unwrap_or(i64::MIN);
+    let prefer_external = state
+        .profiles
+        .get(profile_name)
+        .map(|profile| !profile.managed)
+        .unwrap_or(false);
+    (active, last_selected_at, prefer_external)
+}
+
 pub fn prune_profile_bindings(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     max_entries: usize,
@@ -361,6 +456,12 @@ mod tests {
         }
     }
 
+    fn external_profile(name: &str) -> (String, ProfileEntry) {
+        let (name, mut profile) = profile(name);
+        profile.managed = false;
+        (name, profile)
+    }
+
     #[test]
     fn merge_profile_bindings_prefers_newer_known_profile_binding() {
         let profiles = BTreeMap::from([profile("p1"), profile("p2")]);
@@ -378,6 +479,93 @@ mod tests {
         assert_eq!(merged.get("same"), Some(&binding("p2", 30)));
         assert_eq!(merged.get("old_only"), Some(&binding("p1", 20)));
         assert!(!merged.contains_key("stale"));
+    }
+
+    #[test]
+    fn duplicate_identity_key_prefers_account_then_normalized_email() {
+        assert_eq!(
+            duplicate_profile_identity_key(Some(" acct "), Some("User@Example.COM")),
+            Some("account:acct".to_string())
+        );
+        assert_eq!(
+            duplicate_profile_identity_key(None, Some(" User@Example.COM ")),
+            Some("email:user@example.com".to_string())
+        );
+        assert_eq!(duplicate_profile_identity_key(Some(" "), Some(" ")), None);
+    }
+
+    #[test]
+    fn canonical_duplicate_profile_prefers_active_recent_external_then_name() {
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::from([
+                profile("active"),
+                profile("recent"),
+                external_profile("external"),
+                profile("alpha"),
+                profile("beta"),
+            ]),
+            last_run_selected_at: BTreeMap::from([
+                ("active".to_string(), 1),
+                ("recent".to_string(), 20),
+                ("external".to_string(), 20),
+                ("alpha".to_string(), 5),
+                ("beta".to_string(), 5),
+            ]),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            select_canonical_duplicate_profile(
+                &state,
+                &[
+                    "recent".to_string(),
+                    "external".to_string(),
+                    "active".to_string()
+                ],
+            ),
+            Some("active".to_string())
+        );
+        assert_eq!(
+            select_canonical_duplicate_profile(
+                &state,
+                &["recent".to_string(), "external".to_string()],
+            ),
+            Some("external".to_string())
+        );
+        assert_eq!(
+            select_canonical_duplicate_profile(&state, &["beta".to_string(), "alpha".to_string()]),
+            Some("alpha".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_duplicate_profile_from_state_merges_selection_and_remaps_bindings() {
+        let mut state = AppState {
+            active_profile: Some("duplicate".to_string()),
+            profiles: BTreeMap::from([profile("canonical"), profile("duplicate")]),
+            last_run_selected_at: BTreeMap::from([
+                ("canonical".to_string(), 10),
+                ("duplicate".to_string(), 20),
+            ]),
+            response_profile_bindings: BTreeMap::from([("r".to_string(), binding("duplicate", 1))]),
+            session_profile_bindings: BTreeMap::from([("s".to_string(), binding("duplicate", 2))]),
+        };
+
+        let removed = remove_duplicate_profile_from_state(&mut state, "duplicate", "canonical");
+
+        assert!(removed.is_some());
+        assert_eq!(state.active_profile.as_deref(), Some("canonical"));
+        assert!(!state.profiles.contains_key("duplicate"));
+        assert_eq!(state.last_run_selected_at.get("canonical"), Some(&20));
+        assert_eq!(
+            state.response_profile_bindings["r"].profile_name,
+            "canonical"
+        );
+        assert_eq!(
+            state.session_profile_bindings["s"].profile_name,
+            "canonical"
+        );
     }
 
     #[test]

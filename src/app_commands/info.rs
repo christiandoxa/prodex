@@ -682,30 +682,12 @@ pub(crate) fn info_observation_window_remaining(
 }
 
 pub(crate) fn format_info_process_summary(processes: &[ProdexProcessInfo]) -> String {
-    if processes.is_empty() {
-        return "No".to_string();
-    }
-
     let runtime_count = processes.iter().filter(|process| process.runtime).count();
-    let pid_list = processes
-        .iter()
-        .take(6)
-        .map(|process| process.pid.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let remaining = processes.len().saturating_sub(6);
-    let extra = if remaining > 0 {
-        format!(" (+{remaining} more)")
-    } else {
-        String::new()
-    };
-
-    format!(
-        "Yes ({} total, {} runtime; pids: {}{})",
+    terminal_ui::format_info_process_summary_display(
         processes.len(),
         runtime_count,
-        pid_list,
-        extra
+        processes.iter().map(|process| process.pid),
+        6,
     )
 }
 
@@ -713,107 +695,69 @@ pub(crate) fn format_info_load_summary(
     summary: &InfoRuntimeLoadSummary,
     runtime_process_count: usize,
 ) -> String {
-    if runtime_process_count == 0 {
-        return "No active prodex runtime detected".to_string();
-    }
-    if summary.log_count == 0 {
-        return "Runtime process detected, but no matching runtime log was found".to_string();
-    }
-    if summary.recent_selection_events == 0 {
-        return format!(
-            "{} active runtime log(s); no selection activity observed in the sampled window; inflight units {}",
-            summary.log_count, summary.active_inflight_units
-        );
-    }
-    if summary.recent_selection_events == 1 {
-        return format!(
-            "1 selection event observed in the sampled window; inflight units {}; {} active runtime log(s)",
-            summary.active_inflight_units, summary.log_count
-        );
-    }
-
-    let activity_span = summary
-        .recent_first_timestamp
-        .zip(summary.recent_last_timestamp)
-        .map(|(start, end)| format_relative_duration(end.saturating_sub(start)))
-        .unwrap_or_else(|| format!("{}m", INFO_RECENT_LOAD_WINDOW_SECONDS / 60));
-
-    format!(
-        "{} selection event(s) over {}; inflight units {}; {} active runtime log(s)",
-        summary.recent_selection_events,
-        activity_span,
-        summary.active_inflight_units,
-        summary.log_count
+    terminal_ui::format_info_load_summary_display(
+        terminal_ui::InfoLoadSummaryDisplay {
+            log_count: summary.log_count,
+            active_inflight_units: summary.active_inflight_units,
+            recent_selection_events: summary.recent_selection_events,
+            recent_first_timestamp: summary.recent_first_timestamp,
+            recent_last_timestamp: summary.recent_last_timestamp,
+        },
+        runtime_process_count,
+        INFO_RECENT_LOAD_WINDOW_SECONDS,
     )
 }
 
 pub(crate) fn format_info_quota_data_summary(aggregate: &InfoQuotaAggregate) -> String {
-    if aggregate.quota_compatible_profiles == 0 {
-        return "No quota-compatible profiles".to_string();
-    }
-
-    format!(
-        "{} quota-compatible profile(s): live={}, snapshot={}, unavailable={}",
+    terminal_ui::format_info_quota_data_summary_display(
         aggregate.quota_compatible_profiles,
         aggregate.live_profiles,
         aggregate.snapshot_profiles,
-        aggregate.unavailable_profiles
+        aggregate.unavailable_profiles,
     )
 }
 
 pub(crate) fn format_info_token_usage_summary(summary: &InfoTokenUsageSummary) -> String {
-    if summary.event_count == 0 {
-        return format!(
-            "No token_usage events found in {} recent runtime log(s)",
-            summary.log_count
-        );
-    }
-
-    let top_profiles = summary
-        .by_profile
-        .iter()
-        .take(4)
-        .map(|(profile, data)| {
-            format!(
-                "{}:{} in/{} cached/{} out/{} reasoning",
+    let by_profile =
+        summary
+            .by_profile
+            .iter()
+            .map(|(profile, data)| terminal_ui::TokenUsageProfileDisplay {
                 profile,
-                data.total.input_tokens,
-                data.total.cached_input_tokens,
-                data.total.output_tokens,
-                data.total.reasoning_tokens
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let suffix = if top_profiles.is_empty() {
-        String::new()
-    } else {
-        format!("; by profile: {top_profiles}")
-    };
+                total: token_usage_counts(data.total),
+            });
 
-    format!(
-        "{} event(s), logs={}: input={}, cached_input={}, output={}, reasoning={}{}",
+    terminal_ui::format_info_token_usage_summary_display(
         summary.event_count,
         summary.log_count,
-        summary.total.input_tokens,
-        summary.total.cached_input_tokens,
-        summary.total.output_tokens,
-        summary.total.reasoning_tokens,
-        suffix
+        token_usage_counts(summary.total),
+        by_profile,
     )
 }
 
+fn token_usage_counts(usage: RuntimeTokenUsage) -> terminal_ui::TokenUsageCounts {
+    terminal_ui::TokenUsageCounts {
+        input_tokens: usage.input_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        output_tokens: usage.output_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+    }
+}
+
 pub(crate) fn format_runtime_policy_summary(summary: Option<&RuntimePolicySummary>) -> String {
-    summary
-        .map(|summary| format!("{} (v{})", summary.path.display(), summary.version))
-        .unwrap_or_else(|| "disabled".to_string())
+    let Some(summary) = summary else {
+        return terminal_ui::format_runtime_policy_summary_display(None, None);
+    };
+
+    let path = summary.path.display().to_string();
+    terminal_ui::format_runtime_policy_summary_display(Some(path.as_str()), Some(summary.version))
 }
 
 pub(crate) fn format_runtime_logs_summary() -> String {
-    format!(
-        "{} ({})",
-        runtime_proxy_log_dir().display(),
-        runtime_proxy_log_format().as_str()
+    let directory = runtime_proxy_log_dir().display().to_string();
+    terminal_ui::format_runtime_logs_summary_display(
+        &directory,
+        runtime_proxy_log_format().as_str(),
     )
 }
 
@@ -838,55 +782,56 @@ pub(crate) fn runtime_logs_json_value() -> serde_json::Value {
 }
 
 pub(crate) fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {
-    format!(
-        "workers proxy={}, long-lived={}, async={}, probe-refresh={}; active={}, queue={}; lanes responses={}, compact={}, websocket={}, standard={}; ws-connect workers={}, queue={}, overflow={}; ws-dns workers={}, queue={}, overflow={}",
-        snapshot.worker_count,
-        snapshot.long_lived_worker_count,
-        snapshot.async_worker_count,
-        snapshot.probe_refresh_worker_count,
-        snapshot.active_request_limit,
-        snapshot.long_lived_queue_capacity,
-        snapshot.lane_limits.responses,
-        snapshot.lane_limits.compact,
-        snapshot.lane_limits.websocket,
-        snapshot.lane_limits.standard,
-        snapshot.websocket_connect_worker_count,
-        snapshot.websocket_connect_queue_capacity,
-        snapshot.websocket_connect_overflow_capacity,
-        snapshot.websocket_dns_worker_count,
-        snapshot.websocket_dns_queue_capacity,
-        snapshot.websocket_dns_overflow_capacity
-    )
+    terminal_ui::format_runtime_tuning_workers_display(terminal_ui::RuntimeTuningWorkersDisplay {
+        worker_count: snapshot.worker_count,
+        long_lived_worker_count: snapshot.long_lived_worker_count,
+        async_worker_count: snapshot.async_worker_count,
+        probe_refresh_worker_count: snapshot.probe_refresh_worker_count,
+        active_request_limit: snapshot.active_request_limit,
+        long_lived_queue_capacity: snapshot.long_lived_queue_capacity,
+        lane_responses: snapshot.lane_limits.responses,
+        lane_compact: snapshot.lane_limits.compact,
+        lane_websocket: snapshot.lane_limits.websocket,
+        lane_standard: snapshot.lane_limits.standard,
+        websocket_connect_worker_count: snapshot.websocket_connect_worker_count,
+        websocket_connect_queue_capacity: snapshot.websocket_connect_queue_capacity,
+        websocket_connect_overflow_capacity: snapshot.websocket_connect_overflow_capacity,
+        websocket_dns_worker_count: snapshot.websocket_dns_worker_count,
+        websocket_dns_queue_capacity: snapshot.websocket_dns_queue_capacity,
+        websocket_dns_overflow_capacity: snapshot.websocket_dns_overflow_capacity,
+    })
 }
 
 pub(crate) fn format_runtime_tuning_budgets(snapshot: &RuntimeTuningSnapshot) -> String {
-    format!(
-        "precommit={}x/{}ms, pressure-precommit={}x/{}ms, continuation={}x/{}ms; admission={}ms, pressure-admission={}ms, long-lived={}ms, pressure-long-lived={}ms",
-        snapshot.precommit_attempt_limit,
-        snapshot.precommit_budget_ms,
-        snapshot.pressure_precommit_attempt_limit,
-        snapshot.pressure_precommit_budget_ms,
-        snapshot.continuation_precommit_attempt_limit,
-        snapshot.continuation_precommit_budget_ms,
-        snapshot.admission_wait_budget_ms,
-        snapshot.pressure_admission_wait_budget_ms,
-        snapshot.long_lived_queue_wait_budget_ms,
-        snapshot.pressure_long_lived_queue_wait_budget_ms
-    )
+    terminal_ui::format_runtime_tuning_budgets_display(terminal_ui::RuntimeTuningBudgetsDisplay {
+        precommit_attempt_limit: snapshot.precommit_attempt_limit,
+        precommit_budget_ms: snapshot.precommit_budget_ms,
+        pressure_precommit_attempt_limit: snapshot.pressure_precommit_attempt_limit,
+        pressure_precommit_budget_ms: snapshot.pressure_precommit_budget_ms,
+        continuation_precommit_attempt_limit: snapshot.continuation_precommit_attempt_limit,
+        continuation_precommit_budget_ms: snapshot.continuation_precommit_budget_ms,
+        admission_wait_budget_ms: snapshot.admission_wait_budget_ms,
+        pressure_admission_wait_budget_ms: snapshot.pressure_admission_wait_budget_ms,
+        long_lived_queue_wait_budget_ms: snapshot.long_lived_queue_wait_budget_ms,
+        pressure_long_lived_queue_wait_budget_ms: snapshot.pressure_long_lived_queue_wait_budget_ms,
+    })
 }
 
 pub(crate) fn format_runtime_tuning_transport(snapshot: &RuntimeTuningSnapshot) -> String {
-    format!(
-        "http-connect={}ms, stream-idle={}ms, sse-lookahead={}ms; ws-connect={}ms, ws-progress={}ms, ws-happy={}ms, ws-stale-reuse={}ms; inflight soft/hard={}/{}",
-        snapshot.http_connect_timeout_ms,
-        snapshot.stream_idle_timeout_ms,
-        snapshot.sse_lookahead_timeout_ms,
-        snapshot.websocket_connect_timeout_ms,
-        snapshot.websocket_precommit_progress_timeout_ms,
-        snapshot.websocket_happy_eyeballs_delay_ms,
-        snapshot.websocket_previous_response_reuse_stale_ms,
-        snapshot.profile_inflight_soft_limit,
-        snapshot.profile_inflight_hard_limit
+    terminal_ui::format_runtime_tuning_transport_display(
+        terminal_ui::RuntimeTuningTransportDisplay {
+            http_connect_timeout_ms: snapshot.http_connect_timeout_ms,
+            stream_idle_timeout_ms: snapshot.stream_idle_timeout_ms,
+            sse_lookahead_timeout_ms: snapshot.sse_lookahead_timeout_ms,
+            websocket_connect_timeout_ms: snapshot.websocket_connect_timeout_ms,
+            websocket_precommit_progress_timeout_ms: snapshot
+                .websocket_precommit_progress_timeout_ms,
+            websocket_happy_eyeballs_delay_ms: snapshot.websocket_happy_eyeballs_delay_ms,
+            websocket_previous_response_reuse_stale_ms: snapshot
+                .websocket_previous_response_reuse_stale_ms,
+            profile_inflight_soft_limit: snapshot.profile_inflight_soft_limit,
+            profile_inflight_hard_limit: snapshot.profile_inflight_hard_limit,
+        },
     )
 }
 
@@ -941,18 +886,13 @@ pub(crate) fn format_info_pool_remaining(
     profiles_with_data: usize,
     earliest_reset_at: Option<i64>,
 ) -> String {
-    if profiles_with_data == 0 {
-        return "Unavailable".to_string();
-    }
-
-    let mut value = format!("{total_remaining}% across {profiles_with_data} profile(s)");
-    if let Some(reset_at) = earliest_reset_at {
-        value.push_str(&format!(
-            "; earliest reset {}",
-            format_precise_reset_time(Some(reset_at))
-        ));
-    }
-    value
+    let earliest_reset =
+        earliest_reset_at.map(|reset_at| format_precise_reset_time(Some(reset_at)));
+    terminal_ui::format_info_pool_remaining_display(
+        total_remaining,
+        profiles_with_data,
+        earliest_reset.as_deref(),
+    )
 }
 
 pub(crate) fn format_info_runway(
@@ -962,69 +902,36 @@ pub(crate) fn format_info_runway(
     estimate: Option<&InfoRunwayEstimate>,
     now: i64,
 ) -> String {
-    if profiles_with_data == 0 {
-        return "Unavailable".to_string();
-    }
-    if current_remaining <= 0 {
-        return "Exhausted".to_string();
-    }
-
-    let Some(estimate) = estimate else {
-        return "Unavailable (no recent quota decay observed in active runtime logs)".to_string();
-    };
-
-    let observed = format_relative_duration(estimate.observed_span_seconds);
-    let burn = format!("{:.1}", estimate.burn_per_hour);
-    if let Some(reset_at) = earliest_reset_at
-        && reset_at <= estimate.exhaust_at
-    {
-        return format!(
-            "Earliest reset {} arrives before the no-reset runway (~{} at {} aggregated-%/h, {} profile(s), observed over {})",
-            format_precise_reset_time(Some(reset_at)),
-            format_relative_duration(estimate.exhaust_at.saturating_sub(now)),
-            burn,
-            estimate.observed_profiles,
-            observed
+    let reset_text =
+        earliest_reset_at.map(|reset_at| (reset_at, format_precise_reset_time(Some(reset_at))));
+    let earliest_reset =
+        reset_text.as_ref().map(
+            |(reset_at, reset_text)| terminal_ui::InfoRunwayResetDisplay {
+                reset_at: *reset_at,
+                reset_text,
+            },
         );
-    }
+    let exhaust_text =
+        estimate.map(|estimate| format_precise_reset_time(Some(estimate.exhaust_at)));
+    let estimate = estimate
+        .zip(exhaust_text.as_deref())
+        .map(
+            |(estimate, exhaust_text)| terminal_ui::InfoRunwayEstimateDisplay {
+                burn_per_hour: estimate.burn_per_hour,
+                observed_profiles: estimate.observed_profiles,
+                observed_span_seconds: estimate.observed_span_seconds,
+                exhaust_at: estimate.exhaust_at,
+                exhaust_text,
+            },
+        );
 
-    format!(
-        "{} (~{}) at {} aggregated-%/h from {} profile(s), observed over {}, no-reset estimate",
-        format_precise_reset_time(Some(estimate.exhaust_at)),
-        format_relative_duration(estimate.exhaust_at.saturating_sub(now)),
-        burn,
-        estimate.observed_profiles,
-        observed
+    terminal_ui::format_info_runway_display(
+        profiles_with_data,
+        current_remaining,
+        earliest_reset,
+        estimate,
+        now,
     )
-}
-
-pub(crate) fn format_relative_duration(seconds: i64) -> String {
-    let seconds = seconds.max(0);
-    if seconds == 0 {
-        return "now".to_string();
-    }
-
-    let days = seconds / 86_400;
-    let hours = (seconds % 86_400) / 3_600;
-    let minutes = (seconds % 3_600) / 60;
-
-    if days > 0 {
-        if hours > 0 {
-            format!("{days}d {hours}h")
-        } else {
-            format!("{days}d")
-        }
-    } else if hours > 0 {
-        if minutes > 0 {
-            format!("{hours}h {minutes}m")
-        } else {
-            format!("{hours}h")
-        }
-    } else if minutes > 0 {
-        format!("{minutes}m")
-    } else {
-        "<1m".to_string()
-    }
 }
 
 #[cfg(test)]

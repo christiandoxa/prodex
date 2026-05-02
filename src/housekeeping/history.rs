@@ -1,17 +1,14 @@
 use super::*;
-
-fn prodex_path_is_under_root(root: &Path, path: &Path) -> bool {
-    let root = normalize_path_for_compare(root);
-    let path = normalize_path_for_compare(path);
-    path == root || path.starts_with(root)
-}
+use prodex_core::{
+    chat_history_file_path_is_owned, path_is_under_root, session_path_date,
+    system_time_to_unix_seconds,
+};
 
 fn prodex_file_modified_epoch(path: &Path) -> Option<i64> {
     fs::metadata(path)
         .ok()
         .and_then(|meta| meta.modified().ok())
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs() as i64)
+        .and_then(system_time_to_unix_seconds)
 }
 
 fn prodex_history_epoch_from_json_value(value: &serde_json::Value) -> Option<i64> {
@@ -145,47 +142,9 @@ fn prune_jsonl_history_file_at(
     }
 }
 
-fn prodex_chat_history_file_is_owned(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("jsonl") || extension.eq_ignore_ascii_case("json")
-        })
-}
-
 fn prodex_session_path_date(path: &Path) -> Option<chrono::NaiveDate> {
-    let parts = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .collect::<Vec<_>>();
-    for window in parts.windows(3) {
-        let year = window[0];
-        let month = window[1];
-        let day = window[2];
-        if year.len() != 4
-            || month.len() != 2
-            || day.len() != 2
-            || !year.chars().all(|ch| ch.is_ascii_digit())
-            || !month.chars().all(|ch| ch.is_ascii_digit())
-            || !day.chars().all(|ch| ch.is_ascii_digit())
-        {
-            continue;
-        }
-
-        let Ok(year) = year.parse::<i32>() else {
-            continue;
-        };
-        let Ok(month) = month.parse::<u32>() else {
-            continue;
-        };
-        let Ok(day) = day.parse::<u32>() else {
-            continue;
-        };
-        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
-            return Some(date);
-        }
-    }
-    None
+    let date = session_path_date(path)?;
+    chrono::NaiveDate::from_ymd_opt(date.year, date.month, date.day)
 }
 
 fn prodex_local_midnight_epoch(date: chrono::NaiveDate) -> Option<i64> {
@@ -228,7 +187,7 @@ fn cleanup_codex_session_history_tree_at(root: &Path, oldest_allowed: i64) -> us
             continue;
         }
         if metadata.is_file()
-            && prodex_chat_history_file_is_owned(&path)
+            && chat_history_file_path_is_owned(&path)
             && prodex_session_file_is_stale(&path, oldest_allowed)
             && fs::remove_file(&path).is_ok()
         {
@@ -285,18 +244,18 @@ pub(super) fn cleanup_prodex_chat_history_at(
     state: &AppState,
     now: SystemTime,
 ) -> usize {
-    let now_epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let now_epoch = system_time_to_unix_seconds(now).unwrap_or_default();
     let oldest_allowed = now_epoch.saturating_sub(PRODEX_CHAT_HISTORY_RETENTION_SECONDS);
     let mut removed = 0usize;
 
     let mut codex_roots = BTreeSet::new();
     for root in [&paths.shared_codex_root, &paths.legacy_shared_codex_root] {
-        if prodex_path_is_under_root(&paths.root, root) {
+        if path_is_under_root(&paths.root, root) {
             codex_roots.insert(root.clone());
         }
     }
     for profile in state.profiles.values() {
-        if profile.managed && prodex_path_is_under_root(&paths.root, &profile.codex_home) {
+        if profile.managed && path_is_under_root(&paths.root, &profile.codex_home) {
             codex_roots.insert(profile.codex_home.clone());
         }
     }
@@ -309,7 +268,7 @@ pub(super) fn cleanup_prodex_chat_history_at(
     }
 
     let shared_claude_root = runtime_proxy_shared_claude_config_dir(paths);
-    if prodex_path_is_under_root(&paths.root, &shared_claude_root) {
+    if path_is_under_root(&paths.root, &shared_claude_root) {
         removed += cleanup_claude_chat_history_root_at(&shared_claude_root, oldest_allowed);
     }
 

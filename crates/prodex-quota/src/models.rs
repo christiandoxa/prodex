@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub fn deserialize_null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
 where
@@ -13,6 +14,42 @@ where
 pub struct AuthSummary {
     pub label: String,
     pub quota_compatible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopilotQuotaInfo {
+    pub login: Option<String>,
+    pub access_type_sku: Option<String>,
+    pub copilot_plan: Option<String>,
+    pub limited_user_quotas: BTreeMap<String, i64>,
+    pub monthly_quotas: BTreeMap<String, i64>,
+    pub limited_user_reset_date: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProviderQuotaSnapshot {
+    OpenAi(UsageResponse),
+    Copilot(CopilotQuotaInfo),
+}
+
+#[derive(Debug, Clone)]
+pub struct QuotaReport {
+    pub name: String,
+    pub active: bool,
+    pub auth: AuthSummary,
+    pub workspace_id: Option<String>,
+    pub result: std::result::Result<ProviderQuotaSnapshot, String>,
+    pub fetched_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderedQuotaReportWindow {
+    pub output: String,
+    pub shown_profiles: usize,
+    pub total_profiles: usize,
+    pub start_profile: usize,
+    pub hidden_before: usize,
+    pub hidden_after: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -7,31 +7,17 @@ pub(crate) fn runtime_broker_key_for_binary_identity(
     upstream_no_proxy: bool,
     binary_identity_key: &str,
 ) -> String {
-    let mut hasher = DefaultHasher::new();
-    upstream_base_url.hash(&mut hasher);
-    include_code_review.hash(&mut hasher);
-    upstream_no_proxy.hash(&mut hasher);
-    RUNTIME_PROXY_OPENAI_MOUNT_PATH.hash(&mut hasher);
-    binary_identity_key.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    prodex_runtime_broker::runtime_broker_key_for_binary_identity(
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+        RUNTIME_PROXY_OPENAI_MOUNT_PATH,
+        binary_identity_key,
+    )
 }
 
 pub(crate) fn runtime_broker_current_binary_identity_key() -> String {
-    let identity = runtime_current_prodex_binary_identity();
-    match (
-        identity.prodex_version.as_deref(),
-        identity.executable_sha256.as_deref(),
-        identity.executable_path.as_ref(),
-    ) {
-        (Some(version), Some(sha256), _) => format!("version={version};sha256={sha256}"),
-        (Some(version), None, Some(path)) => {
-            format!("version={version};path={}", path.display())
-        }
-        (Some(version), None, None) => format!("version={version}"),
-        (None, Some(sha256), _) => format!("sha256={sha256}"),
-        (None, None, Some(path)) => format!("path={}", path.display()),
-        (None, None, None) => "unknown".to_string(),
-    }
+    runtime_prodex_binary_identity_key(&runtime_current_prodex_binary_identity())
 }
 
 pub(crate) fn runtime_broker_key(
@@ -70,21 +56,6 @@ struct RuntimeProcessVersionResolution {
     executable_path: Option<PathBuf>,
     version: Option<String>,
     executable_sha256: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct RuntimeProdexBinaryIdentity {
-    pub(crate) prodex_version: Option<String>,
-    pub(crate) executable_path: Option<PathBuf>,
-    pub(crate) executable_sha256: Option<String>,
-}
-
-impl RuntimeProdexBinaryIdentity {
-    pub(crate) fn is_present(&self) -> bool {
-        self.prodex_version.is_some()
-            || self.executable_path.is_some()
-            || self.executable_sha256.is_some()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,16 +298,6 @@ pub(crate) fn legacy_runtime_proxy_openai_mount_path(version: &str) -> String {
     format!("{LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX}{version}")
 }
 
-pub(crate) fn parse_prodex_version_output(output: &str) -> Option<String> {
-    let mut parts = output.split_whitespace();
-    let binary_name = parts.next()?;
-    let version = parts.next()?;
-    if binary_name == "prodex" && !version.is_empty() {
-        return Some(version.to_string());
-    }
-    None
-}
-
 pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
     runtime_executable_sha256(executable)
 }
@@ -453,45 +414,6 @@ pub(crate) fn runtime_process_prodex_binary_identity(pid: u32) -> RuntimeProdexB
         executable_path: resolution.executable_path,
         executable_sha256: resolution.executable_sha256,
     }
-}
-
-pub(crate) fn runtime_registry_prodex_binary_identity(
-    registry: &RuntimeBrokerRegistry,
-) -> RuntimeProdexBinaryIdentity {
-    RuntimeProdexBinaryIdentity {
-        prodex_version: registry.prodex_version.clone(),
-        executable_path: registry.executable_path.clone().map(PathBuf::from),
-        executable_sha256: registry.executable_sha256.clone(),
-    }
-}
-
-pub(crate) fn runtime_health_prodex_binary_identity(
-    health: &RuntimeBrokerHealth,
-) -> RuntimeProdexBinaryIdentity {
-    RuntimeProdexBinaryIdentity {
-        prodex_version: health.prodex_version.clone(),
-        executable_path: health.executable_path.clone().map(PathBuf::from),
-        executable_sha256: health.executable_sha256.clone(),
-    }
-}
-
-pub(crate) fn runtime_prodex_binary_identity_matches(
-    current: &RuntimeProdexBinaryIdentity,
-    other: &RuntimeProdexBinaryIdentity,
-) -> bool {
-    if let (Some(current_sha256), Some(other_sha256)) = (
-        current.executable_sha256.as_deref(),
-        other.executable_sha256.as_deref(),
-    ) {
-        return current_sha256 == other_sha256;
-    }
-    if let (Some(current_version), Some(other_version)) = (
-        current.prodex_version.as_deref(),
-        other.prodex_version.as_deref(),
-    ) {
-        return current_version == other_version;
-    }
-    false
 }
 
 fn runtime_broker_replacement_reason(

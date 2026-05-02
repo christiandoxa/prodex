@@ -4,6 +4,10 @@ use crate::{
     runtime_websocket_dns_resolve_worker_count, runtime_websocket_tcp_connect_overflow_capacity,
     runtime_websocket_tcp_connect_queue_capacity, runtime_websocket_tcp_connect_worker_count,
 };
+use runtime_proxy_crate::{
+    RuntimeWebsocketTcpConnectOverflowSnapshot, RuntimeWebsocketTcpConnectOverflowState,
+    RuntimeWebsocketTcpConnectTaskKind,
+};
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, TcpStream};
@@ -15,110 +19,10 @@ use std::time::Duration;
 
 type RuntimeWebsocketTcpConnectJob = Box<dyn FnOnce() + Send + 'static>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RuntimeWebsocketLocalPressureKind {
-    DnsResolveTimeout,
-    DnsResolveExecutorOverflow,
-    TcpConnectExecutorOverflow,
-}
-
-impl RuntimeWebsocketLocalPressureKind {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::DnsResolveTimeout => "dns_resolve_timeout",
-            Self::DnsResolveExecutorOverflow => "dns_resolve_executor_overflow",
-            Self::TcpConnectExecutorOverflow => "tcp_connect_executor_overflow",
-        }
-    }
-}
-
-#[derive(Debug)]
-struct RuntimeWebsocketLocalPressureError {
-    kind: RuntimeWebsocketLocalPressureKind,
-    message: String,
-}
-
-impl RuntimeWebsocketLocalPressureError {
-    fn new(kind: RuntimeWebsocketLocalPressureKind, message: String) -> Self {
-        Self { kind, message }
-    }
-}
-
-impl std::fmt::Display for RuntimeWebsocketLocalPressureError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for RuntimeWebsocketLocalPressureError {}
-
-pub(super) fn runtime_websocket_local_pressure_io_error(
-    kind: RuntimeWebsocketLocalPressureKind,
-    message: impl Into<String>,
-) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::WouldBlock,
-        RuntimeWebsocketLocalPressureError::new(kind, message.into()),
-    )
-}
-
-pub(super) fn runtime_websocket_local_pressure_kind_from_io_error(
-    err: &io::Error,
-) -> Option<RuntimeWebsocketLocalPressureKind> {
-    err.get_ref()
-        .and_then(|source| source.downcast_ref::<RuntimeWebsocketLocalPressureError>())
-        .map(|err| err.kind)
-}
-
-#[derive(Clone, Copy)]
-enum RuntimeWebsocketTcpConnectTaskKind {
-    TcpConnect,
-    DnsResolve,
-}
-
-impl RuntimeWebsocketTcpConnectTaskKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::TcpConnect => "tcp_connect",
-            Self::DnsResolve => "dns_resolve",
-        }
-    }
-
-    fn worker_thread_prefix(self) -> &'static str {
-        match self {
-            Self::TcpConnect => "prodex-ws-connect",
-            Self::DnsResolve => "prodex-ws-dns",
-        }
-    }
-
-    fn dispatcher_thread_name(self) -> &'static str {
-        match self {
-            Self::TcpConnect => "prodex-ws-connect-dispatch",
-            Self::DnsResolve => "prodex-ws-dns-dispatch",
-        }
-    }
-
-    fn overflow_enqueue_event(self) -> &'static str {
-        match self {
-            Self::TcpConnect => "websocket_connect_overflow_enqueue",
-            Self::DnsResolve => "websocket_dns_overflow_enqueue",
-        }
-    }
-
-    fn overflow_dispatch_event(self) -> &'static str {
-        match self {
-            Self::TcpConnect => "websocket_connect_overflow_dispatch",
-            Self::DnsResolve => "websocket_dns_overflow_dispatch",
-        }
-    }
-
-    fn overflow_reject_event(self) -> &'static str {
-        match self {
-            Self::TcpConnect => "websocket_connect_overflow_reject",
-            Self::DnsResolve => "websocket_dns_overflow_reject",
-        }
-    }
-}
+pub(super) use runtime_proxy_crate::{
+    RuntimeWebsocketLocalPressureKind, runtime_websocket_local_pressure_io_error,
+    runtime_websocket_local_pressure_kind_from_io_error,
+};
 
 #[derive(Clone)]
 struct RuntimeWebsocketTcpConnectTaskObservability {
@@ -180,43 +84,19 @@ impl RuntimeWebsocketTcpConnectTask {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct RuntimeWebsocketTcpConnectOverflowSnapshot {
-    pub(super) pending_jobs: usize,
-    pub(super) max_pending_jobs: usize,
-    pub(super) total_enqueued: usize,
-    pub(super) total_dispatched: usize,
-    pub(super) total_rejected: usize,
-}
-
 #[derive(Default)]
-struct RuntimeWebsocketTcpConnectOverflowState {
+struct RuntimeWebsocketTcpConnectOverflowQueueState {
     jobs: VecDeque<RuntimeWebsocketTcpConnectTask>,
-    total_enqueued: usize,
-    total_dispatched: usize,
-    total_rejected: usize,
-    max_pending_jobs: usize,
+    stats: RuntimeWebsocketTcpConnectOverflowState,
 }
 
 #[derive(Default)]
 struct RuntimeWebsocketTcpConnectOverflowQueue {
-    state: Mutex<RuntimeWebsocketTcpConnectOverflowState>,
+    state: Mutex<RuntimeWebsocketTcpConnectOverflowQueueState>,
     work_available: Condvar,
 }
 
 impl RuntimeWebsocketTcpConnectOverflowQueue {
-    fn snapshot_from_state(
-        state: &RuntimeWebsocketTcpConnectOverflowState,
-    ) -> RuntimeWebsocketTcpConnectOverflowSnapshot {
-        RuntimeWebsocketTcpConnectOverflowSnapshot {
-            pending_jobs: state.jobs.len(),
-            max_pending_jobs: state.max_pending_jobs,
-            total_enqueued: state.total_enqueued,
-            total_dispatched: state.total_dispatched,
-            total_rejected: state.total_rejected,
-        }
-    }
-
     fn push(
         &self,
         task: RuntimeWebsocketTcpConnectTask,
@@ -229,14 +109,8 @@ impl RuntimeWebsocketTcpConnectOverflowQueue {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if state.jobs.len() >= overflow_capacity {
-            state.total_rejected = state.total_rejected.saturating_add(1);
-            return Err(Self::snapshot_from_state(&state));
-        }
+        let snapshot = state.stats.try_enqueue(overflow_capacity)?;
         state.jobs.push_back(task);
-        state.total_enqueued = state.total_enqueued.saturating_add(1);
-        state.max_pending_jobs = state.max_pending_jobs.max(state.jobs.len());
-        let snapshot = Self::snapshot_from_state(&state);
         self.work_available.notify_one();
         Ok(snapshot)
     }
@@ -253,8 +127,7 @@ impl RuntimeWebsocketTcpConnectOverflowQueue {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         loop {
             if let Some(task) = state.jobs.pop_front() {
-                state.total_dispatched = state.total_dispatched.saturating_add(1);
-                return (task, Self::snapshot_from_state(&state));
+                return (task, state.stats.dispatch());
             }
             state = self
                 .work_available
@@ -269,7 +142,7 @@ impl RuntimeWebsocketTcpConnectOverflowQueue {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Self::snapshot_from_state(&state)
+        state.stats.snapshot()
     }
 }
 
@@ -1162,17 +1035,6 @@ mod tests {
         assert_eq!(
             runtime_websocket_local_pressure_kind_from_io_error(&overflow_err),
             Some(RuntimeWebsocketLocalPressureKind::DnsResolveExecutorOverflow)
-        );
-    }
-
-    #[test]
-    fn local_pressure_classification_ignores_plain_io_errors() {
-        let plain = io::Error::new(io::ErrorKind::WouldBlock, "plain local backpressure");
-
-        assert_eq!(
-            runtime_websocket_local_pressure_kind_from_io_error(&plain),
-            None,
-            "plain WouldBlock errors should not be tagged as websocket local pressure"
         );
     }
 }

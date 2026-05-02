@@ -2,7 +2,13 @@ use super::*;
 
 pub(super) use prodex_runtime_tuning::{
     RuntimeTuningLaneLimits, RuntimeTuningSnapshot, percent_override_with_policy,
-    runtime_duration_ms, runtime_take_fault_injection, timeout_override_ms_with_policy,
+    runtime_duration_ms, runtime_take_fault_injection,
+    runtime_websocket_dns_resolve_overflow_capacity_default,
+    runtime_websocket_dns_resolve_queue_capacity_default,
+    runtime_websocket_dns_resolve_worker_count_default,
+    runtime_websocket_tcp_connect_overflow_capacity_default,
+    runtime_websocket_tcp_connect_queue_capacity_default,
+    runtime_websocket_tcp_connect_worker_count_default, timeout_override_ms_with_policy,
     usize_override_with_policy, usize_override_with_policy_allow_zero,
 };
 
@@ -149,10 +155,6 @@ pub(super) fn runtime_proxy_websocket_precommit_progress_timeout_ms() -> u64 {
     )
 }
 
-pub(super) fn runtime_websocket_tcp_connect_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(4, 16)
-}
-
 pub(super) fn runtime_websocket_tcp_connect_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
@@ -165,10 +167,6 @@ pub(super) fn runtime_websocket_tcp_connect_worker_count() -> usize {
     .max(1)
 }
 
-pub(super) fn runtime_websocket_tcp_connect_queue_capacity_default(worker_count: usize) -> usize {
-    worker_count.saturating_mul(8).clamp(32, 128)
-}
-
 pub(super) fn runtime_websocket_tcp_connect_queue_capacity(worker_count: usize) -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
@@ -177,16 +175,6 @@ pub(super) fn runtime_websocket_tcp_connect_queue_capacity(worker_count: usize) 
     )
     .max(worker_count)
     .max(1)
-}
-
-pub(super) fn runtime_websocket_tcp_connect_overflow_capacity_default(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    queue_capacity
-        .saturating_mul(4)
-        .max(worker_count)
-        .clamp(32, 512)
 }
 
 pub(super) fn runtime_websocket_tcp_connect_overflow_capacity(
@@ -198,10 +186,6 @@ pub(super) fn runtime_websocket_tcp_connect_overflow_capacity(
         runtime_policy_proxy().and_then(|policy| policy.websocket_connect_overflow_capacity),
         runtime_websocket_tcp_connect_overflow_capacity_default(worker_count, queue_capacity),
     )
-}
-
-pub(super) fn runtime_websocket_dns_resolve_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(2, 8)
 }
 
 pub(super) fn runtime_websocket_dns_resolve_worker_count() -> usize {
@@ -216,10 +200,6 @@ pub(super) fn runtime_websocket_dns_resolve_worker_count() -> usize {
     .max(1)
 }
 
-pub(super) fn runtime_websocket_dns_resolve_queue_capacity_default(worker_count: usize) -> usize {
-    worker_count.saturating_mul(4).clamp(16, 64)
-}
-
 pub(super) fn runtime_websocket_dns_resolve_queue_capacity(worker_count: usize) -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
@@ -228,16 +208,6 @@ pub(super) fn runtime_websocket_dns_resolve_queue_capacity(worker_count: usize) 
     )
     .max(worker_count)
     .max(1)
-}
-
-pub(super) fn runtime_websocket_dns_resolve_overflow_capacity_default(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    queue_capacity
-        .saturating_mul(2)
-        .max(worker_count)
-        .clamp(16, 128)
 }
 
 pub(super) fn runtime_websocket_dns_resolve_overflow_capacity(

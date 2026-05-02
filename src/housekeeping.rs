@@ -5,6 +5,12 @@ mod history;
 
 use self::duplicates::cleanup_duplicate_profiles;
 use self::history::cleanup_prodex_chat_history_at;
+use prodex_core::{
+    login_temp_dir_name_is_owned, owned_root_temp_file_name, root_temp_file_pid,
+    runtime_broker_artifact_key, runtime_broker_lease_pid, runtime_proxy_log_file_name_is_owned,
+    select_newest_modified_path, select_runtime_log_paths_to_remove,
+    should_remove_stale_root_temp_file, system_time_to_unix_seconds,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProdexCleanupSummary {
@@ -80,28 +86,12 @@ pub(crate) fn cleanup_prodex_transient_root_files(paths: &AppPaths) -> usize {
         .count()
 }
 
-fn prodex_root_temp_file_name_is_owned(name: &str) -> bool {
-    name.starts_with("state.json.")
-        || name.starts_with("runtime-")
-        || name.starts_with("update-check.json.")
-}
-
-fn prodex_root_temp_file_pid(name: &str) -> Option<u32> {
-    let stem = name.strip_suffix(".tmp")?;
-    let mut parts = stem.rsplitn(4, '.');
-    let _sequence = parts.next()?;
-    let _nanos = parts.next()?;
-    let pid = parts.next()?;
-    let _base_name = parts.next()?;
-    pid.parse::<u32>().ok()
-}
-
 pub(crate) fn cleanup_prodex_stale_root_temp_files_at(paths: &AppPaths, now: SystemTime) -> usize {
     let Ok(entries) = fs::read_dir(&paths.root) else {
         return 0;
     };
-    let oldest_allowed = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
-        - PROD_EX_TMP_LOGIN_RETENTION_SECONDS;
+    let oldest_allowed =
+        system_time_to_unix_seconds(now).unwrap_or_default() - PROD_EX_TMP_LOGIN_RETENTION_SECONDS;
     let mut removed = 0usize;
 
     for entry in entries.flatten() {
@@ -109,7 +99,7 @@ pub(crate) fn cleanup_prodex_stale_root_temp_files_at(paths: &AppPaths, now: Sys
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !name.ends_with(".tmp") || !prodex_root_temp_file_name_is_owned(name) {
+        if !name.ends_with(".tmp") || !owned_root_temp_file_name(name) {
             continue;
         }
 
@@ -117,12 +107,10 @@ pub(crate) fn cleanup_prodex_stale_root_temp_files_at(paths: &AppPaths, now: Sys
             .metadata()
             .ok()
             .and_then(|meta| meta.modified().ok())
-            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs() as i64)
+            .and_then(system_time_to_unix_seconds)
             .unwrap_or(i64::MIN);
-        let pid_alive = prodex_root_temp_file_pid(name).is_some_and(runtime_process_pid_alive);
-        if !pid_alive
-            && (modified < oldest_allowed || prodex_root_temp_file_pid(name).is_some())
+        let pid_alive = root_temp_file_pid(name).is_some_and(runtime_process_pid_alive);
+        if should_remove_stale_root_temp_file(name, modified, oldest_allowed, pid_alive)
             && remove_file_if_exists(&path)
         {
             removed += 1;
@@ -147,7 +135,7 @@ pub(crate) fn collect_orphan_managed_profile_dirs_at(
     state: &AppState,
     now: SystemTime,
 ) -> Vec<String> {
-    let oldest_allowed = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
+    let oldest_allowed = system_time_to_unix_seconds(now).unwrap_or_default()
         - ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS;
     let Ok(entries) = fs::read_dir(&paths.managed_profiles_root) else {
         return Vec::new();
@@ -167,8 +155,7 @@ pub(crate) fn collect_orphan_managed_profile_dirs_at(
             let modified = metadata
                 .modified()
                 .ok()
-                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_secs() as i64)
+                .and_then(system_time_to_unix_seconds)
                 .unwrap_or(i64::MIN);
             if modified >= oldest_allowed || !runtime_managed_profile_dir_looks_safe_to_audit(&path)
             {
@@ -211,7 +198,7 @@ pub(crate) fn prodex_runtime_log_paths_in_dir(dir: &Path) -> Vec<PathBuf> {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| {
-                    name.starts_with(RUNTIME_PROXY_LOG_FILE_PREFIX) && name.ends_with(".log")
+                    runtime_proxy_log_file_name_is_owned(name, RUNTIME_PROXY_LOG_FILE_PREFIX)
                 })
         })
         .collect::<Vec<_>>();
@@ -220,28 +207,25 @@ pub(crate) fn prodex_runtime_log_paths_in_dir(dir: &Path) -> Vec<PathBuf> {
 }
 
 pub(crate) fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) -> usize {
-    let now_epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let now_epoch = system_time_to_unix_seconds(now).unwrap_or_default();
     let oldest_allowed = now_epoch.saturating_sub(RUNTIME_PROXY_LOG_RETENTION_SECONDS);
-    let mut paths = prodex_runtime_log_paths_in_dir(dir)
+    let paths = prodex_runtime_log_paths_in_dir(dir)
         .into_iter()
         .map(|path| {
             let modified = path
                 .metadata()
                 .ok()
                 .and_then(|meta| meta.modified().ok())
-                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_secs() as i64)
+                .and_then(system_time_to_unix_seconds)
                 .unwrap_or(i64::MIN);
             (path, modified)
         })
         .collect::<Vec<_>>();
-    paths.sort_by_key(|(path, modified)| (*modified, path.clone()));
-    let excess = paths
-        .len()
-        .saturating_sub(RUNTIME_PROXY_LOG_RETENTION_COUNT);
     let mut removed = 0usize;
-    for (index, (path, modified)) in paths.into_iter().enumerate() {
-        if (modified < oldest_allowed || index < excess) && fs::remove_file(path).is_ok() {
+    for path in
+        select_runtime_log_paths_to_remove(paths, oldest_allowed, RUNTIME_PROXY_LOG_RETENTION_COUNT)
+    {
+        if fs::remove_file(path).is_ok() {
             removed += 1;
         }
     }
@@ -249,7 +233,7 @@ pub(crate) fn cleanup_runtime_proxy_logs_in_dir(dir: &Path, now: SystemTime) -> 
 }
 
 pub(crate) fn newest_runtime_proxy_log_in_dir(dir: &Path) -> Option<PathBuf> {
-    prodex_runtime_log_paths_in_dir(dir)
+    let paths = prodex_runtime_log_paths_in_dir(dir)
         .into_iter()
         .filter_map(|path| {
             let modified = path
@@ -260,12 +244,8 @@ pub(crate) fn newest_runtime_proxy_log_in_dir(dir: &Path) -> Option<PathBuf> {
                 .map(|duration| duration.as_millis());
             modified.map(|modified| (modified, path))
         })
-        .max_by(|(left_modified, left_path), (right_modified, right_path)| {
-            left_modified
-                .cmp(right_modified)
-                .then_with(|| left_path.cmp(right_path))
-        })
-        .map(|(_, path)| path)
+        .collect::<Vec<_>>();
+    select_newest_modified_path(paths)
 }
 
 pub(crate) fn cleanup_runtime_proxy_latest_pointer(pointer_path: &Path) -> bool {
@@ -289,23 +269,22 @@ pub(crate) fn cleanup_stale_login_dirs_at(paths: &AppPaths, now: SystemTime) -> 
     let Ok(entries) = fs::read_dir(&paths.root) else {
         return 0;
     };
-    let oldest_allowed = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
-        - PROD_EX_TMP_LOGIN_RETENTION_SECONDS;
+    let oldest_allowed =
+        system_time_to_unix_seconds(now).unwrap_or_default() - PROD_EX_TMP_LOGIN_RETENTION_SECONDS;
     let mut removed = 0usize;
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !name.starts_with(".login-") {
+        if !login_temp_dir_name_is_owned(name) {
             continue;
         }
         let modified = entry
             .metadata()
             .ok()
             .and_then(|meta| meta.modified().ok())
-            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs() as i64)
+            .and_then(system_time_to_unix_seconds)
             .unwrap_or(i64::MIN);
         if modified < oldest_allowed && remove_dir_if_exists(&path).is_ok() {
             removed += 1;
@@ -328,25 +307,7 @@ fn runtime_broker_artifact_keys(paths: &AppPaths) -> Vec<String> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if let Some(key) = name
-            .strip_prefix("runtime-broker-")
-            .and_then(|suffix| suffix.strip_suffix(".json"))
-        {
-            keys.push(key.to_string());
-            continue;
-        }
-        if let Some(key) = name
-            .strip_prefix("runtime-broker-")
-            .and_then(|suffix| suffix.strip_suffix(".json.last-good"))
-        {
-            keys.push(key.to_string());
-            continue;
-        }
-        if path.is_dir()
-            && let Some(key) = name
-                .strip_prefix("runtime-broker-")
-                .and_then(|suffix| suffix.strip_suffix("-leases"))
-        {
+        if let Some(key) = runtime_broker_artifact_key(name, path.is_dir()) {
             keys.push(key.to_string());
         }
     }
@@ -386,10 +347,7 @@ pub(crate) fn cleanup_runtime_broker_stale_leases_for_all(paths: &AppPaths) -> u
             let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            let pid = file_name
-                .split('-')
-                .next()
-                .and_then(|value| value.parse::<u32>().ok());
+            let pid = runtime_broker_lease_pid(file_name);
             if pid.is_some_and(runtime_process_pid_alive) {
                 continue;
             }

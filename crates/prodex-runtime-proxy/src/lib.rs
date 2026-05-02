@@ -13,8 +13,10 @@ mod failure_response;
 mod health;
 mod payload_detection;
 mod previous_response_log;
+mod selection_policy;
 mod transport_failure;
 mod websocket_message;
+mod websocket_tcp_connect_executor;
 
 pub use self::attempt_outcome::*;
 pub use self::buffered_response::*;
@@ -22,8 +24,10 @@ pub use self::failure_response::*;
 pub use self::health::*;
 pub use self::payload_detection::*;
 pub use self::previous_response_log::*;
+pub use self::selection_policy::*;
 pub use self::transport_failure::*;
 pub use self::websocket_message::*;
+pub use self::websocket_tcp_connect_executor::*;
 
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 pub const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";

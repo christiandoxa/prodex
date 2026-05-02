@@ -1,19 +1,10 @@
 use super::*;
-
-fn remap_profile_binding_targets(
-    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
-    from_profile: &str,
-    to_profile: &str,
-) {
-    if from_profile == to_profile {
-        return;
-    }
-    for binding in bindings.values_mut() {
-        if binding.profile_name == from_profile {
-            binding.profile_name = to_profile.to_string();
-        }
-    }
-}
+use prodex_core::same_path;
+use prodex_state::{
+    duplicate_profile_identity_key, ensure_active_profile_after_duplicate_cleanup,
+    remap_profile_binding_targets, remove_duplicate_profile_from_state,
+    select_canonical_duplicate_profile,
+};
 
 fn remap_runtime_continuation_store_profiles(
     continuations: &mut RuntimeContinuationStore,
@@ -42,47 +33,8 @@ fn remap_runtime_continuation_store_profiles(
     );
 }
 
-fn duplicate_profile_cleanup_priority(state: &AppState, profile_name: &str) -> (bool, i64, bool) {
-    let active = state.active_profile.as_deref() == Some(profile_name);
-    let last_selected_at = state
-        .last_run_selected_at
-        .get(profile_name)
-        .copied()
-        .unwrap_or(i64::MIN);
-    let prefer_external = state
-        .profiles
-        .get(profile_name)
-        .map(|profile| !profile.managed)
-        .unwrap_or(false);
-    (active, last_selected_at, prefer_external)
-}
-
-fn select_canonical_duplicate_profile(
-    state: &AppState,
-    profile_names: &[String],
-) -> Option<String> {
-    profile_names.iter().cloned().max_by(|left, right| {
-        duplicate_profile_cleanup_priority(state, left)
-            .cmp(&duplicate_profile_cleanup_priority(state, right))
-            .then_with(|| right.cmp(left))
-    })
-}
-
 fn cleanup_duplicate_identity_key(identity: &ProfileIdentity) -> Option<String> {
-    identity
-        .account_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|account_id| !account_id.is_empty())
-        .map(|account_id| format!("account:{account_id}"))
-        .or_else(|| {
-            identity
-                .email
-                .as_deref()
-                .map(str::trim)
-                .filter(|email| !email.is_empty())
-                .map(|email| format!("email:{}", normalize_email(email)))
-        })
+    duplicate_profile_identity_key(identity.account_id.as_deref(), identity.email.as_deref())
 }
 
 fn resolve_cleanup_profile_identities(state: &mut AppState) -> Vec<(String, ProfileIdentity)> {
@@ -177,25 +129,6 @@ pub(super) fn cleanup_duplicate_profiles(
             .into_iter()
             .filter(|profile_name| profile_name != &canonical_name)
         {
-            let duplicate_last_selected_at = state.last_run_selected_at.remove(&duplicate_name);
-            if let Some(last_selected_at) = duplicate_last_selected_at {
-                let target = state
-                    .last_run_selected_at
-                    .entry(canonical_name.clone())
-                    .or_insert(last_selected_at);
-                *target = (*target).max(last_selected_at);
-            }
-
-            remap_profile_binding_targets(
-                &mut state.response_profile_bindings,
-                &duplicate_name,
-                &canonical_name,
-            );
-            remap_profile_binding_targets(
-                &mut state.session_profile_bindings,
-                &duplicate_name,
-                &canonical_name,
-            );
             if let Some(continuations) = continuations.as_mut() {
                 remap_runtime_continuation_store_profiles(
                     continuations,
@@ -211,11 +144,9 @@ pub(super) fn cleanup_duplicate_profiles(
                 );
             }
 
-            if state.active_profile.as_deref() == Some(duplicate_name.as_str()) {
-                state.active_profile = Some(canonical_name.clone());
-            }
-
-            let Some(removed_profile) = state.profiles.remove(&duplicate_name) else {
+            let Some(removed_profile) =
+                remove_duplicate_profile_from_state(state, &duplicate_name, &canonical_name)
+            else {
                 continue;
             };
             summary.duplicate_profiles_removed += 1;
@@ -235,9 +166,7 @@ pub(super) fn cleanup_duplicate_profiles(
         }
     }
 
-    if state.active_profile.is_none() {
-        state.active_profile = state.profiles.keys().next().cloned();
-    }
+    ensure_active_profile_after_duplicate_cleanup(state);
 
     if let Some(continuations) = continuations.as_ref() {
         save_runtime_continuations_for_profiles(paths, continuations, &state.profiles)?;
