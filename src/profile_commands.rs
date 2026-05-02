@@ -20,11 +20,7 @@ pub(crate) use self::copilot::{
 };
 use self::import_export::write_secret_text_file;
 #[cfg(test)]
-use self::import_export::{
-    build_profile_export_payload, decode_profile_export_envelope, derive_profile_export_key,
-    import_profile_export_payload, serialize_profile_export_payload,
-    validate_profile_export_header,
-};
+use self::import_export::{build_profile_export_payload, import_profile_export_payload};
 pub(crate) use self::import_export::{
     count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
     handle_import_profiles, repair_profile_import_auth_journals,
@@ -41,10 +37,14 @@ use aes_gcm_siv::aead::KeyInit;
 #[cfg(test)]
 use aes_gcm_siv::{Aes256GcmSiv, Nonce};
 #[cfg(test)]
-use prodex_profile_export::{PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF};
+use prodex_profile_export::{
+    PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, derive_profile_export_key,
+    serialize_profile_export_payload, validate_profile_export_header,
+};
 
 pub(super) type ProfileExportPayload = prodex_profile_export::ProfileExportPayload<ProfileProvider>;
 pub(super) type ExportedProfile = prodex_profile_export::ExportedProfile<ProfileProvider>;
+#[cfg(test)]
 pub(super) type ProfileExportEnvelope =
     prodex_profile_export::ProfileExportEnvelope<ProfileExportPayload>;
 pub(super) type StagedImportedProfile =

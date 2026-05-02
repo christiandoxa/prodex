@@ -1,6 +1,4 @@
-use std::fs::OpenOptions;
 use std::io::IsTerminal;
-use std::io::Write as _;
 
 use prodex_profile_export::{
     ImportedExistingProfileAuthUpdateJournal, ProfileImportAuthUpdatePlan, ProfileImportIdentity,
@@ -25,13 +23,14 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
         true => Some(resolve_export_password()?),
         false => None,
     };
-    let encoded = serialize_profile_export_payload(&payload, password.as_deref())?;
+    let encoded =
+        prodex_profile_export::serialize_profile_export_payload(&payload, password.as_deref())?;
     let output_path = args
         .output
         .map(absolutize)
         .transpose()?
         .unwrap_or_else(default_profile_export_path);
-    write_profile_export_bundle(&output_path, &encoded)?;
+    prodex_profile_export::write_profile_export_bundle(&output_path, &encoded)?;
     audit_log_event_best_effort(
         "profile",
         "export",
@@ -84,7 +83,7 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
         rollback_imported_profiles(&mut state, &commit);
         return Err(err);
     }
-    cleanup_imported_auth_update_journals(&commit);
+    prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
     audit_log_event_best_effort(
         "profile",
         "import",
@@ -126,7 +125,7 @@ pub(crate) fn handle_import_current_profile(args: ImportCurrentArgs) -> Result<(
 }
 
 pub(crate) fn count_profile_import_auth_journals(paths: &AppPaths) -> Result<usize> {
-    Ok(imported_auth_update_journal_paths(paths)?.len())
+    Ok(prodex_profile_export::profile_import_auth_update_journal_paths(&paths.root)?.len())
 }
 
 pub(crate) fn repair_profile_import_auth_journals(
@@ -267,73 +266,11 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     }
 }
 
-pub(super) fn serialize_profile_export_payload(
-    payload: &ProfileExportPayload,
-    password: Option<&str>,
-) -> Result<Vec<u8>> {
-    prodex_profile_export::serialize_profile_export_payload(payload, password)
-}
-
-#[allow(dead_code)]
-pub(super) fn derive_profile_export_key(password: &str, salt: &[u8], iterations: u32) -> [u8; 32] {
-    prodex_profile_export::derive_profile_export_key(password, salt, iterations)
-}
-
 fn read_profile_export_payload(path: &Path) -> Result<(ProfileExportPayload, bool)> {
-    let content = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let envelope: ProfileExportEnvelope = serde_json::from_slice(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    let encrypted = matches!(envelope, ProfileExportEnvelope::Encrypted { .. });
-    let payload = decode_profile_export_envelope(envelope)?;
+    let (envelope, encrypted) = prodex_profile_export::read_profile_export_envelope(path)?;
+    let payload =
+        prodex_profile_export::decode_profile_export_envelope(envelope, resolve_import_password)?;
     Ok((payload, encrypted))
-}
-
-pub(super) fn decode_profile_export_envelope(
-    envelope: ProfileExportEnvelope,
-) -> Result<ProfileExportPayload> {
-    prodex_profile_export::decode_profile_export_envelope(envelope, resolve_import_password)
-}
-
-#[allow(dead_code)]
-pub(super) fn validate_profile_export_header(format: &str, version: u32) -> Result<()> {
-    prodex_profile_export::validate_profile_export_header(format, version)
-}
-
-pub(super) fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let temp_path = unique_state_temp_file_path(path);
-    write_profile_export_temp_file(&temp_path, content)?;
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("failed to replace {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to secure {}", path.display()))?;
-    }
-    Ok(())
-}
-
-fn write_profile_export_temp_file(path: &Path, content: &[u8]) -> Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    file.write_all(content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
 }
 
 pub(super) fn import_profile_export_payload(
@@ -482,7 +419,7 @@ fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCom
     }
     rollback_imported_auth_updates(state, &commit.auth_updates);
     state.active_profile = commit.previous_active_profile.clone();
-    remove_committed_import_homes(&commit.committed_homes);
+    prodex_profile_export::remove_committed_import_homes(&commit.committed_homes);
 }
 
 fn rollback_partial_imported_profiles(
@@ -494,7 +431,7 @@ fn rollback_partial_imported_profiles(
     }
     rollback_imported_auth_updates(state, &transaction.auth_updates);
     state.active_profile = transaction.previous_active_profile.clone();
-    remove_committed_import_homes(&transaction.committed_homes);
+    prodex_profile_export::remove_committed_import_homes(&transaction.committed_homes);
 }
 
 pub(super) fn rollback_imported_auth_updates(
@@ -520,8 +457,9 @@ pub(super) fn recover_imported_auth_update_journals(
     paths: &AppPaths,
     state: &mut AppState,
 ) -> Result<usize> {
-    let journal_root = imported_auth_update_journal_root(paths);
-    let journal_paths = imported_auth_update_journal_paths(paths)?;
+    let journal_root = prodex_profile_export::profile_import_auth_update_journal_root(&paths.root);
+    let journal_paths =
+        prodex_profile_export::profile_import_auth_update_journal_paths(&paths.root)?;
 
     let mut journals = Vec::new();
     for journal_path in journal_paths {
@@ -563,45 +501,6 @@ pub(super) fn recover_imported_auth_update_journals(
 
     let _ = fs::remove_dir(&journal_root);
     Ok(recovered)
-}
-
-fn imported_auth_update_journal_paths(paths: &AppPaths) -> Result<Vec<PathBuf>> {
-    let journal_root = imported_auth_update_journal_root(paths);
-    let entries = match fs::read_dir(&journal_root) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to read {}", journal_root.display()));
-        }
-    };
-    let mut journal_paths = entries
-        .map(|entry| {
-            entry
-                .map(|entry| entry.path())
-                .with_context(|| format!("failed to read entry in {}", journal_root.display()))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    journal_paths.retain(|path| path.is_file());
-    journal_paths.sort();
-    Ok(journal_paths)
-}
-
-pub(super) fn cleanup_imported_auth_update_journals(commit: &ImportedProfilesCommit) {
-    for update in &commit.auth_updates {
-        let Some(journal_path) = update.journal_path.as_deref() else {
-            continue;
-        };
-        let _ = fs::remove_file(journal_path);
-        if let Some(parent) = journal_path.parent() {
-            let _ = fs::remove_dir(parent);
-        }
-    }
-}
-
-pub(super) fn remove_committed_import_homes(committed_homes: &[PathBuf]) {
-    for home in committed_homes.iter().rev() {
-        let _ = fs::remove_dir_all(home);
-    }
 }
 
 pub(super) fn stage_imported_profiles(
@@ -710,7 +609,11 @@ pub(super) fn stage_imported_profiles(
                         );
                     }
 
-                    let staging_home = unique_import_staging_home(paths, &exported.name);
+                    let staging_home = prodex_profile_export::profile_import_staging_home(
+                        &paths.managed_profiles_root,
+                        &exported.name,
+                        &runtime_random_token("profile"),
+                    );
                     create_codex_home_if_missing(&staging_home)?;
                     prepare_managed_codex_home(paths, &staging_home)?;
                     if plan_inputs[*source_index].supports_codex_runtime {
@@ -766,14 +669,6 @@ pub(super) fn stage_imported_profiles(
     })
 }
 
-fn unique_import_staging_home(paths: &AppPaths, profile_name: &str) -> PathBuf {
-    paths.managed_profiles_root.join(format!(
-        ".import-{}-{}",
-        profile_name,
-        runtime_random_token("profile")
-    ))
-}
-
 fn write_imported_auth_update_journal(
     paths: &AppPaths,
     profile_name: &str,
@@ -781,7 +676,11 @@ fn write_imported_auth_update_journal(
     previous_email: Option<String>,
     previous_auth_json: Option<String>,
 ) -> Result<PathBuf> {
-    let journal_path = unique_imported_auth_update_journal_path(paths, profile_name)?;
+    let journal_path = prodex_profile_export::unique_profile_import_auth_update_journal_path(
+        &paths.root,
+        profile_name,
+        &runtime_random_token("auth"),
+    )?;
     let journal = ImportedExistingProfileAuthUpdateJournal::new(
         profile_name.to_string(),
         codex_home.display().to_string(),
@@ -793,38 +692,6 @@ fn write_imported_auth_update_journal(
         .context("failed to serialize auth update journal")?;
     write_secret_text_file(&journal_path, &json)?;
     Ok(journal_path)
-}
-
-fn unique_imported_auth_update_journal_path(
-    paths: &AppPaths,
-    profile_name: &str,
-) -> Result<PathBuf> {
-    let journal_root = ensure_imported_auth_update_journal_root(paths)?;
-    Ok(journal_root.join(format!(
-        "{}-{}.json",
-        profile_name,
-        runtime_random_token("auth")
-    )))
-}
-
-fn ensure_imported_auth_update_journal_root(paths: &AppPaths) -> Result<PathBuf> {
-    let journal_root = imported_auth_update_journal_root(paths);
-    fs::create_dir_all(&journal_root)
-        .with_context(|| format!("failed to create {}", journal_root.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o700);
-        fs::set_permissions(&journal_root, permissions)
-            .with_context(|| format!("failed to secure {}", journal_root.display()))?;
-    }
-    Ok(journal_root)
-}
-
-pub(super) fn imported_auth_update_journal_root(paths: &AppPaths) -> PathBuf {
-    paths
-        .root
-        .join(prodex_profile_export::IMPORT_AUTH_UPDATE_JOURNAL_DIR)
 }
 
 pub(super) fn write_secret_text_file(path: &Path, content: &str) -> Result<()> {

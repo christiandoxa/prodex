@@ -113,7 +113,7 @@ fn profile_commands_read_access_token(codex_home: &Path) -> String {
 }
 
 fn profile_commands_import_auth_journal_paths(paths: &AppPaths) -> Vec<PathBuf> {
-    let journal_root = super::import_export::imported_auth_update_journal_root(paths);
+    let journal_root = prodex_profile_export::profile_import_auth_update_journal_root(&paths.root);
     let entries = match fs::read_dir(&journal_root) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -210,8 +210,9 @@ fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
         build_profile_export_payload(&source_state, &selected_names).expect("payload builds");
     let encoded =
         serialize_profile_export_payload(&payload, None).expect("plain export should encode");
-    let decoded = decode_profile_export_envelope(
+    let decoded = prodex_profile_export::decode_profile_export_envelope(
         serde_json::from_slice(&encoded).expect("encoded bundle should parse"),
+        || unreachable!("plain export should not request a password"),
     )
     .expect("plain export should decode");
 
@@ -318,13 +319,12 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
 #[cfg(unix)]
 #[test]
 fn profile_export_bundle_is_written_with_private_permissions() {
-    use super::import_export::write_profile_export_bundle;
     use std::os::unix::fs::PermissionsExt;
 
     let target_dir = ProfileCommandsTestDir::new("export-bundle-permissions");
     let output_path = target_dir.path.join("bundle.json");
 
-    write_profile_export_bundle(&output_path, b"{\"secret\":true}")
+    prodex_profile_export::write_profile_export_bundle(&output_path, b"{\"secret\":true}")
         .expect("profile export bundle should be written");
 
     let mode = fs::metadata(&output_path)
@@ -656,7 +656,7 @@ fn profile_import_auth_update_journal_is_removed_after_successful_state_save() {
     existing_state
         .save(&target_paths)
         .expect("state should save after import");
-    super::import_export::cleanup_imported_auth_update_journals(&commit);
+    prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
 
     assert!(
         profile_commands_import_auth_journal_paths(&target_paths).is_empty(),
@@ -934,7 +934,7 @@ fn profile_import_save_failure_rolls_back_auth_and_keeps_recoverable_journal() {
     let bundle_path = sandbox_dir.path.join("duplicate-import.json");
     let bundle = serialize_profile_export_payload(&payload, None)
         .expect("profile export payload should serialize");
-    super::import_export::write_profile_export_bundle(&bundle_path, &bundle)
+    prodex_profile_export::write_profile_export_bundle(&bundle_path, &bundle)
         .expect("profile export bundle should be written");
 
     let fault_count = SystemTime::now()

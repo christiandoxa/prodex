@@ -1,5 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_gcm_siv::{
     Aes256GcmSiv, Nonce,
@@ -23,6 +28,8 @@ pub const IMPORT_AUTH_UPDATE_JOURNAL_DIR: &str = "profile-import-auth-journal";
 pub const IMPORT_AUTH_UPDATE_JOURNAL_VERSION: u32 = 1;
 
 pub type SummaryFields = Vec<(String, String)>;
+
+static PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileImportIdentity {
@@ -508,6 +515,86 @@ pub fn validate_import_auth_update_journal_version(version: u32) -> Result<()> {
     Ok(())
 }
 
+pub fn profile_import_auth_update_journal_root(prodex_root: impl AsRef<Path>) -> PathBuf {
+    prodex_root.as_ref().join(IMPORT_AUTH_UPDATE_JOURNAL_DIR)
+}
+
+pub fn profile_import_auth_update_journal_paths(
+    prodex_root: impl AsRef<Path>,
+) -> Result<Vec<PathBuf>> {
+    let journal_root = profile_import_auth_update_journal_root(prodex_root);
+    let entries = match fs::read_dir(&journal_root) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", journal_root.display()));
+        }
+    };
+    let mut journal_paths = entries
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .with_context(|| format!("failed to read entry in {}", journal_root.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    journal_paths.retain(|path| path.is_file());
+    journal_paths.sort();
+    Ok(journal_paths)
+}
+
+pub fn ensure_profile_import_auth_update_journal_root(
+    prodex_root: impl AsRef<Path>,
+) -> Result<PathBuf> {
+    let journal_root = profile_import_auth_update_journal_root(prodex_root);
+    fs::create_dir_all(&journal_root)
+        .with_context(|| format!("failed to create {}", journal_root.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(&journal_root, permissions)
+            .with_context(|| format!("failed to secure {}", journal_root.display()))?;
+    }
+    Ok(journal_root)
+}
+
+pub fn unique_profile_import_auth_update_journal_path(
+    prodex_root: impl AsRef<Path>,
+    profile_name: &str,
+    token: &str,
+) -> Result<PathBuf> {
+    let journal_root = ensure_profile_import_auth_update_journal_root(prodex_root)?;
+    Ok(journal_root.join(format!("{profile_name}-{token}.json")))
+}
+
+pub fn profile_import_staging_home(
+    managed_profiles_root: impl AsRef<Path>,
+    profile_name: &str,
+    token: &str,
+) -> PathBuf {
+    managed_profiles_root
+        .as_ref()
+        .join(format!(".import-{profile_name}-{token}"))
+}
+
+pub fn cleanup_imported_auth_update_journals(commit: &ImportedProfilesCommit) {
+    for update in &commit.auth_updates {
+        let Some(journal_path) = update.journal_path.as_deref() else {
+            continue;
+        };
+        let _ = fs::remove_file(journal_path);
+        if let Some(parent) = journal_path.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+}
+
+pub fn remove_committed_import_homes(committed_homes: &[PathBuf]) {
+    for home in committed_homes.iter().rev() {
+        let _ = fs::remove_dir_all(home);
+    }
+}
+
 pub fn plan_profile_import<P>(
     profiles: &[P],
     existing_profile_supports_codex_runtime: impl Fn(&str) -> Option<bool>,
@@ -953,6 +1040,36 @@ where
     serde_json::to_vec_pretty(&envelope).context("failed to serialize profile export bundle")
 }
 
+pub fn read_profile_export_envelope<T>(path: &Path) -> Result<(ProfileExportEnvelope<T>, bool)>
+where
+    T: DeserializeOwned,
+{
+    let content = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let envelope: ProfileExportEnvelope<T> = serde_json::from_slice(&content)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let encrypted = matches!(envelope, ProfileExportEnvelope::Encrypted { .. });
+    Ok((envelope, encrypted))
+}
+
+pub fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let temp_path = unique_profile_export_temp_file_path(path);
+    write_profile_export_temp_file(&temp_path, content)?;
+    fs::rename(&temp_path, path)
+        .with_context(|| format!("failed to replace {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = fs::Permissions::from_mode(0o600);
+        fs::set_permissions(path, permissions)
+            .with_context(|| format!("failed to secure {}", path.display()))?;
+    }
+    Ok(())
+}
+
 pub fn decode_profile_export_envelope<T>(
     envelope: ProfileExportEnvelope<T>,
     resolve_password: impl FnOnce() -> Result<String>,
@@ -1067,6 +1184,42 @@ where
         nonce_base64: base64::engine::general_purpose::STANDARD.encode(nonce),
         ciphertext_base64: base64::engine::general_purpose::STANDARD.encode(ciphertext),
     })
+}
+
+fn unique_profile_export_temp_file_path(path: &Path) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let file_name = format!(
+        "{}.{}.{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("profile-export.json"),
+        std::process::id(),
+        nanos,
+        sequence
+    );
+    path.with_file_name(file_name)
+}
+
+fn write_profile_export_temp_file(path: &Path, content: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    file.write_all(content)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
 }
 
 fn yes_no(value: bool) -> String {
