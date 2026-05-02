@@ -8,6 +8,6 @@
     "runtime_compact_session_affinity_selection": 190,
     "runtime_websocket_stale_reuse_affinity": 190,
     "runtime_sse_lookahead_inspection": 240,
-    "runtime_dead_lineage_cleanup": 190
+    "runtime_dead_lineage_cleanup": 200
   }
 }
