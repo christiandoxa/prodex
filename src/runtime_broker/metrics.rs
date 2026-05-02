@@ -1,6 +1,5 @@
 use super::*;
 use prodex_runtime_broker::runtime_broker_continuity_failure_reason_metrics_with_live;
-pub(crate) use prodex_runtime_broker_log::runtime_broker_continuity_failure_reason_metrics_from_log_file;
 
 fn runtime_broker_continuity_failure_reason_metrics(
     log_path: &Path,
