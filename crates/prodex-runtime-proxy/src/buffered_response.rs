@@ -1,5 +1,7 @@
 use std::ops::Deref;
 
+use crate::runtime_response_content_type_from_binary_headers;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RuntimeManagedResponseBody {
     bytes: Vec<u8>,
@@ -88,13 +90,12 @@ pub fn build_runtime_proxy_json_error_parts(
 pub fn runtime_buffered_response_content_type(
     parts: &RuntimeBufferedResponseParts,
 ) -> Option<&str> {
-    parts.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("content-type")
-            .then(|| std::str::from_utf8(value).ok())
-            .flatten()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    })
+    runtime_response_content_type_from_binary_headers(
+        parts
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_slice())),
+    )
 }
 
 #[cfg(test)]

@@ -39,6 +39,16 @@ pub struct PreparedRuntimeLaunch<P, E> {
     pub runtime_proxy: Option<E>,
 }
 
+pub fn allow_profileless_local_home(
+    requested_profile: Option<&str>,
+    model_provider_override: Option<&str>,
+    local_provider_id: &str,
+) -> bool {
+    requested_profile.is_none()
+        && model_provider_override
+            .is_some_and(|provider| provider.eq_ignore_ascii_case(local_provider_id))
+}
+
 pub struct RuntimeProxyCodexEndpoint<'a> {
     pub listen_addr: SocketAddr,
     pub openai_mount_path: &'a str,
@@ -447,5 +457,25 @@ mod tests {
             ]
         );
         assert!(include_code_review);
+    }
+
+    #[test]
+    fn profileless_local_home_requires_no_requested_profile_and_matching_provider() {
+        assert!(allow_profileless_local_home(
+            None,
+            Some("PRODEX-LOCAL"),
+            "prodex-local"
+        ));
+        assert!(!allow_profileless_local_home(
+            Some("main"),
+            Some("prodex-local"),
+            "prodex-local"
+        ));
+        assert!(!allow_profileless_local_home(
+            None,
+            Some("openai"),
+            "prodex-local"
+        ));
+        assert!(!allow_profileless_local_home(None, None, "prodex-local"));
     }
 }

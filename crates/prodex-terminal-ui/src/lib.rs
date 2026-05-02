@@ -603,6 +603,180 @@ pub fn format_info_runway_display(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionReportDisplay<'a> {
+    pub id: &'a str,
+    pub updated_at: Option<&'a str>,
+    pub thread_name: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub profile: Option<&'a str>,
+    pub path: &'a str,
+}
+
+pub fn render_session_reports(reports: &[SessionReportDisplay<'_>]) -> String {
+    render_session_reports_with_width(reports, current_cli_width())
+}
+
+pub fn render_session_reports_with_width(
+    reports: &[SessionReportDisplay<'_>],
+    total_width: usize,
+) -> String {
+    let widths = session_report_column_widths(total_width);
+    let mut lines = vec![section_header_with_width("Sessions", total_width)];
+    lines.push(format_session_report_row(
+        "ID", "UPDATED", "THREAD", "CWD", "PATH", widths,
+    ));
+    lines.push("-".repeat(text_width(lines.last().map(String::as_str).unwrap_or(""))));
+
+    for report in reports {
+        lines.push(format_session_report_row(
+            report.id,
+            report.updated_at.unwrap_or("-"),
+            report.thread_name.unwrap_or("-"),
+            report.cwd.unwrap_or("-"),
+            report.path,
+            widths,
+        ));
+        if let Some(profile) = report.profile {
+            lines.push(format!("  profile: {profile}"));
+        }
+    }
+
+    lines.join("\n")
+}
+
+#[derive(Clone, Copy)]
+struct SessionReportColumnWidths {
+    id: usize,
+    updated: usize,
+    thread: usize,
+    cwd: usize,
+    path: usize,
+}
+
+fn session_report_column_widths(total_width: usize) -> SessionReportColumnWidths {
+    let gap_width = text_width(CLI_TABLE_GAP) * 4;
+    let available = total_width.saturating_sub(gap_width).max(60);
+    let id = (available / 5).clamp(12, 26);
+    let updated = (available / 5).clamp(12, 22);
+    let thread = (available / 5).clamp(12, 24);
+    let remaining = available.saturating_sub(id + updated + thread);
+    let cwd = (remaining / 2).max(12);
+    let path = remaining.saturating_sub(cwd).max(12);
+    SessionReportColumnWidths {
+        id,
+        updated,
+        thread,
+        cwd,
+        path,
+    }
+}
+
+fn format_session_report_row(
+    id: &str,
+    updated: &str,
+    thread_name: &str,
+    cwd: &str,
+    path: &str,
+    widths: SessionReportColumnWidths,
+) -> String {
+    format!(
+        "{:<id_w$}{gap}{:<updated_w$}{gap}{:<thread_w$}{gap}{:<cwd_w$}{gap}{:<path_w$}",
+        fit_cell(id, widths.id),
+        fit_cell(updated, widths.updated),
+        fit_cell(thread_name, widths.thread),
+        fit_cell(cwd, widths.cwd),
+        fit_cell(path, widths.path),
+        gap = CLI_TABLE_GAP,
+        id_w = widths.id,
+        updated_w = widths.updated,
+        thread_w = widths.thread,
+        cwd_w = widths.cwd,
+        path_w = widths.path,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLaunchCandidateDisplay<'a> {
+    pub name: &'a str,
+    pub quota_summary: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLaunchSelectedProfileStatus<'a> {
+    Ready,
+    Blocked { blocked_summary: &'a str },
+    ProbeFailed { error: &'a str },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLaunchScoredCandidateMessage<'a> {
+    pub initial_profile_name: &'a str,
+    pub candidate: RuntimeLaunchCandidateDisplay<'a>,
+    pub selected_profile_status: Option<RuntimeLaunchSelectedProfileStatus<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeLaunchScoredCandidateOutput {
+    pub warning: Option<String>,
+    pub selection: String,
+}
+
+pub fn format_runtime_launch_scored_candidate_message(
+    message: RuntimeLaunchScoredCandidateMessage<'_>,
+) -> RuntimeLaunchScoredCandidateOutput {
+    let RuntimeLaunchCandidateDisplay {
+        name,
+        quota_summary,
+    } = message.candidate;
+    let mut output = RuntimeLaunchScoredCandidateOutput {
+        warning: None,
+        selection: format!("Using profile '{name}' ({quota_summary})"),
+    };
+
+    match message.selected_profile_status {
+        Some(RuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary }) => {
+            output.warning = Some(format!(
+                "Quota preflight blocked profile '{}': {}",
+                message.initial_profile_name, blocked_summary
+            ));
+            output.selection = format!(
+                "Auto-rotating to profile '{name}' using quota-pressure scoring ({quota_summary})."
+            );
+        }
+        Some(RuntimeLaunchSelectedProfileStatus::Ready) => {
+            output.selection = format!(
+                "Auto-selecting profile '{name}' over active profile '{}' using quota-pressure scoring ({quota_summary}).",
+                message.initial_profile_name
+            );
+        }
+        Some(RuntimeLaunchSelectedProfileStatus::ProbeFailed { error }) => {
+            output.warning = Some(format!(
+                "Warning: quota preflight failed for '{}': {error}",
+                message.initial_profile_name
+            ));
+            output.selection = format!(
+                "Using ready profile '{name}' after quota preflight failed ({quota_summary})"
+            );
+        }
+        None => {}
+    }
+
+    output
+}
+
+pub fn format_runtime_provider_direct_launch_message(provider_id: &str, source: &str) -> String {
+    format!(
+        "Detected model_provider '{provider_id}' from {source}. Launching directly without prodex quota preflight or auto-rotate proxy."
+    )
+}
+
+pub fn format_runtime_launch_quota_inspect_hint(profile_name: &str) -> String {
+    format!(
+        "Inspect with `prodex quota --profile {profile_name}` or bypass with `prodex run --skip-quota-check`."
+    )
+}
+
 pub fn format_relative_duration(seconds: i64) -> String {
     let seconds = seconds.max(0);
     if seconds == 0 {
@@ -740,5 +914,58 @@ mod tests {
         assert_eq!(format_relative_duration(59), "<1m");
         assert_eq!(format_relative_duration(3_660), "1h 1m");
         assert_eq!(format_relative_duration(90_000), "1d 1h");
+    }
+
+    #[test]
+    fn session_report_renderer_keeps_existing_columns_and_profile_line() {
+        let rendered = render_session_reports_with_width(
+            &[SessionReportDisplay {
+                id: "sess-a",
+                updated_at: Some("2026-04-29T12:30:00Z"),
+                thread_name: Some("Issue triage"),
+                cwd: Some("/repo"),
+                profile: Some("main"),
+                path: "/tmp/sessions/session-a.jsonl",
+            }],
+            80,
+        );
+
+        assert!(rendered.contains("[ Sessions ]"));
+        assert!(rendered.contains("ID"));
+        assert!(rendered.contains("sess-a"));
+        assert!(rendered.contains("Issue triage"));
+        assert!(rendered.contains("profile: main"));
+    }
+
+    #[test]
+    fn runtime_launch_scored_candidate_message_formats_blocked_selected_profile() {
+        let output =
+            format_runtime_launch_scored_candidate_message(RuntimeLaunchScoredCandidateMessage {
+                initial_profile_name: "main",
+                candidate: RuntimeLaunchCandidateDisplay {
+                    name: "backup",
+                    quota_summary: "5h 80%, weekly 90%",
+                },
+                selected_profile_status: Some(RuntimeLaunchSelectedProfileStatus::Blocked {
+                    blocked_summary: "5h limit exhausted",
+                }),
+            });
+
+        assert_eq!(
+            output.warning.as_deref(),
+            Some("Quota preflight blocked profile 'main': 5h limit exhausted")
+        );
+        assert_eq!(
+            output.selection,
+            "Auto-rotating to profile 'backup' using quota-pressure scoring (5h 80%, weekly 90%)."
+        );
+    }
+
+    #[test]
+    fn runtime_launch_provider_message_preserves_output_text() {
+        assert_eq!(
+            format_runtime_provider_direct_launch_message("amazon-bedrock", "config.toml"),
+            "Detected model_provider 'amazon-bedrock' from config.toml. Launching directly without prodex quota preflight or auto-rotate proxy."
+        );
     }
 }

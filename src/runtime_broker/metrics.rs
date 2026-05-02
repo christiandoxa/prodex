@@ -1,121 +1,11 @@
 use super::*;
+use prodex_runtime_broker::{
+    runtime_broker_continuation_metrics as aggregate_runtime_broker_continuation_metrics,
+    runtime_broker_merge_continuity_failure_reason_metrics,
+    runtime_broker_previous_response_continuity_metrics as aggregate_previous_response_continuity_metrics,
+    runtime_broker_subtract_continuity_failure_reason_metrics,
+};
 use std::io::{Read, Seek, SeekFrom};
-
-pub(crate) fn runtime_broker_continuation_metrics(
-    statuses: &RuntimeContinuationStatuses,
-    now: i64,
-) -> RuntimeBrokerContinuationMetrics {
-    let mut metrics = RuntimeBrokerContinuationMetrics {
-        response_bindings: statuses.response.len(),
-        turn_state_bindings: statuses.turn_state.len(),
-        session_id_bindings: statuses.session_id.len(),
-        warm: 0,
-        verified: 0,
-        suspect: 0,
-        dead: 0,
-        failure_counts: RuntimeBrokerContinuationSignalMetrics::default(),
-        not_found_streaks: RuntimeBrokerContinuationSignalMetrics::default(),
-        stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics::default(),
-    };
-    for (kind, status) in statuses
-        .response
-        .values()
-        .map(|status| (RuntimeContinuationBindingKind::Response, status))
-        .chain(
-            statuses
-                .turn_state
-                .values()
-                .map(|status| (RuntimeContinuationBindingKind::TurnState, status)),
-        )
-        .chain(
-            statuses
-                .session_id
-                .values()
-                .map(|status| (RuntimeContinuationBindingKind::SessionId, status)),
-        )
-    {
-        match status.state {
-            RuntimeContinuationBindingLifecycle::Warm => metrics.warm += 1,
-            RuntimeContinuationBindingLifecycle::Verified => metrics.verified += 1,
-            RuntimeContinuationBindingLifecycle::Suspect => metrics.suspect += 1,
-            RuntimeContinuationBindingLifecycle::Dead => metrics.dead += 1,
-        }
-        add_continuation_signal(
-            &mut metrics.failure_counts,
-            kind,
-            status.failure_count as usize,
-        );
-        add_continuation_signal(
-            &mut metrics.not_found_streaks,
-            kind,
-            status.not_found_streak as usize,
-        );
-        if runtime_continuation_status_is_stale_verified(status, now) {
-            add_continuation_signal(&mut metrics.stale_verified_bindings, kind, 1);
-        }
-    }
-    metrics
-}
-
-fn add_continuation_signal(
-    metrics: &mut RuntimeBrokerContinuationSignalMetrics,
-    kind: RuntimeContinuationBindingKind,
-    value: usize,
-) {
-    match kind {
-        RuntimeContinuationBindingKind::Response => metrics.response += value,
-        RuntimeContinuationBindingKind::TurnState => metrics.turn_state += value,
-        RuntimeContinuationBindingKind::SessionId => metrics.session_id += value,
-    }
-}
-
-fn runtime_broker_previous_response_continuity_metrics(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    now: i64,
-) -> RuntimeBrokerPreviousResponseContinuityMetrics {
-    const PREFIX: &str = "__previous_response_not_found__:";
-
-    let mut metrics = RuntimeBrokerPreviousResponseContinuityMetrics::default();
-    for (key, entry) in profile_health {
-        let Some(rest) = key.strip_prefix(PREFIX) else {
-            continue;
-        };
-        let Some((route, _)) = rest.split_once(':') else {
-            continue;
-        };
-        let score = runtime_profile_effective_score(
-            entry,
-            now,
-            RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
-        );
-        if score == 0 {
-            continue;
-        }
-        if add_route_continuity_signal(&mut metrics.negative_cache_entries, route, 1) {
-            let _ = add_route_continuity_signal(
-                &mut metrics.negative_cache_failures,
-                route,
-                score as usize,
-            );
-        }
-    }
-    metrics
-}
-
-fn add_route_continuity_signal(
-    metrics: &mut RuntimeBrokerRouteContinuityMetrics,
-    route: &str,
-    value: usize,
-) -> bool {
-    match route {
-        "responses" => metrics.responses += value,
-        "compact" => metrics.compact += value,
-        "websocket" => metrics.websocket += value,
-        "standard" => metrics.standard += value,
-        _ => return false,
-    }
-    true
-}
 
 const RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE_LIMIT: usize = 16;
 
@@ -268,57 +158,6 @@ pub(crate) fn runtime_broker_continuity_failure_reason_metrics_from_log_file(
     log_path: &Path,
 ) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
     runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0)
-}
-
-fn runtime_broker_merge_continuity_failure_reason_metrics(
-    metrics: &mut RuntimeBrokerContinuityFailureReasonMetrics,
-    delta: RuntimeBrokerContinuityFailureReasonMetrics,
-) {
-    for (reason, count) in delta.chain_retried_owner {
-        *metrics.chain_retried_owner.entry(reason).or_insert(0) += count;
-    }
-    for (reason, count) in delta.chain_dead_upstream_confirmed {
-        *metrics
-            .chain_dead_upstream_confirmed
-            .entry(reason)
-            .or_insert(0) += count;
-    }
-    for (reason, count) in delta.stale_continuation {
-        *metrics.stale_continuation.entry(reason).or_insert(0) += count;
-    }
-}
-
-fn runtime_broker_subtract_reason_metrics(
-    metrics: BTreeMap<String, usize>,
-    delta: &BTreeMap<String, usize>,
-) -> BTreeMap<String, usize> {
-    metrics
-        .into_iter()
-        .filter_map(|(reason, count)| {
-            let remaining = count.saturating_sub(delta.get(&reason).copied().unwrap_or_default());
-            (remaining > 0).then_some((reason, remaining))
-        })
-        .collect()
-}
-
-fn runtime_broker_subtract_continuity_failure_reason_metrics(
-    metrics: RuntimeBrokerContinuityFailureReasonMetrics,
-    delta: &RuntimeBrokerContinuityFailureReasonMetrics,
-) -> RuntimeBrokerContinuityFailureReasonMetrics {
-    RuntimeBrokerContinuityFailureReasonMetrics {
-        chain_retried_owner: runtime_broker_subtract_reason_metrics(
-            metrics.chain_retried_owner,
-            &delta.chain_retried_owner,
-        ),
-        chain_dead_upstream_confirmed: runtime_broker_subtract_reason_metrics(
-            metrics.chain_dead_upstream_confirmed,
-            &delta.chain_dead_upstream_confirmed,
-        ),
-        stale_continuation: runtime_broker_subtract_reason_metrics(
-            metrics.stale_continuation,
-            &delta.stale_continuation,
-        ),
-    }
 }
 
 fn runtime_broker_continuity_failure_reason_metrics(
@@ -681,10 +520,15 @@ pub(crate) fn runtime_broker_metrics_snapshot(
             .count(),
         degraded_profiles,
         degraded_routes,
-        continuations: runtime_broker_continuation_metrics(&runtime.continuation_statuses, now),
-        previous_response_continuity: runtime_broker_previous_response_continuity_metrics(
+        continuations: aggregate_runtime_broker_continuation_metrics(
+            &runtime.continuation_statuses,
+            now,
+            RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS,
+        ),
+        previous_response_continuity: aggregate_previous_response_continuity_metrics(
             &runtime.profile_health,
             now,
+            RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
         ),
         continuity_failure_reasons: runtime_broker_live_continuity_failure_reason_metrics(
             &shared.log_path,

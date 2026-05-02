@@ -64,8 +64,23 @@ fn print_session_reports(reports: &[SessionReport], json: bool, empty_message: &
         return Ok(());
     }
 
-    print_stdout_text(&render_session_reports(reports));
+    let display_reports = session_report_display_rows(reports);
+    print_stdout_text(&render_session_reports(&display_reports));
     Ok(())
+}
+
+fn session_report_display_rows(reports: &[SessionReport]) -> Vec<SessionReportDisplay<'_>> {
+    reports
+        .iter()
+        .map(|report| SessionReportDisplay {
+            id: &report.id,
+            updated_at: report.updated_at.as_deref(),
+            thread_name: report.thread_name.as_deref(),
+            cwd: report.cwd.as_deref(),
+            profile: report.profile.as_deref(),
+            path: &report.path,
+        })
+        .collect()
 }
 
 pub(crate) fn collect_session_reports(
@@ -313,83 +328,6 @@ fn format_epoch(epoch: i64) -> String {
         .single()
         .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M:%S %Z").to_string())
         .unwrap_or_else(|| epoch.to_string())
-}
-
-fn render_session_reports(reports: &[SessionReport]) -> String {
-    let total_width = current_cli_width();
-    let widths = session_report_column_widths(total_width);
-    let mut lines = vec![section_header_with_width("Sessions", total_width)];
-    lines.push(format_session_report_row(
-        "ID", "UPDATED", "THREAD", "CWD", "PATH", widths,
-    ));
-    lines.push("-".repeat(text_width(lines.last().map(String::as_str).unwrap_or(""))));
-
-    for report in reports {
-        lines.push(format_session_report_row(
-            &report.id,
-            report.updated_at.as_deref().unwrap_or("-"),
-            report.thread_name.as_deref().unwrap_or("-"),
-            report.cwd.as_deref().unwrap_or("-"),
-            &report.path,
-            widths,
-        ));
-        if let Some(profile) = report.profile.as_deref() {
-            lines.push(format!("  profile: {profile}"));
-        }
-    }
-
-    lines.join("\n")
-}
-
-#[derive(Clone, Copy)]
-struct SessionReportColumnWidths {
-    id: usize,
-    updated: usize,
-    thread: usize,
-    cwd: usize,
-    path: usize,
-}
-
-fn session_report_column_widths(total_width: usize) -> SessionReportColumnWidths {
-    let gap_width = text_width(CLI_TABLE_GAP) * 4;
-    let available = total_width.saturating_sub(gap_width).max(60);
-    let id = (available / 5).clamp(12, 26);
-    let updated = (available / 5).clamp(12, 22);
-    let thread = (available / 5).clamp(12, 24);
-    let remaining = available.saturating_sub(id + updated + thread);
-    let cwd = (remaining / 2).max(12);
-    let path = remaining.saturating_sub(cwd).max(12);
-    SessionReportColumnWidths {
-        id,
-        updated,
-        thread,
-        cwd,
-        path,
-    }
-}
-
-fn format_session_report_row(
-    id: &str,
-    updated: &str,
-    thread_name: &str,
-    cwd: &str,
-    path: &str,
-    widths: SessionReportColumnWidths,
-) -> String {
-    format!(
-        "{:<id_w$}{gap}{:<updated_w$}{gap}{:<thread_w$}{gap}{:<cwd_w$}{gap}{:<path_w$}",
-        fit_cell(id, widths.id),
-        fit_cell(updated, widths.updated),
-        fit_cell(thread_name, widths.thread),
-        fit_cell(cwd, widths.cwd),
-        fit_cell(path, widths.path),
-        gap = CLI_TABLE_GAP,
-        id_w = widths.id,
-        updated_w = widths.updated,
-        thread_w = widths.thread,
-        cwd_w = widths.cwd,
-        path_w = widths.path,
-    )
 }
 
 #[cfg(test)]

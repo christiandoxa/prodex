@@ -1,16 +1,10 @@
 use super::*;
 
-pub(super) fn should_skip_runtime_response_header(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "connection"
-            | "content-encoding"
-            | "content-length"
-            | "date"
-            | "server"
-            | "transfer-encoding"
-    )
-}
+pub(super) use runtime_proxy_crate::should_skip_runtime_response_header;
+use runtime_proxy_crate::{
+    runtime_buffered_response_metadata, runtime_forward_text_response_headers,
+    runtime_response_content_type_is_sse, runtime_sse_forwarding_commit_detail,
+};
 
 pub(super) fn forward_runtime_proxy_response(
     shared: &RuntimeRotationProxyShared,
@@ -72,11 +66,11 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
         request_session_id,
         RuntimeRouteKind::Responses,
     )?;
-    let is_sse = response
+    let response_content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.contains("text/event-stream"));
+        .and_then(|value| value.to_str().ok());
+    let is_sse = runtime_response_content_type_is_sse(response_content_type);
     runtime_proxy_log(
         shared,
         format!(
@@ -96,13 +90,21 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
             response_turn_state.as_deref(),
             RuntimeRouteKind::Responses,
         )?;
+        let response_metadata = runtime_buffered_response_metadata(
+            parts.status,
+            parts
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_slice())),
+            parts.body.len(),
+        );
         runtime_proxy_log(
             shared,
             format!(
                 "request={request_id} transport=http buffered_response_complete profile={profile_name} phase=responses_unary status={} content_type={} body_bytes={} elapsed_ms={}",
-                parts.status,
-                runtime_buffered_response_content_type(&parts).unwrap_or("-"),
-                parts.body.len(),
+                response_metadata.status,
+                response_metadata.content_type.unwrap_or("-"),
+                response_metadata.body_bytes,
                 buffered_started_at.elapsed().as_millis(),
             ),
         );
@@ -140,15 +142,12 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
     }
 
     let status = response.status().as_u16();
-    let mut headers = Vec::new();
-    for (name, value) in response.headers() {
-        if should_skip_runtime_response_header(name.as_str()) {
-            continue;
-        }
-        if let Ok(value) = value.to_str() {
-            headers.push((name.to_string(), value.to_string()));
-        }
-    }
+    let headers = runtime_forward_text_response_headers(
+        response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
+    );
 
     let mut prefetch = RuntimePrefetchStream::spawn(
         response,
@@ -164,12 +163,12 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
             response_ids,
             turn_state,
         } => {
+            let detail = runtime_sse_forwarding_commit_detail(prelude.len(), response_ids.len());
             runtime_proxy_log(
                 shared,
                 format!(
                     "request={request_id} transport=http sse_commit profile={profile_name} prelude_bytes={} response_ids={}",
-                    prelude.len(),
-                    response_ids.len()
+                    detail.prelude_bytes, detail.response_id_count
                 ),
             );
             (prelude, response_ids, turn_state)

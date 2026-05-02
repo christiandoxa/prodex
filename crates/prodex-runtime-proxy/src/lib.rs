@@ -13,8 +13,11 @@ mod failure_response;
 mod health;
 mod payload_detection;
 mod previous_response_log;
+mod response_forwarding;
+mod selection_plan;
 mod selection_policy;
 mod transport_failure;
+mod upstream;
 mod websocket_message;
 mod websocket_tcp_connect_executor;
 
@@ -24,8 +27,11 @@ pub use self::failure_response::*;
 pub use self::health::*;
 pub use self::payload_detection::*;
 pub use self::previous_response_log::*;
+pub use self::response_forwarding::*;
+pub use self::selection_plan::*;
 pub use self::selection_policy::*;
 pub use self::transport_failure::*;
+pub use self::upstream::*;
 pub use self::websocket_message::*;
 pub use self::websocket_tcp_connect_executor::*;
 

@@ -2,27 +2,21 @@ use std::fs::OpenOptions;
 use std::io::IsTerminal;
 use std::io::Write as _;
 
+use prodex_profile_export::ImportedExistingProfileAuthUpdateJournal;
+
 use super::*;
 
 const PROFILE_EXPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_EXPORT_PASSWORD";
 const PROFILE_IMPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_IMPORT_PASSWORD";
-const IMPORT_AUTH_UPDATE_JOURNAL_DIR: &str = "profile-import-auth-journal";
-const IMPORT_AUTH_UPDATE_JOURNAL_VERSION: u32 = 1;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ImportedExistingProfileAuthUpdateJournal {
-    version: u32,
-    profile_name: String,
-    codex_home: String,
-    previous_email: Option<String>,
-    previous_auth_json: Option<String>,
-    created_at: String,
-}
 
 pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let profile_names = resolve_export_profile_names(&state, &args.profile)?;
+    let available_profile_names = state.profiles.keys().cloned().collect::<BTreeSet<_>>();
+    let profile_names = prodex_profile_export::resolve_requested_profile_names(
+        &available_profile_names,
+        &args.profile,
+    )?;
     let payload = build_profile_export_payload(&state, &profile_names)?;
     let password = match resolve_export_password_mode(&args)? {
         true => Some(resolve_export_password()?),
@@ -48,27 +42,14 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
         }),
     );
 
-    let mut fields = vec![
-        (
-            "Result".to_string(),
-            format!("Exported {} profile(s).", profile_names.len()),
-        ),
-        ("Path".to_string(), output_path.display().to_string()),
-        (
-            "Encrypted".to_string(),
-            if password.is_some() {
-                "Yes".to_string()
-            } else {
-                "No".to_string()
-            },
-        ),
-    ];
-    if payload.active_profile.is_some() {
-        fields.push((
-            "Active".to_string(),
-            payload.active_profile.unwrap_or_default(),
-        ));
-    }
+    let fields = prodex_profile_export::profile_export_summary_fields(
+        prodex_profile_export::ProfileExportSummary {
+            profile_count: profile_names.len(),
+            path: output_path.display().to_string(),
+            encrypted: password.is_some(),
+            active_profile: payload.active_profile.clone(),
+        },
+    );
     print_panel("Profile Export", &fields);
     Ok(())
 }
@@ -117,42 +98,16 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
         }),
     );
 
-    let result_message = match (
-        commit.imported_names.len(),
-        commit.updated_existing_names.len(),
-    ) {
-        (0, updated) => format!("Updated {updated} existing profile(s)."),
-        (imported, 0) => format!("Imported {imported} profile(s)."),
-        (imported, updated) => {
-            format!("Imported {imported} profile(s) and updated {updated} existing profile(s).")
-        }
-    };
-    let mut fields = vec![
-        ("Result".to_string(), result_message),
-        ("Path".to_string(), bundle_path.display().to_string()),
-        (
-            "Encrypted".to_string(),
-            if encrypted {
-                "Yes".to_string()
-            } else {
-                "No".to_string()
-            },
-        ),
-        (
-            "Imported".to_string(),
-            commit.imported_names.len().to_string(),
-        ),
-        (
-            "Updated duplicates".to_string(),
-            commit.updated_existing_names.len().to_string(),
-        ),
-    ];
-    if let Some(active_profile) = source_active_profile {
-        fields.push(("Source active".to_string(), active_profile));
-    }
-    if let Some(active_profile) = state.active_profile.clone() {
-        fields.push(("Active".to_string(), active_profile));
-    }
+    let fields = prodex_profile_export::profile_import_summary_fields(
+        prodex_profile_export::ProfileImportSummary {
+            imported_count: commit.imported_names.len(),
+            updated_existing_count: commit.updated_existing_names.len(),
+            path: bundle_path.display().to_string(),
+            encrypted,
+            source_active_profile,
+            active_profile: state.active_profile.clone(),
+        },
+    );
     print_panel("Profile Import", &fields);
     Ok(())
 }
@@ -176,29 +131,6 @@ pub(crate) fn repair_profile_import_auth_journals(
     state: &mut AppState,
 ) -> Result<usize> {
     recover_imported_auth_update_journals(paths, state)
-}
-
-fn resolve_export_profile_names(state: &AppState, requested: &[String]) -> Result<Vec<String>> {
-    if state.profiles.is_empty() {
-        bail!("no profiles configured");
-    }
-
-    if requested.is_empty() {
-        return Ok(state.profiles.keys().cloned().collect());
-    }
-
-    let mut names = Vec::new();
-    let mut seen = BTreeSet::new();
-    for name in requested {
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        if !state.profiles.contains_key(name) {
-            bail!("profile '{}' does not exist", name);
-        }
-        names.push(name.clone());
-    }
-    Ok(names)
 }
 
 pub(super) fn build_profile_export_payload(
@@ -527,12 +459,11 @@ fn activate_imported_profile_from_payload(
     payload: &ProfileExportPayload,
     prepared: &PreparedImportedProfiles,
 ) {
-    if state.active_profile.is_none()
-        && let Some(active_profile) = payload.active_profile.as_ref()
-        && let Some(resolved_profile_name) = prepared.resolved_profile_names.get(active_profile)
-    {
-        state.active_profile = Some(resolved_profile_name.clone());
-    }
+    state.active_profile = prodex_profile_export::resolve_imported_active_profile(
+        state.active_profile.as_deref(),
+        payload.active_profile.as_deref(),
+        &prepared.resolved_profile_names,
+    );
 }
 
 fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCommit) {
@@ -583,12 +514,10 @@ pub(super) fn recover_imported_auth_update_journals(
             .with_context(|| format!("failed to read {}", journal_path.display()))?;
         let journal: ImportedExistingProfileAuthUpdateJournal = serde_json::from_str(&journal_text)
             .with_context(|| format!("failed to parse {}", journal_path.display()))?;
-        if journal.version != IMPORT_AUTH_UPDATE_JOURNAL_VERSION {
-            bail!(
-                "unsupported auth update journal version {} in {}",
-                journal.version,
-                journal_path.display()
-            );
+        if let Err(err) =
+            prodex_profile_export::validate_import_auth_update_journal_version(journal.version)
+        {
+            bail!("{err} in {}", journal_path.display());
         }
         journals.push((journal_path, journal));
     }
@@ -859,14 +788,13 @@ fn write_imported_auth_update_journal(
     previous_auth_json: Option<String>,
 ) -> Result<PathBuf> {
     let journal_path = unique_imported_auth_update_journal_path(paths, profile_name)?;
-    let journal = ImportedExistingProfileAuthUpdateJournal {
-        version: IMPORT_AUTH_UPDATE_JOURNAL_VERSION,
-        profile_name: profile_name.to_string(),
-        codex_home: codex_home.display().to_string(),
+    let journal = ImportedExistingProfileAuthUpdateJournal::new(
+        profile_name.to_string(),
+        codex_home.display().to_string(),
         previous_email,
         previous_auth_json,
-        created_at: Local::now().to_rfc3339(),
-    };
+        Local::now().to_rfc3339(),
+    );
     let json = serde_json::to_string_pretty(&journal)
         .context("failed to serialize auth update journal")?;
     write_secret_text_file(&journal_path, &json)?;
@@ -900,7 +828,9 @@ fn ensure_imported_auth_update_journal_root(paths: &AppPaths) -> Result<PathBuf>
 }
 
 pub(super) fn imported_auth_update_journal_root(paths: &AppPaths) -> PathBuf {
-    paths.root.join(IMPORT_AUTH_UPDATE_JOURNAL_DIR)
+    paths
+        .root
+        .join(prodex_profile_export::IMPORT_AUTH_UPDATE_JOURNAL_DIR)
 }
 
 pub(super) fn write_secret_text_file(path: &Path, content: &str) -> Result<()> {

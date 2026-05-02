@@ -4,76 +4,94 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::*;
+use prodex_runtime_doctor::{
+    RuntimeDoctorBackoffMaps, RuntimeDoctorBinaryIdentity, RuntimeDoctorHealthScore,
+    RuntimeDoctorQuotaWindowStatus as DoctorQuotaWindowStatus, RuntimeDoctorStateSummaryConfig,
+    RuntimeDoctorUsageSnapshot,
+};
 
-fn runtime_doctor_push_route_circuits(
-    routes: &mut Vec<String>,
-    backoffs: &RuntimeProfileBackoffs,
-    now: i64,
-) {
-    for (key, until) in &backoffs.route_circuit_open_until {
-        if let Some((route, profile_name)) =
-            runtime_profile_route_key_parts(key, "__route_circuit__:")
-        {
-            let state = if *until > now { "open" } else { "half-open" };
-            routes.push(format!(
-                "{profile_name}/{route} circuit={state} until={until}"
-            ));
-        }
+fn runtime_doctor_state_summary_config() -> RuntimeDoctorStateSummaryConfig {
+    RuntimeDoctorStateSummaryConfig {
+        health_decay_seconds: RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+        bad_pairing_decay_seconds: RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+        performance_decay_seconds: RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+        usage_snapshot_stale_grace_seconds: RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
     }
 }
 
-fn runtime_doctor_push_transport_backoffs(
-    routes: &mut Vec<String>,
-    backoffs: &RuntimeProfileBackoffs,
-) {
-    for (profile_name, until) in &backoffs.transport_backoff_until {
-        if let Some((route, profile_name)) =
-            runtime_profile_transport_backoff_key_parts(profile_name)
-        {
-            routes.push(format!(
-                "{profile_name}/{route} transport_backoff until={until}"
-            ));
-        } else {
-            routes.push(format!(
-                "{profile_name}/transport transport_backoff until={until}"
-            ));
-        }
+fn runtime_doctor_backoff_maps(backoffs: &RuntimeProfileBackoffs) -> RuntimeDoctorBackoffMaps<'_> {
+    RuntimeDoctorBackoffMaps {
+        retry_backoff_until: &backoffs.retry_backoff_until,
+        transport_backoff_until: &backoffs.transport_backoff_until,
+        route_circuit_open_until: &backoffs.route_circuit_open_until,
     }
 }
 
-fn runtime_doctor_push_retry_backoffs(routes: &mut Vec<String>, backoffs: &RuntimeProfileBackoffs) {
-    for (profile_name, until) in &backoffs.retry_backoff_until {
-        routes.push(format!("{profile_name}/retry retry_backoff until={until}"));
-    }
-}
-
-fn runtime_doctor_push_score_degradations(
-    routes: &mut Vec<String>,
+fn runtime_doctor_health_scores(
     scores: &BTreeMap<String, RuntimeProfileHealth>,
-    now: i64,
-) {
-    for (key, health) in scores {
-        if let Some((route, profile_name)) =
-            runtime_profile_route_key_parts(key, "__route_bad_pairing__:")
-        {
-            let score = runtime_profile_effective_score(
-                health,
-                now,
-                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-            );
-            if score > 0 {
-                routes.push(format!("{profile_name}/{route} bad_pairing={score}"));
-            }
-            continue;
-        }
-        if let Some((route, profile_name)) =
-            runtime_profile_route_key_parts(key, "__route_health__:")
-        {
-            let score = runtime_profile_effective_health_score(health, now);
-            if score > 0 {
-                routes.push(format!("{profile_name}/{route} health={score}"));
-            }
-        }
+) -> BTreeMap<String, RuntimeDoctorHealthScore> {
+    scores
+        .iter()
+        .map(|(key, health)| {
+            (
+                key.clone(),
+                RuntimeDoctorHealthScore {
+                    score: health.score,
+                    updated_at: health.updated_at,
+                },
+            )
+        })
+        .collect()
+}
+
+fn runtime_doctor_quota_window_status(status: RuntimeQuotaWindowStatus) -> DoctorQuotaWindowStatus {
+    match status {
+        RuntimeQuotaWindowStatus::Ready => DoctorQuotaWindowStatus::Ready,
+        RuntimeQuotaWindowStatus::Thin => DoctorQuotaWindowStatus::Thin,
+        RuntimeQuotaWindowStatus::Critical => DoctorQuotaWindowStatus::Critical,
+        RuntimeQuotaWindowStatus::Exhausted => DoctorQuotaWindowStatus::Exhausted,
+        RuntimeQuotaWindowStatus::Unknown => DoctorQuotaWindowStatus::Unknown,
+    }
+}
+
+fn runtime_doctor_usage_snapshot(
+    snapshot: &RuntimeProfileUsageSnapshot,
+) -> RuntimeDoctorUsageSnapshot {
+    RuntimeDoctorUsageSnapshot {
+        checked_at: snapshot.checked_at,
+        five_hour_status: runtime_doctor_quota_window_status(snapshot.five_hour_status),
+        five_hour_remaining_percent: snapshot.five_hour_remaining_percent,
+        five_hour_reset_at: snapshot.five_hour_reset_at,
+        weekly_status: runtime_doctor_quota_window_status(snapshot.weekly_status),
+        weekly_remaining_percent: snapshot.weekly_remaining_percent,
+        weekly_reset_at: snapshot.weekly_reset_at,
+    }
+}
+
+fn runtime_doctor_usage_snapshots(
+    usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+) -> BTreeMap<String, RuntimeDoctorUsageSnapshot> {
+    usage_snapshots
+        .iter()
+        .map(|(profile_name, snapshot)| {
+            (
+                profile_name.clone(),
+                runtime_doctor_usage_snapshot(snapshot),
+            )
+        })
+        .collect()
+}
+
+fn runtime_doctor_binary_identity(
+    identity: &RuntimeProdexBinaryIdentity,
+) -> RuntimeDoctorBinaryIdentity {
+    RuntimeDoctorBinaryIdentity {
+        prodex_version: identity.prodex_version.clone(),
+        executable_path: identity
+            .executable_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        executable_sha256: identity.executable_sha256.clone(),
     }
 }
 
@@ -82,15 +100,13 @@ pub(crate) fn runtime_doctor_degraded_routes(
     scores: &BTreeMap<String, RuntimeProfileHealth>,
     now: i64,
 ) -> Vec<String> {
-    let mut routes = Vec::new();
-    runtime_doctor_push_route_circuits(&mut routes, backoffs, now);
-    runtime_doctor_push_transport_backoffs(&mut routes, backoffs);
-    runtime_doctor_push_retry_backoffs(&mut routes, backoffs);
-    runtime_doctor_push_score_degradations(&mut routes, scores, now);
-    routes.sort();
-    routes.dedup();
-    routes.truncate(8);
-    routes
+    let scores = runtime_doctor_health_scores(scores);
+    prodex_runtime_doctor::runtime_doctor_degraded_routes(
+        runtime_doctor_backoff_maps(backoffs),
+        &scores,
+        now,
+        runtime_doctor_state_summary_config(),
+    )
 }
 
 struct RuntimeDoctorCollector {
@@ -181,25 +197,6 @@ impl RuntimeDoctorCollector {
     }
 }
 
-fn runtime_doctor_quota_freshness_label(
-    snapshot: Option<&RuntimeProfileUsageSnapshot>,
-    now: i64,
-) -> String {
-    match snapshot {
-        Some(snapshot) if runtime_usage_snapshot_is_usable(snapshot, now) => "fresh".to_string(),
-        Some(_) => "stale".to_string(),
-        None => "missing".to_string(),
-    }
-}
-
-fn runtime_doctor_route_circuit_state(until: Option<i64>, now: i64) -> String {
-    match until {
-        Some(until) if until > now => "open".to_string(),
-        Some(_) => "half_open".to_string(),
-        None => "closed".to_string(),
-    }
-}
-
 fn runtime_doctor_profile_summaries(
     state: &AppState,
     usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
@@ -207,96 +204,17 @@ fn runtime_doctor_profile_summaries(
     backoffs: &RuntimeProfileBackoffs,
     now: i64,
 ) -> Vec<RuntimeDoctorProfileSummary> {
-    let mut profiles = Vec::new();
-    for profile_name in state.profiles.keys() {
-        let snapshot = usage_snapshots.get(profile_name);
-        let quota_age_seconds = snapshot
-            .map(|snapshot| now.saturating_sub(snapshot.checked_at))
-            .unwrap_or(i64::MAX);
-        let routes = [
-            RuntimeRouteKind::Responses,
-            RuntimeRouteKind::Websocket,
-            RuntimeRouteKind::Compact,
-            RuntimeRouteKind::Standard,
-        ]
-        .into_iter()
-        .map(|route_kind| {
-            let quota_summary = snapshot
-                .map(|snapshot| runtime_quota_summary_from_usage_snapshot(snapshot, route_kind))
-                .unwrap_or(RuntimeQuotaSummary {
-                    five_hour: RuntimeQuotaWindowSummary {
-                        status: RuntimeQuotaWindowStatus::Unknown,
-                        remaining_percent: 0,
-                        reset_at: i64::MAX,
-                    },
-                    weekly: RuntimeQuotaWindowSummary {
-                        status: RuntimeQuotaWindowStatus::Unknown,
-                        remaining_percent: 0,
-                        reset_at: i64::MAX,
-                    },
-                    route_band: RuntimeQuotaPressureBand::Unknown,
-                });
-            RuntimeDoctorRouteSummary {
-                route: runtime_route_kind_label(route_kind).to_string(),
-                circuit_state: runtime_doctor_route_circuit_state(
-                    backoffs
-                        .route_circuit_open_until
-                        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-                        .copied(),
-                    now,
-                ),
-                circuit_until: backoffs
-                    .route_circuit_open_until
-                    .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-                    .copied(),
-                transport_backoff_until: runtime_profile_transport_backoff_until_from_map(
-                    &backoffs.transport_backoff_until,
-                    profile_name,
-                    route_kind,
-                    now,
-                ),
-                health_score: runtime_profile_effective_health_score_from_map(
-                    scores,
-                    &runtime_profile_route_health_key(profile_name, route_kind),
-                    now,
-                ),
-                bad_pairing_score: runtime_profile_effective_score_from_map(
-                    scores,
-                    &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
-                    now,
-                    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-                ),
-                performance_score: runtime_profile_effective_score_from_map(
-                    scores,
-                    &runtime_profile_route_performance_key(profile_name, route_kind),
-                    now,
-                    RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-                ),
-                quota_band: runtime_quota_pressure_band_reason(quota_summary.route_band)
-                    .to_string(),
-                five_hour_status: runtime_quota_window_status_reason(
-                    quota_summary.five_hour.status,
-                )
-                .to_string(),
-                weekly_status: runtime_quota_window_status_reason(quota_summary.weekly.status)
-                    .to_string(),
-            }
-        })
-        .collect::<Vec<_>>();
-        profiles.push(RuntimeDoctorProfileSummary {
-            profile: profile_name.clone(),
-            quota_freshness: runtime_doctor_quota_freshness_label(snapshot, now),
-            quota_age_seconds,
-            retry_backoff_until: backoffs.retry_backoff_until.get(profile_name).copied(),
-            transport_backoff_until: runtime_profile_transport_backoff_max_until(
-                &backoffs.transport_backoff_until,
-                profile_name,
-                now,
-            ),
-            routes,
-        });
-    }
-    profiles
+    let profile_names = state.profiles.keys().cloned().collect::<Vec<_>>();
+    let usage_snapshots = runtime_doctor_usage_snapshots(usage_snapshots);
+    let scores = runtime_doctor_health_scores(scores);
+    prodex_runtime_doctor::runtime_doctor_profile_summaries(
+        &profile_names,
+        &usage_snapshots,
+        &scores,
+        runtime_doctor_backoff_maps(backoffs),
+        now,
+        runtime_doctor_state_summary_config(),
+    )
 }
 
 fn runtime_doctor_path_prodex_binaries() -> Vec<PathBuf> {
@@ -369,32 +287,6 @@ fn runtime_doctor_collect_binary_identities(summary: &mut RuntimeDoctorSummary) 
             .is_some_and(|hash| !hashes.is_empty() && !hashes.contains(hash));
 }
 
-fn runtime_doctor_runtime_broker_mismatch_reason(
-    current: &RuntimeProdexBinaryIdentity,
-    observed: &RuntimeProdexBinaryIdentity,
-) -> &'static str {
-    match (
-        current.executable_sha256.as_deref(),
-        observed.executable_sha256.as_deref(),
-    ) {
-        (Some(current_sha256), Some(observed_sha256)) if current_sha256 != observed_sha256 => {
-            "sha256_mismatch"
-        }
-        _ => match (
-            current.prodex_version.as_deref(),
-            observed.prodex_version.as_deref(),
-        ) {
-            (Some(current_version), Some(observed_version))
-                if current_version != observed_version =>
-            {
-                "version_mismatch"
-            }
-            _ if observed.is_present() => "identity_mismatch",
-            _ => "none",
-        },
-    }
-}
-
 fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key: &str) -> usize {
     let lease_dir = runtime_broker_lease_dir(paths, broker_key);
     let Ok(entries) = fs::read_dir(&lease_dir) else {
@@ -441,6 +333,7 @@ fn runtime_doctor_probe_runtime_broker_health_status(
 
 fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
     let current_identity = runtime_current_prodex_binary_identity();
+    let current_doctor_identity = runtime_doctor_binary_identity(&current_identity);
     let client = runtime_broker_client().ok();
     for broker_key in runtime_broker_registry_keys(paths) {
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
@@ -481,7 +374,10 @@ fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut Runt
             && !runtime_prodex_binary_identity_matches(&current_identity, &identity)
         {
             summary.runtime_broker_mismatch = true;
-            runtime_doctor_runtime_broker_mismatch_reason(&current_identity, &identity)
+            prodex_runtime_doctor::runtime_doctor_runtime_broker_mismatch_reason(
+                &current_doctor_identity,
+                &runtime_doctor_binary_identity(&identity),
+            )
         } else {
             "none"
         };

@@ -178,31 +178,24 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     pub(crate) auth_failure_active: bool,
     pub(crate) quota_guard_reason: Option<&'static str>,
     pub(crate) inflight_soft_limited: bool,
+    #[allow(dead_code)]
     provider_priority: usize,
-    quota_sort_key: RuntimeQuotaPressureSortKey,
-    in_selection_backoff: bool,
-    prompt_cache_affinity_sort_key: (u8, u64),
-    jitter: u64,
 }
 
 impl RuntimeResponsePlannedCandidate {
     pub(crate) fn ready_skip_reason(&self) -> Option<&'static str> {
-        self.common_skip_reason().or_else(|| {
-            self.inflight_soft_limited
-                .then_some("profile_inflight_soft_limit")
-        })
+        runtime_proxy_crate::runtime_response_candidate_ready_skip_reason(
+            self.auth_failure_active,
+            self.quota_guard_reason,
+            self.inflight_soft_limited,
+        )
     }
 
     pub(crate) fn fallback_skip_reason(&self) -> Option<&'static str> {
-        self.common_skip_reason()
-    }
-
-    fn common_skip_reason(&self) -> Option<&'static str> {
-        if self.auth_failure_active {
-            Some("auth_failure_backoff")
-        } else {
-            self.quota_guard_reason
-        }
+        runtime_proxy_crate::runtime_response_candidate_fallback_skip_reason(
+            self.auth_failure_active,
+            self.quota_guard_reason,
+        )
     }
 }
 
@@ -246,147 +239,288 @@ where
         prompt_cache_owner_profile,
         jitter_for,
     } = options;
-    let available_candidates = ready_profile_candidates
+    let mut candidate_quota_summaries = BTreeMap::new();
+    let candidate_inputs = ready_profile_candidates
         .into_iter()
         .enumerate()
         .filter(|(_, candidate)| !excluded_profiles.contains(&candidate.name))
         .filter_map(|(order_index, candidate)| {
             let entry = selection_state.entry(&candidate.name)?;
             let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
-            Some(RuntimeResponsePlannedCandidate {
+            candidate_quota_summaries.insert((candidate.name.clone(), order_index), quota_summary);
+            Some(runtime_proxy_crate::RuntimeResponseCandidatePlanInput {
                 name: candidate.name.clone(),
                 order_index,
                 inflight_count: entry.inflight_count,
-                inflight_soft_limit,
                 health_sort_key: entry.health_sort_key,
                 backoff_sort_key: entry.backoff_sort_key,
-                quota_source: candidate.quota_source,
-                quota_summary,
+                quota_source: runtime_candidate_quota_source_to_proxy(candidate.quota_source),
+                quota_summary: runtime_candidate_quota_summary_to_proxy(quota_summary),
                 auth_failure_active: entry.auth_failure_active,
-                quota_guard_reason: matches!(
-                    route_kind,
-                    RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-                )
-                .then(|| runtime_quota_precommit_guard_reason(quota_summary, route_kind))
-                .flatten(),
-                inflight_soft_limited: entry.inflight_count >= inflight_soft_limit,
                 provider_priority: candidate.provider_priority,
-                quota_sort_key: runtime_quota_pressure_sort_key_for_route(
-                    &candidate.usage,
-                    route_kind,
+                quota_sort_key: runtime_candidate_quota_sort_key_to_proxy(
+                    runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
                 ),
                 in_selection_backoff: entry.in_selection_backoff,
-                prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key_with_owner(
-                    prompt_cache_key,
-                    prompt_cache_owner_profile,
-                    &candidate.name,
-                ),
                 jitter: jitter_for(&candidate.name),
             })
         })
         .collect::<Vec<_>>();
-
-    let mut ready_candidates = available_candidates
-        .iter()
-        .filter(|candidate| !candidate.in_selection_backoff)
-        .cloned()
-        .collect::<Vec<_>>();
-    ready_candidates.sort_by_key(|candidate| {
-        (
-            candidate.provider_priority,
-            candidate.quota_sort_key,
-            runtime_quota_source_sort_key(route_kind, candidate.quota_source),
-            candidate.inflight_count,
-            candidate.health_sort_key,
-            candidate.prompt_cache_affinity_sort_key,
-            candidate.order_index,
-            candidate.jitter,
-        )
-    });
-
-    let mut fallback_candidates = available_candidates;
-    fallback_candidates.sort_by_key(|candidate| {
-        (
-            candidate.backoff_sort_key,
-            candidate.provider_priority,
-            candidate.quota_sort_key,
-            runtime_quota_source_sort_key(route_kind, candidate.quota_source),
-            candidate.inflight_count,
-            candidate.health_sort_key,
-            candidate.prompt_cache_affinity_sort_key,
-            candidate.order_index,
-            candidate.jitter,
-        )
-    });
+    let proxy_plan = runtime_proxy_crate::build_runtime_response_candidate_execution_plan(
+        candidate_inputs,
+        excluded_profiles,
+        runtime_proxy_crate::runtime_response_candidate_plan_options(
+            runtime_route_kind_to_proxy_for_candidate_plan(route_kind),
+            inflight_soft_limit,
+            prompt_cache_key,
+            prompt_cache_owner_profile,
+            runtime_proxy_responses_quota_critical_floor_percent(),
+        ),
+    );
 
     RuntimeResponseCandidateExecutionPlan {
-        ready_candidates,
-        fallback_candidates,
+        ready_candidates: proxy_plan
+            .ready_candidates
+            .into_iter()
+            .map(|candidate| {
+                runtime_response_planned_candidate_from_proxy(candidate, &candidate_quota_summaries)
+            })
+            .collect(),
+        fallback_candidates: proxy_plan
+            .fallback_candidates
+            .into_iter()
+            .map(|candidate| {
+                runtime_response_planned_candidate_from_proxy(candidate, &candidate_quota_summaries)
+            })
+            .collect(),
     }
 }
 
-pub(crate) fn runtime_prompt_cache_affinity_sort_key_with_owner(
-    prompt_cache_key: Option<&str>,
-    prompt_cache_owner_profile: Option<&str>,
-    profile_name: &str,
-) -> (u8, u64) {
-    if prompt_cache_key
-        .map(str::trim)
-        .is_none_or(|prompt_cache_key| prompt_cache_key.is_empty())
-    {
-        return (0, 0);
-    }
-    if let Some(owner) = prompt_cache_owner_profile
-        .map(str::trim)
-        .filter(|owner| !owner.is_empty())
-    {
-        return if owner == profile_name {
-            (0, 0)
-        } else {
-            (
-                1,
-                runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name),
-            )
-        };
-    }
-    (
-        0,
-        runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name),
-    )
-}
-
+#[allow(dead_code)]
 pub(crate) fn runtime_prompt_cache_affinity_sort_key(
     prompt_cache_key: Option<&str>,
     profile_name: &str,
 ) -> u64 {
-    let Some(prompt_cache_key) = prompt_cache_key
-        .map(str::trim)
-        .filter(|prompt_cache_key| !prompt_cache_key.is_empty())
-    else {
-        return 0;
-    };
-
-    u64::MAX - runtime_prompt_cache_affinity_score(prompt_cache_key, profile_name)
+    runtime_proxy_crate::runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name)
 }
 
-fn runtime_prompt_cache_affinity_score(prompt_cache_key: &str, profile_name: &str) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
+fn runtime_response_planned_candidate_from_proxy(
+    candidate: runtime_proxy_crate::RuntimeResponsePlannedCandidate,
+    quota_summaries: &BTreeMap<(String, usize), RuntimeQuotaSummary>,
+) -> RuntimeResponsePlannedCandidate {
+    RuntimeResponsePlannedCandidate {
+        quota_summary: quota_summaries
+            .get(&(candidate.name.clone(), candidate.order_index))
+            .copied()
+            .unwrap_or_else(|| runtime_candidate_quota_summary_from_proxy(candidate.quota_summary)),
+        name: candidate.name,
+        order_index: candidate.order_index,
+        inflight_count: candidate.inflight_count,
+        inflight_soft_limit: candidate.inflight_soft_limit,
+        health_sort_key: candidate.health_sort_key,
+        backoff_sort_key: candidate.backoff_sort_key,
+        quota_source: runtime_candidate_quota_source_from_proxy(candidate.quota_source),
+        auth_failure_active: candidate.auth_failure_active,
+        quota_guard_reason: candidate.quota_guard_reason,
+        inflight_soft_limited: candidate.inflight_soft_limited,
+        provider_priority: candidate.provider_priority,
+    }
+}
 
-    let mut hash = FNV_OFFSET_BASIS;
-    for bytes in [
-        b"prodex-prompt-cache-affinity-v1".as_slice(),
-        b"\0".as_slice(),
-        prompt_cache_key.as_bytes(),
-        b"\0".as_slice(),
-        profile_name.as_bytes(),
-    ] {
-        for byte in bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
+fn runtime_route_kind_to_proxy_for_candidate_plan(
+    route_kind: RuntimeRouteKind,
+) -> runtime_proxy_crate::RuntimeRouteKind {
+    match route_kind {
+        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
+    }
+}
+
+fn runtime_candidate_quota_window_status_to_proxy(
+    status: RuntimeQuotaWindowStatus,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus {
+    match status {
+        RuntimeQuotaWindowStatus::Ready => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready
+        }
+        RuntimeQuotaWindowStatus::Thin => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin
+        }
+        RuntimeQuotaWindowStatus::Critical => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical
+        }
+        RuntimeQuotaWindowStatus::Exhausted => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted
+        }
+        RuntimeQuotaWindowStatus::Unknown => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown
         }
     }
-    hash
+}
+
+fn runtime_candidate_quota_window_status_from_proxy(
+    status: runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus,
+) -> RuntimeQuotaWindowStatus {
+    match status {
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready => {
+            RuntimeQuotaWindowStatus::Ready
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin => {
+            RuntimeQuotaWindowStatus::Thin
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical => {
+            RuntimeQuotaWindowStatus::Critical
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted => {
+            RuntimeQuotaWindowStatus::Exhausted
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown => {
+            RuntimeQuotaWindowStatus::Unknown
+        }
+    }
+}
+
+fn runtime_candidate_quota_pressure_band_to_proxy(
+    band: RuntimeQuotaPressureBand,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaPressureBand {
+    match band {
+        RuntimeQuotaPressureBand::Healthy => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy
+        }
+        RuntimeQuotaPressureBand::Thin => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin
+        }
+        RuntimeQuotaPressureBand::Critical => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical
+        }
+        RuntimeQuotaPressureBand::Exhausted => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted
+        }
+        RuntimeQuotaPressureBand::Unknown => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown
+        }
+    }
+}
+
+fn runtime_candidate_quota_pressure_band_from_proxy(
+    band: runtime_proxy_crate::RuntimeSelectionQuotaPressureBand,
+) -> RuntimeQuotaPressureBand {
+    match band {
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy => {
+            RuntimeQuotaPressureBand::Healthy
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin => {
+            RuntimeQuotaPressureBand::Thin
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical => {
+            RuntimeQuotaPressureBand::Critical
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted => {
+            RuntimeQuotaPressureBand::Exhausted
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown => {
+            RuntimeQuotaPressureBand::Unknown
+        }
+    }
+}
+
+fn runtime_candidate_quota_pressure_band_rank(band: RuntimeQuotaPressureBand) -> u8 {
+    match band {
+        RuntimeQuotaPressureBand::Healthy => 0,
+        RuntimeQuotaPressureBand::Thin => 1,
+        RuntimeQuotaPressureBand::Critical => 2,
+        RuntimeQuotaPressureBand::Exhausted => 3,
+        RuntimeQuotaPressureBand::Unknown => 4,
+    }
+}
+
+fn runtime_candidate_quota_summary_to_proxy(
+    summary: RuntimeQuotaSummary,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaSummary {
+    runtime_proxy_crate::RuntimeSelectionQuotaSummary {
+        five_hour: runtime_proxy_crate::RuntimeSelectionQuotaWindowSummary {
+            status: runtime_candidate_quota_window_status_to_proxy(summary.five_hour.status),
+            remaining_percent: summary.five_hour.remaining_percent,
+        },
+        weekly: runtime_proxy_crate::RuntimeSelectionQuotaWindowSummary {
+            status: runtime_candidate_quota_window_status_to_proxy(summary.weekly.status),
+            remaining_percent: summary.weekly.remaining_percent,
+        },
+        route_band: runtime_candidate_quota_pressure_band_to_proxy(summary.route_band),
+    }
+}
+
+fn runtime_candidate_quota_summary_from_proxy(
+    summary: runtime_proxy_crate::RuntimeSelectionQuotaSummary,
+) -> RuntimeQuotaSummary {
+    RuntimeQuotaSummary {
+        five_hour: RuntimeQuotaWindowSummary {
+            status: runtime_candidate_quota_window_status_from_proxy(summary.five_hour.status),
+            remaining_percent: summary.five_hour.remaining_percent,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeQuotaWindowSummary {
+            status: runtime_candidate_quota_window_status_from_proxy(summary.weekly.status),
+            remaining_percent: summary.weekly.remaining_percent,
+            reset_at: i64::MAX,
+        },
+        route_band: runtime_candidate_quota_pressure_band_from_proxy(summary.route_band),
+    }
+}
+
+fn runtime_candidate_quota_source_to_proxy(
+    source: RuntimeQuotaSource,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaSource {
+    match source {
+        RuntimeQuotaSource::LiveProbe => {
+            runtime_proxy_crate::RuntimeSelectionQuotaSource::LiveProbe
+        }
+        RuntimeQuotaSource::PersistedSnapshot => {
+            runtime_proxy_crate::RuntimeSelectionQuotaSource::PersistedSnapshot
+        }
+    }
+}
+
+fn runtime_candidate_quota_source_from_proxy(
+    source: runtime_proxy_crate::RuntimeSelectionQuotaSource,
+) -> RuntimeQuotaSource {
+    match source {
+        runtime_proxy_crate::RuntimeSelectionQuotaSource::LiveProbe => {
+            RuntimeQuotaSource::LiveProbe
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaSource::PersistedSnapshot => {
+            RuntimeQuotaSource::PersistedSnapshot
+        }
+    }
+}
+
+fn runtime_candidate_quota_sort_key_to_proxy(
+    sort_key: RuntimeQuotaPressureSortKey,
+) -> runtime_proxy_crate::RuntimeResponseQuotaPressureSortKey {
+    let (
+        band,
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        reserve_floor,
+        weekly_remaining,
+        five_hour_remaining,
+        weekly_reset_at,
+        five_hour_reset_at,
+    ) = sort_key;
+    (
+        runtime_candidate_quota_pressure_band_rank(band),
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        reserve_floor,
+        weekly_remaining,
+        five_hour_remaining,
+        weekly_reset_at,
+        five_hour_reset_at,
+    )
 }
 
 fn runtime_response_ready_candidates(

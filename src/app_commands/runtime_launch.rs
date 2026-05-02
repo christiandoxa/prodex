@@ -93,8 +93,11 @@ impl RuntimeLaunchSelection {
         requested: Option<&str>,
         model_provider_override: Option<&str>,
     ) -> Result<Self> {
-        if allow_profileless_local_home(requested, model_provider_override)
-            && state.profiles.is_empty()
+        if prodex_runtime_launch::allow_profileless_local_home(
+            requested,
+            model_provider_override,
+            SUPER_LOCAL_PROVIDER_ID,
+        ) && state.profiles.is_empty()
         {
             let codex_home = paths.shared_codex_root.clone();
             return Ok(Self {
@@ -178,15 +181,6 @@ pub(crate) fn resolve_runtime_launch_profile_name(
         })
 }
 
-fn allow_profileless_local_home(
-    requested: Option<&str>,
-    model_provider_override: Option<&str>,
-) -> bool {
-    requested.is_none()
-        && model_provider_override
-            .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID))
-}
-
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,
     paths: AppPaths,
@@ -254,9 +248,8 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         }
 
         print_wrapped_stderr(&section_header("Runtime Provider"));
-        print_wrapped_stderr(&format!(
-            "Detected model_provider '{}' from {}. Launching directly without prodex quota preflight or auto-rotate proxy.",
-            setting.provider_id,
+        print_wrapped_stderr(&format_runtime_provider_direct_launch_message(
+            setting.provider_id.as_str(),
             setting.source.display_name(),
         ));
         Ok(())
@@ -558,7 +551,10 @@ fn rotate_to_scored_runtime_candidate(
     );
 
     activate_runtime_launch_profile(paths, state, request, selection, &best_candidate.name)?;
-    print_wrapped_stderr(&selection_message);
+    if let Some(warning) = selection_message.warning.as_deref() {
+        print_wrapped_stderr(warning);
+    }
+    print_wrapped_stderr(&selection_message.selection);
     Ok(())
 }
 
@@ -567,52 +563,30 @@ fn scored_runtime_candidate_message(
     best_candidate: &ReadyProfileCandidate,
     selected_report: Option<&RunProfileProbeReport>,
     include_code_review: bool,
-) -> String {
-    let mut selection_message = format!(
-        "Using profile '{}' ({})",
-        best_candidate.name,
-        format_main_windows_compact(&best_candidate.usage)
-    );
+) -> RuntimeLaunchScoredCandidateOutput {
+    let quota_summary = format_main_windows_compact(&best_candidate.usage);
+    let blocked_summary = selected_report.and_then(|report| {
+        report.result.as_ref().ok().and_then(|usage| {
+            let blocked = collect_blocked_limits(usage, include_code_review);
+            (!blocked.is_empty()).then(|| format_blocked_limits(&blocked))
+        })
+    });
+    let selected_profile_status = selected_report.map(|report| match &report.result {
+        Ok(_) => blocked_summary
+            .as_deref()
+            .map(|blocked_summary| RuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary })
+            .unwrap_or(RuntimeLaunchSelectedProfileStatus::Ready),
+        Err(err) => RuntimeLaunchSelectedProfileStatus::ProbeFailed { error: err },
+    });
 
-    if let Some(report) = selected_report {
-        match &report.result {
-            Ok(usage) => {
-                let blocked = collect_blocked_limits(usage, include_code_review);
-                if !blocked.is_empty() {
-                    print_wrapped_stderr(&format!(
-                        "Quota preflight blocked profile '{}': {}",
-                        initial_profile_name,
-                        format_blocked_limits(&blocked)
-                    ));
-                    selection_message = format!(
-                        "Auto-rotating to profile '{}' using quota-pressure scoring ({}).",
-                        best_candidate.name,
-                        format_main_windows_compact(&best_candidate.usage)
-                    );
-                } else {
-                    selection_message = format!(
-                        "Auto-selecting profile '{}' over active profile '{}' using quota-pressure scoring ({}).",
-                        best_candidate.name,
-                        initial_profile_name,
-                        format_main_windows_compact(&best_candidate.usage)
-                    );
-                }
-            }
-            Err(err) => {
-                print_wrapped_stderr(&format!(
-                    "Warning: quota preflight failed for '{}': {err}",
-                    initial_profile_name
-                ));
-                selection_message = format!(
-                    "Using ready profile '{}' after quota preflight failed ({})",
-                    best_candidate.name,
-                    format_main_windows_compact(&best_candidate.usage)
-                );
-            }
-        }
-    }
-
-    selection_message
+    format_runtime_launch_scored_candidate_message(RuntimeLaunchScoredCandidateMessage {
+        initial_profile_name,
+        candidate: RuntimeLaunchCandidateDisplay {
+            name: &best_candidate.name,
+            quota_summary: &quota_summary,
+        },
+        selected_profile_status,
+    })
 }
 
 fn handle_no_ready_runtime_profiles(
@@ -756,10 +730,7 @@ fn activate_runtime_launch_profile(
 }
 
 fn print_quota_preflight_inspect_hint(profile_name: &str) {
-    print_wrapped_stderr(&format!(
-        "Inspect with `prodex quota --profile {}` or bypass with `prodex run --skip-quota-check`.",
-        profile_name
-    ));
+    print_wrapped_stderr(&format_runtime_launch_quota_inspect_hint(profile_name));
 }
 
 fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<PathBuf> {

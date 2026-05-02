@@ -23,6 +23,7 @@ pub(crate) fn runtime_profile_transport_backoff_key_parts(key: &str) -> Option<(
     runtime_profile_route_key_parts(key, "__route_transport_backoff__:")
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_profile_transport_backoff_profile_name(key: &str) -> &str {
     runtime_profile_transport_backoff_key_parts(key)
         .map(|(_, profile_name)| profile_name)
@@ -57,6 +58,7 @@ pub(crate) fn runtime_profile_transport_backoff_until_from_map(
     .max()
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_profile_transport_backoff_max_until(
     transport_backoff_until: &BTreeMap<String, i64>,
     profile_name: &str,
