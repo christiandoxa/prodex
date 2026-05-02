@@ -1382,6 +1382,7 @@ dependencies = [
  "prodex-codex-config",
  "prodex-context",
  "prodex-core",
+ "prodex-housekeeping",
  "prodex-profile-export",
  "prodex-profile-identity",
  "prodex-proxy-config",
@@ -1488,6 +1489,17 @@ version = "0.69.0"
 dependencies = [
  "anyhow",
  "dirs",
+]
+
+[[package]]
+name = "prodex-housekeeping"
+version = "0.69.0"
+dependencies = [
+ "chrono",
+ "prodex-core",
+ "prodex-runtime-claude",
+ "prodex-state",
+ "serde_json",
 ]
 
 [[package]]

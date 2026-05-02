@@ -19,6 +19,7 @@ members = [
     "crates/prodex-codex-config",
     "crates/prodex-context",
     "crates/prodex-core",
+    "crates/prodex-housekeeping",
     "crates/prodex-profile-export",
     "crates/prodex-profile-identity",
     "crates/prodex-proxy-config",
@@ -75,6 +76,7 @@ prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prod
 prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli" }
 prodex_context = { package = "prodex-context", path = "crates/prodex-context" }
 prodex_core = { package = "prodex-core", path = "crates/prodex-core" }
+prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping" }
 prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export" }
 prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity" }
 prodex_proxy_config = { package = "prodex-proxy-config", path = "crates/prodex-proxy-config" }

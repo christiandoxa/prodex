@@ -1,5 +1,3 @@
-use super::*;
-
 #[allow(unused_imports)]
 pub(crate) use prodex_runtime_claude::{
     PRODEX_CLAUDE_PROXY_API_KEY, RuntimeProxyClaudeLaunchModes,
@@ -13,6 +11,9 @@ pub(crate) use prodex_runtime_claude::{
     runtime_proxy_claude_removed_env, runtime_proxy_claude_settings_path,
 };
 
-pub(crate) fn runtime_proxy_shared_claude_config_dir(paths: &AppPaths) -> PathBuf {
+#[allow(dead_code)]
+pub(crate) fn runtime_proxy_shared_claude_config_dir(
+    paths: &crate::AppPaths,
+) -> std::path::PathBuf {
     prodex_runtime_claude::runtime_proxy_shared_claude_config_dir(&paths.root)
 }
