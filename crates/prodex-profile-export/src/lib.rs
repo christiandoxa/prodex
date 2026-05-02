@@ -281,6 +281,40 @@ pub fn validate_profile_export_header(format: &str, version: u32) -> Result<()> 
     Ok(())
 }
 
+fn encrypt_profile_export_payload<T>(
+    payload: &T,
+    password: &str,
+) -> Result<ProfileExportEnvelope<T>>
+where
+    T: Clone + Serialize,
+{
+    let payload_json =
+        serde_json::to_vec(payload).context("failed to serialize profile export payload")?;
+    let mut salt = [0_u8; PROFILE_EXPORT_SALT_BYTES];
+    getrandom::fill(&mut salt)
+        .map_err(|err| anyhow::anyhow!("failed to generate export salt: {err}"))?;
+    let mut nonce = [0_u8; PROFILE_EXPORT_NONCE_BYTES];
+    getrandom::fill(&mut nonce)
+        .map_err(|err| anyhow::anyhow!("failed to generate export nonce: {err}"))?;
+    let key = derive_profile_export_key(password, &salt, PROFILE_EXPORT_PBKDF2_ITERATIONS);
+    let cipher = Aes256GcmSiv::new_from_slice(&key)
+        .map_err(|_| anyhow::anyhow!("failed to initialize export cipher"))?;
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce), payload_json.as_ref())
+        .map_err(|_| anyhow::anyhow!("failed to encrypt profile export payload"))?;
+
+    Ok(ProfileExportEnvelope::Encrypted {
+        format: PROFILE_EXPORT_FORMAT.to_string(),
+        version: PROFILE_EXPORT_VERSION,
+        cipher: PROFILE_EXPORT_CIPHER.to_string(),
+        kdf: PROFILE_EXPORT_KDF.to_string(),
+        iterations: PROFILE_EXPORT_PBKDF2_ITERATIONS,
+        salt_base64: base64::engine::general_purpose::STANDARD.encode(salt),
+        nonce_base64: base64::engine::general_purpose::STANDARD.encode(nonce),
+        ciphertext_base64: base64::engine::general_purpose::STANDARD.encode(ciphertext),
+    })
+}
+
 fn yes_no(value: bool) -> String {
     if value {
         "Yes".to_string()
@@ -408,38 +442,4 @@ mod tests {
             .expect("current journal version should validate");
         assert!(validate_import_auth_update_journal_version(journal.version + 1).is_err());
     }
-}
-
-fn encrypt_profile_export_payload<T>(
-    payload: &T,
-    password: &str,
-) -> Result<ProfileExportEnvelope<T>>
-where
-    T: Clone + Serialize,
-{
-    let payload_json =
-        serde_json::to_vec(payload).context("failed to serialize profile export payload")?;
-    let mut salt = [0_u8; PROFILE_EXPORT_SALT_BYTES];
-    getrandom::fill(&mut salt)
-        .map_err(|err| anyhow::anyhow!("failed to generate export salt: {err}"))?;
-    let mut nonce = [0_u8; PROFILE_EXPORT_NONCE_BYTES];
-    getrandom::fill(&mut nonce)
-        .map_err(|err| anyhow::anyhow!("failed to generate export nonce: {err}"))?;
-    let key = derive_profile_export_key(password, &salt, PROFILE_EXPORT_PBKDF2_ITERATIONS);
-    let cipher = Aes256GcmSiv::new_from_slice(&key)
-        .map_err(|_| anyhow::anyhow!("failed to initialize export cipher"))?;
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), payload_json.as_ref())
-        .map_err(|_| anyhow::anyhow!("failed to encrypt profile export payload"))?;
-
-    Ok(ProfileExportEnvelope::Encrypted {
-        format: PROFILE_EXPORT_FORMAT.to_string(),
-        version: PROFILE_EXPORT_VERSION,
-        cipher: PROFILE_EXPORT_CIPHER.to_string(),
-        kdf: PROFILE_EXPORT_KDF.to_string(),
-        iterations: PROFILE_EXPORT_PBKDF2_ITERATIONS,
-        salt_base64: base64::engine::general_purpose::STANDARD.encode(salt),
-        nonce_base64: base64::engine::general_purpose::STANDARD.encode(nonce),
-        ciphertext_base64: base64::engine::general_purpose::STANDARD.encode(ciphertext),
-    })
 }
