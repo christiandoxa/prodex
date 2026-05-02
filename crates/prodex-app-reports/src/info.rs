@@ -987,6 +987,7 @@ mod tests {
 
         assert_eq!(summary.event_count, 1);
         assert_eq!(summary.total.input_tokens, 100);
+        assert!(format_info_token_usage_summary(&summary).contains("input=100"));
     }
 
     #[test]

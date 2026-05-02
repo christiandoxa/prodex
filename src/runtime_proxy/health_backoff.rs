@@ -1,5 +1,9 @@
 use super::*;
 
+pub(crate) use prodex_runtime_store::{
+    runtime_profile_backoff_sort_key, runtime_profile_name_in_selection_backoff,
+};
+
 pub(crate) fn prune_runtime_profile_retry_backoff(runtime: &mut RuntimeRotationState, now: i64) {
     runtime
         .profile_retry_backoff_until
@@ -40,86 +44,6 @@ pub(crate) fn prune_runtime_profile_selection_backoff(
     prune_runtime_profile_route_circuits(runtime, now);
 }
 
-pub(crate) fn runtime_profile_name_in_selection_backoff(
-    profile_name: &str,
-    retry_backoff_until: &BTreeMap<String, i64>,
-    transport_backoff_until: &BTreeMap<String, i64>,
-    route_circuit_open_until: &BTreeMap<String, i64>,
-    route_kind: RuntimeRouteKind,
-    now: i64,
-) -> bool {
-    retry_backoff_until
-        .get(profile_name)
-        .copied()
-        .is_some_and(|until| until > now)
-        || runtime_profile_transport_backoff_until_from_map(
-            transport_backoff_until,
-            profile_name,
-            route_kind,
-            now,
-        )
-        .is_some()
-        || route_circuit_open_until
-            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-            .copied()
-            .is_some_and(|until| until > now)
-}
-
-pub(crate) fn runtime_profile_backoff_sort_key(
-    profile_name: &str,
-    retry_backoff_until: &BTreeMap<String, i64>,
-    transport_backoff_until: &BTreeMap<String, i64>,
-    route_circuit_open_until: &BTreeMap<String, i64>,
-    route_kind: RuntimeRouteKind,
-    now: i64,
-) -> (usize, i64, i64, i64) {
-    let retry_until = retry_backoff_until
-        .get(profile_name)
-        .copied()
-        .filter(|until| *until > now);
-    let transport_until = runtime_profile_transport_backoff_until_from_map(
-        transport_backoff_until,
-        profile_name,
-        route_kind,
-        now,
-    );
-    let circuit_until = route_circuit_open_until
-        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-        .copied()
-        .filter(|until| *until > now);
-
-    match (circuit_until, transport_until, retry_until) {
-        (None, None, None) => (0, 0, 0, 0),
-        (Some(circuit_until), None, None) => (1, circuit_until, 0, 0),
-        (None, Some(transport_until), None) => (2, transport_until, 0, 0),
-        (None, None, Some(retry_until)) => (3, retry_until, 0, 0),
-        (Some(circuit_until), Some(transport_until), None) => (
-            4,
-            circuit_until.min(transport_until),
-            circuit_until.max(transport_until),
-            0,
-        ),
-        (Some(circuit_until), None, Some(retry_until)) => (
-            5,
-            circuit_until.min(retry_until),
-            circuit_until.max(retry_until),
-            0,
-        ),
-        (None, Some(transport_until), Some(retry_until)) => (
-            6,
-            transport_until.min(retry_until),
-            transport_until.max(retry_until),
-            0,
-        ),
-        (Some(circuit_until), Some(transport_until), Some(retry_until)) => (
-            7,
-            circuit_until.min(transport_until.min(retry_until)),
-            circuit_until.max(transport_until.max(retry_until)),
-            retry_until,
-        ),
-    }
-}
-
 pub(crate) fn runtime_profile_backoffs_snapshot(
     runtime: &RuntimeRotationState,
 ) -> RuntimeProfileBackoffs {
@@ -130,44 +54,12 @@ pub(crate) fn runtime_profile_backoffs_snapshot(
     }
 }
 
-pub(crate) fn runtime_soften_persisted_backoff_map_for_startup(
-    backoffs: &mut BTreeMap<String, i64>,
-    now: i64,
-    max_future_seconds: i64,
-) -> bool {
-    let max_until = now.saturating_add(max_future_seconds.max(0));
-    let mut changed = false;
-    backoffs.retain(|_, until| {
-        if *until <= now {
-            changed = true;
-            return false;
-        }
-        let next_until = (*until).min(max_until);
-        if next_until != *until {
-            changed = true;
-        }
-        *until = next_until;
-        true
-    });
-    changed
-}
-
-pub(crate) fn runtime_route_kind_from_label(label: &str) -> Option<RuntimeRouteKind> {
-    match label {
-        "responses" => Some(RuntimeRouteKind::Responses),
-        "compact" => Some(RuntimeRouteKind::Compact),
-        "websocket" => Some(RuntimeRouteKind::Websocket),
-        "standard" => Some(RuntimeRouteKind::Standard),
-        _ => None,
-    }
-}
-
 pub(crate) fn runtime_soften_persisted_backoffs_for_startup(
     backoffs: &mut RuntimeProfileBackoffs,
     profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
     now: i64,
 ) -> bool {
-    let mut changed = runtime_soften_persisted_backoff_map_for_startup(
+    let mut changed = prodex_runtime_store::runtime_soften_persisted_backoff_map_for_startup(
         &mut backoffs.transport_backoff_until,
         now,
         RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,

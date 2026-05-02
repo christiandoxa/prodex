@@ -42,6 +42,7 @@ members = [
     "crates/prodex-runtime-store",
     "crates/prodex-runtime-tuning",
     "crates/prodex-secret-store",
+    "crates/prodex-session-store",
     "crates/prodex-shared-codex-fs",
     "crates/prodex-shared-types",
     "crates/prodex-state",
@@ -101,6 +102,7 @@ prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prod
 runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy" }
 prodex_runtime_store = { package = "prodex-runtime-store", path = "crates/prodex-runtime-store" }
 prodex_runtime_tuning = { package = "prodex-runtime-tuning", path = "crates/prodex-runtime-tuning" }
+prodex_session_store = { package = "prodex-session-store", path = "crates/prodex-session-store" }
 prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "crates/prodex-shared-codex-fs" }
 prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-shared-types" }
 prodex_state = { package = "prodex-state", path = "crates/prodex-state" }

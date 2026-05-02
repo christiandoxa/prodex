@@ -1,5 +1,10 @@
 use super::*;
 
+pub(crate) use prodex_runtime_store::{
+    runtime_profile_route_circuit_health_key, runtime_profile_route_circuit_key,
+    runtime_profile_route_circuit_profile_name, runtime_profile_route_circuit_reopen_key,
+};
+
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS: i64 = if cfg!(test) { 320 } else { 600 };
@@ -37,34 +42,6 @@ pub(crate) fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64
         .min(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
 }
 
-pub(crate) fn runtime_profile_route_circuit_key(
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    format!(
-        "__route_circuit__:{}:{profile_name}",
-        runtime_route_kind_label(route_kind)
-    )
-}
-
-pub(crate) fn runtime_profile_route_circuit_profile_name(key: &str) -> &str {
-    key.rsplit(':').next().unwrap_or(key)
-}
-
-pub(crate) fn runtime_profile_route_circuit_health_key(key: &str) -> String {
-    key.replacen("__route_circuit__", "__route_health__", 1)
-}
-
-pub(crate) fn runtime_profile_route_circuit_reopen_key(
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    format!(
-        "__route_circuit_reopen__:{}:{profile_name}",
-        runtime_route_kind_label(route_kind)
-    )
-}
-
 pub(crate) fn runtime_profile_route_circuit_open_until(
     runtime: &RuntimeRotationState,
     profile_name: &str,
@@ -83,12 +60,13 @@ pub(crate) fn runtime_profile_route_circuit_probe_seconds(
     route_profile_key: &str,
     now: i64,
 ) -> i64 {
-    let Some((route_label, profile_name)) =
-        runtime_profile_route_key_parts(route_profile_key, "__route_circuit__:")
-    else {
+    let Some((route_label, profile_name)) = prodex_runtime_store::runtime_profile_route_key_parts(
+        route_profile_key,
+        "__route_circuit__:",
+    ) else {
         return RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
     };
-    let Some(route_kind) = runtime_route_kind_from_label(route_label) else {
+    let Some(route_kind) = prodex_runtime_store::runtime_route_kind_from_label(route_label) else {
         return RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
     };
     let score = runtime_profile_effective_health_score_from_map(

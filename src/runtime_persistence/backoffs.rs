@@ -1,12 +1,5 @@
 use super::*;
 
-pub(crate) fn runtime_profile_route_key_parts<'a>(
-    key: &'a str,
-    prefix: &str,
-) -> Option<(&'a str, &'a str)> {
-    prodex_runtime_store::runtime_profile_route_key_parts(key, prefix)
-}
-
 pub(crate) fn runtime_profile_transport_backoff_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,

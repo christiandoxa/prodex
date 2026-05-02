@@ -1,5 +1,7 @@
 use super::*;
 
+#[cfg(test)]
+pub(crate) use prodex_app_reports::collect_info_runtime_load_summary_from_text;
 pub(crate) use prodex_app_reports::{
     InfoTokenUsageSummary, classify_prodex_process_row,
     collect_info_runtime_load_summary_from_texts, collect_info_token_usage_summary_from_texts,
@@ -7,10 +9,6 @@ pub(crate) use prodex_app_reports::{
     format_info_runway, format_info_token_usage_summary, format_runtime_tuning_budgets,
     format_runtime_tuning_transport, format_runtime_tuning_workers, parse_ps_process_rows,
     select_active_runtime_log_paths_with_prefix, select_recent_runtime_log_paths,
-};
-#[cfg(test)]
-pub(crate) use prodex_app_reports::{
-    collect_info_runtime_load_summary_from_text, collect_info_token_usage_summary_from_text,
 };
 
 pub(crate) fn collect_info_quota_aggregate(
@@ -273,36 +271,5 @@ pub(crate) fn secret_backend_json_value() -> serde_json::Value {
             let error = err.to_string();
             prodex_app_reports::secret_backend_json_value_parts(None, None, Some(&error))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn info_token_usage_summary_parses_text_runtime_log_markers() {
-        let summary = collect_info_token_usage_summary_from_text(concat!(
-            "[2026-04-29 10:00:00.000 +07:00] token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8\n",
-            "[2026-04-29 10:00:01.000 +07:00] token_usage request=2 transport=http profile=backup source=responses_sse input_tokens=10 cached_input_tokens=0 output_tokens=4 reasoning_tokens=1\n",
-        ));
-
-        assert_eq!(summary.event_count, 2);
-        assert_eq!(summary.total.input_tokens, 110);
-        assert_eq!(summary.total.cached_input_tokens, 25);
-        assert_eq!(summary.total.output_tokens, 44);
-        assert_eq!(summary.total.reasoning_tokens, 9);
-        assert_eq!(summary.by_profile["main"].total.output_tokens, 40);
-    }
-
-    #[test]
-    fn info_token_usage_summary_parses_json_runtime_log_markers() {
-        let summary = collect_info_token_usage_summary_from_text(
-            r#"{"timestamp":"2026-04-29 10:00:00.000 +07:00","message":"token_usage request=1 transport=http profile=main source=responses_unary input_tokens=100 cached_input_tokens=25 output_tokens=40 reasoning_tokens=8","event":"token_usage","fields":{"request":"1","transport":"http","profile":"main","source":"responses_unary","input_tokens":"100","cached_input_tokens":"25","output_tokens":"40","reasoning_tokens":"8"}}"#,
-        );
-
-        assert_eq!(summary.event_count, 1);
-        assert_eq!(summary.total.input_tokens, 100);
-        assert!(format_info_token_usage_summary(&summary).contains("input=100"));
     }
 }

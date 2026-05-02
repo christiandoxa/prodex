@@ -1,50 +1,10 @@
 use super::*;
 
-fn auth_summary_from_auth_text_result(
-    result: std::result::Result<Option<String>, anyhow::Error>,
-) -> AuthSummary {
-    match result {
-        Ok(Some(content)) => auth_summary_from_auth_text(&content),
-        Ok(None) => prodex_quota::auth_summary_from_auth_text_result(Ok::<
-            Option<String>,
-            anyhow::Error,
-        >(None)),
-        Err(err) => prodex_quota::auth_summary_from_auth_text_result(Err(err)),
-    }
-}
-
 #[derive(Debug, Serialize)]
 struct ChatgptRefreshRequest<'a> {
     client_id: &'static str,
     grant_type: &'static str,
     refresh_token: &'a str,
-}
-
-fn auth_summary_from_auth_text(content: &str) -> AuthSummary {
-    let stored_auth: StoredAuth = match serde_json::from_str(content) {
-        Ok(auth) => auth,
-        Err(_) => return prodex_quota::auth_summary_from_auth_text(content),
-    };
-    let stored_auth = quota_stored_auth(stored_auth);
-    prodex_quota::auth_summary_from_stored_auth(&stored_auth)
-}
-
-fn quota_stored_auth(stored_auth: StoredAuth) -> prodex_quota::StoredAuth {
-    prodex_quota::StoredAuth {
-        auth_mode: stored_auth.auth_mode,
-        tokens: stored_auth.tokens.map(quota_stored_tokens),
-        openai_api_key: stored_auth.openai_api_key,
-        last_refresh: stored_auth.last_refresh,
-    }
-}
-
-fn quota_stored_tokens(tokens: StoredTokens) -> prodex_quota::StoredTokens {
-    prodex_quota::StoredTokens {
-        access_token: tokens.access_token,
-        account_id: tokens.account_id,
-        id_token: tokens.id_token,
-        refresh_token: tokens.refresh_token,
-    }
 }
 
 pub(super) struct UsageFetchFlow<'a> {
@@ -155,7 +115,7 @@ pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
             quota_compatible: false,
         };
     }
-    auth_summary_from_auth_text_result(read_auth_json_text(codex_home))
+    prodex_quota::auth_summary_from_auth_text_result(read_auth_json_text(codex_home))
 }
 
 pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
@@ -170,7 +130,6 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
     };
     let stored_auth: StoredAuth = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", auth_location.display()))?;
-    let stored_auth = quota_stored_auth(stored_auth);
     prodex_quota::usage_auth_from_stored_auth(&stored_auth)
 }
 

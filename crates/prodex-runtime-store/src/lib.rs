@@ -22,6 +22,15 @@ pub const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
 pub const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 pub const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 pub const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
+pub const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
+pub const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
+pub const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
+pub const RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS: i64 = if cfg!(test) { 320 } else { 600 };
+pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
+pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS: i64 =
+    if cfg!(test) { 20 } else { 60 };
+pub const RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS: i64 = if cfg!(test) { 12 } else { 1_800 };
+pub const RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeMergedStateAndContinuations {
@@ -496,6 +505,34 @@ pub fn runtime_profile_route_performance_key(
     )
 }
 
+pub fn runtime_profile_route_circuit_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_circuit__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
+pub fn runtime_profile_route_circuit_profile_name(key: &str) -> &str {
+    key.rsplit(':').next().unwrap_or(key)
+}
+
+pub fn runtime_profile_route_circuit_health_key(key: &str) -> String {
+    key.replacen("__route_circuit__", "__route_health__", 1)
+}
+
+pub fn runtime_profile_route_circuit_reopen_key(
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> String {
+    format!(
+        "__route_circuit_reopen__:{}:{profile_name}",
+        runtime_route_kind_label(route_kind)
+    )
+}
+
 pub fn runtime_profile_global_health_score(
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
     profile_name: &str,
@@ -772,6 +809,200 @@ pub fn runtime_profile_transport_backoff_max_until(
         .max()
 }
 
+pub fn runtime_profile_name_in_selection_backoff(
+    profile_name: &str,
+    retry_backoff_until: &BTreeMap<String, i64>,
+    transport_backoff_until: &BTreeMap<String, i64>,
+    route_circuit_open_until: &BTreeMap<String, i64>,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    retry_backoff_until
+        .get(profile_name)
+        .copied()
+        .is_some_and(|until| until > now)
+        || runtime_profile_transport_backoff_until_from_map(
+            transport_backoff_until,
+            profile_name,
+            route_kind,
+            now,
+        )
+        .is_some()
+        || route_circuit_open_until
+            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+            .copied()
+            .is_some_and(|until| until > now)
+}
+
+pub fn runtime_profile_backoff_sort_key(
+    profile_name: &str,
+    retry_backoff_until: &BTreeMap<String, i64>,
+    transport_backoff_until: &BTreeMap<String, i64>,
+    route_circuit_open_until: &BTreeMap<String, i64>,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> (usize, i64, i64, i64) {
+    let retry_until = retry_backoff_until
+        .get(profile_name)
+        .copied()
+        .filter(|until| *until > now);
+    let transport_until = runtime_profile_transport_backoff_until_from_map(
+        transport_backoff_until,
+        profile_name,
+        route_kind,
+        now,
+    );
+    let circuit_until = route_circuit_open_until
+        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+        .copied()
+        .filter(|until| *until > now);
+
+    match (circuit_until, transport_until, retry_until) {
+        (None, None, None) => (0, 0, 0, 0),
+        (Some(circuit_until), None, None) => (1, circuit_until, 0, 0),
+        (None, Some(transport_until), None) => (2, transport_until, 0, 0),
+        (None, None, Some(retry_until)) => (3, retry_until, 0, 0),
+        (Some(circuit_until), Some(transport_until), None) => (
+            4,
+            circuit_until.min(transport_until),
+            circuit_until.max(transport_until),
+            0,
+        ),
+        (Some(circuit_until), None, Some(retry_until)) => (
+            5,
+            circuit_until.min(retry_until),
+            circuit_until.max(retry_until),
+            0,
+        ),
+        (None, Some(transport_until), Some(retry_until)) => (
+            6,
+            transport_until.min(retry_until),
+            transport_until.max(retry_until),
+            0,
+        ),
+        (Some(circuit_until), Some(transport_until), Some(retry_until)) => (
+            7,
+            circuit_until.min(transport_until.min(retry_until)),
+            circuit_until.max(transport_until.max(retry_until)),
+            retry_until,
+        ),
+    }
+}
+
+pub fn runtime_soften_persisted_backoff_map_for_startup(
+    backoffs: &mut BTreeMap<String, i64>,
+    now: i64,
+    max_future_seconds: i64,
+) -> bool {
+    let max_until = now.saturating_add(max_future_seconds.max(0));
+    let mut changed = false;
+    backoffs.retain(|_, until| {
+        if *until <= now {
+            changed = true;
+            return false;
+        }
+        let next_until = (*until).min(max_until);
+        if next_until != *until {
+            changed = true;
+        }
+        *until = next_until;
+        true
+    });
+    changed
+}
+
+pub fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i64 {
+    let multiplier = 1_i64
+        .checked_shl(
+            score
+                .saturating_sub(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
+                .min(3)
+                .saturating_add(reopen_stage.min(RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE)),
+        )
+        .unwrap_or(i64::MAX);
+    RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS
+        .saturating_mul(multiplier)
+        .min(RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS)
+}
+
+pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
+    let multiplier = 1_i64
+        .checked_shl(
+            score
+                .saturating_sub(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
+                .min(3),
+        )
+        .unwrap_or(i64::MAX);
+    RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS
+        .saturating_mul(multiplier)
+        .min(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
+}
+
+pub fn runtime_profile_route_circuit_probe_seconds(
+    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    route_profile_key: &str,
+    now: i64,
+) -> i64 {
+    let Some((route_label, profile_name)) =
+        runtime_profile_route_key_parts(route_profile_key, "__route_circuit__:")
+    else {
+        return RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
+    };
+    let Some(route_kind) = runtime_route_kind_from_label(route_label) else {
+        return RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
+    };
+    let score = runtime_profile_effective_health_score_from_map(
+        profile_scores,
+        &runtime_profile_route_health_key(profile_name, route_kind),
+        now,
+    );
+    runtime_profile_circuit_half_open_probe_seconds(score)
+}
+
+pub fn runtime_soften_persisted_route_circuits_for_startup(
+    route_circuit_open_until: &mut BTreeMap<String, i64>,
+    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+) -> bool {
+    let mut changed = false;
+    route_circuit_open_until.retain(|route_profile_key, until| {
+        if *until <= now {
+            changed = true;
+            return false;
+        }
+        let max_until = now.saturating_add(runtime_profile_route_circuit_probe_seconds(
+            profile_scores,
+            route_profile_key,
+            now,
+        ));
+        let next_until = (*until).min(max_until);
+        if next_until != *until {
+            changed = true;
+        }
+        *until = next_until;
+        true
+    });
+    changed
+}
+
+pub fn runtime_soften_persisted_backoffs_for_startup(
+    backoffs: &mut RuntimeProfileBackoffs,
+    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+) -> bool {
+    let mut changed = runtime_soften_persisted_backoff_map_for_startup(
+        &mut backoffs.transport_backoff_until,
+        now,
+        RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,
+    );
+    changed = runtime_soften_persisted_route_circuits_for_startup(
+        &mut backoffs.route_circuit_open_until,
+        profile_scores,
+        now,
+    ) || changed;
+    changed
+}
+
 fn runtime_profile_transport_backoff_key_matches_profiles(
     key: &str,
     profiles: &BTreeMap<String, ProfileEntry>,
@@ -781,10 +1012,6 @@ fn runtime_profile_transport_backoff_key_matches_profiles(
             runtime_route_kind_from_label(route).is_some() && profiles.contains_key(profile_name)
         })
         .unwrap_or_else(|| profiles.contains_key(key))
-}
-
-fn runtime_profile_route_circuit_profile_name(key: &str) -> &str {
-    key.rsplit(':').next().unwrap_or(key)
 }
 
 pub const RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX: &str = "__compact_session__:";
@@ -2254,6 +2481,137 @@ mod tests {
         assert_eq!(
             runtime_profile_transport_backoff_max_until(&backoffs, "alpha", 200),
             Some(300)
+        );
+    }
+
+    #[test]
+    fn selection_backoff_helpers_include_retry_transport_and_circuit() {
+        let now = 100;
+        let retry_backoff_until = BTreeMap::from([("alpha".to_string(), 110)]);
+        let transport_backoff_until = BTreeMap::from([(
+            runtime_profile_transport_backoff_key("beta", RuntimeRouteKind::Responses),
+            120,
+        )]);
+        let route_circuit_open_until = BTreeMap::from([(
+            runtime_profile_route_circuit_key("gamma", RuntimeRouteKind::Responses),
+            130,
+        )]);
+
+        assert!(runtime_profile_name_in_selection_backoff(
+            "alpha",
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            RuntimeRouteKind::Responses,
+            now,
+        ));
+        assert!(runtime_profile_name_in_selection_backoff(
+            "beta",
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            RuntimeRouteKind::Responses,
+            now,
+        ));
+        assert!(runtime_profile_name_in_selection_backoff(
+            "gamma",
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            RuntimeRouteKind::Responses,
+            now,
+        ));
+        assert!(!runtime_profile_name_in_selection_backoff(
+            "delta",
+            &retry_backoff_until,
+            &transport_backoff_until,
+            &route_circuit_open_until,
+            RuntimeRouteKind::Responses,
+            now,
+        ));
+
+        assert_eq!(
+            runtime_profile_backoff_sort_key(
+                "gamma",
+                &retry_backoff_until,
+                &transport_backoff_until,
+                &route_circuit_open_until,
+                RuntimeRouteKind::Responses,
+                now,
+            ),
+            (1, 130, 0, 0)
+        );
+        assert_eq!(
+            runtime_profile_backoff_sort_key(
+                "beta",
+                &retry_backoff_until,
+                &transport_backoff_until,
+                &route_circuit_open_until,
+                RuntimeRouteKind::Responses,
+                now,
+            ),
+            (2, 120, 0, 0)
+        );
+        assert_eq!(
+            runtime_profile_backoff_sort_key(
+                "alpha",
+                &retry_backoff_until,
+                &transport_backoff_until,
+                &route_circuit_open_until,
+                RuntimeRouteKind::Responses,
+                now,
+            ),
+            (3, 110, 0, 0)
+        );
+    }
+
+    #[test]
+    fn startup_backoff_softening_prunes_expired_and_caps_future_route_state() {
+        let now = 100;
+        let transport_key =
+            runtime_profile_transport_backoff_key("alpha", RuntimeRouteKind::Responses);
+        let circuit_key = runtime_profile_route_circuit_key("alpha", RuntimeRouteKind::Responses);
+        let mut backoffs = RuntimeProfileBackoffs {
+            retry_backoff_until: BTreeMap::from([("alpha".to_string(), 500)]),
+            transport_backoff_until: BTreeMap::from([
+                ("expired".to_string(), 90),
+                (transport_key.clone(), 500),
+            ]),
+            route_circuit_open_until: BTreeMap::from([
+                ("expired".to_string(), 90),
+                (circuit_key.clone(), 500),
+            ]),
+        };
+        let profile_scores = BTreeMap::from([(
+            runtime_profile_route_health_key("alpha", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
+                updated_at: now,
+            },
+        )]);
+
+        assert!(runtime_soften_persisted_backoffs_for_startup(
+            &mut backoffs,
+            &profile_scores,
+            now,
+        ));
+
+        assert_eq!(backoffs.retry_backoff_until["alpha"], 500);
+        assert_eq!(
+            backoffs.transport_backoff_until,
+            BTreeMap::from([(
+                transport_key,
+                now + RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,
+            )])
+        );
+        assert_eq!(
+            backoffs.route_circuit_open_until,
+            BTreeMap::from([(
+                circuit_key,
+                now + runtime_profile_circuit_half_open_probe_seconds(
+                    RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
+                ),
+            )])
         );
     }
 

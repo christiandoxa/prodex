@@ -49,4 +49,29 @@ mod tests {
         let formatted = format_response_body(br#"{"error":{"message":"quota"}}"#);
         assert!(formatted.contains("\"message\": \"quota\""));
     }
+
+    #[test]
+    fn quota_auth_filter_matches_labels_and_compatibility() {
+        let no_auth = AuthSummary {
+            label: "no-auth".to_string(),
+            quota_compatible: false,
+        };
+        let chatgpt = AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        };
+
+        assert!(QuotaAuthFilter::parse("no-auth").unwrap().matches(&no_auth));
+        assert!(!QuotaAuthFilter::parse("no-auth").unwrap().matches(&chatgpt));
+        assert!(
+            QuotaAuthFilter::parse("quota-compatible")
+                .unwrap()
+                .matches(&chatgpt)
+        );
+        assert!(
+            QuotaAuthFilter::parse("non-quota-compatible")
+                .unwrap()
+                .matches(&no_auth)
+        );
+    }
 }

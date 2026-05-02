@@ -1406,6 +1406,7 @@ dependencies = [
  "prodex-runtime-store",
  "prodex-runtime-tuning",
  "prodex-secret-store",
+ "prodex-session-store",
  "prodex-shared-codex-fs",
  "prodex-shared-types",
  "prodex-state",
@@ -1716,6 +1717,17 @@ version = "0.69.0"
 [[package]]
 name = "prodex-secret-store"
 version = "0.69.0"
+
+[[package]]
+name = "prodex-session-store"
+version = "0.69.0"
+dependencies = [
+ "anyhow",
+ "prodex-app-reports",
+ "prodex-core",
+ "prodex-state",
+ "serde_json",
+]
 
 [[package]]
 name = "prodex-shared-codex-fs"
