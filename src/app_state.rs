@@ -1,6 +1,8 @@
 use super::*;
 
-pub(crate) use prodex_state::{AppState, ProfileEntry, ProfileProvider, ResponseProfileBinding};
+pub(crate) use prodex_state::{
+    AppState, ProfileEntry, ProfileProvider, ResponseProfileBinding, prune_profile_bindings,
+};
 
 pub(crate) trait ProfileProviderExt {
     fn auth_summary(&self, codex_home: &Path) -> AuthSummary;

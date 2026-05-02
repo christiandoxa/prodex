@@ -6,11 +6,13 @@ use chrono::Local;
 use prodex_quota::{RuntimeQuotaPressureBand, UsageResponse, collect_blocked_limits};
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{
-    ReadyProfileCandidate, ReadyProfileScore, RunProfileProbeReport, RuntimeQuotaSource,
+    ReadyProfileCandidate, ReadyProfileScore, RunProfileProbeReport, RuntimeProfileProbeCacheEntry,
+    RuntimeQuotaSource,
 };
-use prodex_state::ProfileEntry;
+use prodex_state::{ProfileEntry, ProfileProvider};
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 pub const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
 pub const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
@@ -60,6 +62,137 @@ impl<P: ProfileSelectionProvider> ProfileSelectionRead for ProfileSelectionView<
 
     fn last_run_selected_at(&self, name: &str) -> Option<i64> {
         self.last_run_selected_at.get(name).copied()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeSelectionProfileEntry {
+    pub name: String,
+    pub codex_home: PathBuf,
+    pub provider: ProfileProvider,
+    pub last_run_selected_at: Option<i64>,
+}
+
+impl ProfileSelectionProvider for RuntimeSelectionProfileEntry {
+    fn runtime_pool_priority(&self) -> usize {
+        self.provider.runtime_pool_priority()
+    }
+}
+
+impl RuntimeSelectionProfileEntry {
+    pub fn supports_codex_runtime(&self) -> bool {
+        self.provider.supports_codex_runtime()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeProfileSelectionCatalogView<'a> {
+    pub entries: &'a [RuntimeSelectionProfileEntry],
+}
+
+impl ProfileSelectionRead for RuntimeProfileSelectionCatalogView<'_> {
+    type Profile = RuntimeSelectionProfileEntry;
+
+    fn profile_names(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    }
+
+    fn profile_entry(&self, name: &str) -> Option<&Self::Profile> {
+        self.entries.iter().find(|entry| entry.name == name)
+    }
+
+    fn last_run_selected_at(&self, name: &str) -> Option<i64> {
+        self.profile_entry(name)
+            .and_then(|entry| entry.last_run_selected_at)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeProfileSelectionCatalog {
+    pub entries: Vec<RuntimeSelectionProfileEntry>,
+}
+
+impl RuntimeProfileSelectionCatalog {
+    pub fn contains(&self, profile_name: &str) -> bool {
+        self.entries.iter().any(|entry| entry.name == profile_name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeRouteSelectionEntry {
+    pub profile: RuntimeSelectionProfileEntry,
+    pub cached_auth_summary: Option<prodex_quota::AuthSummary>,
+    pub cached_probe_entry: Option<RuntimeProfileProbeCacheEntry>,
+    pub cached_usage_snapshot: Option<RuntimeProfileUsageSnapshot>,
+    pub auth_failure_active: bool,
+    pub in_selection_backoff: bool,
+    pub backoff_sort_key: (usize, i64, i64, i64),
+    pub inflight_count: usize,
+    pub health_sort_key: u32,
+}
+
+impl RuntimeRouteSelectionEntry {
+    pub fn supports_codex_runtime(&self) -> bool {
+        self.profile.supports_codex_runtime()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeRouteSelectionCatalogView<'a> {
+    pub entries: &'a [RuntimeRouteSelectionEntry],
+}
+
+impl ProfileSelectionRead for RuntimeRouteSelectionCatalogView<'_> {
+    type Profile = RuntimeSelectionProfileEntry;
+
+    fn profile_names(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .map(|entry| entry.profile.name.clone())
+            .collect()
+    }
+
+    fn profile_entry(&self, name: &str) -> Option<&Self::Profile> {
+        self.entries
+            .iter()
+            .find(|entry| entry.profile.name == name)
+            .map(|entry| &entry.profile)
+    }
+
+    fn last_run_selected_at(&self, name: &str) -> Option<i64> {
+        self.profile_entry(name)
+            .and_then(|entry| entry.last_run_selected_at)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeRouteSelectionCatalog {
+    pub current_profile: String,
+    pub include_code_review: bool,
+    pub upstream_base_url: String,
+    pub entries: Vec<RuntimeRouteSelectionEntry>,
+}
+
+impl RuntimeRouteSelectionCatalog {
+    pub fn entry(&self, profile_name: &str) -> Option<&RuntimeRouteSelectionEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.profile.name == profile_name)
+    }
+
+    pub fn persisted_usage_snapshots(&self) -> BTreeMap<String, RuntimeProfileUsageSnapshot> {
+        self.entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .cached_usage_snapshot
+                    .clone()
+                    .map(|snapshot| (entry.profile.name.clone(), snapshot))
+            })
+            .collect()
     }
 }
 

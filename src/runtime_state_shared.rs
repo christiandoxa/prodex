@@ -1,11 +1,11 @@
 use crate::{
-    AppPaths, AppState, AuthSummary, ResponseProfileBinding, RuntimeProxyLaneAdmission,
-    RuntimeQuotaWindowStatus, UsageAuth, UsageResponse,
+    AppPaths, AppState, ResponseProfileBinding, RuntimeProxyLaneAdmission,
+    RuntimeQuotaWindowStatus, UsageAuth,
 };
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime as TokioRuntime;
@@ -13,8 +13,10 @@ use tokio::runtime::Runtime as TokioRuntime;
 pub(crate) use prodex_runtime_state::{
     RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
     RuntimeContinuationStatuses, RuntimeProbeCacheFreshness, RuntimeProfileBackoffs,
-    RuntimeProfileHealth, RuntimeRouteKind, RuntimeStateLockWaitMetrics,
+    RuntimeProfileHealth, RuntimeRouteKind, RuntimeStateLockWaitMetricCounters,
+    RuntimeStateLockWaitMetrics,
 };
+pub(crate) use prodex_shared_types::RuntimeProfileProbeCacheEntry;
 
 pub(crate) type RuntimeContinuationJournal =
     prodex_runtime_state::RuntimeContinuationJournal<ResponseProfileBinding>;
@@ -37,48 +39,6 @@ pub(crate) struct RuntimeRotationProxyShared {
     pub(crate) active_request_limit: usize,
     pub(crate) runtime_state_lock_wait_counters: Arc<RuntimeStateLockWaitMetricCounters>,
     pub(crate) lane_admission: RuntimeProxyLaneAdmission,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct RuntimeStateLockWaitMetricCounters {
-    wait_total_ns: AtomicU64,
-    wait_count: AtomicU64,
-    wait_max_ns: AtomicU64,
-}
-
-impl RuntimeStateLockWaitMetricCounters {
-    fn record_wait(&self, wait: Duration) {
-        let wait_ns = wait.as_nanos().min(u128::from(u64::MAX)) as u64;
-        self.wait_total_ns.fetch_add(wait_ns, Ordering::Relaxed);
-        self.wait_count.fetch_add(1, Ordering::Relaxed);
-        let mut current_max = self.wait_max_ns.load(Ordering::Relaxed);
-        while wait_ns > current_max {
-            match self.wait_max_ns.compare_exchange_weak(
-                current_max,
-                wait_ns,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(observed) => current_max = observed,
-            }
-        }
-    }
-
-    fn snapshot(&self) -> RuntimeStateLockWaitMetrics {
-        RuntimeStateLockWaitMetrics {
-            wait_total_ns: self.wait_total_ns.load(Ordering::Relaxed),
-            wait_count: self.wait_count.load(Ordering::Relaxed),
-            wait_max_ns: self.wait_max_ns.load(Ordering::Relaxed),
-        }
-    }
-
-    #[cfg(test)]
-    fn reset(&self) {
-        self.wait_total_ns.store(0, Ordering::Relaxed);
-        self.wait_count.store(0, Ordering::Relaxed);
-        self.wait_max_ns.store(0, Ordering::Relaxed);
-    }
 }
 
 impl RuntimeRotationProxyShared {
@@ -150,11 +110,4 @@ pub(crate) struct RuntimeProfileUsageAuthCacheEntry {
     pub(crate) auth: UsageAuth,
     pub(crate) location: secret_store::SecretLocation,
     pub(crate) revision: Option<secret_store::SecretRevision>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeProfileProbeCacheEntry {
-    pub(crate) checked_at: i64,
-    pub(crate) auth: AuthSummary,
-    pub(crate) result: std::result::Result<UsageResponse, String>,
 }

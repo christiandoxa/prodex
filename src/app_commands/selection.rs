@@ -1,8 +1,12 @@
 use super::*;
 
+#[cfg(test)]
+pub(crate) use prodex_app_reports::ProfileSelectionProvider;
 pub(crate) use prodex_app_reports::{
-    ProfileSelectionProvider, ProfileSelectionRead, ProfileSelectionView,
-    ReadyProfileRuntimeSortKey, active_profile_selection_order_with_view,
+    ProfileSelectionRead, ProfileSelectionView, ReadyProfileRuntimeSortKey,
+    RuntimeProfileSelectionCatalog, RuntimeProfileSelectionCatalogView,
+    RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
+    RuntimeSelectionProfileEntry, active_profile_selection_order_with_view,
     merge_run_preflight_reports_with_current_first, profile_in_run_selection_cooldown_with_view,
     profile_rotation_order_with_view, ready_profile_runtime_sort_key_with_view,
     run_profile_probe_is_ready, schedule_ready_profile_candidates_with_view,

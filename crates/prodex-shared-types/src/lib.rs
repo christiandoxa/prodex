@@ -96,6 +96,13 @@ pub struct RunProfileProbeReport {
 }
 
 #[derive(Debug, Clone)]
+pub struct RuntimeProfileProbeCacheEntry {
+    pub checked_at: i64,
+    pub auth: AuthSummary,
+    pub result: std::result::Result<UsageResponse, String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReadyProfileCandidate {
     pub name: String,
     pub usage: UsageResponse,

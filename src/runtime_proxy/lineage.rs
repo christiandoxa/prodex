@@ -1439,21 +1439,3 @@ pub(crate) fn release_runtime_previous_response_affinity(
 
     Ok(changed)
 }
-
-pub(crate) fn prune_profile_bindings(
-    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
-    max_entries: usize,
-) {
-    let keys = runtime_proxy_crate::runtime_profile_binding_prune_keys(
-        bindings.iter().map(|(key, binding)| {
-            runtime_proxy_crate::RuntimeProfileBindingOrderEntry {
-                key,
-                bound_at: binding.bound_at,
-            }
-        }),
-        max_entries,
-    );
-    for key in keys {
-        bindings.remove(&key);
-    }
-}

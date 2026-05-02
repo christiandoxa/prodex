@@ -170,6 +170,47 @@ pub struct RuntimeStateLockWaitMetrics {
     pub wait_max_ns: u64,
 }
 
+#[derive(Debug, Default)]
+pub struct RuntimeStateLockWaitMetricCounters {
+    wait_total_ns: AtomicU64,
+    wait_count: AtomicU64,
+    wait_max_ns: AtomicU64,
+}
+
+impl RuntimeStateLockWaitMetricCounters {
+    pub fn record_wait(&self, wait: Duration) {
+        let wait_ns = wait.as_nanos().min(u128::from(u64::MAX)) as u64;
+        self.wait_total_ns.fetch_add(wait_ns, Ordering::Relaxed);
+        self.wait_count.fetch_add(1, Ordering::Relaxed);
+        let mut current_max = self.wait_max_ns.load(Ordering::Relaxed);
+        while wait_ns > current_max {
+            match self.wait_max_ns.compare_exchange_weak(
+                current_max,
+                wait_ns,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current_max = observed,
+            }
+        }
+    }
+
+    pub fn snapshot(&self) -> RuntimeStateLockWaitMetrics {
+        RuntimeStateLockWaitMetrics {
+            wait_total_ns: self.wait_total_ns.load(Ordering::Relaxed),
+            wait_count: self.wait_count.load(Ordering::Relaxed),
+            wait_max_ns: self.wait_max_ns.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn reset(&self) {
+        self.wait_total_ns.store(0, Ordering::Relaxed);
+        self.wait_count.store(0, Ordering::Relaxed);
+        self.wait_max_ns.store(0, Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeProxyLaneLimits {
     pub responses: usize,
@@ -1444,5 +1485,26 @@ mod tests {
 
         assert_eq!(plan.retry_backoff_until, Some(250));
         assert!(!plan.retry_backoff_changed);
+    }
+
+    #[test]
+    fn runtime_state_lock_wait_counters_track_totals_and_max() {
+        let counters = RuntimeStateLockWaitMetricCounters::default();
+
+        counters.record_wait(Duration::from_nanos(10));
+        counters.record_wait(Duration::from_nanos(25));
+
+        assert_eq!(
+            counters.snapshot(),
+            RuntimeStateLockWaitMetrics {
+                wait_total_ns: 35,
+                wait_count: 2,
+                wait_max_ns: 25,
+            }
+        );
+
+        counters.reset();
+
+        assert_eq!(counters.snapshot(), RuntimeStateLockWaitMetrics::default());
     }
 }
