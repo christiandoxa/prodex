@@ -11,17 +11,6 @@ pub(crate) use runtime_proxy_crate::{
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
 };
 
-fn runtime_route_kind_to_proxy(
-    route_kind: RuntimeRouteKind,
-) -> runtime_proxy_crate::RuntimeRouteKind {
-    match route_kind {
-        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
-        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
-        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
-        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeCandidateAffinity<'a> {
     pub(crate) route_kind: RuntimeRouteKind,
@@ -60,7 +49,7 @@ fn runtime_candidate_affinity_to_proxy(
     affinity: RuntimeCandidateAffinity<'_>,
 ) -> runtime_proxy_crate::RuntimeCandidateAffinity<'_> {
     runtime_proxy_crate::RuntimeCandidateAffinity {
-        route_kind: runtime_route_kind_to_proxy(affinity.route_kind),
+        route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(affinity.route_kind),
         candidate_name: affinity.candidate_name,
         strict_affinity_profile: affinity.strict_affinity_profile,
         pinned_profile: affinity.pinned_profile,
@@ -146,95 +135,13 @@ pub(crate) fn runtime_websocket_previous_response_reuse_is_stale(
     )
 }
 
-fn runtime_selection_quota_window_status_to_proxy(
-    status: RuntimeQuotaWindowStatus,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus {
-    match status {
-        RuntimeQuotaWindowStatus::Ready => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready
-        }
-        RuntimeQuotaWindowStatus::Thin => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin
-        }
-        RuntimeQuotaWindowStatus::Critical => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical
-        }
-        RuntimeQuotaWindowStatus::Exhausted => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted
-        }
-        RuntimeQuotaWindowStatus::Unknown => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown
-        }
-    }
-}
-
-fn runtime_selection_quota_window_to_proxy(
-    window: RuntimeQuotaWindowSummary,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaWindowSummary {
-    runtime_proxy_crate::RuntimeSelectionQuotaWindowSummary {
-        status: runtime_selection_quota_window_status_to_proxy(window.status),
-        remaining_percent: window.remaining_percent,
-    }
-}
-
-fn runtime_selection_quota_pressure_band_to_proxy(
-    band: RuntimeQuotaPressureBand,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaPressureBand {
-    match band {
-        RuntimeQuotaPressureBand::Healthy => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy
-        }
-        RuntimeQuotaPressureBand::Thin => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin
-        }
-        RuntimeQuotaPressureBand::Critical => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical
-        }
-        RuntimeQuotaPressureBand::Exhausted => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted
-        }
-        RuntimeQuotaPressureBand::Unknown => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown
-        }
-    }
-}
-
-fn runtime_selection_quota_summary_to_proxy(
-    summary: RuntimeQuotaSummary,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaSummary {
-    runtime_proxy_crate::RuntimeSelectionQuotaSummary {
-        five_hour: runtime_selection_quota_window_to_proxy(summary.five_hour),
-        weekly: runtime_selection_quota_window_to_proxy(summary.weekly),
-        route_band: runtime_selection_quota_pressure_band_to_proxy(summary.route_band),
-    }
-}
-
-fn runtime_selection_quota_source_to_proxy(
-    source: RuntimeQuotaSource,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaSource {
-    match source {
-        RuntimeQuotaSource::LiveProbe => {
-            runtime_proxy_crate::RuntimeSelectionQuotaSource::LiveProbe
-        }
-        RuntimeQuotaSource::PersistedSnapshot => {
-            runtime_proxy_crate::RuntimeSelectionQuotaSource::PersistedSnapshot
-        }
-    }
-}
-
-fn runtime_selection_quota_source_option_to_proxy(
-    source: Option<RuntimeQuotaSource>,
-) -> Option<runtime_proxy_crate::RuntimeSelectionQuotaSource> {
-    source.map(runtime_selection_quota_source_to_proxy)
-}
-
 pub(crate) fn runtime_quota_precommit_guard_reason(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,
 ) -> Option<&'static str> {
-    runtime_proxy_crate::runtime_quota_precommit_guard_reason(
-        runtime_selection_quota_summary_to_proxy(summary),
-        runtime_route_kind_to_proxy(route_kind),
+    prodex_runtime_quota::runtime_quota_precommit_guard_reason(
+        summary,
+        route_kind,
         runtime_proxy_responses_quota_critical_floor_percent(),
     )
 }
@@ -306,9 +213,13 @@ fn runtime_soft_affinity_input_to_proxy(
 ) -> runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
     runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
         affinity_kind: input.affinity_kind.to_proxy(),
-        route_kind: runtime_route_kind_to_proxy(input.route_kind),
-        quota_summary: runtime_selection_quota_summary_to_proxy(input.quota_summary),
-        quota_source: runtime_selection_quota_source_option_to_proxy(input.quota_source),
+        route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(input.route_kind),
+        quota_summary: prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(
+            input.quota_summary,
+        ),
+        quota_source: prodex_runtime_quota::runtime_quota_source_option_to_proxy(
+            input.quota_source,
+        ),
         current_profile_matches_candidate: input.current_profile_matches_candidate,
         has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,
         responses_critical_floor_percent: runtime_proxy_responses_quota_critical_floor_percent(),

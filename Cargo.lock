@@ -1400,6 +1400,7 @@ dependencies = [
  "prodex-runtime-metrics",
  "prodex-runtime-policy",
  "prodex-runtime-proxy",
+ "prodex-runtime-quota",
  "prodex-runtime-state",
  "prodex-runtime-store",
  "prodex-runtime-tuning",
@@ -1667,6 +1668,17 @@ dependencies = [
  "base64",
  "prodex-runtime-tuning",
  "serde_json",
+]
+
+[[package]]
+name = "prodex-runtime-quota"
+version = "0.69.0"
+dependencies = [
+ "chrono",
+ "prodex-quota",
+ "prodex-runtime-proxy",
+ "prodex-runtime-state",
+ "prodex-shared-types",
 ]
 
 [[package]]

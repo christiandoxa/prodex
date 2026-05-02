@@ -38,6 +38,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
 - `crates/prodex-runtime-policy/`: runtime policy parsing, validation, caching, and summary helpers
 - `crates/prodex-runtime-proxy/`: side-effect-free runtime proxy boundary types, classifiers, path/log parsing, payload parsing, and transport helper logic
+- `crates/prodex-runtime-quota/`: runtime quota adapter, snapshot, summary, and sort-key helpers
 - `crates/prodex-runtime-state/`: runtime state, lane admission counters, and scheduled-save data structures
 - `crates/prodex-runtime-store/`: runtime store merge and compaction helpers
 - `crates/prodex-runtime-tuning/`: runtime tuning snapshot types, override parsing, and fault-injection counters

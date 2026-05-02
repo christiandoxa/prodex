@@ -252,7 +252,7 @@ pub(crate) fn runtime_optimistic_current_candidate_decision(
     runtime_proxy_crate::runtime_optimistic_current_candidate_decision(
         runtime_proxy_crate::RuntimeOptimisticCurrentCandidateInput {
             current_profile: input.current_profile,
-            route_kind: runtime_route_kind_to_proxy_for_candidate_plan(input.route_kind),
+            route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(input.route_kind),
             auth_failure_active: input.auth_failure_active,
             in_selection_backoff: input.in_selection_backoff,
             circuit_open: input.circuit_open,
@@ -261,10 +261,12 @@ pub(crate) fn runtime_optimistic_current_candidate_decision(
             current_profile_quota_compatible: input.current_profile_quota_compatible,
             has_alternative_quota_compatible_profile: input
                 .has_alternative_quota_compatible_profile,
-            quota_summary: runtime_candidate_quota_summary_to_proxy(input.quota_summary),
+            quota_summary: prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(
+                input.quota_summary,
+            ),
             quota_source: input
                 .quota_source
-                .map(runtime_candidate_quota_source_to_proxy),
+                .map(prodex_runtime_quota::runtime_quota_source_to_proxy),
             inflight_count: input.inflight_count,
             inflight_soft_limit: input.inflight_soft_limit,
             prompt_cache_key: input.prompt_cache_key,
@@ -304,13 +306,18 @@ where
                 inflight_count: entry.inflight_count,
                 health_sort_key: entry.health_sort_key,
                 backoff_sort_key: entry.backoff_sort_key,
-                quota_source: runtime_candidate_quota_source_to_proxy(candidate.quota_source),
-                quota_summary: runtime_candidate_quota_summary_to_proxy(quota_summary),
+                quota_source: prodex_runtime_quota::runtime_quota_source_to_proxy(
+                    candidate.quota_source,
+                ),
+                quota_summary: prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(
+                    quota_summary,
+                ),
                 auth_failure_active: entry.auth_failure_active,
                 provider_priority: candidate.provider_priority,
-                quota_sort_key: runtime_candidate_quota_sort_key_to_proxy(
-                    runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
-                ),
+                quota_sort_key:
+                    prodex_runtime_quota::runtime_response_quota_pressure_sort_key_to_proxy(
+                        runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
+                    ),
                 in_selection_backoff: entry.in_selection_backoff,
                 jitter: jitter_for(&candidate.name),
             })
@@ -320,7 +327,7 @@ where
         candidate_inputs,
         excluded_profiles,
         runtime_proxy_crate::runtime_response_candidate_plan_options(
-            runtime_route_kind_to_proxy_for_candidate_plan(route_kind),
+            prodex_runtime_quota::runtime_route_kind_to_proxy(route_kind),
             inflight_soft_limit,
             prompt_cache_key,
             prompt_cache_owner_profile,
@@ -362,215 +369,23 @@ fn runtime_response_planned_candidate_from_proxy(
         quota_summary: quota_summaries
             .get(&(candidate.name.clone(), candidate.order_index))
             .copied()
-            .unwrap_or_else(|| runtime_candidate_quota_summary_from_proxy(candidate.quota_summary)),
+            .unwrap_or_else(|| {
+                prodex_runtime_quota::runtime_selection_quota_summary_from_proxy(
+                    candidate.quota_summary,
+                )
+            }),
         name: candidate.name,
         order_index: candidate.order_index,
         inflight_count: candidate.inflight_count,
         inflight_soft_limit: candidate.inflight_soft_limit,
         health_sort_key: candidate.health_sort_key,
         backoff_sort_key: candidate.backoff_sort_key,
-        quota_source: runtime_candidate_quota_source_from_proxy(candidate.quota_source),
+        quota_source: prodex_runtime_quota::runtime_quota_source_from_proxy(candidate.quota_source),
         auth_failure_active: candidate.auth_failure_active,
         quota_guard_reason: candidate.quota_guard_reason,
         inflight_soft_limited: candidate.inflight_soft_limited,
         provider_priority: candidate.provider_priority,
     }
-}
-
-fn runtime_route_kind_to_proxy_for_candidate_plan(
-    route_kind: RuntimeRouteKind,
-) -> runtime_proxy_crate::RuntimeRouteKind {
-    match route_kind {
-        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
-        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
-        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
-        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
-    }
-}
-
-fn runtime_candidate_quota_window_status_to_proxy(
-    status: RuntimeQuotaWindowStatus,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus {
-    match status {
-        RuntimeQuotaWindowStatus::Ready => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready
-        }
-        RuntimeQuotaWindowStatus::Thin => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin
-        }
-        RuntimeQuotaWindowStatus::Critical => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical
-        }
-        RuntimeQuotaWindowStatus::Exhausted => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted
-        }
-        RuntimeQuotaWindowStatus::Unknown => {
-            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown
-        }
-    }
-}
-
-fn runtime_candidate_quota_window_status_from_proxy(
-    status: runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus,
-) -> RuntimeQuotaWindowStatus {
-    match status {
-        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready => {
-            RuntimeQuotaWindowStatus::Ready
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin => {
-            RuntimeQuotaWindowStatus::Thin
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical => {
-            RuntimeQuotaWindowStatus::Critical
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted => {
-            RuntimeQuotaWindowStatus::Exhausted
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown => {
-            RuntimeQuotaWindowStatus::Unknown
-        }
-    }
-}
-
-fn runtime_candidate_quota_pressure_band_to_proxy(
-    band: RuntimeQuotaPressureBand,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaPressureBand {
-    match band {
-        RuntimeQuotaPressureBand::Healthy => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy
-        }
-        RuntimeQuotaPressureBand::Thin => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin
-        }
-        RuntimeQuotaPressureBand::Critical => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical
-        }
-        RuntimeQuotaPressureBand::Exhausted => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted
-        }
-        RuntimeQuotaPressureBand::Unknown => {
-            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown
-        }
-    }
-}
-
-fn runtime_candidate_quota_pressure_band_from_proxy(
-    band: runtime_proxy_crate::RuntimeSelectionQuotaPressureBand,
-) -> RuntimeQuotaPressureBand {
-    match band {
-        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy => {
-            RuntimeQuotaPressureBand::Healthy
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin => {
-            RuntimeQuotaPressureBand::Thin
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical => {
-            RuntimeQuotaPressureBand::Critical
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted => {
-            RuntimeQuotaPressureBand::Exhausted
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown => {
-            RuntimeQuotaPressureBand::Unknown
-        }
-    }
-}
-
-fn runtime_candidate_quota_pressure_band_rank(band: RuntimeQuotaPressureBand) -> u8 {
-    match band {
-        RuntimeQuotaPressureBand::Healthy => 0,
-        RuntimeQuotaPressureBand::Thin => 1,
-        RuntimeQuotaPressureBand::Critical => 2,
-        RuntimeQuotaPressureBand::Exhausted => 3,
-        RuntimeQuotaPressureBand::Unknown => 4,
-    }
-}
-
-fn runtime_candidate_quota_summary_to_proxy(
-    summary: RuntimeQuotaSummary,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaSummary {
-    runtime_proxy_crate::RuntimeSelectionQuotaSummary {
-        five_hour: runtime_proxy_crate::RuntimeSelectionQuotaWindowSummary {
-            status: runtime_candidate_quota_window_status_to_proxy(summary.five_hour.status),
-            remaining_percent: summary.five_hour.remaining_percent,
-        },
-        weekly: runtime_proxy_crate::RuntimeSelectionQuotaWindowSummary {
-            status: runtime_candidate_quota_window_status_to_proxy(summary.weekly.status),
-            remaining_percent: summary.weekly.remaining_percent,
-        },
-        route_band: runtime_candidate_quota_pressure_band_to_proxy(summary.route_band),
-    }
-}
-
-fn runtime_candidate_quota_summary_from_proxy(
-    summary: runtime_proxy_crate::RuntimeSelectionQuotaSummary,
-) -> RuntimeQuotaSummary {
-    RuntimeQuotaSummary {
-        five_hour: RuntimeQuotaWindowSummary {
-            status: runtime_candidate_quota_window_status_from_proxy(summary.five_hour.status),
-            remaining_percent: summary.five_hour.remaining_percent,
-            reset_at: i64::MAX,
-        },
-        weekly: RuntimeQuotaWindowSummary {
-            status: runtime_candidate_quota_window_status_from_proxy(summary.weekly.status),
-            remaining_percent: summary.weekly.remaining_percent,
-            reset_at: i64::MAX,
-        },
-        route_band: runtime_candidate_quota_pressure_band_from_proxy(summary.route_band),
-    }
-}
-
-fn runtime_candidate_quota_source_to_proxy(
-    source: RuntimeQuotaSource,
-) -> runtime_proxy_crate::RuntimeSelectionQuotaSource {
-    match source {
-        RuntimeQuotaSource::LiveProbe => {
-            runtime_proxy_crate::RuntimeSelectionQuotaSource::LiveProbe
-        }
-        RuntimeQuotaSource::PersistedSnapshot => {
-            runtime_proxy_crate::RuntimeSelectionQuotaSource::PersistedSnapshot
-        }
-    }
-}
-
-fn runtime_candidate_quota_source_from_proxy(
-    source: runtime_proxy_crate::RuntimeSelectionQuotaSource,
-) -> RuntimeQuotaSource {
-    match source {
-        runtime_proxy_crate::RuntimeSelectionQuotaSource::LiveProbe => {
-            RuntimeQuotaSource::LiveProbe
-        }
-        runtime_proxy_crate::RuntimeSelectionQuotaSource::PersistedSnapshot => {
-            RuntimeQuotaSource::PersistedSnapshot
-        }
-    }
-}
-
-fn runtime_candidate_quota_sort_key_to_proxy(
-    sort_key: RuntimeQuotaPressureSortKey,
-) -> runtime_proxy_crate::RuntimeResponseQuotaPressureSortKey {
-    let (
-        band,
-        total_pressure,
-        weekly_pressure,
-        five_hour_pressure,
-        reserve_floor,
-        weekly_remaining,
-        five_hour_remaining,
-        weekly_reset_at,
-        five_hour_reset_at,
-    ) = sort_key;
-    (
-        runtime_candidate_quota_pressure_band_rank(band),
-        total_pressure,
-        weekly_pressure,
-        five_hour_pressure,
-        reserve_floor,
-        weekly_remaining,
-        five_hour_remaining,
-        weekly_reset_at,
-        five_hour_reset_at,
-    )
 }
 
 fn runtime_response_ready_candidates(

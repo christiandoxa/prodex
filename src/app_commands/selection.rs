@@ -182,6 +182,7 @@ pub(crate) fn profile_in_run_selection_cooldown(
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn required_main_window_snapshot(
     usage: &UsageResponse,
     label: &str,
