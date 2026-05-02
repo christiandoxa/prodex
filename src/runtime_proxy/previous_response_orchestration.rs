@@ -203,10 +203,10 @@ pub(crate) fn handle_runtime_previous_response_not_found(
             compact_followup_profile,
         );
     }
-    if plan.clear_trusted_affinity {
-        if let Some(trusted_previous_response_affinity) = trusted_previous_response_affinity_mut {
-            *trusted_previous_response_affinity = false;
-        }
+    if plan.clear_trusted_affinity
+        && let Some(trusted_previous_response_affinity) = trusted_previous_response_affinity_mut
+    {
+        *trusted_previous_response_affinity = false;
     }
     excluded_profiles.insert(profile_name.to_string());
 
