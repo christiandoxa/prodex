@@ -2,7 +2,7 @@ use super::*;
 pub(crate) use prodex_app_reports::SessionReport;
 use prodex_app_reports::{
     apply_session_json_line, apply_session_json_lines, apply_session_value,
-    is_session_metadata_file, sort_session_reports,
+    is_session_metadata_file, render_session_reports_output, sort_session_reports,
 };
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
@@ -40,38 +40,14 @@ fn load_session_reports(
 }
 
 fn print_session_reports(reports: &[SessionReport], json: bool, empty_message: &str) -> Result<()> {
-    if json {
-        let json =
-            serde_json::to_string_pretty(reports).context("failed to render session JSON")?;
-        print_stdout_line(&json);
-        return Ok(());
+    let output = render_session_reports_output(reports, json, empty_message)
+        .context("failed to render session JSON")?;
+    if json || reports.is_empty() {
+        print_stdout_line(&output);
+    } else {
+        print_stdout_text(&output);
     }
-
-    if reports.is_empty() {
-        print_panel(
-            "Sessions",
-            &[("Status".to_string(), empty_message.to_string())],
-        );
-        return Ok(());
-    }
-
-    let display_reports = session_report_display_rows(reports);
-    print_stdout_text(&render_session_reports(&display_reports));
     Ok(())
-}
-
-fn session_report_display_rows(reports: &[SessionReport]) -> Vec<SessionReportDisplay<'_>> {
-    reports
-        .iter()
-        .map(|report| SessionReportDisplay {
-            id: &report.id,
-            updated_at: report.updated_at.as_deref(),
-            thread_name: report.thread_name.as_deref(),
-            cwd: report.cwd.as_deref(),
-            profile: report.profile.as_deref(),
-            path: &report.path,
-        })
-        .collect()
 }
 
 pub(crate) fn collect_session_reports(

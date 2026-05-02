@@ -3,9 +3,9 @@ use super::*;
 pub(crate) use prodex_app_reports::{
     ProfileSelectionProvider, ProfileSelectionRead, ProfileSelectionView,
     ReadyProfileRuntimeSortKey, active_profile_selection_order_with_view,
-    profile_in_run_selection_cooldown_with_view, profile_rotation_order_with_view,
-    ready_profile_runtime_sort_key_with_view, ready_profile_score_for_route,
-    schedule_ready_profile_candidates_with_view,
+    merge_run_preflight_reports_with_current_first, profile_in_run_selection_cooldown_with_view,
+    profile_rotation_order_with_view, ready_profile_runtime_sort_key_with_view,
+    run_profile_probe_is_ready, schedule_ready_profile_candidates_with_view,
 };
 
 #[cfg(test)]
@@ -88,16 +88,6 @@ pub(crate) fn probe_run_profile(
     })
 }
 
-pub(crate) fn run_profile_probe_is_ready(
-    report: &RunProfileProbeReport,
-    include_code_review: bool,
-) -> bool {
-    match report.result.as_ref() {
-        Ok(usage) => collect_blocked_limits(usage, include_code_review).is_empty(),
-        Err(_) => false,
-    }
-}
-
 pub(crate) fn run_preflight_reports_with_current_first(
     state: &AppState,
     current_profile: &str,
@@ -105,22 +95,15 @@ pub(crate) fn run_preflight_reports_with_current_first(
     base_url: Option<&str>,
     upstream_no_proxy: bool,
 ) -> Vec<RunProfileProbeReport> {
-    let mut reports = Vec::with_capacity(state.profiles.len());
-    reports.push(current_report);
-    reports.extend(
+    merge_run_preflight_reports_with_current_first(
+        current_report,
         collect_run_profile_reports(
             state,
             profile_rotation_order(state, current_profile),
             base_url,
             upstream_no_proxy,
-        )
-        .into_iter()
-        .map(|mut report| {
-            report.order_index += 1;
-            report
-        }),
-    );
-    reports
+        ),
+    )
 }
 
 pub(crate) fn ready_profile_candidates(

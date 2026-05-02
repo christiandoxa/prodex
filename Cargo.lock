@@ -1425,8 +1425,10 @@ dependencies = [
  "chrono",
  "prodex-quota",
  "prodex-runtime-state",
+ "prodex-runtime-tuning",
  "prodex-shared-types",
  "prodex-state",
+ "prodex-terminal-ui",
  "serde",
  "serde_json",
 ]
@@ -1551,6 +1553,7 @@ version = "0.69.0"
 dependencies = [
  "prodex-runtime-state",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1600,8 +1603,14 @@ dependencies = [
 name = "prodex-runtime-launch"
 version = "0.69.0"
 dependencies = [
+ "anyhow",
  "prodex-codex-config",
+ "prodex-quota",
+ "prodex-redaction",
  "prodex-runtime-proxy",
+ "prodex-shared-types",
+ "prodex-state",
+ "prodex-terminal-ui",
  "reqwest",
 ]
 
@@ -1617,6 +1626,9 @@ dependencies = [
 [[package]]
 name = "prodex-runtime-metrics"
 version = "0.69.0"
+dependencies = [
+ "prodex-runtime-broker",
+]
 
 [[package]]
 name = "prodex-runtime-policy"
@@ -1633,6 +1645,7 @@ dependencies = [
 name = "prodex-runtime-proxy"
 version = "0.69.0"
 dependencies = [
+ "prodex-runtime-tuning",
  "serde_json",
 ]
 

@@ -58,13 +58,6 @@ struct RuntimeProcessVersionResolution {
     executable_sha256: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeBrokerVersionGuardOutcome {
-    Compatible,
-    Replaced,
-    DeferredActiveRequests,
-}
-
 trait RuntimeProcessPlatform {
     fn pid_alive(pid: u32) -> bool;
     fn executable_path(pid: u32) -> Option<PathBuf>;
@@ -229,10 +222,10 @@ pub(crate) fn runtime_random_token(prefix: &str) -> String {
 }
 
 pub(crate) fn runtime_broker_startup_grace_seconds() -> i64 {
-    let ready_timeout_seconds = runtime_broker_ready_timeout_ms().div_ceil(1_000) as i64;
-    ready_timeout_seconds
-        .saturating_add(1)
-        .max(RUNTIME_BROKER_IDLE_GRACE_SECONDS)
+    prodex_runtime_broker::runtime_broker_startup_grace_seconds(
+        runtime_broker_ready_timeout_ms(),
+        RUNTIME_BROKER_IDLE_GRACE_SECONDS,
+    )
 }
 
 pub(crate) fn load_runtime_broker_registry(
@@ -295,7 +288,10 @@ pub(crate) fn remove_runtime_broker_registry_if_token_matches(
 }
 
 pub(crate) fn legacy_runtime_proxy_openai_mount_path(version: &str) -> String {
-    format!("{LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX}{version}")
+    prodex_runtime_broker::runtime_broker_legacy_openai_mount_path(
+        LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX,
+        version,
+    )
 }
 
 pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
@@ -465,34 +461,41 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
     }
 
     let observed_identity = runtime_broker_observed_binary_identity(registry, health);
-    let observed_version_mismatch = observed_identity
-        .prodex_version
-        .as_deref()
-        .is_some_and(|version| version != runtime_current_prodex_version());
-    let current_identity = if observed_version_mismatch {
-        runtime_current_prodex_version_identity()
-    } else {
-        runtime_current_prodex_binary_identity()
-    };
-    if observed_identity.is_present()
-        && runtime_prodex_binary_identity_matches(&current_identity, &observed_identity)
-    {
-        return RuntimeBrokerVersionGuardOutcome::Compatible;
-    }
-
     let active_requests = health
         .filter(|health| health.matches_registry_instance(registry))
         .map(|health| health.active_requests)
         .unwrap_or_default();
     let live_leases = cleanup_runtime_broker_stale_leases(paths, broker_key);
-    if active_requests > 0 || live_leases > 0 {
-        return RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests;
-    }
-
-    let replacement_reason = prodex_runtime_broker::runtime_broker_replacement_reason(
-        &current_identity,
+    let current_version_identity = runtime_current_prodex_version_identity();
+    let current_binary_identity;
+    let observed_version_mismatch = prodex_runtime_broker::runtime_broker_observed_version_mismatch(
+        &current_version_identity,
         &observed_identity,
     );
+    let current_identity_for_decision = if observed_version_mismatch {
+        &current_version_identity
+    } else {
+        current_binary_identity = runtime_current_prodex_binary_identity();
+        &current_binary_identity
+    };
+    let decision = prodex_runtime_broker::runtime_broker_version_guard_decision(
+        true,
+        current_identity_for_decision,
+        &current_version_identity,
+        &observed_identity,
+        active_requests,
+        live_leases,
+    );
+    if decision.outcome != RuntimeBrokerVersionGuardOutcome::Replaced {
+        return decision.outcome;
+    }
+    let current_identity = decision.current_identity;
+    let replacement_reason = decision.replacement_reason.unwrap_or_else(|| {
+        prodex_runtime_broker::runtime_broker_replacement_reason(
+            &current_identity,
+            &observed_identity,
+        )
+    });
     audit_log_event_best_effort(
         "runtime_broker",
         "replace_stale_broker",
@@ -526,8 +529,10 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
 }
 
 pub(crate) fn runtime_broker_openai_mount_path(registry: &RuntimeBrokerRegistry) -> Result<String> {
-    if let Some(openai_mount_path) = registry.openai_mount_path.as_deref() {
-        return Ok(openai_mount_path.to_string());
+    if let Some(openai_mount_path) =
+        prodex_runtime_broker::runtime_broker_registry_openai_mount_path(registry)
+    {
+        return Ok(openai_mount_path);
     }
 
     let version = runtime_process_prodex_version(registry.pid).with_context(|| {

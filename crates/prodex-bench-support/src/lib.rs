@@ -128,10 +128,129 @@ impl RuntimeProxyHotPathBenchCheckResult {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeProxyHotPathBenchThreshold {
     pub name: &'static str,
     pub max_median_ns_per_iteration: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeProxyHotPathBenchCaseSpec {
+    pub name: &'static str,
+    pub default_size: usize,
+    pub threshold: RuntimeProxyHotPathBenchThreshold,
+}
+
+pub const RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_route_eligible_quota_fallback_scan",
+        default_size: 64,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_route_eligible_quota_fallback_scan",
+            max_median_ns_per_iteration: 30_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_previous_response_candidate_selection",
+        default_size: 64,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_previous_response_candidate_selection",
+            max_median_ns_per_iteration: 110_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_MIXED_POOL_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_mixed_pool_response_selection",
+        default_size: 96,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_mixed_pool_response_selection",
+            max_median_ns_per_iteration: 2_400_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_compact_session_affinity_selection",
+        default_size: 64,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_compact_session_affinity_selection",
+            max_median_ns_per_iteration: 160_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_websocket_stale_reuse_affinity",
+        default_size: 64,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_websocket_stale_reuse_affinity",
+            max_median_ns_per_iteration: 220_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_sse_lookahead_inspection",
+        default_size: 128,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_sse_lookahead_inspection",
+            max_median_ns_per_iteration: 130_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
+    RuntimeProxyHotPathBenchCaseSpec {
+        name: "runtime_dead_lineage_cleanup",
+        default_size: 128,
+        threshold: RuntimeProxyHotPathBenchThreshold {
+            name: "runtime_dead_lineage_cleanup",
+            max_median_ns_per_iteration: 190_000,
+        },
+    };
+
+pub const RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS: [RuntimeProxyHotPathBenchCaseSpec; 7] = [
+    RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE,
+    RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE,
+    RUNTIME_PROXY_MIXED_POOL_BENCH_CASE,
+    RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE,
+    RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE,
+    RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE,
+    RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE,
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeProxyHotPathBenchScenarioSizes {
+    pub quota_fallback: usize,
+    pub previous_response: usize,
+    pub mixed_pool_selection: usize,
+    pub compact_session_selection: usize,
+    pub websocket_stale_reuse: usize,
+    pub sse_inspect: usize,
+    pub lineage_cleanup: usize,
+}
+
+impl RuntimeProxyHotPathBenchScenarioSizes {
+    pub const fn from_default_case_specs() -> Self {
+        Self {
+            quota_fallback: RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE.default_size,
+            previous_response: RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE.default_size,
+            mixed_pool_selection: RUNTIME_PROXY_MIXED_POOL_BENCH_CASE.default_size,
+            compact_session_selection: RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE
+                .default_size,
+            websocket_stale_reuse: RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE.default_size,
+            sse_inspect: RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE.default_size,
+            lineage_cleanup: RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE.default_size,
+        }
+    }
+}
+
+impl Default for RuntimeProxyHotPathBenchScenarioSizes {
+    fn default() -> Self {
+        Self::from_default_case_specs()
+    }
 }
 
 pub fn scaled_runtime_proxy_hot_path_threshold_ns(
@@ -243,6 +362,104 @@ where
     })
 }
 
+#[doc(hidden)]
+pub struct RuntimeProxyHotPathBenchCaseSuite<
+    QuotaFallback,
+    PreviousResponse,
+    MixedPoolSelection,
+    CompactSessionSelection,
+    WebsocketStaleReuse,
+    SseInspect,
+    LineageCleanup,
+> {
+    pub quota_fallback: QuotaFallback,
+    pub previous_response: PreviousResponse,
+    pub mixed_pool_selection: MixedPoolSelection,
+    pub compact_session_selection: CompactSessionSelection,
+    pub websocket_stale_reuse: WebsocketStaleReuse,
+    pub sse_inspect: SseInspect,
+    pub lineage_cleanup: LineageCleanup,
+}
+
+#[doc(hidden)]
+#[allow(clippy::type_complexity)]
+pub fn run_runtime_proxy_hot_path_case_suite<
+    QuotaFallback,
+    QuotaFallbackResult,
+    PreviousResponse,
+    PreviousResponseResult,
+    MixedPoolSelection,
+    MixedPoolSelectionResult,
+    CompactSessionSelection,
+    CompactSessionSelectionResult,
+    WebsocketStaleReuse,
+    WebsocketStaleReuseResult,
+    SseInspect,
+    SseInspectResult,
+    LineageCleanup,
+    LineageCleanupResult,
+>(
+    config: RuntimeProxyHotPathBenchCheckConfig,
+    mut suite: RuntimeProxyHotPathBenchCaseSuite<
+        QuotaFallback,
+        PreviousResponse,
+        MixedPoolSelection,
+        CompactSessionSelection,
+        WebsocketStaleReuse,
+        SseInspect,
+        LineageCleanup,
+    >,
+) -> Vec<RuntimeProxyHotPathBenchCheckResult>
+where
+    QuotaFallback: FnMut() -> QuotaFallbackResult,
+    PreviousResponse: FnMut() -> PreviousResponseResult,
+    MixedPoolSelection: FnMut() -> MixedPoolSelectionResult,
+    CompactSessionSelection: FnMut() -> CompactSessionSelectionResult,
+    WebsocketStaleReuse: FnMut() -> WebsocketStaleReuseResult,
+    SseInspect: FnMut() -> SseInspectResult,
+    LineageCleanup: FnMut() -> LineageCleanupResult,
+{
+    let config = config.normalized();
+
+    vec![
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE.threshold,
+            || (suite.quota_fallback)(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE.threshold,
+            || (suite.previous_response)(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_MIXED_POOL_BENCH_CASE.threshold,
+            || (suite.mixed_pool_selection)(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE.threshold,
+            || (suite.compact_session_selection)(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE.threshold,
+            || (suite.websocket_stale_reuse)(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config.clone(),
+            RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE.threshold,
+            || (suite.sse_inspect)(),
+        ),
+        run_runtime_proxy_hot_path_case(
+            config,
+            RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE.threshold,
+            || (suite.lineage_cleanup)(),
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +525,44 @@ mod tests {
         assert_eq!(result.scale_headroom_percent(), 20);
         assert_eq!(result.threshold_headroom_ns_per_iteration(), 2);
         assert!(result.passed());
+    }
+
+    #[test]
+    fn runtime_proxy_hot_path_bench_case_specs_keep_expected_order() {
+        let names = RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS
+            .iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "runtime_route_eligible_quota_fallback_scan",
+                "runtime_previous_response_candidate_selection",
+                "runtime_mixed_pool_response_selection",
+                "runtime_compact_session_affinity_selection",
+                "runtime_websocket_stale_reuse_affinity",
+                "runtime_sse_lookahead_inspection",
+                "runtime_dead_lineage_cleanup",
+            ]
+        );
+        assert!(
+            RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS
+                .iter()
+                .all(|spec| spec.name == spec.threshold.name && spec.default_size > 0)
+        );
+
+        assert_eq!(
+            RuntimeProxyHotPathBenchScenarioSizes::default(),
+            RuntimeProxyHotPathBenchScenarioSizes {
+                quota_fallback: 64,
+                previous_response: 64,
+                mixed_pool_selection: 96,
+                compact_session_selection: 64,
+                websocket_stale_reuse: 64,
+                sse_inspect: 128,
+                lineage_cleanup: 128,
+            }
+        );
     }
 }

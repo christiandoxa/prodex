@@ -119,6 +119,14 @@ pub fn runtime_sse_forwarding_commit_detail(
     }
 }
 
+pub fn runtime_token_usage_event_is_loggable(event_type: Option<&str>) -> bool {
+    match event_type {
+        None => true,
+        Some("response.completed" | "response.failed") => true,
+        Some(kind) => kind.ends_with(".completed"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +214,19 @@ mod tests {
                 response_id_count: 2,
             }
         );
+    }
+
+    #[test]
+    fn token_usage_logging_accepts_terminal_and_completed_events() {
+        assert!(runtime_token_usage_event_is_loggable(None));
+        assert!(runtime_token_usage_event_is_loggable(Some(
+            "response.completed"
+        )));
+        assert!(runtime_token_usage_event_is_loggable(Some(
+            "tool.completed"
+        )));
+        assert!(!runtime_token_usage_event_is_loggable(Some(
+            "response.delta"
+        )));
     }
 }

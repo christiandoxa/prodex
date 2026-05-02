@@ -331,3 +331,181 @@ pub fn translate_runtime_buffered_responses_reply_to_anthropic(
         runtime_anthropic_json_response_parts(response),
     ))
 }
+
+pub fn runtime_anthropic_buffered_reply_parts(
+    reply: RuntimeResponsesReply,
+) -> Result<RuntimeBufferedResponseParts> {
+    match reply {
+        RuntimeResponsesReply::Buffered(parts) => Ok(parts),
+        RuntimeResponsesReply::Streaming(_) => {
+            bail!("Anthropic buffered translation unexpectedly returned streaming response")
+        }
+    }
+}
+
+pub struct RuntimeAnthropicBufferedTranslationObservation<'a> {
+    pub status: u16,
+    pub content_type: Option<&'a str>,
+    pub followup_attempt: usize,
+    pub body: &'a [u8],
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeAnthropicServerToolFollowup {
+    pub previous_response_id: String,
+    pub attempt: usize,
+    pub request: RuntimeProxyRequest,
+}
+
+pub fn translate_runtime_buffered_responses_reply_to_anthropic_with_server_tool_followups<
+    Observe,
+    Followup,
+>(
+    mut parts: RuntimeBufferedResponseParts,
+    request: &RuntimeAnthropicMessagesRequest,
+    followup_limit: usize,
+    mut observe: Observe,
+    mut followup: Followup,
+) -> Result<RuntimeResponsesReply>
+where
+    Observe: for<'a> FnMut(RuntimeAnthropicBufferedTranslationObservation<'a>),
+    Followup: FnMut(RuntimeAnthropicServerToolFollowup) -> Result<RuntimeBufferedResponseParts>,
+{
+    if !request.server_tools.needs_buffered_translation() {
+        return translate_runtime_buffered_responses_reply_to_anthropic(parts, request);
+    }
+
+    let mut carried_usage = RuntimeAnthropicServerToolUsage {
+        web_search_requests: request.carried_web_search_requests,
+        web_fetch_requests: request.carried_web_fetch_requests,
+        code_execution_requests: request.carried_code_execution_requests,
+        tool_search_requests: request.carried_tool_search_requests,
+    };
+
+    for followup_attempt in 0..=followup_limit {
+        let content_type = runtime_buffered_response_content_type(&parts);
+        observe(RuntimeAnthropicBufferedTranslationObservation {
+            status: parts.status,
+            content_type,
+            followup_attempt,
+            body: &parts.body,
+        });
+
+        if parts.status >= 400 {
+            return Ok(RuntimeResponsesReply::Buffered(
+                runtime_anthropic_error_from_upstream_parts(parts),
+            ));
+        }
+
+        if !runtime_response_body_looks_like_sse(&parts.body)
+            && !content_type
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains("text/event-stream")
+            && serde_json::from_slice::<serde_json::Value>(&parts.body)
+                .ok()
+                .is_some_and(|value| value.get("error").is_some())
+        {
+            return Ok(RuntimeResponsesReply::Buffered(
+                runtime_anthropic_error_from_upstream_parts(parts),
+            ));
+        }
+
+        let response_message =
+            runtime_anthropic_message_from_buffered_responses_parts_with_carried_usage(
+                &parts,
+                request,
+                carried_usage,
+            )?;
+        carried_usage = runtime_anthropic_message_server_tool_usage(&response_message);
+
+        if followup_attempt == followup_limit
+            || !runtime_anthropic_message_needs_server_tool_followup(&response_message)
+        {
+            let response_parts = if request.stream {
+                runtime_anthropic_sse_response_parts_from_message_value(response_message)
+            } else {
+                runtime_anthropic_json_response_parts(response_message)
+            };
+            return Ok(RuntimeResponsesReply::Buffered(response_parts));
+        }
+
+        let Some(previous_response_id) = runtime_buffered_response_ids(&parts).last().cloned()
+        else {
+            let response_parts = if request.stream {
+                runtime_anthropic_sse_response_parts_from_message_value(response_message)
+            } else {
+                runtime_anthropic_json_response_parts(response_message)
+            };
+            return Ok(RuntimeResponsesReply::Buffered(response_parts));
+        };
+
+        let request_for_followup = runtime_request_for_anthropic_server_tool_followup(
+            &request.translated_request,
+            &previous_response_id,
+        )?;
+        parts = followup(RuntimeAnthropicServerToolFollowup {
+            previous_response_id,
+            attempt: followup_attempt + 1,
+            request: request_for_followup,
+        })?;
+    }
+
+    unreachable!("anthropic buffered server-tool translation should return inside loop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn test_messages_request() -> RuntimeAnthropicMessagesRequest {
+        let mut server_tools = RuntimeAnthropicServerTools::default();
+        server_tools.register("web_search", "web_search");
+        RuntimeAnthropicMessagesRequest {
+            translated_request: RuntimeProxyRequest {
+                method: "POST".to_string(),
+                path_and_query: "/backend-api/codex/responses".to_string(),
+                headers: Vec::new(),
+                body: b"{}".to_vec(),
+            },
+            requested_model: "gpt-5.4".to_string(),
+            stream: false,
+            want_thinking: false,
+            server_tools,
+            carried_web_search_requests: 0,
+            carried_web_fetch_requests: 0,
+            carried_code_execution_requests: 0,
+            carried_tool_search_requests: 0,
+        }
+    }
+
+    #[test]
+    fn server_tool_followup_translation_passes_upstream_errors_without_followup() {
+        let observed = Cell::new(false);
+        let result =
+            translate_runtime_buffered_responses_reply_to_anthropic_with_server_tool_followups(
+                RuntimeBufferedResponseParts {
+                    status: 429,
+                    headers: vec![("content-type".to_string(), b"text/plain".to_vec())],
+                    body: b"too many requests".to_vec(),
+                },
+                &test_messages_request(),
+                2,
+                |observation| {
+                    observed.set(true);
+                    assert_eq!(observation.status, 429);
+                    assert_eq!(observation.content_type, Some("text/plain"));
+                    assert_eq!(observation.followup_attempt, 0);
+                },
+                |_| panic!("upstream errors should not trigger server-tool followup"),
+            )
+            .unwrap();
+
+        assert!(observed.get());
+        match result {
+            RuntimeResponsesReply::Buffered(parts) => assert_eq!(parts.status, 429),
+            RuntimeResponsesReply::Streaming(_) => panic!("translation should be buffered"),
+        }
+    }
+}

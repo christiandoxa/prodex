@@ -71,10 +71,13 @@ pub(crate) fn schedule_runtime_state_save_request(
         return;
     }
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
-    let queued_at = Instant::now();
-    let ready_at = queued_at + runtime_state_save_debounce(reason);
+    let enqueue_plan = runtime_state_save_enqueue_plan(reason, Instant::now());
+    let plan = enqueue_plan.schedule;
+    let queued_at = enqueue_plan.queue.queued_at;
+    let ready_at = enqueue_plan.queue.ready_at;
     let state_profiles = request.state.profiles.clone();
-    let journal_continuations = runtime_state_save_reason_requires_continuation_journal(reason)
+    let journal_continuations = plan
+        .requires_continuation_journal
         .then(|| request.continuations.clone());
     if cfg!(test) {
         runtime_proxy_log(
@@ -86,10 +89,7 @@ pub(crate) fn schedule_runtime_state_save_request(
                     runtime_proxy_log_field("reason", reason),
                     runtime_proxy_log_field(
                         "ready_in_ms",
-                        ready_at
-                            .saturating_duration_since(queued_at)
-                            .as_millis()
-                            .to_string(),
+                        enqueue_plan.queue.ready_in_ms().to_string(),
                     ),
                 ],
             ),
@@ -151,7 +151,7 @@ pub(crate) fn schedule_runtime_state_save_request(
         }
         return;
     }
-    let backlog = enqueue_runtime_state_save_job(
+    let queue_plan = enqueue_runtime_state_save_job(
         shared,
         request.paths.state_file.clone(),
         RuntimeStateSavePayload::Snapshot(RuntimeStateSaveSnapshot {
@@ -167,6 +167,7 @@ pub(crate) fn schedule_runtime_state_save_request(
         queued_at,
         ready_at,
     );
+    let backlog = queue_plan.backlog;
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -177,15 +178,12 @@ pub(crate) fn schedule_runtime_state_save_request(
                 runtime_proxy_log_field("backlog", backlog.to_string()),
                 runtime_proxy_log_field(
                     "ready_in_ms",
-                    ready_at
-                        .saturating_duration_since(queued_at)
-                        .as_millis()
-                        .to_string(),
+                    enqueue_plan.queue.ready_in_ms().to_string(),
                 ),
             ],
         ),
     );
-    if runtime_proxy_queue_pressure_active(backlog, 0, 0) {
+    if queue_plan.pressure_active {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -226,35 +224,25 @@ pub(crate) fn runtime_state_save_selected_snapshot_from_runtime(
     runtime: &RuntimeRotationState,
     sections: RuntimeStateSaveSections,
 ) -> RuntimeStateSaveSelectedSnapshot {
-    let state = match sections.state {
-        RuntimeStateSaveStateSection::None => None,
-        RuntimeStateSaveStateSection::Core => Some(AppState {
-            active_profile: runtime.state.active_profile.clone(),
-            profiles: runtime.state.profiles.clone(),
-            last_run_selected_at: runtime.state.last_run_selected_at.clone(),
-            response_profile_bindings: BTreeMap::new(),
-            session_profile_bindings: BTreeMap::new(),
-        }),
-        RuntimeStateSaveStateSection::Full => Some(runtime.state.clone()),
+    let continuations = if sections.continuations {
+        runtime_continuation_store_snapshot(runtime)
+    } else {
+        RuntimeContinuationStore::default()
     };
-    let profiles = state.is_none().then(|| runtime.state.profiles.clone());
-    RuntimeStateSaveSelectedSnapshot {
-        paths: runtime.paths.clone(),
-        state,
-        profiles,
-        continuations: sections
-            .continuations
-            .then(|| runtime_continuation_store_snapshot(runtime)),
-        profile_scores: sections
-            .profile_scores
-            .then(|| runtime.profile_health.clone()),
-        usage_snapshots: sections
-            .usage_snapshots
-            .then(|| runtime.profile_usage_snapshots.clone()),
-        backoffs: sections
-            .backoffs
-            .then(|| runtime_profile_backoffs_snapshot(runtime)),
-    }
+    let backoffs = if sections.backoffs {
+        runtime_profile_backoffs_snapshot(runtime)
+    } else {
+        RuntimeProfileBackoffs::default()
+    };
+    prodex_runtime_store::runtime_state_save_selected_snapshot_from_parts(
+        &runtime.paths,
+        &runtime.state,
+        &continuations,
+        &runtime.profile_health,
+        &runtime.profile_usage_snapshots,
+        &backoffs,
+        sections,
+    )
 }
 
 pub(crate) fn runtime_state_save_selected_snapshot_from_shared(
@@ -292,21 +280,23 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
         return;
     }
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
-    let queued_at = Instant::now();
-    let ready_at = queued_at + runtime_state_save_debounce(reason);
-    let sections = runtime_state_save_sections_for_reason(reason);
-    let backlog = enqueue_runtime_state_save_job(
+    let enqueue_plan = runtime_state_save_enqueue_plan(reason, Instant::now());
+    let plan = enqueue_plan.schedule;
+    let queued_at = enqueue_plan.queue.queued_at;
+    let ready_at = enqueue_plan.queue.ready_at;
+    let queue_plan = enqueue_runtime_state_save_job(
         shared,
         runtime.paths.state_file.clone(),
         RuntimeStateSavePayload::Live {
             shared: shared.clone(),
-            sections,
+            sections: plan.sections,
         },
         revision,
         reason,
         queued_at,
         ready_at,
     );
+    let backlog = queue_plan.backlog;
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -317,15 +307,12 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
                 runtime_proxy_log_field("backlog", backlog.to_string()),
                 runtime_proxy_log_field(
                     "ready_in_ms",
-                    ready_at
-                        .saturating_duration_since(queued_at)
-                        .as_millis()
-                        .to_string(),
+                    enqueue_plan.queue.ready_in_ms().to_string(),
                 ),
             ],
         ),
     );
-    if runtime_proxy_queue_pressure_active(backlog, 0, 0) {
+    if queue_plan.pressure_active {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -338,7 +325,7 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
             ),
         );
     }
-    if runtime_state_save_reason_requires_continuation_journal(reason) {
+    if plan.requires_continuation_journal {
         schedule_runtime_continuation_journal_save_from_runtime(shared, runtime, reason);
     }
 }
@@ -351,7 +338,7 @@ fn enqueue_runtime_state_save_job(
     reason: &str,
     queued_at: Instant,
     ready_at: Instant,
-) -> usize {
+) -> prodex_runtime_state::RuntimeBackgroundQueueEnqueuePlan {
     let queue = runtime_state_save_queue();
     let mut pending = queue
         .pending
@@ -369,10 +356,13 @@ fn enqueue_runtime_state_save_job(
             ready_at,
         },
     );
-    let backlog = pending.len().saturating_sub(1);
+    let plan = runtime_background_queue_enqueue_plan(
+        prodex_runtime_state::RuntimeBackgroundQueueKind::StateSave,
+        pending.len(),
+    );
     drop(pending);
     queue.wake.notify_one();
-    backlog
+    plan
 }
 
 pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
@@ -395,8 +385,9 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
     }
     let queue = runtime_continuation_journal_save_queue();
     let journal_path = runtime_continuation_journal_file_path(&runtime.paths);
-    let queued_at = Instant::now();
-    let ready_at = queued_at + runtime_continuation_journal_save_debounce(reason);
+    let enqueue_plan = runtime_continuation_journal_save_enqueue_plan(reason, Instant::now());
+    let queued_at = enqueue_plan.queued_at;
+    let ready_at = enqueue_plan.ready_at;
     let mut pending = queue
         .pending
         .lock()
@@ -412,9 +403,13 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
             ready_at,
         },
     );
-    let backlog = pending.len().saturating_sub(1);
+    let queue_plan = runtime_background_queue_enqueue_plan(
+        prodex_runtime_state::RuntimeBackgroundQueueKind::ContinuationJournal,
+        pending.len(),
+    );
     drop(pending);
     queue.wake.notify_one();
+    let backlog = queue_plan.backlog;
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -422,17 +417,11 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
             [
                 runtime_proxy_log_field("reason", reason),
                 runtime_proxy_log_field("backlog", backlog.to_string()),
-                runtime_proxy_log_field(
-                    "ready_in_ms",
-                    ready_at
-                        .saturating_duration_since(queued_at)
-                        .as_millis()
-                        .to_string(),
-                ),
+                runtime_proxy_log_field("ready_in_ms", enqueue_plan.ready_in_ms().to_string()),
             ],
         ),
     );
-    if runtime_proxy_queue_pressure_active(0, backlog, 0) {
+    if queue_plan.pressure_active {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -510,12 +499,28 @@ pub(crate) fn runtime_proxy_queue_pressure_active(
         state_save_backlog,
         continuation_journal_backlog,
         probe_refresh_backlog,
-        prodex_runtime_state::RuntimeBackgroundQueuePressureThresholds {
-            state_save: RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD,
-            continuation_journal: RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD,
-            probe_refresh: RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD,
-        },
+        runtime_background_queue_pressure_thresholds(),
     )
+}
+
+pub(crate) fn runtime_background_queue_enqueue_plan(
+    kind: prodex_runtime_state::RuntimeBackgroundQueueKind,
+    pending_len_after_enqueue: usize,
+) -> prodex_runtime_state::RuntimeBackgroundQueueEnqueuePlan {
+    prodex_runtime_state::runtime_background_queue_enqueue_plan(
+        kind,
+        pending_len_after_enqueue,
+        runtime_background_queue_pressure_thresholds(),
+    )
+}
+
+fn runtime_background_queue_pressure_thresholds()
+-> prodex_runtime_state::RuntimeBackgroundQueuePressureThresholds {
+    prodex_runtime_state::RuntimeBackgroundQueuePressureThresholds {
+        state_save: RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD,
+        continuation_journal: RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD,
+        probe_refresh: RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD,
+    }
 }
 
 pub(crate) fn schedule_runtime_continuation_journal_save(
@@ -591,8 +596,9 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
     }
     let queue = runtime_continuation_journal_save_queue();
     let journal_path = runtime_continuation_journal_file_path(&paths);
-    let queued_at = Instant::now();
-    let ready_at = queued_at + runtime_continuation_journal_save_debounce(reason);
+    let enqueue_plan = runtime_continuation_journal_save_enqueue_plan(reason, Instant::now());
+    let queued_at = enqueue_plan.queued_at;
+    let ready_at = enqueue_plan.ready_at;
     let mut pending = queue
         .pending
         .lock()
@@ -614,9 +620,13 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
             ready_at,
         },
     );
-    let backlog = pending.len().saturating_sub(1);
+    let queue_plan = runtime_background_queue_enqueue_plan(
+        prodex_runtime_state::RuntimeBackgroundQueueKind::ContinuationJournal,
+        pending.len(),
+    );
     drop(pending);
     queue.wake.notify_one();
+    let backlog = queue_plan.backlog;
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -624,17 +634,11 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
             [
                 runtime_proxy_log_field("reason", reason),
                 runtime_proxy_log_field("backlog", backlog.to_string()),
-                runtime_proxy_log_field(
-                    "ready_in_ms",
-                    ready_at
-                        .saturating_duration_since(queued_at)
-                        .as_millis()
-                        .to_string(),
-                ),
+                runtime_proxy_log_field("ready_in_ms", enqueue_plan.ready_in_ms().to_string()),
             ],
         ),
     );
-    if runtime_proxy_queue_pressure_active(0, backlog, 0) {
+    if queue_plan.pressure_active {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -888,14 +892,28 @@ where
     }
 }
 
+fn runtime_state_save_enqueue_plan(
+    reason: &str,
+    queued_at: Instant,
+) -> prodex_runtime_state::RuntimeStateSaveEnqueuePlan {
+    prodex_runtime_state::runtime_state_save_enqueue_plan(
+        reason,
+        queued_at,
+        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
     prodex_runtime_state::runtime_state_save_reason_requires_continuation_journal(reason)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {
     prodex_runtime_state::runtime_state_save_sections_for_reason(reason)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn runtime_state_save_debounce(reason: &str) -> Duration {
     prodex_runtime_state::runtime_state_save_debounce(
         reason,
@@ -903,9 +921,13 @@ pub(crate) fn runtime_state_save_debounce(reason: &str) -> Duration {
     )
 }
 
-pub(crate) fn runtime_continuation_journal_save_debounce(reason: &str) -> Duration {
-    prodex_runtime_state::runtime_continuation_journal_save_debounce(
+fn runtime_continuation_journal_save_enqueue_plan(
+    reason: &str,
+    queued_at: Instant,
+) -> prodex_runtime_state::RuntimeScheduledSaveEnqueuePlan {
+    prodex_runtime_state::runtime_continuation_journal_save_enqueue_plan(
         reason,
+        queued_at,
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
     )
 }

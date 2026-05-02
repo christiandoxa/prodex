@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) -> Vec<OsString> {
     prodex_runtime_broker::runtime_broker_process_args(config)
 }
@@ -14,6 +15,11 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
 ) -> Result<Option<RuntimeBrokerRegistry>> {
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
+    let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+    };
     while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
         let Some(existing) = load_runtime_broker_registry(paths, broker_key)? else {
             return Ok(None);
@@ -42,9 +48,11 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             }
         }
 
-        if existing.matches_launch_config(upstream_base_url, include_code_review, upstream_no_proxy)
-            && let Some(health) = health
-            && health.matches_registry_instance(&existing)
+        if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
+            &existing,
+            health.as_ref(),
+            launch_config,
+        ) == prodex_runtime_broker::RuntimeBrokerRegistryReuseDecision::Reuse
         {
             return Ok(Some(existing));
         }
@@ -63,6 +71,11 @@ pub(crate) fn find_compatible_runtime_broker_registry(
     include_code_review: bool,
     upstream_no_proxy: bool,
 ) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
+    let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+    };
     for broker_key in runtime_broker_registry_keys(paths) {
         if broker_key == excluded_broker_key {
             continue;
@@ -71,11 +84,7 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         let Some(registry) = load_runtime_broker_registry(paths, &broker_key)? else {
             continue;
         };
-        if !registry.matches_launch_config(
-            upstream_base_url,
-            include_code_review,
-            upstream_no_proxy,
-        ) {
+        if !launch_config.matches_registry(&registry) {
             continue;
         }
         if !runtime_process_pid_alive(registry.pid) {
@@ -97,8 +106,11 @@ pub(crate) fn find_compatible_runtime_broker_registry(
             RuntimeBrokerVersionGuardOutcome::Replaced
             | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => continue,
         }
-        if let Some(health) = health
-            && health.matches_registry_instance(&registry)
+        if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
+            &registry,
+            health.as_ref(),
+            launch_config,
+        ) == prodex_runtime_broker::RuntimeBrokerRegistryReuseDecision::Reuse
         {
             return Ok(Some((broker_key, registry)));
         }
@@ -135,9 +147,14 @@ pub(crate) fn spawn_runtime_broker_process(
     config: RuntimeBrokerSpawnConfig<'_>,
 ) -> Result<()> {
     let current_exe = env::current_exe().context("failed to locate current prodex binary")?;
-    Command::new(current_exe)
-        .args(runtime_broker_process_args(config))
-        .env("PRODEX_HOME", &paths.root)
+    let command_plan = prodex_runtime_broker::runtime_broker_process_command_plan(
+        current_exe,
+        &paths.root,
+        config,
+    );
+    Command::new(command_plan.executable)
+        .args(command_plan.args)
+        .env("PRODEX_HOME", command_plan.prodex_home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -165,6 +182,11 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
     upstream_no_proxy: bool,
 ) -> Result<RuntimeProxyEndpoint> {
     let broker_key = runtime_broker_key(upstream_base_url, include_code_review, upstream_no_proxy);
+    let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+    };
     let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
     let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
     let preferred_listen_addr = preferred_runtime_broker_listen_addr(paths, &broker_key)?;
@@ -198,12 +220,11 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
                 health.as_ref(),
             ) {
                 RuntimeBrokerVersionGuardOutcome::Compatible => {
-                    if existing.matches_launch_config(
-                        upstream_base_url,
-                        include_code_review,
-                        upstream_no_proxy,
-                    ) && let Some(health) = health
-                        && health.matches_registry_instance(&existing)
+                    if prodex_runtime_broker::runtime_broker_registry_reuse_decision(
+                        &existing,
+                        health.as_ref(),
+                        launch_config,
+                    ) == prodex_runtime_broker::RuntimeBrokerRegistryReuseDecision::Reuse
                     {
                         activate_runtime_broker_profile(
                             &broker_client,

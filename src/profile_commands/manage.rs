@@ -1,15 +1,12 @@
 use super::*;
 
 pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
-    validate_profile_name(&args.name)?;
-
-    if args.codex_home.is_some() && (args.copy_from.is_some() || args.copy_current) {
-        bail!("--codex-home cannot be combined with --copy-from or --copy-current");
-    }
-
-    if args.copy_from.is_some() && args.copy_current {
-        bail!("use either --copy-from or --copy-current");
-    }
+    prodex_profile_identity::validate_profile_name(&args.name)?;
+    let source_kind = prodex_profile_identity::resolve_add_profile_source_kind(
+        args.codex_home.is_some(),
+        args.copy_from.is_some(),
+        args.copy_current,
+    )?;
 
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
@@ -18,15 +15,21 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         bail!("profile '{}' already exists", args.name);
     }
 
-    let managed = args.codex_home.is_none();
-    let source_home = if args.copy_current {
-        Some(default_codex_home(&paths)?)
-    } else if let Some(path) = args.copy_from {
-        Some(absolutize(path)?)
-    } else {
-        None
+    let managed = source_kind.managed();
+    let source_home = match source_kind {
+        prodex_profile_identity::AddProfileSourceKind::CopyCurrent => {
+            Some(default_codex_home(&paths)?)
+        }
+        prodex_profile_identity::AddProfileSourceKind::CopyFrom => Some(absolutize(
+            args.copy_from.expect("copy-from path should be present"),
+        )?),
+        prodex_profile_identity::AddProfileSourceKind::ExternalHome
+        | prodex_profile_identity::AddProfileSourceKind::EmptyManaged => None,
     };
-    let activate_profile = state.active_profile.is_none() || args.activate;
+    let activate_profile = prodex_profile_identity::should_activate_profile(
+        state.active_profile.is_some(),
+        args.activate,
+    );
     let source_identity = source_home
         .as_deref()
         .and_then(|home| fetch_profile_identity(home).ok());

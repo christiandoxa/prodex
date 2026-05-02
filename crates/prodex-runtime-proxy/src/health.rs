@@ -10,6 +10,7 @@ pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
 pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS: i64 =
     if cfg!(test) { 20 } else { 60 };
 pub const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
+pub const RUNTIME_PROFILE_LATENCY_PENALTY_MAX: u32 = 12;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeProfileBackoffs {
@@ -24,6 +25,37 @@ pub struct RuntimeProfileHealth {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProfileHealthSnapshot {
+    pub score: u32,
+    pub updated_at: i64,
+}
+
+pub trait RuntimeProfileHealthEntry {
+    fn runtime_profile_health_score(&self) -> u32;
+    fn runtime_profile_health_updated_at(&self) -> i64;
+}
+
+impl RuntimeProfileHealthEntry for RuntimeProfileHealth {
+    fn runtime_profile_health_score(&self) -> u32 {
+        self.score
+    }
+
+    fn runtime_profile_health_updated_at(&self) -> i64 {
+        self.updated_at
+    }
+}
+
+impl RuntimeProfileHealthEntry for RuntimeProfileHealthSnapshot {
+    fn runtime_profile_health_score(&self) -> u32 {
+        self.score
+    }
+
+    fn runtime_profile_health_updated_at(&self) -> i64 {
+        self.updated_at
+    }
+}
+
 pub fn runtime_route_coupled_kinds(route_kind: RuntimeRouteKind) -> &'static [RuntimeRouteKind] {
     match route_kind {
         RuntimeRouteKind::Responses => &[RuntimeRouteKind::Websocket],
@@ -33,24 +65,27 @@ pub fn runtime_route_coupled_kinds(route_kind: RuntimeRouteKind) -> &'static [Ru
     }
 }
 
-pub fn runtime_profile_effective_health_score(entry: &RuntimeProfileHealth, now: i64) -> u32 {
+pub fn runtime_profile_effective_health_score<T: RuntimeProfileHealthEntry>(
+    entry: &T,
+    now: i64,
+) -> u32 {
     runtime_profile_effective_score(entry, now, RUNTIME_PROFILE_HEALTH_DECAY_SECONDS)
 }
 
-pub fn runtime_profile_effective_score(
-    entry: &RuntimeProfileHealth,
+pub fn runtime_profile_effective_score<T: RuntimeProfileHealthEntry>(
+    entry: &T,
     now: i64,
     decay_seconds: i64,
 ) -> u32 {
     let decay = now
-        .saturating_sub(entry.updated_at)
+        .saturating_sub(entry.runtime_profile_health_updated_at())
         .saturating_div(decay_seconds.max(1))
         .clamp(0, i64::from(u32::MAX)) as u32;
-    entry.score.saturating_sub(decay)
+    entry.runtime_profile_health_score().saturating_sub(decay)
 }
 
-pub fn runtime_profile_effective_health_score_from_map(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+pub fn runtime_profile_effective_health_score_from_map<T: RuntimeProfileHealthEntry>(
+    profile_health: &BTreeMap<String, T>,
     key: &str,
     now: i64,
 ) -> u32 {
@@ -60,8 +95,8 @@ pub fn runtime_profile_effective_health_score_from_map(
         .unwrap_or(0)
 }
 
-pub fn runtime_profile_effective_score_from_map(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+pub fn runtime_profile_effective_score_from_map<T: RuntimeProfileHealthEntry>(
+    profile_health: &BTreeMap<String, T>,
     key: &str,
     now: i64,
     decay_seconds: i64,
@@ -69,6 +104,29 @@ pub fn runtime_profile_effective_score_from_map(
     profile_health
         .get(key)
         .map(|entry| runtime_profile_effective_score(entry, now, decay_seconds))
+        .unwrap_or(0)
+}
+
+pub fn runtime_profile_effective_health_score_by_key<F>(health_entry: F, key: &str, now: i64) -> u32
+where
+    F: FnOnce(&str) -> Option<RuntimeProfileHealthSnapshot>,
+{
+    health_entry(key)
+        .map(|entry| runtime_profile_effective_health_score(&entry, now))
+        .unwrap_or(0)
+}
+
+pub fn runtime_profile_effective_score_by_key<F>(
+    health_entry: F,
+    key: &str,
+    now: i64,
+    decay_seconds: i64,
+) -> u32
+where
+    F: FnOnce(&str) -> Option<RuntimeProfileHealthSnapshot>,
+{
+    health_entry(key)
+        .map(|entry| runtime_profile_effective_score(&entry, now, decay_seconds))
         .unwrap_or(0)
 }
 
@@ -211,8 +269,8 @@ pub fn runtime_profile_transport_backoff_max_until(
         .max()
 }
 
-pub fn runtime_profile_route_coupling_score_from_map(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+pub fn runtime_profile_route_coupling_score_from_map<T: RuntimeProfileHealthEntry>(
+    profile_health: &BTreeMap<String, T>,
     profile_name: &str,
     now: i64,
     route_kind: RuntimeRouteKind,
@@ -239,8 +297,39 @@ pub fn runtime_profile_route_coupling_score_from_map(
         .fold(0, u32::saturating_add)
 }
 
-pub fn runtime_profile_route_performance_score(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+pub fn runtime_profile_route_coupling_score_by_key<F>(
+    health_entry: F,
+    profile_name: &str,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32
+where
+    F: Fn(&str) -> Option<RuntimeProfileHealthSnapshot> + Copy,
+{
+    runtime_route_coupled_kinds(route_kind)
+        .iter()
+        .copied()
+        .map(|coupled_kind| {
+            let route_score = runtime_profile_effective_health_score_by_key(
+                health_entry,
+                &runtime_profile_route_health_key(profile_name, coupled_kind),
+                now,
+            );
+            let bad_pairing_score = runtime_profile_effective_score_by_key(
+                health_entry,
+                &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+                now,
+                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+            );
+            route_score
+                .saturating_add(bad_pairing_score)
+                .saturating_div(2)
+        })
+        .fold(0, u32::saturating_add)
+}
+
+pub fn runtime_profile_route_performance_score<T: RuntimeProfileHealthEntry>(
+    profile_health: &BTreeMap<String, T>,
     profile_name: &str,
     now: i64,
     route_kind: RuntimeRouteKind,
@@ -267,9 +356,40 @@ pub fn runtime_profile_route_performance_score(
     route_score.saturating_add(coupled_score)
 }
 
-pub fn runtime_profile_health_sort_key(
+pub fn runtime_profile_route_performance_score_by_key<F>(
+    health_entry: F,
     profile_name: &str,
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32
+where
+    F: Fn(&str) -> Option<RuntimeProfileHealthSnapshot> + Copy,
+{
+    let route_score = runtime_profile_effective_score_by_key(
+        health_entry,
+        &runtime_profile_route_performance_key(profile_name, route_kind),
+        now,
+        RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+    );
+    let coupled_score = runtime_route_coupled_kinds(route_kind)
+        .iter()
+        .copied()
+        .map(|coupled_kind| {
+            runtime_profile_effective_score_by_key(
+                health_entry,
+                &runtime_profile_route_performance_key(profile_name, coupled_kind),
+                now,
+                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+            )
+            .saturating_div(2)
+        })
+        .fold(0, u32::saturating_add);
+    route_score.saturating_add(coupled_score)
+}
+
+pub fn runtime_profile_health_sort_key<T: RuntimeProfileHealthEntry>(
+    profile_name: &str,
+    profile_health: &BTreeMap<String, T>,
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
@@ -293,6 +413,41 @@ pub fn runtime_profile_health_sort_key(
         ))
         .saturating_add(runtime_profile_route_performance_score(
             profile_health,
+            profile_name,
+            now,
+            route_kind,
+        ))
+}
+
+pub fn runtime_profile_health_sort_key_by_key<F>(
+    profile_name: &str,
+    health_entry: F,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32
+where
+    F: Fn(&str) -> Option<RuntimeProfileHealthSnapshot> + Copy,
+{
+    runtime_profile_effective_health_score_by_key(health_entry, profile_name, now)
+        .saturating_add(runtime_profile_effective_health_score_by_key(
+            health_entry,
+            &runtime_profile_route_health_key(profile_name, route_kind),
+            now,
+        ))
+        .saturating_add(runtime_profile_effective_score_by_key(
+            health_entry,
+            &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+            now,
+            RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+        ))
+        .saturating_add(runtime_profile_route_coupling_score_by_key(
+            health_entry,
+            profile_name,
+            now,
+            route_kind,
+        ))
+        .saturating_add(runtime_profile_route_performance_score_by_key(
+            health_entry,
             profile_name,
             now,
             route_kind,
@@ -326,6 +481,47 @@ pub fn runtime_profile_inflight_soft_limit(
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => base.saturating_sub(1).max(1),
         RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => base.saturating_sub(2).max(1),
     }
+}
+
+pub fn runtime_profile_latency_penalty(
+    elapsed_ms: u64,
+    route_kind: RuntimeRouteKind,
+    stage: &str,
+) -> u32 {
+    let (good_ms, warn_ms, poor_ms, severe_ms) = match (route_kind, stage) {
+        (RuntimeRouteKind::Responses, "ttfb") | (RuntimeRouteKind::Websocket, "connect") => {
+            (120, 300, 700, 1_500)
+        }
+        (RuntimeRouteKind::Compact, _) | (RuntimeRouteKind::Standard, _) => (80, 180, 400, 900),
+        _ => (100, 250, 600, 1_200),
+    };
+    match elapsed_ms {
+        elapsed if elapsed <= good_ms => 0,
+        elapsed if elapsed <= warn_ms => 2,
+        elapsed if elapsed <= poor_ms => 4,
+        elapsed if elapsed <= severe_ms => 7,
+        _ => RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
+    }
+}
+
+pub fn runtime_profile_latency_observation_next_score(
+    current_score: u32,
+    elapsed_ms: u64,
+    route_kind: RuntimeRouteKind,
+    stage: &str,
+) -> u32 {
+    let observed = runtime_profile_latency_penalty(elapsed_ms, route_kind, stage);
+    if observed == 0 {
+        current_score.saturating_sub(2)
+    } else {
+        (((current_score as u64) * 2) + (observed as u64)).div_ceil(3) as u32
+    }
+}
+
+pub fn runtime_profile_latency_failure_next_score(current_score: u32) -> u32 {
+    current_score
+        .saturating_add(crate::RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY)
+        .min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX)
 }
 
 pub fn runtime_profile_name_in_selection_backoff(
@@ -443,8 +639,8 @@ pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
         .min(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
 }
 
-pub fn runtime_profile_route_circuit_probe_seconds(
-    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+pub fn runtime_profile_route_circuit_probe_seconds<T: RuntimeProfileHealthEntry>(
+    profile_scores: &BTreeMap<String, T>,
     route_profile_key: &str,
     now: i64,
 ) -> i64 {
@@ -464,9 +660,9 @@ pub fn runtime_profile_route_circuit_probe_seconds(
     runtime_profile_circuit_half_open_probe_seconds(score)
 }
 
-pub fn runtime_soften_persisted_route_circuits_for_startup(
+pub fn runtime_soften_persisted_route_circuits_for_startup<T: RuntimeProfileHealthEntry>(
     route_circuit_open_until: &mut BTreeMap<String, i64>,
-    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_scores: &BTreeMap<String, T>,
     now: i64,
 ) -> bool {
     let mut changed = false;
@@ -490,9 +686,9 @@ pub fn runtime_soften_persisted_route_circuits_for_startup(
     changed
 }
 
-pub fn runtime_soften_persisted_backoffs_for_startup(
+pub fn runtime_soften_persisted_backoffs_for_startup<T: RuntimeProfileHealthEntry>(
     backoffs: &mut RuntimeProfileBackoffs,
-    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_scores: &BTreeMap<String, T>,
     now: i64,
 ) -> bool {
     let mut changed = runtime_soften_persisted_backoff_map_for_startup(
@@ -596,6 +792,22 @@ mod tests {
     }
 
     #[test]
+    fn latency_penalty_uses_route_stage_thresholds() {
+        assert_eq!(
+            runtime_profile_latency_penalty(120, RuntimeRouteKind::Responses, "ttfb"),
+            0
+        );
+        assert_eq!(
+            runtime_profile_latency_penalty(181, RuntimeRouteKind::Compact, "connect"),
+            4
+        );
+        assert_eq!(
+            runtime_profile_latency_failure_next_score(10),
+            RUNTIME_PROFILE_LATENCY_PENALTY_MAX
+        );
+    }
+
+    #[test]
     fn startup_softening_clamps_future_backoffs() {
         let now = 100;
         let mut backoffs = RuntimeProfileBackoffs::default();
@@ -605,8 +817,9 @@ mod tests {
         backoffs
             .transport_backoff_until
             .insert("beta".to_string(), now - 1);
+        let profile_scores = BTreeMap::<String, RuntimeProfileHealth>::new();
         let changed =
-            runtime_soften_persisted_backoffs_for_startup(&mut backoffs, &BTreeMap::new(), now);
+            runtime_soften_persisted_backoffs_for_startup(&mut backoffs, &profile_scores, now);
 
         assert!(changed);
         assert_eq!(

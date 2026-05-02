@@ -6,10 +6,12 @@
 use prodex_runtime_state::{
     RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
     RuntimeContinuationStatuses, RuntimeContinuationStore, RuntimeProfileBackoffs,
-    RuntimeProfileHealth, RuntimeProfileUsageSnapshot, RuntimeRouteKind,
+    RuntimeProfileHealth, RuntimeProfileUsageSnapshot, RuntimeRouteKind, RuntimeStateSaveSections,
+    RuntimeStateSaveSelectedSnapshot, RuntimeStateSaveStateSection,
 };
 use prodex_state::{
-    AppState, ProfileEntry, ResponseProfileBinding, merge_profile_bindings, prune_profile_bindings,
+    AppState, AppStateCompactionPolicy, ProfileEntry, ResponseProfileBinding,
+    merge_profile_bindings, prune_profile_bindings,
     prune_profile_bindings_for_housekeeping_without_retention,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,6 +19,261 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const RUNTIME_SCORE_RETENTION_SECONDS: i64 = if cfg!(test) { 120 } else { 14 * 24 * 60 * 60 };
 pub const RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
+
+#[derive(Debug, Clone)]
+pub struct RuntimeMergedStateAndContinuations {
+    pub state: AppState,
+    pub continuations: RuntimeContinuationStore<ResponseProfileBinding>,
+}
+
+pub fn merge_runtime_state_snapshot_for_save(
+    existing: AppState,
+    snapshot: &AppState,
+    now: i64,
+    policy: AppStateCompactionPolicy,
+) -> AppState {
+    prodex_state::merge_runtime_state_snapshot_with_policy(existing, snapshot, now, policy)
+}
+
+pub fn merge_runtime_state_and_continuations_for_save(
+    existing_state: AppState,
+    state_snapshot: &AppState,
+    existing_continuations: &RuntimeContinuationStore<ResponseProfileBinding>,
+    continuation_snapshot: &RuntimeContinuationStore<ResponseProfileBinding>,
+    now: i64,
+    state_policy: AppStateCompactionPolicy,
+    continuation_policy: RuntimeContinuationCompactionPolicy,
+) -> RuntimeMergedStateAndContinuations {
+    let mut state =
+        merge_runtime_state_snapshot_for_save(existing_state, state_snapshot, now, state_policy);
+    let continuations = merge_runtime_continuation_store(
+        existing_continuations,
+        continuation_snapshot,
+        &state.profiles,
+        now,
+        continuation_policy,
+    );
+    state.response_profile_bindings =
+        runtime_external_response_profile_bindings(&continuations.response_profile_bindings);
+    state.session_profile_bindings = continuations.session_profile_bindings.clone();
+    RuntimeMergedStateAndContinuations {
+        state,
+        continuations,
+    }
+}
+
+pub fn runtime_state_save_selected_snapshot_from_parts<P, C, H, U, B>(
+    paths: &P,
+    state: &AppState,
+    continuations: &C,
+    profile_scores: &BTreeMap<String, H>,
+    usage_snapshots: &BTreeMap<String, U>,
+    backoffs: &B,
+    sections: RuntimeStateSaveSections,
+) -> RuntimeStateSaveSelectedSnapshot<P, AppState, ProfileEntry, C, H, U, B>
+where
+    P: Clone,
+    C: Clone,
+    H: Clone,
+    U: Clone,
+    B: Clone,
+{
+    let state_snapshot = match sections.state {
+        RuntimeStateSaveStateSection::None => None,
+        RuntimeStateSaveStateSection::Core => Some(AppState {
+            active_profile: state.active_profile.clone(),
+            profiles: state.profiles.clone(),
+            last_run_selected_at: state.last_run_selected_at.clone(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        }),
+        RuntimeStateSaveStateSection::Full => Some(state.clone()),
+    };
+    let profiles = state_snapshot.is_none().then(|| state.profiles.clone());
+    RuntimeStateSaveSelectedSnapshot {
+        paths: paths.clone(),
+        state: state_snapshot,
+        profiles,
+        continuations: sections.continuations.then(|| continuations.clone()),
+        profile_scores: sections.profile_scores.then(|| profile_scores.clone()),
+        usage_snapshots: sections.usage_snapshots.then(|| usage_snapshots.clone()),
+        backoffs: sections.backoffs.then(|| backoffs.clone()),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStateSelectedSnapshotLoadPlan {
+    pub needs_existing_state: bool,
+    pub needs_existing_continuations: bool,
+}
+
+pub fn runtime_state_selected_snapshot_load_plan<P, S, E, C, H, U, B>(
+    snapshot: &RuntimeStateSaveSelectedSnapshot<P, S, E, C, H, U, B>,
+) -> RuntimeStateSelectedSnapshotLoadPlan {
+    RuntimeStateSelectedSnapshotLoadPlan {
+        needs_existing_state: snapshot.state.is_some() || snapshot.profiles.is_none(),
+        needs_existing_continuations: snapshot.continuations.is_some(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStateSelectedSnapshotPreparePlan {
+    pub load: RuntimeStateSelectedSnapshotLoadPlan,
+    pub writes_state: bool,
+    pub writes_continuations: bool,
+    pub writes_profile_scores: bool,
+    pub writes_usage_snapshots: bool,
+    pub writes_backoffs: bool,
+}
+
+pub fn runtime_state_selected_snapshot_prepare_plan<P, S, E, C, H, U, B>(
+    snapshot: &RuntimeStateSaveSelectedSnapshot<P, S, E, C, H, U, B>,
+) -> RuntimeStateSelectedSnapshotPreparePlan {
+    RuntimeStateSelectedSnapshotPreparePlan {
+        load: runtime_state_selected_snapshot_load_plan(snapshot),
+        writes_state: snapshot.state.is_some(),
+        writes_continuations: snapshot.continuations.is_some(),
+        writes_profile_scores: snapshot.profile_scores.is_some(),
+        writes_usage_snapshots: snapshot.usage_snapshots.is_some(),
+        writes_backoffs: snapshot.backoffs.is_some(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStateSelectedSnapshotMergedSections {
+    pub profiles: BTreeMap<String, ProfileEntry>,
+    pub state: Option<AppState>,
+    pub continuations: Option<RuntimeContinuationStore<ResponseProfileBinding>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeStateSelectedSnapshotMergeError {
+    MissingExistingState,
+    MissingProfiles,
+    MissingExistingContinuations,
+}
+
+impl std::fmt::Display for RuntimeStateSelectedSnapshotMergeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingExistingState => formatter.write_str("missing existing state"),
+            Self::MissingProfiles => formatter.write_str("missing profiles"),
+            Self::MissingExistingContinuations => {
+                formatter.write_str("missing existing continuations")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RuntimeStateSelectedSnapshotMergeError {}
+
+pub fn runtime_state_selected_snapshot_profiles_for_merge<P, H, U, B>(
+    snapshot: &RuntimeStateSaveSelectedSnapshot<
+        P,
+        AppState,
+        ProfileEntry,
+        RuntimeContinuationStore<ResponseProfileBinding>,
+        H,
+        U,
+        B,
+    >,
+    existing_state: Option<&AppState>,
+    now: i64,
+    state_policy: AppStateCompactionPolicy,
+) -> Result<BTreeMap<String, ProfileEntry>, RuntimeStateSelectedSnapshotMergeError> {
+    if let Some(state_snapshot) = snapshot.state.as_ref() {
+        let existing_state =
+            existing_state.ok_or(RuntimeStateSelectedSnapshotMergeError::MissingExistingState)?;
+        return Ok(merge_runtime_state_snapshot_for_save(
+            existing_state.clone(),
+            state_snapshot,
+            now,
+            state_policy,
+        )
+        .profiles);
+    }
+
+    snapshot
+        .profiles
+        .clone()
+        .or_else(|| existing_state.map(|state| state.profiles.clone()))
+        .ok_or(RuntimeStateSelectedSnapshotMergeError::MissingProfiles)
+}
+
+pub fn merge_runtime_state_selected_snapshot_sections<P, H, U, B>(
+    snapshot: &RuntimeStateSaveSelectedSnapshot<
+        P,
+        AppState,
+        ProfileEntry,
+        RuntimeContinuationStore<ResponseProfileBinding>,
+        H,
+        U,
+        B,
+    >,
+    existing_state: Option<&AppState>,
+    existing_continuations: Option<&RuntimeContinuationStore<ResponseProfileBinding>>,
+    now: i64,
+    state_policy: AppStateCompactionPolicy,
+    continuation_policy: RuntimeContinuationCompactionPolicy,
+) -> Result<RuntimeStateSelectedSnapshotMergedSections, RuntimeStateSelectedSnapshotMergeError> {
+    let mut state = None;
+    let mut continuations = None;
+    let profiles = if let Some(state_snapshot) = snapshot.state.as_ref() {
+        let existing_state =
+            existing_state.ok_or(RuntimeStateSelectedSnapshotMergeError::MissingExistingState)?;
+        if let Some(continuation_snapshot) = snapshot.continuations.as_ref() {
+            let existing_continuations = existing_continuations
+                .ok_or(RuntimeStateSelectedSnapshotMergeError::MissingExistingContinuations)?;
+            let merged = merge_runtime_state_and_continuations_for_save(
+                existing_state.clone(),
+                state_snapshot,
+                existing_continuations,
+                continuation_snapshot,
+                now,
+                state_policy,
+                continuation_policy,
+            );
+            let profiles = merged.state.profiles.clone();
+            state = Some(merged.state);
+            continuations = Some(merged.continuations);
+            profiles
+        } else {
+            let merged_state = merge_runtime_state_snapshot_for_save(
+                existing_state.clone(),
+                state_snapshot,
+                now,
+                state_policy,
+            );
+            let profiles = merged_state.profiles.clone();
+            state = Some(merged_state);
+            profiles
+        }
+    } else {
+        let profiles = snapshot
+            .profiles
+            .clone()
+            .or_else(|| existing_state.map(|state| state.profiles.clone()))
+            .ok_or(RuntimeStateSelectedSnapshotMergeError::MissingProfiles)?;
+        if let Some(continuation_snapshot) = snapshot.continuations.as_ref() {
+            let existing_continuations = existing_continuations
+                .ok_or(RuntimeStateSelectedSnapshotMergeError::MissingExistingContinuations)?;
+            continuations = Some(merge_runtime_continuation_store(
+                existing_continuations,
+                continuation_snapshot,
+                &profiles,
+                now,
+                continuation_policy,
+            ));
+        }
+        profiles
+    };
+
+    Ok(RuntimeStateSelectedSnapshotMergedSections {
+        profiles,
+        state,
+        continuations,
+    })
+}
 
 pub fn compact_runtime_usage_snapshots<W>(
     mut snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot<W>>,
@@ -916,6 +1173,259 @@ mod tests {
             email: None,
             provider: ProfileProvider::Openai,
         }
+    }
+
+    #[test]
+    fn save_merge_plans_state_and_continuation_sidecar_together() {
+        let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+        let existing_state = AppState {
+            active_profile: Some("alpha".to_string()),
+            profiles: profiles.clone(),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let state_snapshot = AppState {
+            active_profile: Some("alpha".to_string()),
+            profiles: profiles.clone(),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let lineage_key = format!("{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}4:resp:turn");
+        let session_binding = ResponseProfileBinding {
+            profile_name: "alpha".to_string(),
+            bound_at: 20,
+        };
+        let continuation_snapshot = RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([
+                (
+                    "resp".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "alpha".to_string(),
+                        bound_at: 20,
+                    },
+                ),
+                (
+                    lineage_key.clone(),
+                    ResponseProfileBinding {
+                        profile_name: "alpha".to_string(),
+                        bound_at: 21,
+                    },
+                ),
+            ]),
+            session_profile_bindings: BTreeMap::from([(
+                "session".to_string(),
+                session_binding.clone(),
+            )]),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            statuses: RuntimeContinuationStatuses::default(),
+        };
+
+        let merged = merge_runtime_state_and_continuations_for_save(
+            existing_state,
+            &state_snapshot,
+            &RuntimeContinuationStore::default(),
+            &continuation_snapshot,
+            100,
+            AppStateCompactionPolicy::default(),
+            RuntimeContinuationCompactionPolicy::default(),
+        );
+
+        assert_eq!(
+            merged
+                .state
+                .response_profile_bindings
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["resp".to_string()]
+        );
+        assert!(
+            merged
+                .continuations
+                .response_profile_bindings
+                .contains_key(&lineage_key)
+        );
+        assert_eq!(
+            merged.state.session_profile_bindings.get("session"),
+            Some(&session_binding)
+        );
+    }
+
+    #[test]
+    fn selected_snapshot_helper_keeps_only_requested_sections() {
+        let paths = PathBuf::from("/tmp/state.json");
+        let state = AppState {
+            active_profile: Some("alpha".to_string()),
+            profiles: BTreeMap::from([("alpha".to_string(), profile())]),
+            last_run_selected_at: BTreeMap::from([("alpha".to_string(), 10)]),
+            response_profile_bindings: BTreeMap::from([(
+                "resp".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "alpha".to_string(),
+                    bound_at: 10,
+                },
+            )]),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let continuations: RuntimeContinuationStore<ResponseProfileBinding> =
+            RuntimeContinuationStore::default();
+        let selected = runtime_state_save_selected_snapshot_from_parts(
+            &paths,
+            &state,
+            &continuations,
+            &BTreeMap::<String, RuntimeProfileHealth>::new(),
+            &BTreeMap::<String, RuntimeProfileUsageSnapshot>::new(),
+            &RuntimeProfileBackoffs::default(),
+            RuntimeStateSaveSections {
+                state: RuntimeStateSaveStateSection::Core,
+                continuations: true,
+                profile_scores: false,
+                usage_snapshots: false,
+                backoffs: false,
+            },
+        );
+
+        let core_state = selected.state.expect("core state selected");
+        assert!(core_state.response_profile_bindings.is_empty());
+        assert_eq!(core_state.last_run_selected_at.get("alpha"), Some(&10));
+        assert!(selected.profiles.is_none());
+        assert!(selected.continuations.is_some());
+        assert!(selected.profile_scores.is_none());
+    }
+
+    #[test]
+    fn selected_snapshot_merge_plan_loads_only_needed_sources() {
+        let snapshot = RuntimeStateSaveSelectedSnapshot {
+            paths: (),
+            state: None::<AppState>,
+            profiles: Some(BTreeMap::from([("alpha".to_string(), profile())])),
+            continuations: Some(RuntimeContinuationStore::<ResponseProfileBinding>::default()),
+            profile_scores: None::<BTreeMap<String, RuntimeProfileHealth>>,
+            usage_snapshots: None::<BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+            backoffs: None::<RuntimeProfileBackoffs>,
+        };
+
+        assert_eq!(
+            runtime_state_selected_snapshot_load_plan(&snapshot),
+            RuntimeStateSelectedSnapshotLoadPlan {
+                needs_existing_state: false,
+                needs_existing_continuations: true,
+            }
+        );
+        assert_eq!(
+            runtime_state_selected_snapshot_prepare_plan(&snapshot),
+            RuntimeStateSelectedSnapshotPreparePlan {
+                load: RuntimeStateSelectedSnapshotLoadPlan {
+                    needs_existing_state: false,
+                    needs_existing_continuations: true,
+                },
+                writes_state: false,
+                writes_continuations: true,
+                writes_profile_scores: false,
+                writes_usage_snapshots: false,
+                writes_backoffs: false,
+            }
+        );
+
+        let merged = merge_runtime_state_selected_snapshot_sections(
+            &snapshot,
+            None,
+            Some(&RuntimeContinuationStore::default()),
+            100,
+            AppStateCompactionPolicy::default(),
+            RuntimeContinuationCompactionPolicy::default(),
+        )
+        .expect("selected snapshot sections merge");
+
+        assert!(merged.state.is_none());
+        assert!(merged.continuations.is_some());
+        assert_eq!(
+            merged.profiles.keys().cloned().collect::<Vec<_>>(),
+            vec!["alpha".to_string()]
+        );
+    }
+
+    #[test]
+    fn selected_snapshot_merge_combines_state_and_continuations() {
+        let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+        let existing_state = AppState {
+            active_profile: Some("alpha".to_string()),
+            profiles: profiles.clone(),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let state_snapshot = AppState {
+            active_profile: Some("alpha".to_string()),
+            profiles: profiles.clone(),
+            last_run_selected_at: BTreeMap::new(),
+            response_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
+        };
+        let snapshot = RuntimeStateSaveSelectedSnapshot {
+            paths: (),
+            state: Some(state_snapshot),
+            profiles: None,
+            continuations: Some(RuntimeContinuationStore {
+                response_profile_bindings: BTreeMap::from([(
+                    "resp".to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "alpha".to_string(),
+                        bound_at: 20,
+                    },
+                )]),
+                ..RuntimeContinuationStore::default()
+            }),
+            profile_scores: None::<BTreeMap<String, RuntimeProfileHealth>>,
+            usage_snapshots: None::<BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+            backoffs: None::<RuntimeProfileBackoffs>,
+        };
+
+        assert_eq!(
+            runtime_state_selected_snapshot_load_plan(&snapshot),
+            RuntimeStateSelectedSnapshotLoadPlan {
+                needs_existing_state: true,
+                needs_existing_continuations: true,
+            }
+        );
+        assert_eq!(
+            runtime_state_selected_snapshot_profiles_for_merge(
+                &snapshot,
+                Some(&existing_state),
+                100,
+                AppStateCompactionPolicy::default(),
+            )
+            .expect("profiles")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+            vec!["alpha".to_string()]
+        );
+
+        let merged = merge_runtime_state_selected_snapshot_sections(
+            &snapshot,
+            Some(&existing_state),
+            Some(&RuntimeContinuationStore::default()),
+            100,
+            AppStateCompactionPolicy::default(),
+            RuntimeContinuationCompactionPolicy::default(),
+        )
+        .expect("selected snapshot sections merge");
+
+        assert_eq!(
+            merged
+                .state
+                .expect("state")
+                .response_profile_bindings
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["resp".to_string()]
+        );
+        assert!(merged.continuations.is_some());
     }
 
     #[test]

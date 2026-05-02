@@ -12,7 +12,11 @@ pub(super) use self::unauthorized_recovery::{
     runtime_try_recover_profile_auth_from_unauthorized_steps,
 };
 use runtime_proxy_crate::{
-    runtime_websocket_authority, runtime_websocket_no_proxy_pattern_matches,
+    inspect_runtime_websocket_text_frame, runtime_interleave_socket_addrs,
+    runtime_proxy_websocket_error_payload_text, runtime_realtime_websocket_terminal_event_kind,
+    runtime_translate_precommit_previous_response_websocket_text_frame,
+    runtime_translate_previous_response_websocket_text_frame, runtime_websocket_authority,
+    runtime_websocket_error_payload_from_http_body, runtime_websocket_no_proxy_pattern_matches,
     runtime_websocket_normalize_host,
 };
 
@@ -389,19 +393,6 @@ fn runtime_websocket_local_pressure_kind_from_ws_error(
     }
 }
 
-pub(super) fn runtime_websocket_error_payload_from_http_body(
-    body: &[u8],
-) -> RuntimeWebsocketErrorPayload {
-    if body.is_empty() {
-        return RuntimeWebsocketErrorPayload::Empty;
-    }
-
-    match std::str::from_utf8(body) {
-        Ok(text) => RuntimeWebsocketErrorPayload::Text(text.to_string()),
-        Err(_) => RuntimeWebsocketErrorPayload::Binary(body.to_vec()),
-    }
-}
-
 pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
@@ -435,32 +426,6 @@ pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
     }
 }
 
-pub(super) fn runtime_interleave_socket_addrs(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
-    let (mut primary, mut secondary): (VecDeque<_>, VecDeque<_>) =
-        addrs.into_iter().partition(|addr| addr.is_ipv6());
-    let prefer_ipv6 = primary.front().is_some();
-    if !prefer_ipv6 {
-        std::mem::swap(&mut primary, &mut secondary);
-    }
-
-    let mut ordered = Vec::with_capacity(primary.len().saturating_add(secondary.len()));
-    loop {
-        let mut progressed = false;
-        if let Some(addr) = primary.pop_front() {
-            ordered.push(addr);
-            progressed = true;
-        }
-        if let Some(addr) = secondary.pop_front() {
-            ordered.push(addr);
-            progressed = true;
-        }
-        if !progressed {
-            break;
-        }
-    }
-    ordered
-}
-
 pub(super) fn runtime_configure_upstream_tcp_stream(
     stream: &TcpStream,
     io_timeout: Duration,
@@ -479,7 +444,7 @@ fn runtime_resolve_websocket_tcp_addrs(
     timeout: Duration,
 ) -> io::Result<Vec<SocketAddr>> {
     runtime_resolve_websocket_tcp_addrs_with_executor(
-        RuntimeWebsocketDnsResolveExecutor::global(),
+        runtime_websocket_dns_resolve_executor(),
         Some(shared.log_path.as_path()),
         Some(request_id),
         host.to_string(),
@@ -929,22 +894,6 @@ pub(super) fn send_runtime_proxy_websocket_error(
         .context("failed to send runtime websocket error frame")
 }
 
-pub(super) fn runtime_proxy_websocket_error_payload_text(
-    status: u16,
-    code: &str,
-    message: &str,
-) -> String {
-    serde_json::json!({
-        "type": "error",
-        "status": status,
-        "error": {
-            "code": code,
-            "message": message,
-        }
-    })
-    .to_string()
-}
-
 pub(super) fn forward_runtime_proxy_websocket_error(
     local_socket: &mut RuntimeLocalWebSocket,
     payload: &RuntimeWebsocketErrorPayload,
@@ -1030,95 +979,6 @@ pub(super) fn forward_runtime_proxy_buffered_websocket_text_frames(
             .context("failed to forward buffered runtime websocket text frame")?;
     }
     Ok(())
-}
-
-pub(super) fn runtime_translate_previous_response_websocket_text_frame(payload: &str) -> String {
-    payload.to_string()
-}
-
-pub(super) fn runtime_translate_precommit_previous_response_websocket_text_frame(
-    payload: &str,
-) -> String {
-    if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
-        return payload.to_string();
-    }
-
-    let message = runtime_proxy_stale_continuation_message();
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
-        return runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message);
-    };
-
-    let event_type = runtime_response_event_type_from_value(&value);
-    if event_type.as_deref() == Some("response.failed") {
-        if value.get("response").is_some() {
-            return serde_json::json!({
-                "type": "response.failed",
-                "status": 409,
-                "response": {
-                    "error": {
-                        "code": "stale_continuation",
-                        "message": message,
-                    }
-                }
-            })
-            .to_string();
-        }
-
-        return serde_json::json!({
-            "type": "response.failed",
-            "status": 409,
-            "error": {
-                "code": "stale_continuation",
-                "message": message,
-            }
-        })
-        .to_string();
-    }
-
-    runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
-}
-
-pub(super) fn inspect_runtime_websocket_text_frame(
-    payload: &str,
-) -> RuntimeInspectedWebsocketTextFrame {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
-        return RuntimeInspectedWebsocketTextFrame::default();
-    };
-
-    let event_type = runtime_response_event_type_from_value(&value);
-    let retry_kind = if extract_runtime_proxy_previous_response_message_from_value(&value).is_some()
-    {
-        Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
-    } else if extract_runtime_proxy_overload_message_from_value(&value).is_some() {
-        Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
-    } else if extract_runtime_proxy_quota_message_from_value(&value).is_some() {
-        Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
-    } else {
-        None
-    };
-    let precommit_hold = event_type
-        .as_deref()
-        .is_some_and(runtime_proxy_precommit_hold_event_kind);
-    let terminal_event = event_type
-        .as_deref()
-        .is_some_and(|kind| matches!(kind, "response.completed" | "response.failed"));
-
-    RuntimeInspectedWebsocketTextFrame {
-        event_type,
-        turn_state: extract_runtime_turn_state_from_value(&value),
-        response_ids: extract_runtime_response_ids_from_value(&value),
-        token_usage: extract_runtime_token_usage_from_value(&value),
-        retry_kind,
-        precommit_hold,
-        terminal_event,
-    }
-}
-
-pub(super) fn runtime_response_event_type_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
 }
 
 pub(super) struct RuntimeWebsocketAttemptRequest<'a> {
@@ -1980,45 +1840,6 @@ pub(super) fn attempt_runtime_websocket_request(
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-pub(super) fn runtime_response_event_type(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| runtime_response_event_type_from_value(&value))
-}
-
-pub(super) fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "response.created"
-            | "response.in_progress"
-            | "response.queued"
-            | "response.output_item.added"
-            | "response.content_part.added"
-            | "response.reasoning_summary_part.added"
-    )
-}
-
-pub(super) fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "session.updated"
-            | "conversation.item.added"
-            | "conversation.item.done"
-            | "response.cancelled"
-            | "response.done"
-            | "error"
-    )
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn is_runtime_terminal_event(payload: &str) -> bool {
-    runtime_response_event_type(payload)
-        .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2383,22 +2204,28 @@ mod tests {
             let start_tx = start_tx.clone();
             let done_tx = done_tx.clone();
             let gate = Arc::clone(&gate);
-            executor.spawn_observed(Some(log_path.as_path()), Some(41), Some(addr), move || {
-                started.fetch_add(1, Ordering::SeqCst);
-                start_tx.send(()).expect("start signal should send");
+            executor.spawn_observed(
+                Some(log_path.as_path()),
+                Some(41),
+                Some(addr),
+                Some(runtime_proxy_log_to_path),
+                move || {
+                    started.fetch_add(1, Ordering::SeqCst);
+                    start_tx.send(()).expect("start signal should send");
 
-                let (released, ready) = &*gate;
-                let mut released = released
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                while !*released {
-                    released = ready
-                        .wait(released)
+                    let (released, ready) = &*gate;
+                    let mut released = released
+                        .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-                }
+                    while !*released {
+                        released = ready
+                            .wait(released)
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    }
 
-                done_tx.send(()).expect("done signal should send");
-            });
+                    done_tx.send(()).expect("done signal should send");
+                },
+            );
         }
 
         start_rx
@@ -2509,6 +2336,7 @@ mod tests {
                     Some(log_path.as_path()),
                     Some(43),
                     Some(addr),
+                    Some(runtime_proxy_log_to_path),
                     move || {
                         started.fetch_add(1, Ordering::SeqCst);
                         start_tx.send(()).expect("start signal should send");
@@ -2641,22 +2469,28 @@ mod tests {
             let start_tx = start_tx.clone();
             let done_tx = done_tx.clone();
             let gate = Arc::clone(&gate);
-            if executor.spawn_observed(Some(log_path.as_path()), Some(42), Some(addr), move || {
-                started.fetch_add(1, Ordering::SeqCst);
-                start_tx.send(()).expect("start signal should send");
+            if executor.spawn_observed(
+                Some(log_path.as_path()),
+                Some(42),
+                Some(addr),
+                Some(runtime_proxy_log_to_path),
+                move || {
+                    started.fetch_add(1, Ordering::SeqCst);
+                    start_tx.send(()).expect("start signal should send");
 
-                let (released, ready) = &*gate;
-                let mut released = released
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                while !*released {
-                    released = ready
-                        .wait(released)
+                    let (released, ready) = &*gate;
+                    let mut released = released
+                        .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-                }
+                    while !*released {
+                        released = ready
+                            .wait(released)
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    }
 
-                done_tx.send(()).expect("done signal should send");
-            }) {
+                    done_tx.send(()).expect("done signal should send");
+                },
+            ) {
                 accepted_jobs += 1;
             } else {
                 rejected_jobs += 1;

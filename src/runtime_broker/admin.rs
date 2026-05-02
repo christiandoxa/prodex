@@ -4,9 +4,19 @@ pub(crate) fn runtime_proxy_admin_token(request: &tiny_http::Request) -> Option<
     request
         .headers()
         .iter()
-        .find(|header| header.field.equiv("X-Prodex-Admin-Token"))
+        .find(|header| {
+            header
+                .field
+                .equiv(prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER)
+        })
         .map(|header| header.value.as_str().trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn runtime_broker_admin_error_response(
+    error: prodex_runtime_broker::RuntimeBrokerAdminError,
+) -> tiny_http::ResponseBox {
+    build_runtime_proxy_json_error_response(error.status, error.code, &error.message)
 }
 
 pub(crate) fn build_runtime_proxy_json_response(
@@ -80,8 +90,7 @@ fn runtime_broker_metrics_prometheus_response(
             ));
         }
     };
-    let snapshot = runtime_broker_prometheus_snapshot(metadata, &metrics);
-    let body = runtime_metrics::render_runtime_broker_prometheus(&snapshot);
+    let body = runtime_metrics::render_runtime_broker_prometheus_from_metrics(metadata, &metrics);
     Some(build_runtime_proxy_prometheus_response(200, body))
 }
 
@@ -102,12 +111,10 @@ fn runtime_broker_health_response(
 fn runtime_broker_activation_profile(
     request: &mut tiny_http::Request,
 ) -> std::result::Result<String, tiny_http::ResponseBox> {
-    if request.method().as_str() != "POST" {
-        return Err(build_runtime_proxy_json_error_response(
-            405,
-            "method_not_allowed",
-            "runtime broker activation requires POST",
-        ));
+    if let Err(error) =
+        prodex_runtime_broker::runtime_broker_validate_activation_method(request.method().as_str())
+    {
+        return Err(runtime_broker_admin_error_response(error));
     }
     let mut body = Vec::new();
     if let Err(err) = request.as_reader().read_to_end(&mut body) {
@@ -117,23 +124,8 @@ fn runtime_broker_activation_profile(
             &format!("failed to read runtime broker activation body: {err}"),
         ));
     }
-    serde_json::from_slice::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("current_profile")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .map(str::to_string)
-        })
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            build_runtime_proxy_json_error_response(
-                400,
-                "invalid_request",
-                "runtime broker activation requires a non-empty current_profile",
-            )
-        })
+    prodex_runtime_broker::runtime_broker_activation_profile_from_json(&body)
+        .map_err(runtime_broker_admin_error_response)
 }
 
 fn apply_runtime_broker_activation(
@@ -182,11 +174,10 @@ fn runtime_broker_activation_response(
     );
     Some(build_runtime_proxy_json_response(
         200,
-        serde_json::json!({
-            "ok": true,
-            "current_profile": current_profile,
-        })
-        .to_string(),
+        serde_json::to_string(&prodex_runtime_broker::runtime_broker_activation_success(
+            current_profile,
+        ))
+        .unwrap_or_else(|_| "{\"ok\":true}".to_string()),
     ))
 }
 
@@ -198,18 +189,15 @@ pub(crate) fn handle_runtime_proxy_admin_request(
     let route = prodex_runtime_broker::RuntimeBrokerAdminRoute::from_path(path)?;
 
     let Some(metadata) = runtime_broker_metadata_for_log_path(&shared.log_path) else {
-        return Some(build_runtime_proxy_json_error_response(
-            404,
-            "not_found",
-            "runtime broker admin endpoint is not enabled for this proxy",
+        return Some(runtime_broker_admin_error_response(
+            prodex_runtime_broker::runtime_broker_admin_not_enabled_error(),
         ));
     };
-    if runtime_proxy_admin_token(request).as_deref() != Some(metadata.admin_token.as_str()) {
-        return Some(build_runtime_proxy_json_error_response(
-            403,
-            "forbidden",
-            "missing or invalid runtime broker admin token",
-        ));
+    if let Err(error) = prodex_runtime_broker::runtime_broker_validate_admin_token(
+        runtime_proxy_admin_token(request).as_deref(),
+        metadata.admin_token.as_str(),
+    ) {
+        return Some(runtime_broker_admin_error_response(error));
     }
 
     match route {

@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) use prodex_state::{merge_last_run_selection, merge_profile_bindings};
 
-fn app_state_compaction_policy() -> prodex_state::AppStateCompactionPolicy {
+pub(crate) fn app_state_compaction_policy() -> prodex_state::AppStateCompactionPolicy {
     prodex_state::AppStateCompactionPolicy {
         last_run_retention_seconds: APP_STATE_LAST_RUN_RETENTION_SECONDS,
         session_binding_retention_seconds: APP_STATE_SESSION_BINDING_RETENTION_SECONDS,
@@ -78,12 +78,6 @@ pub(crate) fn prune_profile_bindings_for_housekeeping(
     );
 }
 
-pub(crate) fn runtime_continuation_status_last_event_at(
-    status: &RuntimeContinuationBindingStatus,
-) -> Option<i64> {
-    prodex_runtime_store::runtime_continuation_status_last_event_at(status)
-}
-
 pub(crate) fn runtime_continuation_status_is_terminal(
     status: &RuntimeContinuationBindingStatus,
 ) -> bool {
@@ -108,15 +102,8 @@ pub(crate) fn runtime_age_stale_verified_continuation_status(
     )
 }
 
-pub(crate) fn runtime_continuation_dead_status_shadowed_by_binding(
-    binding: &ResponseProfileBinding,
-    status: &RuntimeContinuationBindingStatus,
-) -> bool {
-    prodex_runtime_store::runtime_continuation_dead_status_shadowed_by_binding(binding, status)
-}
-
 pub(crate) fn merge_runtime_state_snapshot(existing: AppState, snapshot: &AppState) -> AppState {
-    prodex_state::merge_runtime_state_snapshot_with_policy(
+    prodex_runtime_store::merge_runtime_state_snapshot_for_save(
         existing,
         snapshot,
         Local::now().timestamp(),

@@ -62,11 +62,10 @@ struct RuntimeProxyAsyncLoggerTestState {
 }
 
 fn runtime_proxy_log_queue_capacity() -> usize {
-    thread::available_parallelism()
+    let parallelism = thread::available_parallelism()
         .map(|count| count.get())
-        .unwrap_or(4)
-        .saturating_mul(256)
-        .clamp(1024, 8192)
+        .unwrap_or(4);
+    runtime_proxy_log_queue_capacity_default(parallelism)
 }
 
 fn runtime_proxy_async_logger() -> &'static RuntimeProxyAsyncLogger {
@@ -390,10 +389,6 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
     log_path
 }
 
-pub(super) fn runtime_proxy_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(4, 12)
-}
-
 pub(super) fn runtime_proxy_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
@@ -404,10 +399,6 @@ pub(super) fn runtime_proxy_worker_count() -> usize {
         runtime_proxy_worker_count_default(parallelism),
     )
     .clamp(1, 64)
-}
-
-pub(super) fn runtime_proxy_long_lived_worker_count_default(parallelism: usize) -> usize {
-    parallelism.saturating_mul(2).clamp(8, 24)
 }
 
 pub(super) fn runtime_proxy_long_lived_worker_count() -> usize {
@@ -429,13 +420,9 @@ pub(super) fn runtime_probe_refresh_worker_count() -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
         runtime_policy_proxy().and_then(|policy| policy.probe_refresh_worker_count),
-        parallelism.clamp(2, 4),
+        runtime_probe_refresh_worker_count_default(parallelism),
     )
     .clamp(1, 8)
-}
-
-pub(super) fn runtime_proxy_async_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(2, 4)
 }
 
 pub(super) fn runtime_proxy_async_worker_count() -> usize {
@@ -451,22 +438,12 @@ pub(super) fn runtime_proxy_async_worker_count() -> usize {
 }
 
 pub(super) fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
-    let default_capacity = worker_count.saturating_mul(8).clamp(128, 1024);
     usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
         runtime_policy_proxy().and_then(|policy| policy.long_lived_queue_capacity),
-        default_capacity,
+        runtime_proxy_long_lived_queue_capacity_default(worker_count),
     )
     .max(1)
-}
-
-pub(super) fn runtime_proxy_active_request_limit_default(
-    worker_count: usize,
-    long_lived_worker_count: usize,
-) -> usize {
-    worker_count
-        .saturating_add(long_lived_worker_count.saturating_mul(3))
-        .clamp(64, 512)
 }
 
 pub(super) fn runtime_proxy_active_request_limit(
@@ -559,36 +536,51 @@ pub(super) fn runtime_proxy_lane_limits(
     worker_count: usize,
     long_lived_worker_count: usize,
 ) -> RuntimeProxyLaneLimits {
-    let global_limit = global_limit.max(1);
+    let policy = runtime_policy_proxy();
+    let responses_override = usize_override_with_policy(
+        "PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT",
+        policy
+            .as_ref()
+            .and_then(|policy| policy.responses_active_limit),
+        0,
+    );
+    let compact_override = usize_override_with_policy(
+        "PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT",
+        policy
+            .as_ref()
+            .and_then(|policy| policy.compact_active_limit),
+        0,
+    );
+    let websocket_override = usize_override_with_policy(
+        "PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT",
+        policy
+            .as_ref()
+            .and_then(|policy| policy.websocket_active_limit),
+        0,
+    );
+    let standard_override = usize_override_with_policy(
+        "PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT",
+        policy
+            .as_ref()
+            .and_then(|policy| policy.standard_active_limit),
+        0,
+    );
+    let limits = runtime_proxy_lane_limits_from_overrides(
+        global_limit,
+        worker_count,
+        long_lived_worker_count,
+        RuntimeProxyLaneLimitOverrides {
+            responses: (responses_override > 0).then_some(responses_override),
+            compact: (compact_override > 0).then_some(compact_override),
+            websocket: (websocket_override > 0).then_some(websocket_override),
+            standard: (standard_override > 0).then_some(standard_override),
+        },
+    );
     RuntimeProxyLaneLimits {
-        responses: usize_override_with_policy(
-            "PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT",
-            runtime_policy_proxy().and_then(|policy| policy.responses_active_limit),
-            (global_limit.saturating_mul(3) / 4).clamp(4, global_limit),
-        )
-        .min(global_limit)
-        .max(1),
-        compact: usize_override_with_policy(
-            "PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT",
-            runtime_policy_proxy().and_then(|policy| policy.compact_active_limit),
-            (global_limit / 4).clamp(2, 6).min(global_limit),
-        )
-        .min(global_limit)
-        .max(1),
-        websocket: usize_override_with_policy(
-            "PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT",
-            runtime_policy_proxy().and_then(|policy| policy.websocket_active_limit),
-            long_lived_worker_count.clamp(2, global_limit),
-        )
-        .min(global_limit)
-        .max(1),
-        standard: usize_override_with_policy(
-            "PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT",
-            runtime_policy_proxy().and_then(|policy| policy.standard_active_limit),
-            (worker_count / 2).clamp(2, 8).min(global_limit),
-        )
-        .min(global_limit)
-        .max(1),
+        responses: limits.responses,
+        compact: limits.compact,
+        websocket: limits.websocket,
+        standard: limits.standard,
     }
 }
 

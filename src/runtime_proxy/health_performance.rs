@@ -1,24 +1,27 @@
 use super::*;
 
+fn runtime_route_kind_to_proxy(
+    route_kind: RuntimeRouteKind,
+) -> runtime_proxy_crate::RuntimeRouteKind {
+    match route_kind {
+        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
+    }
+}
+
+#[allow(dead_code)]
 pub(crate) fn runtime_profile_latency_penalty(
     elapsed_ms: u64,
     route_kind: RuntimeRouteKind,
     stage: &str,
 ) -> u32 {
-    let (good_ms, warn_ms, poor_ms, severe_ms) = match (route_kind, stage) {
-        (RuntimeRouteKind::Responses, "ttfb") | (RuntimeRouteKind::Websocket, "connect") => {
-            (120, 300, 700, 1_500)
-        }
-        (RuntimeRouteKind::Compact, _) | (RuntimeRouteKind::Standard, _) => (80, 180, 400, 900),
-        _ => (100, 250, 600, 1_200),
-    };
-    match elapsed_ms {
-        elapsed if elapsed <= good_ms => 0,
-        elapsed if elapsed <= warn_ms => 2,
-        elapsed if elapsed <= poor_ms => 4,
-        elapsed if elapsed <= severe_ms => 7,
-        _ => RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
-    }
+    runtime_proxy_crate::runtime_profile_latency_penalty(
+        elapsed_ms,
+        runtime_route_kind_to_proxy(route_kind),
+        stage,
+    )
 }
 
 pub(crate) fn update_runtime_profile_route_performance(
@@ -87,12 +90,12 @@ pub(crate) fn note_runtime_profile_latency_observation(
             )
         })
         .unwrap_or(0);
-    let observed = runtime_profile_latency_penalty(elapsed_ms, route_kind, stage);
-    let next_score = if observed == 0 {
-        current_score.saturating_sub(2)
-    } else {
-        (((current_score as u64) * 2) + (observed as u64)).div_ceil(3) as u32
-    };
+    let next_score = runtime_proxy_crate::runtime_profile_latency_observation_next_score(
+        current_score,
+        elapsed_ms,
+        runtime_route_kind_to_proxy(route_kind),
+        stage,
+    );
     let _ = update_runtime_profile_route_performance(
         shared,
         profile_name,
@@ -122,9 +125,7 @@ pub(crate) fn note_runtime_profile_latency_failure(
             )
         })
         .unwrap_or(0);
-    let next_score = current_score
-        .saturating_add(RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY)
-        .min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX);
+    let next_score = runtime_proxy_crate::runtime_profile_latency_failure_next_score(current_score);
     let _ = update_runtime_profile_route_performance(
         shared,
         profile_name,

@@ -2,11 +2,12 @@ use super::*;
 
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY;
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY;
 pub(crate) use runtime_proxy_crate::{
-    RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY, RuntimeTransportFailureKind,
-    runtime_profile_transport_health_penalty, runtime_transport_failure_kind_from_io_error,
-    runtime_transport_failure_kind_from_message, runtime_transport_failure_kind_label,
-    runtime_upstream_connect_failure_marker,
+    RuntimeTransportFailureKind, runtime_profile_transport_health_penalty,
+    runtime_transport_failure_kind_from_io_error, runtime_transport_failure_kind_from_message,
+    runtime_transport_failure_kind_label, runtime_upstream_connect_failure_marker,
 };
 
 pub(crate) fn log_runtime_upstream_connect_failure(

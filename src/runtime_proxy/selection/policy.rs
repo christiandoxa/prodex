@@ -146,13 +146,6 @@ pub(crate) fn runtime_websocket_previous_response_reuse_is_stale(
     )
 }
 
-pub(crate) fn runtime_quota_precommit_floor_percent(route_kind: RuntimeRouteKind) -> i64 {
-    runtime_proxy_crate::runtime_quota_precommit_floor_percent_for_route(
-        runtime_route_kind_to_proxy(route_kind),
-        runtime_proxy_responses_quota_critical_floor_percent(),
-    )
-}
-
 fn runtime_selection_quota_window_status_to_proxy(
     status: RuntimeQuotaWindowStatus,
 ) -> runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus {
@@ -233,16 +226,6 @@ fn runtime_selection_quota_source_option_to_proxy(
     source: Option<RuntimeQuotaSource>,
 ) -> Option<runtime_proxy_crate::RuntimeSelectionQuotaSource> {
     source.map(runtime_selection_quota_source_to_proxy)
-}
-
-pub(crate) fn runtime_quota_window_precommit_guard(
-    window: RuntimeQuotaWindowSummary,
-    floor_percent: i64,
-) -> bool {
-    runtime_proxy_crate::runtime_quota_window_precommit_guard(
-        runtime_selection_quota_window_to_proxy(window),
-        floor_percent,
-    )
 }
 
 pub(crate) fn runtime_quota_precommit_guard_reason(

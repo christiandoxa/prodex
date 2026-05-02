@@ -1,10 +1,99 @@
 use super::*;
 
 pub(crate) fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
-    // These timestamps are stored with second precision. Require strictly more
-    // than the interval so a boundary-crossing lookup does not persist nearly a
-    // second early.
-    now.saturating_sub(bound_at) > RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS
+    runtime_proxy_crate::runtime_proxy_binding_touch_should_persist(
+        bound_at,
+        now,
+        RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS,
+    )
+}
+
+fn runtime_continuation_policy() -> runtime_proxy_crate::RuntimeProxyContinuationPolicy {
+    runtime_proxy_crate::RuntimeProxyContinuationPolicy {
+        touch_persist_interval_seconds: RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS,
+        suspect_grace_seconds: RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS,
+        suspect_not_found_streak_limit: RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT,
+        confidence_max: RUNTIME_CONTINUATION_CONFIDENCE_MAX,
+        verified_confidence_bonus: RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS,
+        touch_confidence_bonus: RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS,
+        suspect_confidence_penalty: RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY,
+    }
+}
+
+fn runtime_continuation_lifecycle_to_proxy(
+    state: RuntimeContinuationBindingLifecycle,
+) -> runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle {
+    match state {
+        RuntimeContinuationBindingLifecycle::Warm => {
+            runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Warm
+        }
+        RuntimeContinuationBindingLifecycle::Verified => {
+            runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Verified
+        }
+        RuntimeContinuationBindingLifecycle::Suspect => {
+            runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Suspect
+        }
+        RuntimeContinuationBindingLifecycle::Dead => {
+            runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Dead
+        }
+    }
+}
+
+fn runtime_continuation_lifecycle_from_proxy(
+    state: runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle,
+) -> RuntimeContinuationBindingLifecycle {
+    match state {
+        runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Warm => {
+            RuntimeContinuationBindingLifecycle::Warm
+        }
+        runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Verified => {
+            RuntimeContinuationBindingLifecycle::Verified
+        }
+        runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Suspect => {
+            RuntimeContinuationBindingLifecycle::Suspect
+        }
+        runtime_proxy_crate::RuntimeProxyContinuationBindingLifecycle::Dead => {
+            RuntimeContinuationBindingLifecycle::Dead
+        }
+    }
+}
+
+fn runtime_continuation_status_to_proxy(
+    status: &RuntimeContinuationBindingStatus,
+) -> runtime_proxy_crate::RuntimeProxyContinuationBindingStatus {
+    runtime_proxy_crate::RuntimeProxyContinuationBindingStatus {
+        state: runtime_continuation_lifecycle_to_proxy(status.state),
+        confidence: status.confidence,
+        last_touched_at: status.last_touched_at,
+        last_verified_at: status.last_verified_at,
+        last_verified_route: status.last_verified_route.clone(),
+        last_not_found_at: status.last_not_found_at,
+        not_found_streak: status.not_found_streak,
+        success_count: status.success_count,
+        failure_count: status.failure_count,
+    }
+}
+
+fn runtime_continuation_status_from_proxy(
+    status: runtime_proxy_crate::RuntimeProxyContinuationBindingStatus,
+) -> RuntimeContinuationBindingStatus {
+    RuntimeContinuationBindingStatus {
+        state: runtime_continuation_lifecycle_from_proxy(status.state),
+        confidence: status.confidence,
+        last_touched_at: status.last_touched_at,
+        last_verified_at: status.last_verified_at,
+        last_verified_route: status.last_verified_route,
+        last_not_found_at: status.last_not_found_at,
+        not_found_streak: status.not_found_streak,
+        success_count: status.success_count,
+        failure_count: status.failure_count,
+    }
+}
+
+fn runtime_continuation_status_option_to_proxy(
+    status: Option<&RuntimeContinuationBindingStatus>,
+) -> Option<runtime_proxy_crate::RuntimeProxyContinuationBindingStatus> {
+    status.map(runtime_continuation_status_to_proxy)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,41 +125,20 @@ pub(crate) fn runtime_continuation_status_map_mut(
     }
 }
 
-pub(crate) fn runtime_continuation_next_event_at(
-    status: &RuntimeContinuationBindingStatus,
-    now: i64,
-) -> i64 {
-    runtime_continuation_status_last_event_at(status)
-        .filter(|last| *last >= now)
-        .map_or(now, |last| last.saturating_add(1))
-}
-
 pub(crate) fn runtime_continuation_status_touches(
     status: &mut RuntimeContinuationBindingStatus,
     now: i64,
 ) -> bool {
-    let previous = status.clone();
-    let event_at = runtime_continuation_next_event_at(&previous, now);
-    status.last_touched_at = Some(event_at);
-    if status.state == RuntimeContinuationBindingLifecycle::Suspect {
-        if status.last_not_found_at.is_some_and(|last| {
-            event_at.saturating_sub(last) >= RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
-        }) {
-            status.state = RuntimeContinuationBindingLifecycle::Warm;
-            status.not_found_streak = 0;
-            status.last_not_found_at = None;
-        }
-        status.confidence = status
-            .confidence
-            .saturating_add(RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS)
-            .min(RUNTIME_CONTINUATION_CONFIDENCE_MAX);
-    } else if status.state != RuntimeContinuationBindingLifecycle::Dead {
-        status.confidence = status
-            .confidence
-            .saturating_add(RUNTIME_CONTINUATION_TOUCH_CONFIDENCE_BONUS)
-            .min(RUNTIME_CONTINUATION_CONFIDENCE_MAX);
+    let mut proxy_status = runtime_continuation_status_to_proxy(status);
+    let changed = runtime_proxy_crate::runtime_proxy_continuation_status_touches(
+        &mut proxy_status,
+        now,
+        runtime_continuation_policy(),
+    );
+    if changed {
+        *status = runtime_continuation_status_from_proxy(proxy_status);
     }
-    *status != previous
+    changed
 }
 
 pub(crate) fn runtime_mark_continuation_status_touched(
@@ -92,22 +160,15 @@ pub(crate) fn runtime_continuation_status_should_refresh_verified(
     now: i64,
     verified_route: Option<RuntimeRouteKind>,
 ) -> bool {
-    let Some(status) = runtime_continuation_status_map(statuses, kind).get(key) else {
-        return true;
-    };
-
-    if status.state != RuntimeContinuationBindingLifecycle::Verified {
-        return true;
-    }
-
-    let verified_route_label = verified_route.map(runtime_route_kind_label);
-    if status.last_verified_route.as_deref() != verified_route_label {
-        return true;
-    }
-
-    status
-        .last_verified_at
-        .is_none_or(|last_verified_at| runtime_binding_touch_should_persist(last_verified_at, now))
+    let status = runtime_continuation_status_option_to_proxy(
+        runtime_continuation_status_map(statuses, kind).get(key),
+    );
+    runtime_proxy_crate::runtime_proxy_continuation_status_should_refresh_verified(
+        status.as_ref(),
+        now,
+        verified_route.map(runtime_route_kind_label),
+        runtime_continuation_policy(),
+    )
 }
 
 pub(crate) fn runtime_continuation_status_should_persist_touch(
@@ -116,21 +177,14 @@ pub(crate) fn runtime_continuation_status_should_persist_touch(
     key: &str,
     now: i64,
 ) -> bool {
-    let Some(status) = runtime_continuation_status_map(statuses, kind).get(key) else {
-        return true;
-    };
-
-    if status.state == RuntimeContinuationBindingLifecycle::Suspect
-        && status.last_not_found_at.is_some_and(|last_not_found_at| {
-            now.saturating_sub(last_not_found_at) >= RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
-        })
-    {
-        return true;
-    }
-
-    status
-        .last_touched_at
-        .is_none_or(|last_touched_at| runtime_binding_touch_should_persist(last_touched_at, now))
+    let status = runtime_continuation_status_option_to_proxy(
+        runtime_continuation_status_map(statuses, kind).get(key),
+    );
+    runtime_proxy_crate::runtime_proxy_continuation_status_should_persist_touch(
+        status.as_ref(),
+        now,
+        runtime_continuation_policy(),
+    )
 }
 
 pub(crate) fn runtime_mark_continuation_status_verified(
@@ -143,22 +197,17 @@ pub(crate) fn runtime_mark_continuation_status_verified(
     let status = runtime_continuation_status_map_mut(statuses, kind)
         .entry(key.to_string())
         .or_default();
-    let previous = status.clone();
-    let event_at = runtime_continuation_next_event_at(&previous, now);
-    status.state = RuntimeContinuationBindingLifecycle::Verified;
-    status.last_touched_at = Some(event_at);
-    status.last_verified_at = Some(event_at);
-    status.last_verified_route =
-        verified_route.map(|route_kind| runtime_route_kind_label(route_kind).to_string());
-    status.last_not_found_at = None;
-    status.not_found_streak = 0;
-    status.success_count = status.success_count.saturating_add(1);
-    status.failure_count = 0;
-    status.confidence = status
-        .confidence
-        .saturating_add(RUNTIME_CONTINUATION_VERIFIED_CONFIDENCE_BONUS)
-        .min(RUNTIME_CONTINUATION_CONFIDENCE_MAX);
-    *status != previous
+    let mut proxy_status = runtime_continuation_status_to_proxy(status);
+    let changed = runtime_proxy_crate::runtime_proxy_mark_continuation_status_verified(
+        &mut proxy_status,
+        now,
+        verified_route.map(runtime_route_kind_label),
+        runtime_continuation_policy(),
+    );
+    if changed {
+        *status = runtime_continuation_status_from_proxy(proxy_status);
+    }
+    changed
 }
 
 pub(crate) fn runtime_mark_continuation_status_suspect(
@@ -170,27 +219,16 @@ pub(crate) fn runtime_mark_continuation_status_suspect(
     let status = runtime_continuation_status_map_mut(statuses, kind)
         .entry(key.to_string())
         .or_default();
-    let previous = status.clone();
-    let event_at = runtime_continuation_next_event_at(&previous, now);
-    status.not_found_streak = status.not_found_streak.saturating_add(1);
-    status.last_touched_at = Some(event_at);
-    status.last_not_found_at = Some(event_at);
-    status.failure_count = status.failure_count.saturating_add(1);
-    let previous_confidence = status.confidence;
-    status.confidence = status
-        .confidence
-        .saturating_sub(RUNTIME_CONTINUATION_SUSPECT_CONFIDENCE_PENALTY);
-    if previous_confidence == 0 {
-        status.confidence = 1;
+    let mut proxy_status = runtime_continuation_status_to_proxy(status);
+    let changed = runtime_proxy_crate::runtime_proxy_mark_continuation_status_suspect(
+        &mut proxy_status,
+        now,
+        runtime_continuation_policy(),
+    );
+    if changed {
+        *status = runtime_continuation_status_from_proxy(proxy_status);
     }
-    status.state = if status.not_found_streak >= RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT
-        || (previous_confidence > 0 && status.confidence == 0)
-    {
-        RuntimeContinuationBindingLifecycle::Dead
-    } else {
-        RuntimeContinuationBindingLifecycle::Suspect
-    };
-    *status != previous
+    changed
 }
 
 pub(crate) fn runtime_mark_continuation_status_dead(
@@ -202,17 +240,16 @@ pub(crate) fn runtime_mark_continuation_status_dead(
     let status = runtime_continuation_status_map_mut(statuses, kind)
         .entry(key.to_string())
         .or_default();
-    let previous = status.clone();
-    let event_at = runtime_continuation_next_event_at(&previous, now);
-    status.state = RuntimeContinuationBindingLifecycle::Dead;
-    status.confidence = 0;
-    status.last_touched_at = Some(event_at);
-    status.last_not_found_at = Some(event_at);
-    status.not_found_streak = status
-        .not_found_streak
-        .max(RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT);
-    status.failure_count = status.failure_count.saturating_add(1);
-    *status != previous
+    let mut proxy_status = runtime_continuation_status_to_proxy(status);
+    let changed = runtime_proxy_crate::runtime_proxy_mark_continuation_status_dead(
+        &mut proxy_status,
+        now,
+        runtime_continuation_policy(),
+    );
+    if changed {
+        *status = runtime_continuation_status_from_proxy(proxy_status);
+    }
+    changed
 }
 
 pub(crate) fn runtime_continuation_status_recently_suspect(
@@ -221,26 +258,22 @@ pub(crate) fn runtime_continuation_status_recently_suspect(
     key: &str,
     now: i64,
 ) -> bool {
-    runtime_continuation_status_map(statuses, kind)
-        .get(key)
-        .is_some_and(|status| {
-            status.state == RuntimeContinuationBindingLifecycle::Suspect
-                && !runtime_continuation_status_is_terminal(status)
-                && status.last_not_found_at.is_some_and(|last| {
-                    now.saturating_sub(last) < RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS
-                })
-        })
+    let status = runtime_continuation_status_option_to_proxy(
+        runtime_continuation_status_map(statuses, kind).get(key),
+    );
+    runtime_proxy_crate::runtime_proxy_continuation_status_recently_suspect(
+        status.as_ref(),
+        now,
+        runtime_continuation_policy(),
+    )
 }
 
 pub(crate) fn runtime_continuation_status_label(
     status: &RuntimeContinuationBindingStatus,
 ) -> &'static str {
-    match status.state {
-        RuntimeContinuationBindingLifecycle::Warm => "warm",
-        RuntimeContinuationBindingLifecycle::Verified => "verified",
-        RuntimeContinuationBindingLifecycle::Suspect => "suspect",
-        RuntimeContinuationBindingLifecycle::Dead => "dead",
-    }
+    runtime_proxy_crate::runtime_proxy_continuation_status_label(
+        &runtime_continuation_status_to_proxy(status),
+    )
 }
 
 pub(crate) fn runtime_compact_session_lineage_key(session_id: &str) -> String {
@@ -263,19 +296,6 @@ pub(crate) fn runtime_response_turn_state_lineage_key(
 
 pub(crate) fn runtime_is_response_turn_state_lineage_key(key: &str) -> bool {
     key.starts_with(RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX)
-}
-
-pub(crate) fn runtime_response_turn_state_lineage_parts(key: &str) -> Option<(&str, &str)> {
-    let suffix = key.strip_prefix(RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX)?;
-    let (response_len, rest) = suffix.split_once(':')?;
-    let response_len = response_len.parse::<usize>().ok()?;
-    let response_and_sep = rest.get(..response_len.saturating_add(1))?;
-    if response_and_sep.as_bytes().get(response_len).copied() != Some(b':') {
-        return None;
-    }
-    let response_id = response_and_sep.get(..response_len)?;
-    let turn_state = rest.get(response_len.saturating_add(1)..)?;
-    (!response_id.is_empty() && !turn_state.is_empty()).then_some((response_id, turn_state))
 }
 
 pub(crate) fn runtime_is_compact_session_lineage_key(key: &str) -> bool {
@@ -310,7 +330,10 @@ pub(crate) fn runtime_dead_continuation_status_shadowed_by_live_binding(
         (binding, status),
         (Some(binding), Some(status))
             if runtime_continuation_status_is_terminal(status)
-                && runtime_continuation_dead_status_shadowed_by_binding(binding, status)
+                && runtime_proxy_crate::runtime_proxy_continuation_dead_status_shadowed_by_binding_bound_at(
+                    binding.bound_at,
+                    &runtime_continuation_status_to_proxy(status),
+                )
     )
 }
 

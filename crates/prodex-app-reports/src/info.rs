@@ -1,13 +1,17 @@
 use prodex_quota::{
     MainWindowSnapshot, RuntimeQuotaWindowStatus, UsageResponse, UsageWindow, WindowPair,
-    find_main_window, remaining_percent,
+    find_main_window, format_precise_reset_time, remaining_percent,
 };
 use prodex_runtime_state::RuntimeProfileUsageSnapshot as RuntimeProfileUsageSnapshotGeneric;
+use prodex_runtime_tuning::RuntimeTuningSnapshot;
 use prodex_shared_types::{
     InfoQuotaAggregate, InfoQuotaSource, InfoQuotaWindow, InfoRuntimeLoadSummary,
-    InfoRuntimeQuotaObservation, InfoRunwayEstimate, RunProfileProbeReport,
+    InfoRuntimeQuotaObservation, InfoRunwayEstimate, ProcessRow, ProdexProcessInfo,
+    RunProfileProbeReport,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub type RuntimeProfileUsageSnapshot = RuntimeProfileUsageSnapshotGeneric<RuntimeQuotaWindowStatus>;
 
@@ -229,6 +233,24 @@ pub fn collect_info_token_usage_summary_from_text(text: &str) -> InfoTokenUsageS
     summary
 }
 
+pub fn collect_info_token_usage_summary_from_texts<I, S>(
+    log_count: usize,
+    texts: I,
+) -> InfoTokenUsageSummary
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut summary = InfoTokenUsageSummary {
+        log_count,
+        ..InfoTokenUsageSummary::default()
+    };
+    for text in texts {
+        summary.merge(collect_info_token_usage_summary_from_text(text.as_ref()));
+    }
+    summary
+}
+
 impl InfoTokenUsageSummary {
     pub fn merge(&mut self, other: InfoTokenUsageSummary) {
         self.event_count += other.event_count;
@@ -321,6 +343,54 @@ pub fn collect_info_runtime_load_summary_from_text(
     }
 
     summary.active_inflight_units = latest_inflight_counts.values().sum();
+    summary
+}
+
+pub fn collect_info_runtime_load_summary_from_texts<I, S>(
+    log_count: usize,
+    texts: I,
+    now: i64,
+    recent_window_seconds: i64,
+    lookback_seconds: i64,
+) -> InfoRuntimeLoadSummary
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut summary = InfoRuntimeLoadSummary {
+        log_count,
+        ..InfoRuntimeLoadSummary::default()
+    };
+
+    for text in texts {
+        let log_summary = collect_info_runtime_load_summary_from_text(
+            text.as_ref(),
+            now,
+            recent_window_seconds,
+            lookback_seconds,
+        );
+        summary.observations.extend(log_summary.observations);
+        summary.active_inflight_units += log_summary.active_inflight_units;
+        summary.recent_selection_events += log_summary.recent_selection_events;
+        summary.recent_first_timestamp = match (
+            summary.recent_first_timestamp,
+            log_summary.recent_first_timestamp,
+        ) {
+            (Some(current), Some(candidate)) => Some(current.min(candidate)),
+            (current, candidate) => current.or(candidate),
+        };
+        summary.recent_last_timestamp = match (
+            summary.recent_last_timestamp,
+            log_summary.recent_last_timestamp,
+        ) {
+            (Some(current), Some(candidate)) => Some(current.max(candidate)),
+            (current, candidate) => current.or(candidate),
+        };
+    }
+
+    summary
+        .observations
+        .sort_by_key(|observation| (observation.timestamp, observation.profile.clone()));
     summary
 }
 
@@ -519,6 +589,377 @@ pub fn info_observation_window_remaining(
     }
 }
 
+pub fn parse_ps_process_rows(text: &str) -> Vec<ProcessRow> {
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() < 2 {
+            continue;
+        }
+        let Ok(pid) = tokens[0].parse::<u32>() else {
+            continue;
+        };
+        rows.push(ProcessRow {
+            pid,
+            command: tokens[1].to_string(),
+            args: tokens
+                .iter()
+                .skip(2)
+                .map(|token| (*token).to_string())
+                .collect(),
+        });
+    }
+    rows
+}
+
+pub fn classify_prodex_process_row(
+    row: ProcessRow,
+    current_pid: u32,
+    current_basename: Option<&str>,
+) -> Option<ProdexProcessInfo> {
+    if row.pid == current_pid || !is_prodex_process_row(&row, current_basename) {
+        return None;
+    }
+
+    Some(ProdexProcessInfo {
+        pid: row.pid,
+        runtime: prodex_process_row_is_runtime(&row, current_basename),
+    })
+}
+
+pub fn is_prodex_process_row(row: &ProcessRow, current_basename: Option<&str>) -> bool {
+    let command_base = process_basename(&row.command);
+    process_basename_matches(command_base, current_basename)
+        || prodex_process_row_argv_span(row, current_basename).is_some()
+}
+
+pub fn prodex_process_row_is_runtime(row: &ProcessRow, current_basename: Option<&str>) -> bool {
+    prodex_process_row_argv_span(row, current_basename)
+        .and_then(|args| args.get(1))
+        .is_some_and(|arg| arg == "run" || arg == "__runtime-broker")
+}
+
+pub fn prodex_process_row_argv_span<'a>(
+    row: &'a ProcessRow,
+    current_basename: Option<&str>,
+) -> Option<&'a [String]> {
+    row.args.iter().enumerate().find_map(|(index, arg)| {
+        process_basename_matches(process_basename(arg), current_basename)
+            .then_some(&row.args[index..])
+    })
+}
+
+pub fn process_basename_matches(candidate: &str, current_basename: Option<&str>) -> bool {
+    candidate == "prodex" || current_basename.is_some_and(|name| candidate == name)
+}
+
+pub fn process_basename(input: &str) -> &str {
+    Path::new(input)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(input)
+}
+
+pub fn runtime_log_pid_from_path(path: &Path) -> Option<u32> {
+    runtime_log_pid_from_path_with_prefix(path, "prodex-runtime")
+}
+
+pub fn runtime_log_pid_from_path_with_prefix(path: &Path, prefix: &str) -> Option<u32> {
+    let name = path.file_name()?.to_str()?;
+    let rest = name.strip_prefix(&format!("{prefix}-"))?;
+    let (pid, _) = rest.split_once('-')?;
+    pid.parse::<u32>().ok()
+}
+
+pub fn select_active_runtime_log_paths<I>(
+    processes: &[ProdexProcessInfo],
+    log_paths: I,
+) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    select_active_runtime_log_paths_with_prefix(processes, log_paths, "prodex-runtime")
+}
+
+pub fn select_active_runtime_log_paths_with_prefix<I>(
+    processes: &[ProdexProcessInfo],
+    log_paths: I,
+    prefix: &str,
+) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let runtime_pids = processes
+        .iter()
+        .filter(|process| process.runtime)
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+    if runtime_pids.is_empty() {
+        return Vec::new();
+    }
+
+    let mut latest_logs = BTreeMap::new();
+    for path in log_paths {
+        let Some(pid) = runtime_log_pid_from_path_with_prefix(&path, prefix) else {
+            continue;
+        };
+        if runtime_pids.contains(&pid) {
+            latest_logs.insert(pid, path);
+        }
+    }
+    latest_logs.into_values().collect()
+}
+
+pub fn select_recent_runtime_log_paths<I>(log_paths: I, limit: usize) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = (PathBuf, SystemTime)>,
+{
+    let mut paths = log_paths.into_iter().collect::<Vec<_>>();
+    paths.sort_by(|(left_path, left_modified), (right_path, right_modified)| {
+        left_modified
+            .cmp(right_modified)
+            .then_with(|| left_path.cmp(right_path))
+    });
+    paths.reverse();
+    paths.truncate(limit);
+    paths.into_iter().map(|(path, _)| path).collect()
+}
+
+pub fn format_info_process_summary(processes: &[ProdexProcessInfo]) -> String {
+    let runtime_count = processes.iter().filter(|process| process.runtime).count();
+    terminal_ui::format_info_process_summary_display(
+        processes.len(),
+        runtime_count,
+        processes.iter().map(|process| process.pid),
+        6,
+    )
+}
+
+pub fn format_info_load_summary(
+    summary: &InfoRuntimeLoadSummary,
+    runtime_process_count: usize,
+    recent_window_seconds: i64,
+) -> String {
+    terminal_ui::format_info_load_summary_display(
+        terminal_ui::InfoLoadSummaryDisplay {
+            log_count: summary.log_count,
+            active_inflight_units: summary.active_inflight_units,
+            recent_selection_events: summary.recent_selection_events,
+            recent_first_timestamp: summary.recent_first_timestamp,
+            recent_last_timestamp: summary.recent_last_timestamp,
+        },
+        runtime_process_count,
+        recent_window_seconds,
+    )
+}
+
+pub fn format_runtime_policy_summary(path: Option<&str>, version: Option<u32>) -> String {
+    terminal_ui::format_runtime_policy_summary_display(path, version)
+}
+
+pub fn runtime_policy_json_value(path: Option<&str>, version: Option<u32>) -> serde_json::Value {
+    path.zip(version)
+        .map(|(path, version)| {
+            serde_json::json!({
+                "path": path,
+                "version": version,
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+pub fn format_runtime_logs_summary(directory: &str, format: &str) -> String {
+    terminal_ui::format_runtime_logs_summary_display(directory, format)
+}
+
+pub fn runtime_logs_json_value(directory: &str, format: &str) -> serde_json::Value {
+    serde_json::json!({
+        "directory": directory,
+        "format": format,
+    })
+}
+
+pub fn format_secret_backend_summary_parts(
+    backend: Option<&str>,
+    keyring_service: Option<&str>,
+    error: Option<&str>,
+) -> String {
+    if let Some(err) = error {
+        return format!("invalid ({err})");
+    }
+
+    match (backend, keyring_service) {
+        (Some(backend), Some(service)) => format!("{backend} ({service})"),
+        (Some(backend), None) => backend.to_string(),
+        (None, _) => "invalid (missing backend)".to_string(),
+    }
+}
+
+pub fn secret_backend_json_value_parts(
+    backend: Option<&str>,
+    keyring_service: Option<&str>,
+    error: Option<&str>,
+) -> serde_json::Value {
+    if let Some(err) = error {
+        return serde_json::json!({
+            "invalid": true,
+            "error": err,
+        });
+    }
+
+    serde_json::json!({
+        "backend": backend,
+        "keyring_service": keyring_service,
+    })
+}
+
+pub fn format_info_quota_data_summary(aggregate: &InfoQuotaAggregate) -> String {
+    terminal_ui::format_info_quota_data_summary_display(
+        aggregate.quota_compatible_profiles,
+        aggregate.live_profiles,
+        aggregate.snapshot_profiles,
+        aggregate.unavailable_profiles,
+    )
+}
+
+pub fn format_info_token_usage_summary(summary: &InfoTokenUsageSummary) -> String {
+    let by_profile =
+        summary
+            .by_profile
+            .iter()
+            .map(|(profile, data)| terminal_ui::TokenUsageProfileDisplay {
+                profile,
+                total: token_usage_counts(data.total),
+            });
+
+    terminal_ui::format_info_token_usage_summary_display(
+        summary.event_count,
+        summary.log_count,
+        token_usage_counts(summary.total),
+        by_profile,
+    )
+}
+
+fn token_usage_counts(usage: InfoTokenUsageCounts) -> terminal_ui::TokenUsageCounts {
+    terminal_ui::TokenUsageCounts {
+        input_tokens: usage.input_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        output_tokens: usage.output_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+    }
+}
+
+pub fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {
+    terminal_ui::format_runtime_tuning_workers_display(terminal_ui::RuntimeTuningWorkersDisplay {
+        worker_count: snapshot.worker_count,
+        long_lived_worker_count: snapshot.long_lived_worker_count,
+        async_worker_count: snapshot.async_worker_count,
+        probe_refresh_worker_count: snapshot.probe_refresh_worker_count,
+        active_request_limit: snapshot.active_request_limit,
+        long_lived_queue_capacity: snapshot.long_lived_queue_capacity,
+        lane_responses: snapshot.lane_limits.responses,
+        lane_compact: snapshot.lane_limits.compact,
+        lane_websocket: snapshot.lane_limits.websocket,
+        lane_standard: snapshot.lane_limits.standard,
+        websocket_connect_worker_count: snapshot.websocket_connect_worker_count,
+        websocket_connect_queue_capacity: snapshot.websocket_connect_queue_capacity,
+        websocket_connect_overflow_capacity: snapshot.websocket_connect_overflow_capacity,
+        websocket_dns_worker_count: snapshot.websocket_dns_worker_count,
+        websocket_dns_queue_capacity: snapshot.websocket_dns_queue_capacity,
+        websocket_dns_overflow_capacity: snapshot.websocket_dns_overflow_capacity,
+    })
+}
+
+pub fn format_runtime_tuning_budgets(snapshot: &RuntimeTuningSnapshot) -> String {
+    terminal_ui::format_runtime_tuning_budgets_display(terminal_ui::RuntimeTuningBudgetsDisplay {
+        precommit_attempt_limit: snapshot.precommit_attempt_limit,
+        precommit_budget_ms: snapshot.precommit_budget_ms,
+        pressure_precommit_attempt_limit: snapshot.pressure_precommit_attempt_limit,
+        pressure_precommit_budget_ms: snapshot.pressure_precommit_budget_ms,
+        continuation_precommit_attempt_limit: snapshot.continuation_precommit_attempt_limit,
+        continuation_precommit_budget_ms: snapshot.continuation_precommit_budget_ms,
+        admission_wait_budget_ms: snapshot.admission_wait_budget_ms,
+        pressure_admission_wait_budget_ms: snapshot.pressure_admission_wait_budget_ms,
+        long_lived_queue_wait_budget_ms: snapshot.long_lived_queue_wait_budget_ms,
+        pressure_long_lived_queue_wait_budget_ms: snapshot.pressure_long_lived_queue_wait_budget_ms,
+    })
+}
+
+pub fn format_runtime_tuning_transport(snapshot: &RuntimeTuningSnapshot) -> String {
+    terminal_ui::format_runtime_tuning_transport_display(
+        terminal_ui::RuntimeTuningTransportDisplay {
+            http_connect_timeout_ms: snapshot.http_connect_timeout_ms,
+            stream_idle_timeout_ms: snapshot.stream_idle_timeout_ms,
+            sse_lookahead_timeout_ms: snapshot.sse_lookahead_timeout_ms,
+            websocket_connect_timeout_ms: snapshot.websocket_connect_timeout_ms,
+            websocket_precommit_progress_timeout_ms: snapshot
+                .websocket_precommit_progress_timeout_ms,
+            websocket_happy_eyeballs_delay_ms: snapshot.websocket_happy_eyeballs_delay_ms,
+            websocket_previous_response_reuse_stale_ms: snapshot
+                .websocket_previous_response_reuse_stale_ms,
+            profile_inflight_soft_limit: snapshot.profile_inflight_soft_limit,
+            profile_inflight_hard_limit: snapshot.profile_inflight_hard_limit,
+        },
+    )
+}
+
+pub fn format_info_pool_remaining(
+    total_remaining: i64,
+    profiles_with_data: usize,
+    earliest_reset_at: Option<i64>,
+) -> String {
+    let earliest_reset =
+        earliest_reset_at.map(|reset_at| format_precise_reset_time(Some(reset_at)));
+    terminal_ui::format_info_pool_remaining_display(
+        total_remaining,
+        profiles_with_data,
+        earliest_reset.as_deref(),
+    )
+}
+
+pub fn format_info_runway(
+    profiles_with_data: usize,
+    current_remaining: i64,
+    earliest_reset_at: Option<i64>,
+    estimate: Option<&InfoRunwayEstimate>,
+    now: i64,
+) -> String {
+    let reset_text =
+        earliest_reset_at.map(|reset_at| (reset_at, format_precise_reset_time(Some(reset_at))));
+    let earliest_reset =
+        reset_text.as_ref().map(
+            |(reset_at, reset_text)| terminal_ui::InfoRunwayResetDisplay {
+                reset_at: *reset_at,
+                reset_text,
+            },
+        );
+    let exhaust_text =
+        estimate.map(|estimate| format_precise_reset_time(Some(estimate.exhaust_at)));
+    let estimate = estimate
+        .zip(exhaust_text.as_deref())
+        .map(
+            |(estimate, exhaust_text)| terminal_ui::InfoRunwayEstimateDisplay {
+                burn_per_hour: estimate.burn_per_hour,
+                observed_profiles: estimate.observed_profiles,
+                observed_span_seconds: estimate.observed_span_seconds,
+                exhaust_at: estimate.exhaust_at,
+                exhaust_text,
+            },
+        );
+
+    terminal_ui::format_info_runway_display(
+        profiles_with_data,
+        current_remaining,
+        earliest_reset,
+        estimate,
+        now,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,5 +987,107 @@ mod tests {
 
         assert_eq!(summary.event_count, 1);
         assert_eq!(summary.total.input_tokens, 100);
+    }
+
+    #[test]
+    fn active_runtime_log_paths_filter_to_runtime_processes() {
+        let processes = vec![
+            ProdexProcessInfo {
+                pid: 200,
+                runtime: true,
+            },
+            ProdexProcessInfo {
+                pid: 201,
+                runtime: false,
+            },
+        ];
+        let paths = select_active_runtime_log_paths(
+            &processes,
+            [
+                PathBuf::from("/tmp/prodex-runtime-200-old.log"),
+                PathBuf::from("/tmp/prodex-runtime-201-ignored.log"),
+                PathBuf::from("/tmp/prodex-runtime-200-new.log"),
+            ],
+        );
+
+        assert_eq!(
+            paths,
+            vec![PathBuf::from("/tmp/prodex-runtime-200-new.log")]
+        );
+    }
+
+    #[test]
+    fn recent_runtime_log_paths_sort_by_modified_then_path_descending() {
+        let base = std::time::UNIX_EPOCH;
+        let paths = select_recent_runtime_log_paths(
+            [
+                (
+                    PathBuf::from("/tmp/prodex-runtime-100-a.log"),
+                    base + std::time::Duration::from_secs(5),
+                ),
+                (
+                    PathBuf::from("/tmp/prodex-runtime-100-b.log"),
+                    base + std::time::Duration::from_secs(5),
+                ),
+                (
+                    PathBuf::from("/tmp/prodex-runtime-100-c.log"),
+                    base + std::time::Duration::from_secs(1),
+                ),
+            ],
+            2,
+        );
+
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/tmp/prodex-runtime-100-b.log"),
+                PathBuf::from("/tmp/prodex-runtime-100-a.log"),
+            ]
+        );
+    }
+
+    #[test]
+    fn runtime_info_summary_parts_preserve_display_and_json_shapes() {
+        assert_eq!(
+            format_runtime_policy_summary(Some("/tmp/policy.toml"), Some(1)),
+            "/tmp/policy.toml (v1)"
+        );
+        assert_eq!(format_runtime_policy_summary(None, None), "disabled");
+        assert_eq!(
+            runtime_policy_json_value(Some("/tmp/policy.toml"), Some(1)),
+            serde_json::json!({"path": "/tmp/policy.toml", "version": 1})
+        );
+        assert_eq!(
+            runtime_policy_json_value(None, None),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            format_runtime_logs_summary("/tmp/prodex", "json"),
+            "/tmp/prodex (json)"
+        );
+        assert_eq!(
+            runtime_logs_json_value("/tmp/prodex", "json"),
+            serde_json::json!({"directory": "/tmp/prodex", "format": "json"})
+        );
+    }
+
+    #[test]
+    fn secret_backend_summary_parts_preserve_display_and_json_shapes() {
+        assert_eq!(
+            format_secret_backend_summary_parts(Some("keyring"), Some("prodex"), None),
+            "keyring (prodex)"
+        );
+        assert_eq!(
+            secret_backend_json_value_parts(Some("file"), None, None),
+            serde_json::json!({"backend": "file", "keyring_service": null})
+        );
+        assert_eq!(
+            format_secret_backend_summary_parts(None, None, Some("bad config")),
+            "invalid (bad config)"
+        );
+        assert_eq!(
+            secret_backend_json_value_parts(None, None, Some("bad config")),
+            serde_json::json!({"invalid": true, "error": "bad config"})
+        );
     }
 }

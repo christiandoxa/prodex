@@ -93,9 +93,13 @@ pub(crate) fn schedule_runtime_probe_refresh(
             queued_at,
         },
     );
-    let backlog = pending.len().saturating_sub(1);
+    let queue_plan = runtime_background_queue_enqueue_plan(
+        prodex_runtime_state::RuntimeBackgroundQueueKind::ProbeRefresh,
+        pending.len(),
+    );
     drop(pending);
     queue.wake.notify_one();
+    let backlog = queue_plan.backlog;
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -107,7 +111,7 @@ pub(crate) fn schedule_runtime_probe_refresh(
             ],
         ),
     );
-    if runtime_proxy_queue_pressure_active(0, 0, backlog) {
+    if queue_plan.pressure_active {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -139,20 +143,26 @@ pub(crate) fn runtime_profiles_needing_startup_probe_refresh(
     profile_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
     now: i64,
 ) -> Vec<String> {
-    active_profile_selection_order(state, current_profile)
-        .into_iter()
-        .filter(|profile_name| {
-            let probe_fresh = profile_probe_cache.get(profile_name).is_some_and(|entry| {
-                runtime_profile_probe_cache_freshness(entry, now)
-                    == RuntimeProbeCacheFreshness::Fresh
-            });
-            let snapshot_usable = profile_usage_snapshots
-                .get(profile_name)
-                .is_some_and(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now));
-            !probe_fresh && !snapshot_usable
-        })
-        .take(RUNTIME_STARTUP_PROBE_WARM_LIMIT)
-        .collect()
+    prodex_runtime_state::runtime_profiles_needing_startup_probe_refresh_from_snapshots(
+        active_profile_selection_order(state, current_profile)
+            .into_iter()
+            .map(
+                |profile_name| prodex_runtime_state::RuntimeStartupProbeRefreshInput {
+                    probe_checked_at: profile_probe_cache
+                        .get(&profile_name)
+                        .map(|entry| entry.checked_at),
+                    usage_snapshot: profile_usage_snapshots.get(&profile_name),
+                    profile_name,
+                },
+            ),
+        prodex_runtime_state::RuntimeStartupProbeRefreshPlan {
+            now,
+            probe_fresh_seconds: RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS,
+            stale_grace_seconds: RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+            warm_limit: RUNTIME_STARTUP_PROBE_WARM_LIMIT,
+        },
+        |status| matches!(status, RuntimeQuotaWindowStatus::Exhausted),
+    )
 }
 
 pub(crate) fn run_runtime_probe_jobs_inline(
@@ -337,39 +347,29 @@ fn apply_runtime_profile_probe_result_to_runtime(
         let quota_summary =
             runtime_quota_summary_from_usage_snapshot(&snapshot, RuntimeRouteKind::Responses);
         let blocking_reset_at =
-            runtime_quota_summary_blocking_reset_at(quota_summary, RuntimeRouteKind::Responses)
-                .filter(|reset_at| *reset_at > now);
-        let quarantine_until =
-            runtime_quota_precommit_guard_reason(quota_summary, RuntimeRouteKind::Responses).map(
-                |_| {
-                    blocking_reset_at.unwrap_or_else(|| {
-                        now.saturating_add(RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS)
-                    })
-                },
-            );
-        let mut quarantine_applied = None;
-        if let Some(until) = quarantine_until {
-            let next_until = runtime
-                .profile_retry_backoff_until
-                .get(profile_name)
-                .copied()
-                .unwrap_or(until)
-                .max(until);
+            runtime_quota_summary_blocking_reset_at(quota_summary, RuntimeRouteKind::Responses);
+        let usage_apply_plan = prodex_runtime_state::runtime_probe_usage_snapshot_apply_plan(
+            prodex_runtime_state::RuntimeProbeUsageSnapshotApplyInput {
+                previous_snapshot: previous_snapshot.as_ref(),
+                previous_retry_backoff_until: previous_retry_backoff,
+                next_snapshot: &snapshot,
+                quota_blocked: runtime_quota_precommit_guard_reason(
+                    quota_summary,
+                    RuntimeRouteKind::Responses,
+                )
+                .is_some(),
+                blocking_reset_at,
+                now,
+                quota_quarantine_fallback_seconds:
+                    RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS,
+                touch_persist_interval_seconds: RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS,
+            },
+        );
+        if let Some(until) = usage_apply_plan.retry_backoff_until {
             runtime
                 .profile_retry_backoff_until
-                .insert(profile_name.to_string(), next_until);
-            quarantine_applied = Some(next_until);
+                .insert(profile_name.to_string(), until);
         }
-        let snapshot_should_persist = runtime_profile_usage_snapshot_should_persist(
-            previous_snapshot.as_ref(),
-            &snapshot,
-            now,
-        );
-        let retry_backoff_changed = runtime
-            .profile_retry_backoff_until
-            .get(profile_name)
-            .copied()
-            != previous_retry_backoff;
         runtime
             .profile_usage_snapshots
             .insert(profile_name.to_string(), snapshot);
@@ -379,20 +379,20 @@ fn apply_runtime_profile_probe_result_to_runtime(
                 runtime_quota_summary_log_fields(quota_summary)
             ));
         }
-        if let Some(until) = quarantine_applied
-            && retry_backoff_changed
+        if let Some(until) = usage_apply_plan.retry_backoff_until
+            && usage_apply_plan.retry_backoff_changed
         {
             log_messages.push(format!(
                 "profile_quota_quarantine profile={profile_name} route={} until={} reset_at={} message=probe_snapshot",
                 runtime_route_kind_label(RuntimeRouteKind::Responses),
                 until,
-                blocking_reset_at.unwrap_or(i64::MAX),
+                usage_apply_plan.blocking_reset_at.unwrap_or(i64::MAX),
             ));
             log_messages.push(format!(
                 "profile_retry_backoff profile={profile_name} until={until}",
             ));
         }
-        if snapshot_should_persist || retry_backoff_changed {
+        if usage_apply_plan.snapshot_should_persist || usage_apply_plan.retry_backoff_changed {
             state_save_args = Some(RuntimeStateSaveRequest::from_snapshot(
                 runtime_state_save_snapshot_from_runtime(runtime),
                 &format!("usage_snapshot:{profile_name}"),
@@ -457,31 +457,6 @@ fn apply_runtime_profile_probe_result_with_timeout(
             }
         }
     }
-}
-
-pub(crate) fn runtime_profile_usage_snapshot_materially_matches(
-    previous: &RuntimeProfileUsageSnapshot,
-    next: &RuntimeProfileUsageSnapshot,
-) -> bool {
-    previous.five_hour_status == next.five_hour_status
-        && previous.five_hour_remaining_percent == next.five_hour_remaining_percent
-        && previous.five_hour_reset_at == next.five_hour_reset_at
-        && previous.weekly_status == next.weekly_status
-        && previous.weekly_remaining_percent == next.weekly_remaining_percent
-        && previous.weekly_reset_at == next.weekly_reset_at
-}
-
-pub(crate) fn runtime_profile_usage_snapshot_should_persist(
-    previous: Option<&RuntimeProfileUsageSnapshot>,
-    next: &RuntimeProfileUsageSnapshot,
-    now: i64,
-) -> bool {
-    let Some(previous) = previous else {
-        return true;
-    };
-
-    !runtime_profile_usage_snapshot_materially_matches(previous, next)
-        || runtime_binding_touch_should_persist(previous.checked_at, now)
 }
 
 fn runtime_probe_refresh_take_next_job(queue: &RuntimeProbeRefreshQueue) -> RuntimeProbeRefreshJob {

@@ -11,6 +11,7 @@ pub const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5.4";
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 pub const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 pub const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
+pub const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
 
@@ -34,10 +35,50 @@ pub struct RuntimeProxyRequest {
     pub body: Vec<u8>,
 }
 
+impl RuntimeProxyRequest {
+    pub fn from_parts(
+        method: impl Into<String>,
+        path_and_query: impl Into<String>,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> Self {
+        Self {
+            method: method.into(),
+            path_and_query: path_and_query.into(),
+            headers,
+            body,
+        }
+    }
+
+    pub fn into_parts(self) -> (String, String, Vec<(String, String)>, Vec<u8>) {
+        (self.method, self.path_and_query, self.headers, self.body)
+    }
+}
+
 pub struct RuntimeBufferedResponseParts {
     pub status: u16,
     pub headers: Vec<(String, Vec<u8>)>,
     pub body: Vec<u8>,
+}
+
+pub type RuntimeBufferedResponsePartsTuple = (u16, Vec<(String, Vec<u8>)>, Vec<u8>);
+
+impl RuntimeBufferedResponseParts {
+    pub fn from_parts(status: u16, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            headers,
+            body,
+        }
+    }
+
+    pub fn from_body_slice(status: u16, headers: Vec<(String, Vec<u8>)>, body: &[u8]) -> Self {
+        Self::from_parts(status, headers, body.to_vec())
+    }
+
+    pub fn into_parts(self) -> RuntimeBufferedResponsePartsTuple {
+        (self.status, self.headers, self.body)
+    }
 }
 
 #[allow(clippy::large_enum_variant)]

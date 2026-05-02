@@ -2,8 +2,8 @@ use super::*;
 #[cfg(test)]
 pub(crate) use prodex_runtime_launch::local_proxy_bypass_env;
 pub(crate) use prodex_runtime_launch::{
-    codex_sandbox_removed_env, extract_prodex_dry_run_flag, prepare_codex_launch_args,
-    prodex_dry_run_requested, remove_upstream_proxy_env,
+    RuntimeLaunchDryRunChild, codex_sandbox_removed_env, extract_prodex_dry_run_flag,
+    prepare_codex_launch_args, prodex_dry_run_requested, remove_upstream_proxy_env,
 };
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
@@ -92,11 +92,6 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     )
 }
 
-pub(crate) enum RuntimeLaunchDryRunChild {
-    Codex { codex_args: Vec<OsString> },
-    Caveman { codex_args: Vec<OsString> },
-}
-
 pub(crate) fn print_runtime_launch_dry_run(
     flow: &str,
     request: RuntimeLaunchRequest<'_>,
@@ -104,108 +99,33 @@ pub(crate) fn print_runtime_launch_dry_run(
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
     let prepared = prepare_runtime_launch_dry_run(request)?;
-    let runtime_proxy = prepared.runtime_proxy.as_ref();
-    let plan = match child {
-        RuntimeLaunchDryRunChild::Codex { codex_args } => {
-            let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
-            let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
-            if upstream_no_proxy && runtime_proxy.is_none() {
-                remove_upstream_proxy_env(&mut child);
-            }
-            RuntimeLaunchPlan::new(child)
-        }
-        RuntimeLaunchDryRunChild::Caveman { codex_args } => {
-            let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
-            let caveman_home =
-                dry_run_caveman_home_placeholder(&prepared.paths, &prepared.codex_home);
-            let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
-            if upstream_no_proxy && runtime_proxy.is_none() {
-                remove_upstream_proxy_env(&mut child);
-            }
-            RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home)
-        }
-    };
-    let output = runtime_launch_dry_run_report(flow, &prepared, &plan);
+    let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref());
+    let plan = prodex_runtime_launch::runtime_launch_dry_run_plan(
+        codex_bin(),
+        &prepared.codex_home,
+        &prepared.paths.managed_profiles_root,
+        runtime_proxy,
+        upstream_no_proxy,
+        SUPER_LOCAL_PROVIDER_ID,
+        child,
+    );
+    let output = prodex_runtime_launch::runtime_launch_dry_run_report(
+        flow,
+        &prepared.codex_home,
+        runtime_proxy,
+        &plan,
+    );
     print!("{output}");
     Ok(())
 }
 
-fn dry_run_caveman_home_placeholder(paths: &AppPaths, base_codex_home: &Path) -> PathBuf {
-    paths.managed_profiles_root.join(format!(
-        ".caveman-dry-run-from-{}",
-        base_codex_home
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("profile")
-    ))
-}
-
-pub(crate) fn runtime_launch_dry_run_report(
-    flow: &str,
-    prepared: &PreparedRuntimeLaunch,
-    plan: &RuntimeLaunchPlan,
-) -> String {
-    let child = &plan.child;
-    let provider = dry_run_config_value(&child.args, &prepared.codex_home, "model_provider")
-        .unwrap_or_else(|| "openai".to_string());
-    let model = dry_run_config_value(&child.args, &prepared.codex_home, "model")
-        .unwrap_or_else(|| "(codex default)".to_string());
-    let mut output = String::new();
-    output.push_str("Prodex dry run: launch diagnostics\n");
-    output.push_str(&format!("Flow: {flow}\n"));
-    output.push_str(&format!(
-        "Binary: {}\n",
-        redaction_display_os(&child.binary)
-    ));
-    output.push_str(&format!("Provider: {provider}\n"));
-    output.push_str(&format!("Model: {model}\n"));
-    output.push_str(&format!("CODEX_HOME: {}\n", child.codex_home.display()));
-    output.push_str(&format!(
-        "Runtime proxy: {}\n",
-        prepared
-            .runtime_proxy
-            .as_ref()
-            .map(|proxy| {
-                if proxy.listen_addr.port() == 0 {
-                    format!("would be enabled with mount {}", proxy.openai_mount_path)
-                } else {
-                    format!(
-                        "enabled at http://{}{}",
-                        proxy.listen_addr, proxy.openai_mount_path
-                    )
-                }
-            })
-            .unwrap_or_else(|| "disabled".to_string())
-    ));
-    output.push_str("Args:\n");
-    if child.args.is_empty() {
-        output.push_str("  (none)\n");
-    } else {
-        for arg in redaction_redacted_cli_args(&child.args) {
-            output.push_str(&format!("  {arg}\n"));
-        }
-    }
-    output.push_str("Env:\n");
-    output.push_str(&format!("  CODEX_HOME={}\n", child.codex_home.display()));
-    for (key, value) in &child.extra_env {
-        output.push_str(&format!(
-            "  {}={}\n",
-            redaction_display_os(key),
-            redaction_redacted_env_value(key, value)
-        ));
-    }
-    if !child.removed_env.is_empty() {
-        output.push_str("Removed env:\n");
-        for key in &child.removed_env {
-            output.push_str(&format!("  {}\n", redaction_display_os(key)));
-        }
-    }
-    output.push_str("Codex/TUI not started because --dry-run was set.\n");
-    output
-}
-
-fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
-    codex_cli_config_override_value(args, key).or_else(|| codex_config_value(codex_home, key))
+fn runtime_proxy_codex_endpoint(
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+) -> Option<prodex_runtime_launch::RuntimeProxyCodexEndpoint<'_>> {
+    runtime_proxy.map(|proxy| prodex_runtime_launch::RuntimeProxyCodexEndpoint {
+        listen_addr: proxy.listen_addr,
+        openai_mount_path: &proxy.openai_mount_path,
+    })
 }
 
 #[cfg(test)]
@@ -467,7 +387,12 @@ mod tests {
             runtime_proxy: None,
         };
 
-        let report = runtime_launch_dry_run_report("run", &prepared, &plan);
+        let report = prodex_runtime_launch::runtime_launch_dry_run_report(
+            "run",
+            &prepared.codex_home,
+            runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref()),
+            &plan,
+        );
 
         assert!(report.contains("Model: gpt-5.4"));
         assert!(report.contains("ANTHROPIC_AUTH_TOKEN=<redacted>"));

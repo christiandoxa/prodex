@@ -3,7 +3,7 @@ use super::*;
 pub(super) use prodex_runtime_broker::{
     RuntimeBrokerContinuityFailureReasonMetrics, RuntimeBrokerHealth, RuntimeBrokerLaneMetrics,
     RuntimeBrokerMetadata, RuntimeBrokerMetrics, RuntimeBrokerObservation, RuntimeBrokerRegistry,
-    RuntimeBrokerRouteContinuityMetrics, RuntimeBrokerTrafficMetrics, RuntimeProdexBinaryIdentity,
+    RuntimeBrokerTrafficMetrics, RuntimeBrokerVersionGuardOutcome, RuntimeProdexBinaryIdentity,
     parse_prodex_version_output, runtime_health_prodex_binary_identity,
     runtime_prodex_binary_identity_key, runtime_prodex_binary_identity_matches,
     runtime_registry_prodex_binary_identity,

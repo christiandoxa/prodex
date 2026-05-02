@@ -49,6 +49,7 @@ pub(crate) fn ensure_path_is_unique(state: &AppState, candidate: &Path) -> Resul
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn validate_profile_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("profile name cannot be empty");

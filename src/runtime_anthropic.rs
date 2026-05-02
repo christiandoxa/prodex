@@ -7,7 +7,8 @@ pub(super) use anthropic::{
     RuntimeAnthropicNativeClientToolCall, RuntimeAnthropicNativeClientToolKind,
     RuntimeAnthropicRegisteredServerTool, RuntimeAnthropicServerToolUsage,
     RuntimeAnthropicServerTools, RuntimeAnthropicSseReader, RuntimeAnthropicStreamToolUse,
-    RuntimeAnthropicTranslatedTools, runtime_anthropic_code_execution_request_count_from_output,
+    RuntimeAnthropicTranslatedTools, runtime_anthropic_buffered_reply_parts,
+    runtime_anthropic_code_execution_request_count_from_output,
     runtime_anthropic_computer_key_combo_from_output_action,
     runtime_anthropic_computer_tool_input_from_output_item,
     runtime_anthropic_computer_tool_use_block_from_output_item,
@@ -94,40 +95,12 @@ pub(super) use anthropic::{
 pub(super) fn handle_runtime_proxy_anthropic_compat_request(
     request: &tiny_http::Request,
 ) -> Option<tiny_http::ResponseBox> {
-    let path = path_without_query(request.url());
-    let method = request.method().as_str();
-    if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
-        return None;
-    }
-
-    match path {
-        "/" => Some(build_runtime_proxy_json_response(
-            200,
-            serde_json::json!({
-                "service": "prodex",
-                "status": "ok",
-                "version": env!("CARGO_PKG_VERSION"),
-            })
-            .to_string(),
-        )),
-        RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH => Some(build_runtime_proxy_json_response(
-            200,
-            serde_json::json!({
-                "status": "ok",
-            })
-            .to_string(),
-        )),
-        RUNTIME_PROXY_ANTHROPIC_MODELS_PATH => Some(build_runtime_proxy_json_response(
-            200,
-            runtime_proxy_anthropic_models_list().to_string(),
-        )),
-        _ => runtime_proxy_anthropic_model_id_from_path(path).map(|model_id| {
-            build_runtime_proxy_json_response(
-                200,
-                runtime_proxy_anthropic_model_descriptor(model_id).to_string(),
-            )
-        }),
-    }
+    anthropic::runtime_proxy_anthropic_compat_json_response(
+        request.method().as_str(),
+        request.url(),
+        env!("CARGO_PKG_VERSION"),
+    )
+    .map(|response| build_runtime_proxy_json_response(response.status, response.body.to_string()))
 }
 
 #[derive(Debug, Clone)]
@@ -144,50 +117,52 @@ pub(super) struct RuntimeAnthropicMessagesRequest {
 }
 
 fn runtime_request_to_anthropic(request: &RuntimeProxyRequest) -> anthropic::RuntimeProxyRequest {
-    anthropic::RuntimeProxyRequest {
-        method: request.method.clone(),
-        path_and_query: request.path_and_query.clone(),
-        headers: request.headers.clone(),
-        body: request.body.clone(),
-    }
+    anthropic::RuntimeProxyRequest::from_parts(
+        request.method.clone(),
+        request.path_and_query.clone(),
+        request.headers.clone(),
+        request.body.clone(),
+    )
 }
 
 fn runtime_request_from_anthropic(request: anthropic::RuntimeProxyRequest) -> RuntimeProxyRequest {
+    let (method, path_and_query, headers, body) = request.into_parts();
     RuntimeProxyRequest {
-        method: request.method,
-        path_and_query: request.path_and_query,
-        headers: request.headers,
-        body: request.body,
+        method,
+        path_and_query,
+        headers,
+        body,
     }
 }
 
 fn buffered_parts_to_anthropic(
     parts: RuntimeBufferedResponseParts,
 ) -> anthropic::RuntimeBufferedResponseParts {
-    anthropic::RuntimeBufferedResponseParts {
-        status: parts.status,
-        headers: parts.headers,
-        body: parts.body.into_vec(),
-    }
+    anthropic::RuntimeBufferedResponseParts::from_parts(
+        parts.status,
+        parts.headers,
+        parts.body.into_vec(),
+    )
 }
 
 fn buffered_parts_ref_to_anthropic(
     parts: &RuntimeBufferedResponseParts,
 ) -> anthropic::RuntimeBufferedResponseParts {
-    anthropic::RuntimeBufferedResponseParts {
-        status: parts.status,
-        headers: parts.headers.clone(),
-        body: parts.body.to_vec(),
-    }
+    anthropic::RuntimeBufferedResponseParts::from_body_slice(
+        parts.status,
+        parts.headers.clone(),
+        &parts.body,
+    )
 }
 
 fn buffered_parts_from_anthropic(
     parts: anthropic::RuntimeBufferedResponseParts,
 ) -> RuntimeBufferedResponseParts {
+    let (status, headers, body) = parts.into_parts();
     RuntimeBufferedResponseParts {
-        status: parts.status,
-        headers: parts.headers,
-        body: parts.body.into(),
+        status,
+        headers,
+        body: body.into(),
     }
 }
 
@@ -230,47 +205,6 @@ pub(super) fn translate_runtime_anthropic_messages_request(
         .map(messages_request_from_anthropic)
 }
 
-pub(super) fn runtime_anthropic_json_response_parts(
-    value: serde_json::Value,
-) -> RuntimeBufferedResponseParts {
-    buffered_parts_from_anthropic(anthropic::runtime_anthropic_json_response_parts(value))
-}
-
-pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(
-    value: serde_json::Value,
-) -> RuntimeBufferedResponseParts {
-    buffered_parts_from_anthropic(
-        anthropic::runtime_anthropic_sse_response_parts_from_message_value(value),
-    )
-}
-
-pub(super) fn runtime_buffered_response_ids(parts: &RuntimeBufferedResponseParts) -> Vec<String> {
-    anthropic::runtime_buffered_response_ids(&buffered_parts_ref_to_anthropic(parts))
-}
-
-pub(super) fn runtime_request_for_anthropic_server_tool_followup(
-    request: &RuntimeProxyRequest,
-    previous_response_id: &str,
-) -> Result<RuntimeProxyRequest> {
-    anthropic::runtime_request_for_anthropic_server_tool_followup(
-        &runtime_request_to_anthropic(request),
-        previous_response_id,
-    )
-    .map(runtime_request_from_anthropic)
-}
-
-pub(super) fn runtime_anthropic_message_from_buffered_responses_parts_with_carried_usage(
-    parts: &RuntimeBufferedResponseParts,
-    request: &RuntimeAnthropicMessagesRequest,
-    carried_usage: RuntimeAnthropicServerToolUsage,
-) -> Result<serde_json::Value> {
-    anthropic::runtime_anthropic_message_from_buffered_responses_parts_with_carried_usage(
-        &buffered_parts_ref_to_anthropic(parts),
-        &messages_request_to_anthropic(request),
-        carried_usage,
-    )
-}
-
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     body: &[u8],
@@ -292,6 +226,27 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     .map(buffered_parts_from_anthropic)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(
+    value: serde_json::Value,
+) -> RuntimeBufferedResponseParts {
+    buffered_parts_from_anthropic(
+        anthropic::runtime_anthropic_sse_response_parts_from_message_value(value),
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn runtime_request_for_anthropic_server_tool_followup(
+    request: &RuntimeProxyRequest,
+    previous_response_id: &str,
+) -> Result<RuntimeProxyRequest> {
+    anthropic::runtime_request_for_anthropic_server_tool_followup(
+        &runtime_request_to_anthropic(request),
+        previous_response_id,
+    )
+    .map(runtime_request_from_anthropic)
+}
+
 #[allow(dead_code)]
 pub(super) fn runtime_anthropic_error_message_from_parts(
     parts: &RuntimeBufferedResponseParts,
@@ -306,14 +261,6 @@ pub(super) fn build_runtime_anthropic_error_parts(
 ) -> RuntimeBufferedResponseParts {
     buffered_parts_from_anthropic(anthropic::build_runtime_anthropic_error_parts(
         status, error_type, message,
-    ))
-}
-
-pub(super) fn runtime_anthropic_error_from_upstream_parts(
-    parts: RuntimeBufferedResponseParts,
-) -> RuntimeBufferedResponseParts {
-    buffered_parts_from_anthropic(anthropic::runtime_anthropic_error_from_upstream_parts(
-        buffered_parts_to_anthropic(parts),
     ))
 }
 
@@ -347,14 +294,15 @@ pub(super) fn translate_runtime_buffered_responses_reply_to_anthropic(
         buffered_parts_to_anthropic(parts),
         &messages_request_to_anthropic(request),
     )?;
-    match reply {
-        anthropic::RuntimeResponsesReply::Buffered(parts) => Ok(RuntimeResponsesReply::Buffered(
-            buffered_parts_from_anthropic(parts),
-        )),
-        anthropic::RuntimeResponsesReply::Streaming(_) => {
-            bail!("Anthropic buffered translation unexpectedly returned streaming response")
-        }
-    }
+    runtime_responses_reply_from_anthropic(reply)
+}
+
+fn runtime_responses_reply_from_anthropic(
+    reply: anthropic::RuntimeResponsesReply,
+) -> Result<RuntimeResponsesReply> {
+    runtime_anthropic_buffered_reply_parts(reply)
+        .map(buffered_parts_from_anthropic)
+        .map(RuntimeResponsesReply::Buffered)
 }
 
 pub(super) fn translate_runtime_responses_reply_to_anthropic(
@@ -364,107 +312,56 @@ pub(super) fn translate_runtime_responses_reply_to_anthropic(
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
     if request.server_tools.needs_buffered_translation() {
-        let mut parts = match response {
+        let parts = match response {
             RuntimeResponsesReply::Buffered(parts) => parts,
             RuntimeResponsesReply::Streaming(response) => {
                 buffer_runtime_streaming_response_parts(response)?
             }
         };
-        let mut carried_usage = RuntimeAnthropicServerToolUsage {
-            web_search_requests: request.carried_web_search_requests,
-            web_fetch_requests: request.carried_web_fetch_requests,
-            code_execution_requests: request.carried_code_execution_requests,
-            tool_search_requests: request.carried_tool_search_requests,
-        };
-
-        for followup_attempt in 0..=RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT {
-            if std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some() {
+        let anthropic_request = messages_request_to_anthropic(request);
+        let debug_anthropic = std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some();
+        let reply = anthropic::translate_runtime_buffered_responses_reply_to_anthropic_with_server_tool_followups(
+            buffered_parts_to_anthropic(parts),
+            &anthropic_request,
+            RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT,
+            |observation| {
+                if debug_anthropic {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http anthropic_translated_upstream status={} content_type={:?} followup_attempt={} body_snippet={}",
+                            observation.status,
+                            observation.content_type,
+                            observation.followup_attempt,
+                            runtime_proxy_redacted_body_snippet(observation.body, 2048),
+                        ),
+                    );
+                }
+            },
+            |followup| {
+                let anthropic::RuntimeAnthropicServerToolFollowup {
+                    previous_response_id,
+                    attempt,
+                    request: followup_request,
+                } = followup;
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} transport=http anthropic_translated_upstream status={} content_type={:?} followup_attempt={} body_snippet={}",
-                        parts.status,
-                        runtime_buffered_response_content_type(&parts),
-                        followup_attempt,
-                        runtime_proxy_redacted_body_snippet(&parts.body, 2048),
+                        "request={request_id} transport=http anthropic_server_tool_followup previous_response_id={previous_response_id} attempt={attempt}",
                     ),
                 );
-            }
+                let followup_request = runtime_request_from_anthropic(followup_request);
+                let parts = match proxy_runtime_responses_request(request_id, &followup_request, shared)? {
+                    RuntimeResponsesReply::Buffered(parts) => parts,
+                    RuntimeResponsesReply::Streaming(response) => {
+                        buffer_runtime_streaming_response_parts(response)?
+                    }
+                };
+                Ok(buffered_parts_to_anthropic(parts))
+            },
+        )?;
 
-            if parts.status >= 400 {
-                return Ok(RuntimeResponsesReply::Buffered(
-                    runtime_anthropic_error_from_upstream_parts(parts),
-                ));
-            }
-
-            if !runtime_response_body_looks_like_sse(&parts.body)
-                && !runtime_buffered_response_content_type(&parts)
-                    .unwrap_or_default()
-                    .to_ascii_lowercase()
-                    .contains("text/event-stream")
-                && serde_json::from_slice::<serde_json::Value>(&parts.body)
-                    .ok()
-                    .is_some_and(|value| value.get("error").is_some())
-            {
-                return Ok(RuntimeResponsesReply::Buffered(
-                    runtime_anthropic_error_from_upstream_parts(parts),
-                ));
-            }
-
-            let response_message =
-                runtime_anthropic_message_from_buffered_responses_parts_with_carried_usage(
-                    &parts,
-                    request,
-                    carried_usage,
-                )?;
-            carried_usage = runtime_anthropic_message_server_tool_usage(&response_message);
-
-            if followup_attempt == RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT
-                || !runtime_anthropic_message_needs_server_tool_followup(&response_message)
-            {
-                if request.stream {
-                    return Ok(RuntimeResponsesReply::Buffered(
-                        runtime_anthropic_sse_response_parts_from_message_value(response_message),
-                    ));
-                }
-
-                return Ok(RuntimeResponsesReply::Buffered(
-                    runtime_anthropic_json_response_parts(response_message),
-                ));
-            }
-
-            let Some(previous_response_id) = runtime_buffered_response_ids(&parts).last().cloned()
-            else {
-                if request.stream {
-                    return Ok(RuntimeResponsesReply::Buffered(
-                        runtime_anthropic_sse_response_parts_from_message_value(response_message),
-                    ));
-                }
-                return Ok(RuntimeResponsesReply::Buffered(
-                    runtime_anthropic_json_response_parts(response_message),
-                ));
-            };
-
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http anthropic_server_tool_followup previous_response_id={previous_response_id} attempt={}",
-                    followup_attempt + 1,
-                ),
-            );
-            let followup_request = runtime_request_for_anthropic_server_tool_followup(
-                &request.translated_request,
-                &previous_response_id,
-            )?;
-            parts = match proxy_runtime_responses_request(request_id, &followup_request, shared)? {
-                RuntimeResponsesReply::Buffered(parts) => parts,
-                RuntimeResponsesReply::Streaming(response) => {
-                    buffer_runtime_streaming_response_parts(response)?
-                }
-            };
-        }
-
-        unreachable!("anthropic buffered server-tool translation should return inside loop");
+        return runtime_responses_reply_from_anthropic(reply);
     }
 
     match response {

@@ -16,8 +16,7 @@ pub(crate) use self::policy::{
     runtime_candidate_no_rotate_affinity, runtime_previous_response_not_found_fallback_policy,
     runtime_quota_blocked_affinity_is_releasable, runtime_quota_blocked_affinity_release_policy,
     runtime_quota_blocked_previous_response_fresh_fallback_allowed,
-    runtime_quota_precommit_floor_percent, runtime_quota_precommit_guard_reason,
-    runtime_quota_window_precommit_guard,
+    runtime_quota_precommit_guard_reason,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,
     runtime_websocket_previous_response_reuse_is_nonreplayable,
     runtime_websocket_previous_response_reuse_is_stale,
@@ -851,125 +850,90 @@ fn runtime_proxy_optimistic_current_candidate_for_route_with_selection(
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
-    let quota_evidence_required =
-        has_alternative_quota_compatible_profile && quota_source.is_none();
-    let live_quota_probe_required = has_alternative_quota_compatible_profile
-        && matches!(
-            route_kind,
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    if let RuntimeOptimisticCurrentCandidateDecision::Skip(skip) =
+        runtime_optimistic_current_candidate_decision(
+            RuntimeOptimisticCurrentCandidateSelectionInput {
+                current_profile: current_profile.as_str(),
+                route_kind,
+                auth_failure_active,
+                in_selection_backoff,
+                circuit_open: circuit_open_until.is_some(),
+                health_score,
+                performance_score,
+                current_profile_quota_compatible,
+                has_alternative_quota_compatible_profile,
+                quota_summary,
+                quota_source,
+                inflight_count,
+                inflight_soft_limit,
+                prompt_cache_key,
+                prompt_cache_owner_profile: prompt_cache_owner_profile.as_deref(),
+            },
         )
-        && !matches!(quota_source, Some(RuntimeQuotaSource::LiveProbe));
-    let unknown_quota_allowed = quota_summary.route_band == RuntimeQuotaPressureBand::Unknown
-        && !has_alternative_quota_compatible_profile;
-    let quota_band_blocks_current =
-        quota_summary.route_band > RuntimeQuotaPressureBand::Healthy && !unknown_quota_allowed;
-
-    if auth_failure_active
-        || in_selection_backoff
-        || circuit_open_until.is_some()
-        || health_score > 0
-        || performance_score > 0
-        || quota_evidence_required
-        || live_quota_probe_required
-        || inflight_count >= inflight_soft_limit
-        || quota_band_blocks_current
     {
-        let reason = if auth_failure_active {
-            "auth_failure_backoff"
-        } else if in_selection_backoff {
-            "selection_backoff"
-        } else if circuit_open_until.is_some() {
-            "route_circuit_open"
-        } else if health_score > 0 {
-            "profile_health"
-        } else if performance_score > 0 {
-            "profile_performance"
-        } else if quota_evidence_required {
-            "quota_probe_unavailable"
-        } else if live_quota_probe_required {
-            if matches!(quota_source, Some(RuntimeQuotaSource::PersistedSnapshot)) {
-                "stale_persisted_quota"
-            } else {
-                "quota_probe_unavailable"
-            }
-        } else if quota_band_blocks_current {
-            runtime_quota_pressure_band_reason(quota_summary.route_band)
+        let reason = skip.reason_label();
+        if skip.reason == RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "selection_skip_current",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("profile", current_profile.as_str()),
+                            runtime_proxy_log_field("reason", reason),
+                            runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                            runtime_proxy_log_field("health", health_score.to_string()),
+                            runtime_proxy_log_field("performance", performance_score.to_string()),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_selection_quota_source_label(quota_source),
+                            ),
+                        ],
+                        quota_summary,
+                    ),
+                ),
+            );
+        } else if skip.include_quota_fields() {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "selection_skip_current",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("profile", current_profile.as_str()),
+                            runtime_proxy_log_field("reason", reason),
+                            runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                            runtime_proxy_log_field("health", health_score.to_string()),
+                            runtime_proxy_log_field("performance", performance_score.to_string()),
+                            runtime_proxy_log_field("soft_limit", inflight_soft_limit.to_string()),
+                            runtime_proxy_log_field(
+                                "circuit_until",
+                                circuit_open_until.unwrap_or_default().to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_selection_quota_source_label(quota_source),
+                            ),
+                        ],
+                        quota_summary,
+                    ),
+                ),
+            );
         } else {
-            "profile_inflight_soft_limit"
-        };
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "selection_skip_current",
-                runtime_selection_log_fields_with_quota(
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "selection_skip_current",
                     [
                         runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
                         runtime_proxy_log_field("profile", current_profile.as_str()),
                         runtime_proxy_log_field("reason", reason),
-                        runtime_proxy_log_field("inflight", inflight_count.to_string()),
-                        runtime_proxy_log_field("health", health_score.to_string()),
-                        runtime_proxy_log_field("performance", performance_score.to_string()),
-                        runtime_proxy_log_field("soft_limit", inflight_soft_limit.to_string()),
-                        runtime_proxy_log_field(
-                            "circuit_until",
-                            circuit_open_until.unwrap_or_default().to_string(),
-                        ),
-                        runtime_proxy_log_field(
-                            "quota_source",
-                            runtime_selection_quota_source_label(quota_source),
-                        ),
                     ],
-                    quota_summary,
                 ),
-            ),
-        );
-        return Ok(None);
-    }
-    if !current_profile_quota_compatible {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "selection_skip_current",
-                [
-                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                    runtime_proxy_log_field("profile", current_profile.as_str()),
-                    runtime_proxy_log_field("reason", "auth_not_quota_compatible"),
-                ],
-            ),
-        );
-        return Ok(None);
-    }
-    if prompt_cache_key
-        .map(str::trim)
-        .is_some_and(|prompt_cache_key| !prompt_cache_key.is_empty())
-        && matches!(
-            route_kind,
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-        )
-        && has_alternative_quota_compatible_profile
-        && prompt_cache_owner_profile.as_deref() != Some(current_profile.as_str())
-    {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "selection_skip_current",
-                runtime_selection_log_fields_with_quota(
-                    [
-                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                        runtime_proxy_log_field("profile", current_profile.as_str()),
-                        runtime_proxy_log_field("reason", "prompt_cache_affinity"),
-                        runtime_proxy_log_field("inflight", inflight_count.to_string()),
-                        runtime_proxy_log_field("health", health_score.to_string()),
-                        runtime_proxy_log_field("performance", performance_score.to_string()),
-                        runtime_proxy_log_field(
-                            "quota_source",
-                            runtime_selection_quota_source_label(quota_source),
-                        ),
-                    ],
-                    quota_summary,
-                ),
-            ),
-        );
+            );
+        }
         return Ok(None);
     }
 

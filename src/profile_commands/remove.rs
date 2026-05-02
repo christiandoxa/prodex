@@ -38,8 +38,15 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
 
-    let target_names = resolve_remove_profile_targets(&state, &args)?;
-    validate_bulk_profile_home_deletion(&state, &target_names, &args)?;
+    let target_names = prodex_profile_identity::resolve_remove_profile_targets(
+        state
+            .profiles
+            .iter()
+            .map(|(name, profile)| (name.as_str(), profile.managed)),
+        args.all,
+        args.name.as_deref(),
+        args.delete_home,
+    )?;
     let removed_profiles = remove_profiles_from_state(&mut state, &target_names, args.delete_home)?;
     prune_removed_profile_metadata(&mut state, &target_names);
     state.save(&paths)?;
@@ -55,52 +62,6 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         .next()
         .expect("single-profile removal should record the removed profile");
     print_single_profile_removal_result(&state, removed_profile);
-
-    Ok(())
-}
-
-fn resolve_remove_profile_targets(
-    state: &AppState,
-    args: &RemoveProfileArgs,
-) -> Result<Vec<String>> {
-    if args.all {
-        return Ok(state.profiles.keys().cloned().collect::<Vec<_>>());
-    }
-
-    let Some(name) = args.name.as_deref() else {
-        bail!("provide a profile name or pass --all");
-    };
-    if !state.profiles.contains_key(name) {
-        bail!("profile '{}' does not exist", name);
-    }
-    Ok(vec![name.to_string()])
-}
-
-fn validate_bulk_profile_home_deletion(
-    state: &AppState,
-    target_names: &[String],
-    args: &RemoveProfileArgs,
-) -> Result<()> {
-    if !args.all || !args.delete_home {
-        return Ok(());
-    }
-
-    let external_profiles = target_names
-        .iter()
-        .filter(|name| {
-            state
-                .profiles
-                .get(*name)
-                .is_some_and(|profile| !profile.managed)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if !external_profiles.is_empty() {
-        bail!(
-            "--delete-home with --all refuses to delete external profiles: {}",
-            external_profiles.join(", ")
-        );
-    }
 
     Ok(())
 }
@@ -129,17 +90,15 @@ fn remove_profiles_from_state(
 }
 
 fn remove_profile_home_if_requested(profile: &ProfileEntry, delete_home: bool) -> Result<bool> {
-    let should_delete_home = profile.managed || delete_home;
+    let should_delete_home = prodex_profile_identity::should_delete_profile_home(
+        profile.managed,
+        delete_home,
+        profile.codex_home.display(),
+    )?;
     if !should_delete_home {
         return Ok(false);
     }
 
-    if !profile.managed && delete_home {
-        bail!(
-            "refusing to delete external path {}",
-            profile.codex_home.display()
-        );
-    }
     if profile.codex_home.exists() {
         fs::remove_dir_all(&profile.codex_home)
             .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
@@ -149,24 +108,22 @@ fn remove_profile_home_if_requested(profile: &ProfileEntry, delete_home: bool) -
 }
 
 fn prune_removed_profile_metadata(state: &mut AppState, target_names: &[String]) {
-    let removed_names = target_names.iter().cloned().collect::<BTreeSet<_>>();
+    let plan = prodex_profile_identity::plan_removed_profile_state(
+        state.profiles.keys().map(String::as_str),
+        state.active_profile.as_deref(),
+        target_names.iter().map(String::as_str),
+    );
     state
         .last_run_selected_at
-        .retain(|profile_name, _| !removed_names.contains(profile_name));
+        .retain(|profile_name, _| !plan.removed_names.contains(profile_name));
     state
         .response_profile_bindings
-        .retain(|_, binding| !removed_names.contains(&binding.profile_name));
+        .retain(|_, binding| !plan.removed_names.contains(&binding.profile_name));
     state
         .session_profile_bindings
-        .retain(|_, binding| !removed_names.contains(&binding.profile_name));
+        .retain(|_, binding| !plan.removed_names.contains(&binding.profile_name));
 
-    if state
-        .active_profile
-        .as_deref()
-        .is_some_and(|profile_name| removed_names.contains(profile_name))
-    {
-        state.active_profile = state.profiles.keys().next().cloned();
-    }
+    state.active_profile = plan.active_profile;
 }
 
 fn print_bulk_profile_removal_result(state: &AppState, removed_profiles: &[RemovedProfileRecord]) {

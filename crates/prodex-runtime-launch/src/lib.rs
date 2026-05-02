@@ -1,9 +1,10 @@
+use anyhow::bail;
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
 const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
@@ -49,6 +50,44 @@ pub fn allow_profileless_local_home(
             .is_some_and(|provider| provider.eq_ignore_ascii_case(local_provider_id))
 }
 
+pub fn fixed_runtime_proxy_state(
+    state: &prodex_state::AppState,
+    profile_name: &str,
+) -> anyhow::Result<prodex_state::AppState> {
+    let mut fixed = state.clone();
+    if !fixed.profiles.contains_key(profile_name) {
+        bail!("profile '{}' is missing", profile_name);
+    }
+    fixed
+        .profiles
+        .retain(|candidate_name, _| candidate_name == profile_name);
+    fixed.active_profile = Some(profile_name.to_string());
+    fixed
+        .last_run_selected_at
+        .retain(|candidate_name, _| candidate_name == profile_name);
+    fixed
+        .response_profile_bindings
+        .retain(|_, binding| binding.profile_name == profile_name);
+    fixed
+        .session_profile_bindings
+        .retain(|_, binding| binding.profile_name == profile_name);
+    Ok(fixed)
+}
+
+pub fn dry_run_caveman_home_placeholder(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+) -> PathBuf {
+    managed_profiles_root.join(format!(
+        ".caveman-dry-run-from-{}",
+        base_codex_home
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("profile")
+    ))
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct RuntimeProxyCodexEndpoint<'a> {
     pub listen_addr: SocketAddr,
     pub openai_mount_path: &'a str,
@@ -391,6 +430,270 @@ pub fn cleanup_runtime_launch_plan(plan: &RuntimeLaunchPlan) {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum RuntimeLaunchDryRunChild {
+    Codex { codex_args: Vec<OsString> },
+    Caveman { codex_args: Vec<OsString> },
+}
+
+pub fn runtime_launch_dry_run_plan(
+    binary: OsString,
+    base_codex_home: &Path,
+    managed_profiles_root: &Path,
+    runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
+    upstream_no_proxy: bool,
+    local_provider_id: &str,
+    child: RuntimeLaunchDryRunChild,
+) -> RuntimeLaunchPlan {
+    let runtime_args = match &child {
+        RuntimeLaunchDryRunChild::Codex { codex_args }
+        | RuntimeLaunchDryRunChild::Caveman { codex_args } => {
+            runtime_proxy_codex_passthrough_args(runtime_proxy, codex_args)
+        }
+    };
+    let (codex_home, cleanup_path) = match child {
+        RuntimeLaunchDryRunChild::Codex { .. } => (base_codex_home.to_path_buf(), None),
+        RuntimeLaunchDryRunChild::Caveman { .. } => {
+            let caveman_home =
+                dry_run_caveman_home_placeholder(managed_profiles_root, base_codex_home);
+            (caveman_home.clone(), Some(caveman_home))
+        }
+    };
+    let mut child = codex_child_plan(binary, codex_home, runtime_args, local_provider_id);
+    if upstream_no_proxy && runtime_proxy.is_none() {
+        remove_upstream_proxy_env(&mut child);
+    }
+
+    let plan = RuntimeLaunchPlan::new(child);
+    if let Some(cleanup_path) = cleanup_path {
+        plan.with_cleanup_path(cleanup_path)
+    } else {
+        plan
+    }
+}
+
+pub fn runtime_launch_dry_run_report(
+    flow: &str,
+    base_codex_home: &Path,
+    runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
+    plan: &RuntimeLaunchPlan,
+) -> String {
+    let child = &plan.child;
+    let provider = dry_run_config_value(&child.args, base_codex_home, "model_provider")
+        .unwrap_or_else(|| "openai".to_string());
+    let model = dry_run_config_value(&child.args, base_codex_home, "model")
+        .unwrap_or_else(|| "(codex default)".to_string());
+    let mut output = String::new();
+    output.push_str("Prodex dry run: launch diagnostics\n");
+    output.push_str(&format!("Flow: {flow}\n"));
+    output.push_str(&format!(
+        "Binary: {}\n",
+        redaction::redaction_display_os(&child.binary)
+    ));
+    output.push_str(&format!("Provider: {provider}\n"));
+    output.push_str(&format!("Model: {model}\n"));
+    output.push_str(&format!("CODEX_HOME: {}\n", child.codex_home.display()));
+    output.push_str(&format!(
+        "Runtime proxy: {}\n",
+        runtime_proxy
+            .map(|proxy| {
+                if proxy.listen_addr.port() == 0 {
+                    format!("would be enabled with mount {}", proxy.openai_mount_path)
+                } else {
+                    format!(
+                        "enabled at http://{}{}",
+                        proxy.listen_addr, proxy.openai_mount_path
+                    )
+                }
+            })
+            .unwrap_or_else(|| "disabled".to_string())
+    ));
+    output.push_str("Args:\n");
+    if child.args.is_empty() {
+        output.push_str("  (none)\n");
+    } else {
+        for arg in redaction::redaction_redacted_cli_args(&child.args) {
+            output.push_str(&format!("  {arg}\n"));
+        }
+    }
+    output.push_str("Env:\n");
+    output.push_str(&format!("  CODEX_HOME={}\n", child.codex_home.display()));
+    for (key, value) in &child.extra_env {
+        output.push_str(&format!(
+            "  {}={}\n",
+            redaction::redaction_display_os(key),
+            redaction::redaction_redacted_env_value(key, value)
+        ));
+    }
+    if !child.removed_env.is_empty() {
+        output.push_str("Removed env:\n");
+        for key in &child.removed_env {
+            output.push_str(&format!("  {}\n", redaction::redaction_display_os(key)));
+        }
+    }
+    output.push_str("Codex/TUI not started because --dry-run was set.\n");
+    output
+}
+
+fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
+    codex_config::codex_cli_config_override_value(args, key)
+        .or_else(|| codex_config::codex_config_value(codex_home, key))
+}
+
+pub fn scored_runtime_candidate_message(
+    initial_profile_name: &str,
+    best_candidate: &prodex_shared_types::ReadyProfileCandidate,
+    selected_report: Option<&prodex_shared_types::RunProfileProbeReport>,
+    include_code_review: bool,
+) -> terminal_ui::RuntimeLaunchScoredCandidateOutput {
+    let quota_summary = prodex_quota::format_main_windows_compact(&best_candidate.usage);
+    let blocked_summary = selected_report.and_then(|report| {
+        report.result.as_ref().ok().and_then(|usage| {
+            let blocked = prodex_quota::collect_blocked_limits(usage, include_code_review);
+            (!blocked.is_empty()).then(|| prodex_quota::format_blocked_limits(&blocked))
+        })
+    });
+    let selected_profile_status = selected_report.map(|report| match &report.result {
+        Ok(_) => blocked_summary
+            .as_deref()
+            .map(
+                |blocked_summary| terminal_ui::RuntimeLaunchSelectedProfileStatus::Blocked {
+                    blocked_summary,
+                },
+            )
+            .unwrap_or(terminal_ui::RuntimeLaunchSelectedProfileStatus::Ready),
+        Err(err) => terminal_ui::RuntimeLaunchSelectedProfileStatus::ProbeFailed { error: err },
+    });
+
+    terminal_ui::format_runtime_launch_scored_candidate_message(
+        terminal_ui::RuntimeLaunchScoredCandidateMessage {
+            initial_profile_name,
+            candidate: terminal_ui::RuntimeLaunchCandidateDisplay {
+                name: &best_candidate.name,
+                quota_summary: &quota_summary,
+            },
+            selected_profile_status,
+        },
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeLaunchNoReadyProfilesPlan {
+    Blocked {
+        blocked_message: String,
+        no_ready_message: String,
+        inspect_hint: String,
+        error_message: String,
+    },
+    ProbeFailed {
+        warning_message: String,
+        continue_message: String,
+    },
+}
+
+pub fn no_ready_runtime_profiles_plan(
+    report: &prodex_shared_types::RunProfileProbeReport,
+    profile_name: &str,
+    include_code_review: bool,
+) -> RuntimeLaunchNoReadyProfilesPlan {
+    match &report.result {
+        Ok(usage) => {
+            let blocked = prodex_quota::collect_blocked_limits(usage, include_code_review);
+            RuntimeLaunchNoReadyProfilesPlan::Blocked {
+                blocked_message: format!(
+                    "Quota preflight blocked profile '{}': {}",
+                    profile_name,
+                    prodex_quota::format_blocked_limits(&blocked)
+                ),
+                no_ready_message: "No ready profile was found.".to_string(),
+                inspect_hint: terminal_ui::format_runtime_launch_quota_inspect_hint(profile_name),
+                error_message: format!(
+                    "quota preflight blocked profile '{}' and no ready profile was found",
+                    profile_name
+                ),
+            }
+        }
+        Err(err) => RuntimeLaunchNoReadyProfilesPlan::ProbeFailed {
+            warning_message: format!(
+                "Warning: quota preflight failed for '{}': {err:#}",
+                profile_name
+            ),
+            continue_message: "Continuing without quota gate.".to_string(),
+        },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeLaunchBlockedSelectedProfilePlan {
+    Rotate {
+        blocked_message: String,
+        next_profile: String,
+        rotate_message: String,
+    },
+    Stop {
+        blocked_message: String,
+        messages: Vec<String>,
+        error_message: String,
+    },
+}
+
+pub fn blocked_selected_runtime_profile_plan(
+    profile_name: &str,
+    blocked: &[prodex_quota::BlockedLimit],
+    allow_auto_rotate: bool,
+    alternatives: &[String],
+) -> RuntimeLaunchBlockedSelectedProfilePlan {
+    let blocked_message = format!(
+        "Quota preflight blocked profile '{}': {}",
+        profile_name,
+        prodex_quota::format_blocked_limits(blocked)
+    );
+
+    if allow_auto_rotate {
+        if let Some(next_profile) = alternatives.first() {
+            let next_profile = next_profile.clone();
+            return RuntimeLaunchBlockedSelectedProfilePlan::Rotate {
+                blocked_message,
+                rotate_message: format!("Auto-rotating to profile '{}'.", next_profile),
+                next_profile,
+            };
+        }
+
+        return RuntimeLaunchBlockedSelectedProfilePlan::Stop {
+            blocked_message,
+            messages: vec![
+                "No other ready profile was found.".to_string(),
+                terminal_ui::format_runtime_launch_quota_inspect_hint(profile_name),
+            ],
+            error_message: format!(
+                "quota preflight blocked profile '{}' and no other ready profile was found",
+                profile_name
+            ),
+        };
+    }
+
+    let mut messages = Vec::new();
+    if !alternatives.is_empty() {
+        messages.push(format!(
+            "Other profiles that look ready: {}",
+            alternatives.join(", ")
+        ));
+        messages.push("Rerun without `--no-auto-rotate` to allow fallback.".to_string());
+    }
+    messages.push(terminal_ui::format_runtime_launch_quota_inspect_hint(
+        profile_name,
+    ));
+
+    RuntimeLaunchBlockedSelectedProfilePlan::Stop {
+        blocked_message,
+        messages,
+        error_message: format!(
+            "quota preflight blocked profile '{}' with auto-rotate disabled",
+            profile_name
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +780,128 @@ mod tests {
             "prodex-local"
         ));
         assert!(!allow_profileless_local_home(None, None, "prodex-local"));
+    }
+
+    #[test]
+    fn runtime_launch_dry_run_plan_builds_caveman_placeholder_cleanup() {
+        let base_home = PathBuf::from("/tmp/prodex/profiles/main");
+        let managed_root = PathBuf::from("/tmp/prodex/profiles");
+        let plan = runtime_launch_dry_run_plan(
+            OsString::from("codex"),
+            &base_home,
+            &managed_root,
+            None,
+            false,
+            "prodex-local",
+            RuntimeLaunchDryRunChild::Caveman {
+                codex_args: vec![OsString::from("exec")],
+            },
+        );
+
+        let expected_home = managed_root.join(".caveman-dry-run-from-main");
+        assert_eq!(plan.child.codex_home, expected_home);
+        assert_eq!(plan.child.args, vec![OsString::from("exec")]);
+        assert_eq!(plan.cleanup_paths, vec![expected_home]);
+    }
+
+    #[test]
+    fn runtime_launch_dry_run_report_redacts_secret_env_and_args() {
+        let codex_home = PathBuf::from("/tmp/prodex-home");
+        let plan = RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(OsString::from("codex"), codex_home.clone())
+                .with_args(vec![
+                    OsString::from("-c"),
+                    OsString::from("model=\"gpt-5.4\""),
+                    OsString::from("--config=api_key=\"secret-value\""),
+                    OsString::from("--api-key"),
+                    OsString::from("opaque-cli-value"),
+                    OsString::from("--header"),
+                    OsString::from("Authorization: Bearer dry-run-bearer-secret-12345"),
+                    OsString::from("sk-proj-dry-run-secret-123456789"),
+                ])
+                .with_extra_env(vec![
+                    ("ANTHROPIC_AUTH_TOKEN", OsString::from("secret-value")),
+                    (
+                        "PRODEX_VISIBLE_BEARER",
+                        OsString::from("Bearer dry-run-env-bearer-secret-12345"),
+                    ),
+                    ("PRODEX_VISIBLE", OsString::from("1")),
+                ]),
+        );
+
+        let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan);
+
+        assert!(report.contains("Model: gpt-5.4"));
+        assert!(report.contains("ANTHROPIC_AUTH_TOKEN=<redacted>"));
+        assert!(report.contains("PRODEX_VISIBLE=1"));
+        assert!(report.contains("Bearer <redacted>"));
+        assert!(report.contains("sk-proj-<redacted>"));
+        assert!(report.contains("<redacted>"));
+        assert!(!report.contains("secret-value"));
+        assert!(!report.contains("opaque-cli-value"));
+        assert!(!report.contains("dry-run-bearer-secret-12345"));
+        assert!(!report.contains("dry-run-secret-123456789"));
+        assert!(!report.contains("dry-run-env-bearer-secret-12345"));
+        assert!(report.contains("Codex/TUI not started"));
+    }
+
+    #[test]
+    fn no_ready_runtime_profiles_plan_formats_blocked_report() {
+        let report = prodex_shared_types::RunProfileProbeReport {
+            name: "main".to_string(),
+            order_index: 0,
+            auth: prodex_quota::AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(prodex_quota::UsageResponse {
+                email: None,
+                plan_type: None,
+                rate_limit: Some(prodex_quota::WindowPair {
+                    primary_window: Some(prodex_quota::UsageWindow {
+                        used_percent: Some(100),
+                        reset_at: Some(1_900_000_000),
+                        limit_window_seconds: Some(18_000),
+                    }),
+                    secondary_window: None,
+                }),
+                code_review_rate_limit: None,
+                additional_rate_limits: Vec::new(),
+            }),
+        };
+
+        let RuntimeLaunchNoReadyProfilesPlan::Blocked {
+            blocked_message,
+            no_ready_message,
+            inspect_hint,
+            error_message,
+        } = no_ready_runtime_profiles_plan(&report, "main", false)
+        else {
+            panic!("expected blocked plan");
+        };
+
+        assert!(blocked_message.contains("Quota preflight blocked profile 'main'"));
+        assert_eq!(no_ready_message, "No ready profile was found.");
+        assert!(inspect_hint.contains("prodex quota --profile main"));
+        assert!(error_message.contains("no ready profile"));
+    }
+
+    #[test]
+    fn blocked_selected_runtime_profile_plan_formats_rotation() {
+        let blocked = vec![prodex_quota::BlockedLimit {
+            message: "5h exhausted until later".to_string(),
+        }];
+        let plan =
+            blocked_selected_runtime_profile_plan("main", &blocked, true, &["backup".to_string()]);
+
+        assert_eq!(
+            plan,
+            RuntimeLaunchBlockedSelectedProfilePlan::Rotate {
+                blocked_message: "Quota preflight blocked profile 'main': 5h exhausted until later"
+                    .to_string(),
+                next_profile: "backup".to_string(),
+                rotate_message: "Auto-rotating to profile 'backup'.".to_string(),
+            }
+        );
     }
 }

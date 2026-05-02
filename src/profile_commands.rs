@@ -18,6 +18,7 @@ pub(crate) use self::copilot::{
     CopilotUserInfo, fetch_copilot_user_info_for_account, fetch_copilot_user_info_json_for_account,
     handle_import_copilot_profile,
 };
+use self::import_export::write_secret_text_file;
 #[cfg(test)]
 use self::import_export::{
     build_profile_export_payload, decode_profile_export_envelope, derive_profile_export_key,
@@ -27,9 +28,6 @@ use self::import_export::{
 pub(crate) use self::import_export::{
     count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
     handle_import_profiles, repair_profile_import_auth_journals,
-};
-use self::import_export::{
-    remove_committed_import_homes, rollback_imported_auth_updates, write_secret_text_file,
 };
 pub(crate) use self::login::{handle_codex_login, handle_codex_logout};
 pub(crate) use self::manage::{
@@ -45,123 +43,18 @@ use aes_gcm_siv::{Aes256GcmSiv, Nonce};
 #[cfg(test)]
 use prodex_profile_export::{PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct ProfileExportPayload {
-    exported_at: String,
-    source_prodex_version: String,
-    active_profile: Option<String>,
-    profiles: Vec<ExportedProfile>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct ExportedProfile {
-    name: String,
-    #[serde(default)]
-    email: Option<String>,
-    source_managed: bool,
-    #[serde(default)]
-    provider: ProfileProvider,
-    auth_json: String,
-}
-
+pub(super) type ProfileExportPayload = prodex_profile_export::ProfileExportPayload<ProfileProvider>;
+pub(super) type ExportedProfile = prodex_profile_export::ExportedProfile<ProfileProvider>;
 pub(super) type ProfileExportEnvelope =
     prodex_profile_export::ProfileExportEnvelope<ProfileExportPayload>;
-
-#[derive(Debug)]
-pub(super) struct StagedImportedProfile {
-    name: String,
-    email: Option<String>,
-    staging_home: PathBuf,
-    final_home: PathBuf,
-    provider: ProfileProvider,
-}
-
-#[derive(Debug)]
-pub(super) struct PreparedImportedProfiles {
-    staged_profiles: Vec<StagedImportedProfile>,
-    auth_updates: Vec<PreparedImportedProfileAuthUpdate>,
-    resolved_profile_names: BTreeMap<String, String>,
-}
-
-#[derive(Debug)]
-pub(super) struct PreparedImportedProfileAuthUpdate {
-    target_profile_name: String,
-    email: Option<String>,
-    auth_json: String,
-}
-
-#[derive(Debug)]
-pub(super) struct ImportedExistingProfileAuthUpdate {
-    profile_name: String,
-    codex_home: PathBuf,
-    previous_auth_json: Option<String>,
-    previous_email: Option<String>,
-    journal_path: Option<PathBuf>,
-}
-
-#[derive(Debug)]
-pub(super) struct ImportedProfilesCommit {
-    imported_names: Vec<String>,
-    updated_existing_names: Vec<String>,
-    committed_homes: Vec<PathBuf>,
-    auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
-    previous_active_profile: Option<String>,
-}
-
-#[derive(Debug)]
-pub(super) struct ImportedProfilesTransaction {
-    imported_names: Vec<String>,
-    updated_existing_names: Vec<String>,
-    committed_homes: Vec<PathBuf>,
-    auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
-    previous_active_profile: Option<String>,
-}
-
-impl ImportedProfilesTransaction {
-    fn new(
-        previous_active_profile: Option<String>,
-        staged_profile_count: usize,
-        auth_update_count: usize,
-    ) -> Self {
-        Self {
-            imported_names: Vec::with_capacity(staged_profile_count),
-            updated_existing_names: Vec::with_capacity(auth_update_count),
-            committed_homes: Vec::with_capacity(staged_profile_count),
-            auth_updates: Vec::with_capacity(auth_update_count),
-            previous_active_profile,
-        }
-    }
-
-    fn record_existing_auth_update(&mut self, update: ImportedExistingProfileAuthUpdate) {
-        self.updated_existing_names
-            .push(update.profile_name.clone());
-        self.auth_updates.push(update);
-    }
-
-    fn record_imported_profile(&mut self, name: String, final_home: PathBuf) {
-        self.committed_homes.push(final_home);
-        self.imported_names.push(name);
-    }
-
-    fn rollback_partial(&self, state: &mut AppState) {
-        for name in &self.imported_names {
-            state.profiles.remove(name);
-        }
-        rollback_imported_auth_updates(state, &self.auth_updates);
-        state.active_profile = self.previous_active_profile.clone();
-        remove_committed_import_homes(&self.committed_homes);
-    }
-
-    fn into_commit(self) -> ImportedProfilesCommit {
-        ImportedProfilesCommit {
-            imported_names: self.imported_names,
-            updated_existing_names: self.updated_existing_names,
-            committed_homes: self.committed_homes,
-            auth_updates: self.auth_updates,
-            previous_active_profile: self.previous_active_profile,
-        }
-    }
-}
+pub(super) type StagedImportedProfile =
+    prodex_profile_export::StagedImportedProfile<ProfileProvider>;
+pub(super) type PreparedImportedProfiles =
+    prodex_profile_export::PreparedImportedProfiles<ProfileProvider>;
+pub(super) type ImportedExistingProfileAuthUpdate =
+    prodex_profile_export::ImportedExistingProfileAuthUpdate;
+pub(super) type ImportedProfilesCommit = prodex_profile_export::ImportedProfilesCommit;
+pub(super) type ImportedProfilesTransaction = prodex_profile_export::ImportedProfilesTransaction;
 
 #[derive(Debug)]
 pub(super) struct ExistingProfileAuthUpdate {
@@ -227,43 +120,6 @@ pub(super) fn update_existing_profile_auth(
         profile_name: profile_name.to_string(),
         codex_home: profile.codex_home,
     })
-}
-
-fn resolved_exported_profile_identity(exported: &ExportedProfile) -> ProfileIdentity {
-    let mut identity = parse_identity_from_auth_json(&exported.auth_json).unwrap_or_default();
-    if identity.email.is_none() {
-        identity.email = exported
-            .email
-            .as_deref()
-            .map(str::trim)
-            .filter(|email| !email.is_empty())
-            .map(ToOwned::to_owned);
-    }
-    identity
-}
-
-fn queue_existing_profile_auth_update(
-    auth_updates: &mut Vec<PreparedImportedProfileAuthUpdate>,
-    target_profile_name: &str,
-    email: Option<String>,
-    auth_json: String,
-) {
-    if let Some(existing) = auth_updates
-        .iter_mut()
-        .find(|update| update.target_profile_name == target_profile_name)
-    {
-        existing.auth_json = auth_json;
-        if email.is_some() {
-            existing.email = email;
-        }
-        return;
-    }
-
-    auth_updates.push(PreparedImportedProfileAuthUpdate {
-        target_profile_name: target_profile_name.to_string(),
-        email,
-        auth_json,
-    });
 }
 
 #[cfg(test)]

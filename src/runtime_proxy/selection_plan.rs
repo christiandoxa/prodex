@@ -223,6 +223,56 @@ where
     }
 }
 
+pub(crate) use runtime_proxy_crate::{
+    RuntimeOptimisticCurrentCandidateDecision, RuntimeOptimisticCurrentCandidateSkipReason,
+};
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeOptimisticCurrentCandidateSelectionInput<'a> {
+    pub(crate) current_profile: &'a str,
+    pub(crate) route_kind: RuntimeRouteKind,
+    pub(crate) auth_failure_active: bool,
+    pub(crate) in_selection_backoff: bool,
+    pub(crate) circuit_open: bool,
+    pub(crate) health_score: u32,
+    pub(crate) performance_score: u32,
+    pub(crate) current_profile_quota_compatible: bool,
+    pub(crate) has_alternative_quota_compatible_profile: bool,
+    pub(crate) quota_summary: RuntimeQuotaSummary,
+    pub(crate) quota_source: Option<RuntimeQuotaSource>,
+    pub(crate) inflight_count: usize,
+    pub(crate) inflight_soft_limit: usize,
+    pub(crate) prompt_cache_key: Option<&'a str>,
+    pub(crate) prompt_cache_owner_profile: Option<&'a str>,
+}
+
+pub(crate) fn runtime_optimistic_current_candidate_decision(
+    input: RuntimeOptimisticCurrentCandidateSelectionInput<'_>,
+) -> RuntimeOptimisticCurrentCandidateDecision {
+    runtime_proxy_crate::runtime_optimistic_current_candidate_decision(
+        runtime_proxy_crate::RuntimeOptimisticCurrentCandidateInput {
+            current_profile: input.current_profile,
+            route_kind: runtime_route_kind_to_proxy_for_candidate_plan(input.route_kind),
+            auth_failure_active: input.auth_failure_active,
+            in_selection_backoff: input.in_selection_backoff,
+            circuit_open: input.circuit_open,
+            health_score: input.health_score,
+            performance_score: input.performance_score,
+            current_profile_quota_compatible: input.current_profile_quota_compatible,
+            has_alternative_quota_compatible_profile: input
+                .has_alternative_quota_compatible_profile,
+            quota_summary: runtime_candidate_quota_summary_to_proxy(input.quota_summary),
+            quota_source: input
+                .quota_source
+                .map(runtime_candidate_quota_source_to_proxy),
+            inflight_count: input.inflight_count,
+            inflight_soft_limit: input.inflight_soft_limit,
+            prompt_cache_key: input.prompt_cache_key,
+            prompt_cache_owner_profile: input.prompt_cache_owner_profile,
+        },
+    )
+}
+
 pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
     selection_state: &RuntimeRouteSelectionCatalog,
     excluded_profiles: &BTreeSet<String>,

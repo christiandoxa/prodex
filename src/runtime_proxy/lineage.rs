@@ -961,26 +961,21 @@ fn drain_runtime_response_turn_state_lineage(
     previous_response_id: &str,
     bound_profile: Option<&str>,
 ) -> BTreeSet<String> {
-    let prefix = format!(
-        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
-        previous_response_id.len()
+    let plan = runtime_proxy_crate::runtime_response_turn_state_lineage_drain_plan(
+        bindings.iter().map(|(key, binding)| {
+            runtime_proxy_crate::RuntimeResponseTurnStateLineageBinding {
+                key,
+                profile_name: &binding.profile_name,
+                bound_at: binding.bound_at,
+            }
+        }),
+        previous_response_id,
+        bound_profile,
     );
-    let keys = bindings
-        .range(prefix.clone()..)
-        .take_while(|(key, _)| key.starts_with(&prefix))
-        .filter(|(_, binding)| {
-            bound_profile.is_none_or(|profile_name| binding.profile_name == profile_name)
-        })
-        .map(|(key, _)| key.clone())
-        .collect::<Vec<_>>();
-    let mut removed_turn_states = BTreeSet::new();
-    for key in keys {
-        if let Some((_, turn_state)) = runtime_response_turn_state_lineage_parts(&key) {
-            removed_turn_states.insert(turn_state.to_string());
-        }
+    for key in plan.keys {
         bindings.remove(&key);
     }
-    removed_turn_states
+    plan.removed_turn_states
 }
 
 fn runtime_previous_response_turn_state_from_bindings(
@@ -988,33 +983,17 @@ fn runtime_previous_response_turn_state_from_bindings(
     previous_response_id: &str,
     bound_profile: Option<&str>,
 ) -> Option<String> {
-    let prefix = format!(
-        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{previous_response_id}:",
-        previous_response_id.len()
-    );
-    let mut selected = None::<(i64, String)>;
-    for (key, binding) in bindings.range(prefix.clone()..) {
-        if !key.starts_with(&prefix) {
-            break;
-        }
-        if bound_profile.is_some_and(|profile_name| binding.profile_name != profile_name) {
-            continue;
-        }
-        let Some((response_id, turn_state)) = runtime_response_turn_state_lineage_parts(key) else {
-            continue;
-        };
-        if response_id != previous_response_id {
-            continue;
-        }
-        let candidate = (binding.bound_at, turn_state.to_string());
-        if selected
-            .as_ref()
-            .is_none_or(|(current_bound_at, _)| *current_bound_at <= candidate.0)
-        {
-            selected = Some(candidate);
-        }
-    }
-    selected.map(|(_, turn_state)| turn_state)
+    runtime_proxy_crate::runtime_previous_response_turn_state_from_bindings(
+        bindings.iter().map(|(key, binding)| {
+            runtime_proxy_crate::RuntimeResponseTurnStateLineageBinding {
+                key,
+                profile_name: &binding.profile_name,
+                bound_at: binding.bound_at,
+            }
+        }),
+        previous_response_id,
+        bound_profile,
+    )
 }
 
 fn runtime_live_response_turn_states_for_profile(
@@ -1022,13 +1001,17 @@ fn runtime_live_response_turn_states_for_profile(
     profile_name: &str,
     filter: &BTreeSet<String>,
 ) -> BTreeSet<String> {
-    bindings
-        .iter()
-        .filter(|(_, binding)| binding.profile_name == profile_name)
-        .filter_map(|(key, _)| runtime_response_turn_state_lineage_parts(key))
-        .filter(|(_, turn_state)| filter.contains(*turn_state))
-        .map(|(_, turn_state)| turn_state.to_string())
-        .collect()
+    runtime_proxy_crate::runtime_live_response_turn_states_for_profile(
+        bindings.iter().map(|(key, binding)| {
+            runtime_proxy_crate::RuntimeResponseTurnStateLineageBinding {
+                key,
+                profile_name: &binding.profile_name,
+                bound_at: binding.bound_at,
+            }
+        }),
+        profile_name,
+        filter,
+    )
 }
 
 pub(crate) fn clear_runtime_dead_response_bindings(
@@ -1461,18 +1444,16 @@ pub(crate) fn prune_profile_bindings(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     max_entries: usize,
 ) {
-    if bindings.len() <= max_entries {
-        return;
-    }
-
-    let excess = bindings.len() - max_entries;
-    let mut oldest = bindings
-        .iter()
-        .map(|(response_id, binding)| (response_id.clone(), binding.bound_at))
-        .collect::<Vec<_>>();
-    oldest.sort_by_key(|(_, bound_at)| *bound_at);
-
-    for (response_id, _) in oldest.into_iter().take(excess) {
-        bindings.remove(&response_id);
+    let keys = runtime_proxy_crate::runtime_profile_binding_prune_keys(
+        bindings.iter().map(|(key, binding)| {
+            runtime_proxy_crate::RuntimeProfileBindingOrderEntry {
+                key,
+                bound_at: binding.bound_at,
+            }
+        }),
+        max_entries,
+    );
+    for key in keys {
+        bindings.remove(&key);
     }
 }

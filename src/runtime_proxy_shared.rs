@@ -49,19 +49,7 @@ pub(super) enum RuntimeSseInspection {
     PreviousResponseNotFound(Vec<u8>),
 }
 
-#[derive(Debug)]
-pub(super) enum RuntimeSseInspectionProgress {
-    Hold {
-        response_ids: Vec<String>,
-        turn_state: Option<String>,
-    },
-    Commit {
-        response_ids: Vec<String>,
-        turn_state: Option<String>,
-    },
-    QuotaBlocked,
-    PreviousResponseNotFound,
-}
+pub(super) type RuntimeSseInspectionProgress = runtime_proxy_crate::RuntimeSseInspectionProgress;
 
 pub(super) type RuntimeParsedSseEvent = runtime_proxy_crate::RuntimeParsedSseEvent;
 
@@ -229,27 +217,7 @@ pub(super) struct RuntimeWebsocketTcpAttemptResult {
 }
 
 pub(super) type RuntimeWebsocketErrorPayload = runtime_proxy_crate::RuntimeWebsocketErrorPayload;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RuntimeWebsocketRetryInspectionKind {
-    QuotaBlocked,
-    Overloaded,
-    PreviousResponseNotFound,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(super) struct RuntimeInspectedWebsocketTextFrame {
-    pub(super) event_type: Option<String>,
-    pub(super) turn_state: Option<String>,
-    pub(super) response_ids: Vec<String>,
-    pub(super) token_usage: Option<RuntimeTokenUsage>,
-    pub(super) retry_kind: Option<RuntimeWebsocketRetryInspectionKind>,
-    pub(super) precommit_hold: bool,
-    pub(super) terminal_event: bool,
-}
-
-#[derive(Debug)]
-pub(super) struct RuntimeBufferedWebsocketTextFrame {
-    pub(super) text: String,
-    pub(super) response_ids: Vec<String>,
-}
+pub(super) type RuntimeWebsocketRetryInspectionKind =
+    runtime_proxy_crate::RuntimeWebsocketRetryInspectionKind;
+pub(super) type RuntimeBufferedWebsocketTextFrame =
+    runtime_proxy_crate::RuntimeBufferedWebsocketTextFrame;

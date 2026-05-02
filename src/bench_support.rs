@@ -1,7 +1,13 @@
 use crate::*;
 pub use prodex_bench_support::{
+    RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE, RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS,
+    RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE, RUNTIME_PROXY_MIXED_POOL_BENCH_CASE,
+    RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE, RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE,
+    RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE, RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE,
+    RuntimeProxyHotPathBenchCaseSpec, RuntimeProxyHotPathBenchCaseSuite,
     RuntimeProxyHotPathBenchCheckConfig, RuntimeProxyHotPathBenchCheckResult,
-    RuntimeProxyHotPathBenchThreshold, run_runtime_proxy_hot_path_case,
+    RuntimeProxyHotPathBenchScenarioSizes, RuntimeProxyHotPathBenchThreshold,
+    run_runtime_proxy_hot_path_case, run_runtime_proxy_hot_path_case_suite,
 };
 
 static BENCH_CASE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -151,93 +157,36 @@ fn bench_runtime_shared(
     }
 }
 
-const RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_route_eligible_quota_fallback_scan",
-        max_median_ns_per_iteration: 30_000,
-    };
-const RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_previous_response_candidate_selection",
-        max_median_ns_per_iteration: 110_000,
-    };
-const RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_mixed_pool_response_selection",
-        max_median_ns_per_iteration: 2_400_000,
-    };
-const RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_compact_session_affinity_selection",
-        max_median_ns_per_iteration: 160_000,
-    };
-const RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_websocket_stale_reuse_affinity",
-        max_median_ns_per_iteration: 220_000,
-    };
-const RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_sse_lookahead_inspection",
-        max_median_ns_per_iteration: 130_000,
-    };
-const RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_THRESHOLD: RuntimeProxyHotPathBenchThreshold =
-    RuntimeProxyHotPathBenchThreshold {
-        name: "runtime_dead_lineage_cleanup",
-        max_median_ns_per_iteration: 190_000,
-    };
-
 #[doc(hidden)]
 pub fn run_runtime_proxy_hot_path_bench_check(
     config: RuntimeProxyHotPathBenchCheckConfig,
 ) -> Vec<RuntimeProxyHotPathBenchCheckResult> {
-    let config = config.normalized();
+    let sizes = RuntimeProxyHotPathBenchScenarioSizes::default();
+    let quota_fallback = RuntimeProxyQuotaFallbackBenchCase::new(sizes.quota_fallback);
+    let previous_response = RuntimeProxyPreviousResponseBenchCase::new(sizes.previous_response);
+    let mixed_pool_selection =
+        RuntimeProxyMixedPoolSelectionBenchCase::new(sizes.mixed_pool_selection);
+    let compact_session_selection =
+        RuntimeProxyCompactSessionSelectionBenchCase::new(sizes.compact_session_selection);
+    let websocket_stale_reuse =
+        RuntimeProxyWebsocketStaleReuseBenchCase::new(sizes.websocket_stale_reuse);
+    let sse_inspect = RuntimeProxySseInspectBenchCase::new(sizes.sse_inspect);
+    let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(sizes.lineage_cleanup);
 
-    let quota_fallback = RuntimeProxyQuotaFallbackBenchCase::new(64);
-    let previous_response = RuntimeProxyPreviousResponseBenchCase::new(64);
-    let mixed_pool_selection = RuntimeProxyMixedPoolSelectionBenchCase::new(96);
-    let compact_session_selection = RuntimeProxyCompactSessionSelectionBenchCase::new(64);
-    let websocket_stale_reuse = RuntimeProxyWebsocketStaleReuseBenchCase::new(64);
-    let sse_inspect = RuntimeProxySseInspectBenchCase::new(128);
-    let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(128);
-
-    vec![
-        run_runtime_proxy_hot_path_case(
-            config.clone(),
-            RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_THRESHOLD,
-            || quota_fallback.has_route_eligible_quota_fallback(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config.clone(),
-            RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_THRESHOLD,
-            || previous_response.next_previous_response_candidate(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config.clone(),
-            RUNTIME_PROXY_MIXED_POOL_BENCH_THRESHOLD,
-            || mixed_pool_selection.select_fresh_response_candidate(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config.clone(),
-            RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_THRESHOLD,
-            || compact_session_selection.select_compact_session_candidate(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config.clone(),
-            RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_THRESHOLD,
-            || websocket_stale_reuse.evaluate_stale_reuse_affinity(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config.clone(),
-            RUNTIME_PROXY_SSE_INSPECT_BENCH_THRESHOLD,
-            || sse_inspect.inspect(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config,
-            RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_THRESHOLD,
-            || lineage_cleanup.clear_dead_response_bindings(),
-        ),
-    ]
+    run_runtime_proxy_hot_path_case_suite(
+        config,
+        RuntimeProxyHotPathBenchCaseSuite {
+            quota_fallback: || quota_fallback.has_route_eligible_quota_fallback(),
+            previous_response: || previous_response.next_previous_response_candidate(),
+            mixed_pool_selection: || mixed_pool_selection.select_fresh_response_candidate(),
+            compact_session_selection: || {
+                compact_session_selection.select_compact_session_candidate()
+            },
+            websocket_stale_reuse: || websocket_stale_reuse.evaluate_stale_reuse_affinity(),
+            sse_inspect: || sse_inspect.inspect(),
+            lineage_cleanup: || lineage_cleanup.clear_dead_response_bindings(),
+        },
+    )
 }
 
 #[doc(hidden)]
@@ -785,8 +734,7 @@ impl RuntimeProxySseInspectBenchCase {
     }
 
     pub fn inspect(&self) -> usize {
-        match inspect_runtime_sse_buffer(&self.buffer).expect("benchmark SSE parse should succeed")
-        {
+        match inspect_runtime_sse_buffer(&self.buffer) {
             RuntimeSseInspectionProgress::Hold {
                 response_ids,
                 turn_state,

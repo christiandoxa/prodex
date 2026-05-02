@@ -425,24 +425,7 @@ fn start_fixed_runtime_proxy_endpoint(
 }
 
 fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {
-    let mut fixed = state.clone();
-    if !fixed.profiles.contains_key(profile_name) {
-        bail!("profile '{}' is missing", profile_name);
-    }
-    fixed
-        .profiles
-        .retain(|candidate_name, _| candidate_name == profile_name);
-    fixed.active_profile = Some(profile_name.to_string());
-    fixed
-        .last_run_selected_at
-        .retain(|candidate_name, _| candidate_name == profile_name);
-    fixed
-        .response_profile_bindings
-        .retain(|_, binding| binding.profile_name == profile_name);
-    fixed
-        .session_profile_bindings
-        .retain(|_, binding| binding.profile_name == profile_name);
-    Ok(fixed)
+    prodex_runtime_launch::fixed_runtime_proxy_state(state, profile_name)
 }
 
 fn select_runtime_launch_profile(
@@ -564,29 +547,12 @@ fn scored_runtime_candidate_message(
     selected_report: Option<&RunProfileProbeReport>,
     include_code_review: bool,
 ) -> RuntimeLaunchScoredCandidateOutput {
-    let quota_summary = format_main_windows_compact(&best_candidate.usage);
-    let blocked_summary = selected_report.and_then(|report| {
-        report.result.as_ref().ok().and_then(|usage| {
-            let blocked = collect_blocked_limits(usage, include_code_review);
-            (!blocked.is_empty()).then(|| format_blocked_limits(&blocked))
-        })
-    });
-    let selected_profile_status = selected_report.map(|report| match &report.result {
-        Ok(_) => blocked_summary
-            .as_deref()
-            .map(|blocked_summary| RuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary })
-            .unwrap_or(RuntimeLaunchSelectedProfileStatus::Ready),
-        Err(err) => RuntimeLaunchSelectedProfileStatus::ProbeFailed { error: err },
-    });
-
-    format_runtime_launch_scored_candidate_message(RuntimeLaunchScoredCandidateMessage {
+    prodex_runtime_launch::scored_runtime_candidate_message(
         initial_profile_name,
-        candidate: RuntimeLaunchCandidateDisplay {
-            name: &best_candidate.name,
-            quota_summary: &quota_summary,
-        },
-        selected_profile_status,
-    })
+        best_candidate,
+        selected_report,
+        include_code_review,
+    )
 }
 
 fn handle_no_ready_runtime_profiles(
@@ -594,32 +560,30 @@ fn handle_no_ready_runtime_profiles(
     profile_name: &str,
     request: &RuntimeLaunchRequest<'_>,
 ) -> Result<()> {
-    match &report.result {
-        Ok(usage) => {
-            let blocked = collect_blocked_limits(usage, request.include_code_review);
+    match prodex_runtime_launch::no_ready_runtime_profiles_plan(
+        report,
+        profile_name,
+        request.include_code_review,
+    ) {
+        prodex_runtime_launch::RuntimeLaunchNoReadyProfilesPlan::Blocked {
+            blocked_message,
+            no_ready_message,
+            inspect_hint,
+            error_message,
+        } => {
             print_wrapped_stderr(&section_header("Quota Preflight"));
-            print_wrapped_stderr(&format!(
-                "Quota preflight blocked profile '{}': {}",
-                profile_name,
-                format_blocked_limits(&blocked)
-            ));
-            print_wrapped_stderr("No ready profile was found.");
-            print_quota_preflight_inspect_hint(profile_name);
-            return Err(command_exit_error(
-                2,
-                format!(
-                    "quota preflight blocked profile '{}' and no ready profile was found",
-                    profile_name
-                ),
-            ));
+            print_wrapped_stderr(&blocked_message);
+            print_wrapped_stderr(&no_ready_message);
+            print_wrapped_stderr(&inspect_hint);
+            return Err(command_exit_error(2, error_message));
         }
-        Err(err) => {
+        prodex_runtime_launch::RuntimeLaunchNoReadyProfilesPlan::ProbeFailed {
+            warning_message,
+            continue_message,
+        } => {
             print_wrapped_stderr(&section_header("Quota Preflight"));
-            print_wrapped_stderr(&format!(
-                "Warning: quota preflight failed for '{}': {err:#}",
-                profile_name
-            ));
-            print_wrapped_stderr("Continuing without quota gate.");
+            print_wrapped_stderr(&warning_message);
+            print_wrapped_stderr(&continue_message);
         }
     }
     Ok(())
@@ -671,46 +635,35 @@ fn handle_blocked_selected_runtime_profile(
         request.include_code_review,
         request.upstream_no_proxy,
     );
+    let plan = prodex_runtime_launch::blocked_selected_runtime_profile_plan(
+        &selection.initial_profile_name,
+        blocked,
+        request.allow_auto_rotate,
+        &alternatives,
+    );
 
     print_wrapped_stderr(&section_header("Quota Preflight"));
-    print_wrapped_stderr(&format!(
-        "Quota preflight blocked profile '{}': {}",
-        selection.initial_profile_name,
-        format_blocked_limits(blocked)
-    ));
-
-    if request.allow_auto_rotate {
-        if let Some(next_profile) = alternatives.first() {
-            let next_profile = next_profile.clone();
+    match plan {
+        prodex_runtime_launch::RuntimeLaunchBlockedSelectedProfilePlan::Rotate {
+            blocked_message,
+            next_profile,
+            rotate_message,
+        } => {
+            print_wrapped_stderr(&blocked_message);
             activate_runtime_launch_profile(paths, state, request, selection, &next_profile)?;
-            print_wrapped_stderr(&format!("Auto-rotating to profile '{}'.", next_profile));
-        } else {
-            print_wrapped_stderr("No other ready profile was found.");
-            print_quota_preflight_inspect_hint(&selection.initial_profile_name);
-            return Err(command_exit_error(
-                2,
-                format!(
-                    "quota preflight blocked profile '{}' and no other ready profile was found",
-                    selection.initial_profile_name
-                ),
-            ));
+            print_wrapped_stderr(&rotate_message);
         }
-    } else {
-        if !alternatives.is_empty() {
-            print_wrapped_stderr(&format!(
-                "Other profiles that look ready: {}",
-                alternatives.join(", ")
-            ));
-            print_wrapped_stderr("Rerun without `--no-auto-rotate` to allow fallback.");
+        prodex_runtime_launch::RuntimeLaunchBlockedSelectedProfilePlan::Stop {
+            blocked_message,
+            messages,
+            error_message,
+        } => {
+            print_wrapped_stderr(&blocked_message);
+            for message in messages {
+                print_wrapped_stderr(&message);
+            }
+            return Err(command_exit_error(2, error_message));
         }
-        print_quota_preflight_inspect_hint(&selection.initial_profile_name);
-        return Err(command_exit_error(
-            2,
-            format!(
-                "quota preflight blocked profile '{}' with auto-rotate disabled",
-                selection.initial_profile_name
-            ),
-        ));
     }
 
     Ok(())
@@ -727,10 +680,6 @@ fn activate_runtime_launch_profile(
     state.active_profile = Some(profile_name.to_string());
     state.save(paths)?;
     Ok(())
-}
-
-fn print_quota_preflight_inspect_hint(profile_name: &str) {
-    print_wrapped_stderr(&format_runtime_launch_quota_inspect_hint(profile_name));
 }
 
 fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<PathBuf> {

@@ -35,7 +35,10 @@ pub(crate) fn probe_runtime_broker_health(
 ) -> Result<Option<RuntimeBrokerHealth>> {
     let response = match client
         .get(runtime_broker_health_url(registry))
-        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            &registry.admin_token,
+        )
         .send()
     {
         Ok(response) => response,
@@ -56,7 +59,10 @@ pub(crate) fn probe_runtime_broker_metrics(
 ) -> Result<Option<RuntimeBrokerMetrics>> {
     let response = match client
         .get(runtime_broker_metrics_url(registry))
-        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            &registry.admin_token,
+        )
         .send()
     {
         Ok(response) => response,
@@ -113,11 +119,7 @@ pub(crate) fn collect_runtime_broker_metrics_targets(paths: &AppPaths) -> Vec<St
 }
 
 pub(crate) fn format_runtime_broker_metrics_targets(targets: &[String]) -> String {
-    match targets {
-        [] => "-".to_string(),
-        [target] => target.clone(),
-        [first, rest @ ..] => format!("{first} (+{} more)", rest.len()),
-    }
+    prodex_runtime_broker::format_runtime_broker_metrics_targets(targets)
 }
 
 pub(crate) fn activate_runtime_broker_profile(
@@ -127,7 +129,10 @@ pub(crate) fn activate_runtime_broker_profile(
 ) -> Result<()> {
     let response = client
         .post(runtime_broker_activate_url(registry))
-        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            &registry.admin_token,
+        )
         .json(&serde_json::json!({
             "current_profile": current_profile,
         }))

@@ -1,5 +1,27 @@
 use super::*;
 
+pub(crate) use runtime_proxy_crate::{
+    RuntimeProfileInFlightReleaseSnapshot, RuntimeProxyGuardReleaseSnapshot,
+    RuntimeProxyQueueRejection,
+};
+
+fn runtime_route_kind_to_proxy(
+    route_kind: RuntimeRouteKind,
+) -> runtime_proxy_crate::RuntimeRouteKind {
+    match route_kind {
+        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeProxyAdmissionRejection {
+    GlobalLimit,
+    LaneLimit(RuntimeRouteKind),
+}
+
 pub(crate) fn reject_runtime_proxy_overloaded_request(
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
@@ -56,24 +78,6 @@ fn runtime_proxy_response_with_retry_after(
     response
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_overload_response_includes_retry_after_hint() {
-        let response =
-            runtime_proxy_response_with_retry_after(build_runtime_proxy_text_response(503, "busy"));
-        let mut bytes = Vec::new();
-        response
-            .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
-            .expect("response should serialize");
-        let text = String::from_utf8(bytes).expect("response should be utf8");
-
-        assert!(text.contains("\r\nRetry-After: 1\r\n"));
-    }
-}
-
 pub(crate) fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason: &str) {
     let now = Local::now().timestamp().max(0) as u64;
     let until = now.saturating_add(RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS.max(1) as u64);
@@ -95,48 +99,6 @@ pub(crate) fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxySha
     );
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeProxyAdmissionRejection {
-    GlobalLimit,
-    LaneLimit(RuntimeRouteKind),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeProxyQueueRejection {
-    Full,
-    Disconnected,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RuntimeProxyGuardReleaseSnapshot {
-    pub(crate) active_remaining: usize,
-    pub(crate) lane_remaining: usize,
-    pub(crate) active_underflow: bool,
-    pub(crate) lane_underflow: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RuntimeProfileInFlightReleaseSnapshot {
-    pub(crate) remaining: usize,
-    pub(crate) underflow: bool,
-}
-
-fn runtime_proxy_guarded_counter_release(counter: &AtomicUsize) -> (usize, bool) {
-    loop {
-        let current = counter.load(Ordering::SeqCst);
-        if current == 0 {
-            return (0, true);
-        }
-        let remaining = current - 1;
-        if counter
-            .compare_exchange(current, remaining, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
-            return (remaining, false);
-        }
-    }
-}
-
 pub(crate) fn release_runtime_proxy_active_request_guard(
     active_request_count: &AtomicUsize,
     lane_active_count: &AtomicUsize,
@@ -145,27 +107,14 @@ pub(crate) fn release_runtime_proxy_active_request_guard(
     lane_release_underflows_total: &AtomicU64,
     wait: &(Mutex<()>, Condvar),
 ) -> RuntimeProxyGuardReleaseSnapshot {
-    let (mutex, condvar) = wait;
-    let _guard = mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (active_remaining, active_underflow) =
-        runtime_proxy_guarded_counter_release(active_request_count);
-    let (lane_remaining, lane_underflow) = runtime_proxy_guarded_counter_release(lane_active_count);
-    lane_releases_total.fetch_add(1, Ordering::Relaxed);
-    if active_underflow {
-        active_request_release_underflows_total.fetch_add(1, Ordering::Relaxed);
-    }
-    if lane_underflow {
-        lane_release_underflows_total.fetch_add(1, Ordering::Relaxed);
-    }
-    condvar.notify_all();
-    RuntimeProxyGuardReleaseSnapshot {
-        active_remaining,
-        lane_remaining,
-        active_underflow,
-        lane_underflow,
-    }
+    runtime_proxy_crate::release_runtime_proxy_active_request_guard(
+        active_request_count,
+        lane_active_count,
+        lane_releases_total,
+        active_request_release_underflows_total,
+        lane_release_underflows_total,
+        wait,
+    )
 }
 
 pub(crate) fn record_runtime_profile_inflight_acquire(
@@ -289,12 +238,12 @@ pub(crate) fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxySh
         || runtime_proxy_background_queue_pressure_active()
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_proxy_background_queue_pressure_affects_route(
     route_kind: RuntimeRouteKind,
 ) -> bool {
-    matches!(
-        route_kind,
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard
+    runtime_proxy_crate::runtime_proxy_background_queue_pressure_affects_route(
+        runtime_route_kind_to_proxy(route_kind),
     )
 }
 
@@ -303,9 +252,11 @@ pub(crate) fn runtime_proxy_pressure_mode_for_route(
     local_overload_pressure: bool,
     background_queue_pressure: bool,
 ) -> bool {
-    local_overload_pressure
-        || (background_queue_pressure
-            && runtime_proxy_background_queue_pressure_affects_route(route_kind))
+    runtime_proxy_crate::runtime_proxy_pressure_mode_for_route(
+        runtime_route_kind_to_proxy(route_kind),
+        local_overload_pressure,
+        background_queue_pressure,
+    )
 }
 
 pub(crate) fn runtime_proxy_pressure_mode_active_for_route(
@@ -335,8 +286,8 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_mode_for_route(
     local_overload_pressure: bool,
     background_queue_pressure: bool,
 ) -> bool {
-    runtime_proxy_pressure_mode_for_route(
-        route_kind,
+    runtime_proxy_crate::runtime_proxy_sync_probe_pressure_mode_for_route(
+        runtime_route_kind_to_proxy(route_kind),
         local_overload_pressure,
         background_queue_pressure,
     )
@@ -354,12 +305,35 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_mode_active_for_route(
 }
 
 pub(crate) fn runtime_proxy_lane_limit_marks_global_overload(lane: RuntimeRouteKind) -> bool {
-    lane == RuntimeRouteKind::Responses
+    runtime_proxy_crate::runtime_proxy_lane_limit_marks_global_overload(
+        runtime_route_kind_to_proxy(lane),
+    )
 }
 
 pub(crate) fn runtime_proxy_should_shed_fresh_compact_request(
     pressure_mode: bool,
     session_profile: Option<&str>,
 ) -> bool {
-    pressure_mode && session_profile.is_none()
+    runtime_proxy_crate::runtime_proxy_should_shed_fresh_compact_request(
+        pressure_mode,
+        session_profile,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_overload_response_includes_retry_after_hint() {
+        let response =
+            runtime_proxy_response_with_retry_after(build_runtime_proxy_text_response(503, "busy"));
+        let mut bytes = Vec::new();
+        response
+            .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+            .expect("response should serialize");
+        let text = String::from_utf8(bytes).expect("response should be utf8");
+
+        assert!(text.contains("\r\nRetry-After: 1\r\n"));
+    }
 }

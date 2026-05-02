@@ -3,9 +3,11 @@ use crate::{
     RuntimeProfileHealth, RuntimeProfileUsageSnapshot, RuntimeRotationProxyShared,
 };
 
+#[cfg(test)]
+pub(crate) use prodex_runtime_state::RuntimeStateSaveStateSection;
 pub(crate) use prodex_runtime_state::{
     RuntimeDueJobs, RuntimeScheduledSaveJob, RuntimeStateSaveSections,
-    RuntimeStateSaveStateSection, runtime_take_due_scheduled_jobs,
+    runtime_take_due_scheduled_jobs,
 };
 
 pub(crate) type RuntimeStateSaveQueue =

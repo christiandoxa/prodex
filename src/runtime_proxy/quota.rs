@@ -1,6 +1,233 @@
 use super::*;
 
 pub(crate) use prodex_quota::quota_reset_at_from_message as runtime_proxy_quota_reset_at_from_message;
+pub(crate) use runtime_proxy_crate::RuntimePrecommitQuotaBlockReason;
+
+fn runtime_route_kind_to_proxy(
+    route_kind: RuntimeRouteKind,
+) -> runtime_proxy_crate::RuntimeRouteKind {
+    match route_kind {
+        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
+    }
+}
+
+fn runtime_quota_source_to_proxy(
+    source: RuntimeQuotaSource,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaSource {
+    match source {
+        RuntimeQuotaSource::LiveProbe => {
+            runtime_proxy_crate::RuntimeSelectionQuotaSource::LiveProbe
+        }
+        RuntimeQuotaSource::PersistedSnapshot => {
+            runtime_proxy_crate::RuntimeSelectionQuotaSource::PersistedSnapshot
+        }
+    }
+}
+
+fn runtime_quota_source_option_to_proxy(
+    source: Option<RuntimeQuotaSource>,
+) -> Option<runtime_proxy_crate::RuntimeSelectionQuotaSource> {
+    source.map(runtime_quota_source_to_proxy)
+}
+
+fn runtime_quota_window_status_to_proxy(
+    status: RuntimeQuotaWindowStatus,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus {
+    match status {
+        RuntimeQuotaWindowStatus::Ready => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready
+        }
+        RuntimeQuotaWindowStatus::Thin => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin
+        }
+        RuntimeQuotaWindowStatus::Critical => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical
+        }
+        RuntimeQuotaWindowStatus::Exhausted => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted
+        }
+        RuntimeQuotaWindowStatus::Unknown => {
+            runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown
+        }
+    }
+}
+
+fn runtime_quota_window_status_from_proxy(
+    status: runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus,
+) -> RuntimeQuotaWindowStatus {
+    match status {
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Ready => {
+            RuntimeQuotaWindowStatus::Ready
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Thin => {
+            RuntimeQuotaWindowStatus::Thin
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Critical => {
+            RuntimeQuotaWindowStatus::Critical
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Exhausted => {
+            RuntimeQuotaWindowStatus::Exhausted
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaWindowStatus::Unknown => {
+            RuntimeQuotaWindowStatus::Unknown
+        }
+    }
+}
+
+fn runtime_quota_pressure_band_to_proxy(
+    band: RuntimeQuotaPressureBand,
+) -> runtime_proxy_crate::RuntimeSelectionQuotaPressureBand {
+    match band {
+        RuntimeQuotaPressureBand::Healthy => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy
+        }
+        RuntimeQuotaPressureBand::Thin => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin
+        }
+        RuntimeQuotaPressureBand::Critical => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical
+        }
+        RuntimeQuotaPressureBand::Exhausted => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted
+        }
+        RuntimeQuotaPressureBand::Unknown => {
+            runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown
+        }
+    }
+}
+
+fn runtime_quota_pressure_band_from_proxy(
+    band: runtime_proxy_crate::RuntimeSelectionQuotaPressureBand,
+) -> RuntimeQuotaPressureBand {
+    match band {
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Healthy => {
+            RuntimeQuotaPressureBand::Healthy
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Thin => {
+            RuntimeQuotaPressureBand::Thin
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Critical => {
+            RuntimeQuotaPressureBand::Critical
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Exhausted => {
+            RuntimeQuotaPressureBand::Exhausted
+        }
+        runtime_proxy_crate::RuntimeSelectionQuotaPressureBand::Unknown => {
+            RuntimeQuotaPressureBand::Unknown
+        }
+    }
+}
+
+fn runtime_quota_window_summary_to_proxy(
+    window: RuntimeQuotaWindowSummary,
+) -> runtime_proxy_crate::RuntimeProxyQuotaWindowSummary {
+    runtime_proxy_crate::RuntimeProxyQuotaWindowSummary {
+        status: runtime_quota_window_status_to_proxy(window.status),
+        remaining_percent: window.remaining_percent,
+        reset_at: window.reset_at,
+    }
+}
+
+fn runtime_quota_window_summary_from_proxy(
+    window: runtime_proxy_crate::RuntimeProxyQuotaWindowSummary,
+) -> RuntimeQuotaWindowSummary {
+    RuntimeQuotaWindowSummary {
+        status: runtime_quota_window_status_from_proxy(window.status),
+        remaining_percent: window.remaining_percent,
+        reset_at: window.reset_at,
+    }
+}
+
+fn runtime_quota_summary_to_proxy(
+    summary: RuntimeQuotaSummary,
+) -> runtime_proxy_crate::RuntimeProxyQuotaSummary {
+    runtime_proxy_crate::RuntimeProxyQuotaSummary {
+        five_hour: runtime_quota_window_summary_to_proxy(summary.five_hour),
+        weekly: runtime_quota_window_summary_to_proxy(summary.weekly),
+        route_band: runtime_quota_pressure_band_to_proxy(summary.route_band),
+    }
+}
+
+fn runtime_quota_summary_from_proxy(
+    summary: runtime_proxy_crate::RuntimeProxyQuotaSummary,
+) -> RuntimeQuotaSummary {
+    RuntimeQuotaSummary {
+        five_hour: runtime_quota_window_summary_from_proxy(summary.five_hour),
+        weekly: runtime_quota_window_summary_from_proxy(summary.weekly),
+        route_band: runtime_quota_pressure_band_from_proxy(summary.route_band),
+    }
+}
+
+fn runtime_usage_snapshot_to_proxy(
+    snapshot: &RuntimeProfileUsageSnapshot,
+) -> runtime_proxy_crate::RuntimeProxyUsageSnapshot {
+    runtime_proxy_crate::RuntimeProxyUsageSnapshot {
+        checked_at: snapshot.checked_at,
+        five_hour_status: runtime_quota_window_status_to_proxy(snapshot.five_hour_status),
+        five_hour_remaining_percent: snapshot.five_hour_remaining_percent,
+        five_hour_reset_at: snapshot.five_hour_reset_at,
+        weekly_status: runtime_quota_window_status_to_proxy(snapshot.weekly_status),
+        weekly_remaining_percent: snapshot.weekly_remaining_percent,
+        weekly_reset_at: snapshot.weekly_reset_at,
+    }
+}
+
+fn runtime_usage_snapshot_from_proxy(
+    snapshot: runtime_proxy_crate::RuntimeProxyUsageSnapshot,
+) -> RuntimeProfileUsageSnapshot {
+    RuntimeProfileUsageSnapshot {
+        checked_at: snapshot.checked_at,
+        five_hour_status: runtime_quota_window_status_from_proxy(snapshot.five_hour_status),
+        five_hour_remaining_percent: snapshot.five_hour_remaining_percent,
+        five_hour_reset_at: snapshot.five_hour_reset_at,
+        weekly_status: runtime_quota_window_status_from_proxy(snapshot.weekly_status),
+        weekly_remaining_percent: snapshot.weekly_remaining_percent,
+        weekly_reset_at: snapshot.weekly_reset_at,
+    }
+}
+
+fn runtime_quota_window_observation(
+    usage: &UsageResponse,
+    label: &str,
+) -> Option<runtime_proxy_crate::RuntimeProxyQuotaWindowObservation> {
+    required_main_window_snapshot(usage, label).map(|window| {
+        runtime_proxy_crate::RuntimeProxyQuotaWindowObservation {
+            remaining_percent: window.remaining_percent,
+            reset_at: window.reset_at,
+            pressure_score: window.pressure_score,
+        }
+    })
+}
+
+fn runtime_quota_sort_key_from_proxy(
+    sort_key: runtime_proxy_crate::RuntimeProxyQuotaPressureSortKey,
+) -> RuntimeQuotaPressureSortKey {
+    let (
+        band,
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        reserve_floor,
+        weekly_remaining,
+        five_hour_remaining,
+        weekly_reset_at,
+        five_hour_reset_at,
+    ) = sort_key;
+    (
+        runtime_quota_pressure_band_from_proxy(band),
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        reserve_floor,
+        weekly_remaining,
+        five_hour_remaining,
+        weekly_reset_at,
+        five_hour_reset_at,
+    )
+}
 
 pub(crate) fn runtime_profile_usage_cache_is_fresh(
     entry: &RuntimeProfileProbeCacheEntry,
@@ -44,90 +271,61 @@ pub(crate) fn update_runtime_profile_probe_cache_with_usage(
 }
 
 pub(crate) fn runtime_quota_pressure_band_reason(band: RuntimeQuotaPressureBand) -> &'static str {
-    match band {
-        RuntimeQuotaPressureBand::Healthy => "quota_healthy",
-        RuntimeQuotaPressureBand::Thin => "quota_thin",
-        RuntimeQuotaPressureBand::Critical => "quota_critical",
-        RuntimeQuotaPressureBand::Exhausted => "quota_exhausted",
-        RuntimeQuotaPressureBand::Unknown => "quota_unknown",
-    }
+    runtime_proxy_crate::runtime_proxy_quota_pressure_band_reason(
+        runtime_quota_pressure_band_to_proxy(band),
+    )
 }
 
 pub(crate) fn runtime_quota_window_status_reason(status: RuntimeQuotaWindowStatus) -> &'static str {
-    match status {
-        RuntimeQuotaWindowStatus::Ready => "ready",
-        RuntimeQuotaWindowStatus::Thin => "thin",
-        RuntimeQuotaWindowStatus::Critical => "critical",
-        RuntimeQuotaWindowStatus::Exhausted => "exhausted",
-        RuntimeQuotaWindowStatus::Unknown => "unknown",
-    }
+    runtime_proxy_crate::runtime_proxy_quota_window_status_reason(
+        runtime_quota_window_status_to_proxy(status),
+    )
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_quota_window_summary(
     usage: &UsageResponse,
     label: &str,
 ) -> RuntimeQuotaWindowSummary {
-    let Some(window) = required_main_window_snapshot(usage, label) else {
-        return RuntimeQuotaWindowSummary {
-            status: RuntimeQuotaWindowStatus::Unknown,
-            remaining_percent: 0,
-            reset_at: i64::MAX,
-        };
-    };
-    let status = if window.remaining_percent == 0 {
-        RuntimeQuotaWindowStatus::Exhausted
-    } else if window.remaining_percent <= 5 {
-        RuntimeQuotaWindowStatus::Critical
-    } else if window.remaining_percent <= 15 {
-        RuntimeQuotaWindowStatus::Thin
-    } else {
-        RuntimeQuotaWindowStatus::Ready
-    };
-    RuntimeQuotaWindowSummary {
-        status,
-        remaining_percent: window.remaining_percent,
-        reset_at: window.reset_at,
-    }
+    runtime_quota_window_summary_from_proxy(
+        runtime_proxy_crate::runtime_proxy_quota_window_summary(runtime_quota_window_observation(
+            usage, label,
+        )),
+    )
 }
 
 pub(crate) fn runtime_quota_summary_for_route(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeQuotaSummary {
-    RuntimeQuotaSummary {
-        five_hour: runtime_quota_window_summary(usage, "5h"),
-        weekly: runtime_quota_window_summary(usage, "weekly"),
-        route_band: runtime_quota_pressure_band_for_route(usage, route_kind),
-    }
+    runtime_quota_summary_from_proxy(runtime_proxy_crate::runtime_proxy_quota_summary_for_route(
+        runtime_quota_window_observation(usage, "5h"),
+        runtime_quota_window_observation(usage, "weekly"),
+        runtime_route_kind_to_proxy(route_kind),
+    ))
 }
 
 pub(crate) fn runtime_quota_summary_blocking_reset_at(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,
 ) -> Option<i64> {
-    let floor_percent = runtime_quota_precommit_floor_percent(route_kind);
-    [summary.five_hour, summary.weekly]
-        .into_iter()
-        .filter(|window| runtime_quota_window_precommit_guard(*window, floor_percent))
-        .map(|window| window.reset_at)
-        .filter(|reset_at| *reset_at != i64::MAX)
-        .max()
+    runtime_proxy_crate::runtime_proxy_quota_summary_blocking_reset_at(
+        runtime_quota_summary_to_proxy(summary),
+        runtime_route_kind_to_proxy(route_kind),
+        runtime_proxy_responses_quota_critical_floor_percent(),
+    )
 }
 
 pub(crate) fn runtime_profile_usage_snapshot_from_usage(
     usage: &UsageResponse,
 ) -> RuntimeProfileUsageSnapshot {
-    let five_hour = runtime_quota_window_summary(usage, "5h");
-    let weekly = runtime_quota_window_summary(usage, "weekly");
-    RuntimeProfileUsageSnapshot {
-        checked_at: Local::now().timestamp(),
-        five_hour_status: five_hour.status,
-        five_hour_remaining_percent: five_hour.remaining_percent,
-        five_hour_reset_at: five_hour.reset_at,
-        weekly_status: weekly.status,
-        weekly_remaining_percent: weekly.remaining_percent,
-        weekly_reset_at: weekly.reset_at,
-    }
+    runtime_usage_snapshot_from_proxy(
+        runtime_proxy_crate::runtime_proxy_usage_snapshot_from_observations_at(
+            runtime_quota_window_observation(usage, "5h"),
+            runtime_quota_window_observation(usage, "weekly"),
+            Local::now().timestamp(),
+        ),
+    )
 }
 
 pub(crate) fn runtime_quota_summary_from_usage_snapshot(
@@ -142,93 +340,52 @@ pub(crate) fn runtime_quota_summary_from_usage_snapshot_at(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> RuntimeQuotaSummary {
-    let five_hour = runtime_quota_window_summary_from_usage_snapshot_at(
-        snapshot.five_hour_status,
-        snapshot.five_hour_remaining_percent,
-        snapshot.five_hour_reset_at,
-        now,
-    );
-    let weekly = runtime_quota_window_summary_from_usage_snapshot_at(
-        snapshot.weekly_status,
-        snapshot.weekly_remaining_percent,
-        snapshot.weekly_reset_at,
-        now,
-    );
-    let route_band = [
-        five_hour.status,
-        weekly.status,
-        match route_kind {
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => weekly.status,
-            RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => five_hour.status,
-        },
-    ]
-    .into_iter()
-    .fold(RuntimeQuotaPressureBand::Healthy, |band, status| {
-        band.max(match status {
-            RuntimeQuotaWindowStatus::Ready => RuntimeQuotaPressureBand::Healthy,
-            RuntimeQuotaWindowStatus::Thin => RuntimeQuotaPressureBand::Thin,
-            RuntimeQuotaWindowStatus::Critical => RuntimeQuotaPressureBand::Critical,
-            RuntimeQuotaWindowStatus::Exhausted => RuntimeQuotaPressureBand::Exhausted,
-            RuntimeQuotaWindowStatus::Unknown => RuntimeQuotaPressureBand::Unknown,
-        })
-    });
-    RuntimeQuotaSummary {
-        five_hour,
-        weekly,
-        route_band,
-    }
+    runtime_quota_summary_from_proxy(
+        runtime_proxy_crate::runtime_proxy_quota_summary_from_usage_snapshot_at(
+            runtime_usage_snapshot_to_proxy(snapshot),
+            runtime_route_kind_to_proxy(route_kind),
+            now,
+        ),
+    )
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_quota_window_summary_from_usage_snapshot_at(
     status: RuntimeQuotaWindowStatus,
     remaining_percent: i64,
     reset_at: i64,
     now: i64,
 ) -> RuntimeQuotaWindowSummary {
-    if reset_at != i64::MAX && reset_at <= now {
-        return RuntimeQuotaWindowSummary {
-            status: RuntimeQuotaWindowStatus::Ready,
-            remaining_percent: 100,
+    runtime_quota_window_summary_from_proxy(
+        runtime_proxy_crate::runtime_proxy_quota_window_summary_from_usage_snapshot_at(
+            runtime_quota_window_status_to_proxy(status),
+            remaining_percent,
             reset_at,
-        };
-    }
-    RuntimeQuotaWindowSummary {
-        status,
-        remaining_percent,
-        reset_at,
-    }
+            now,
+        ),
+    )
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_profile_usage_snapshot_hold_active(
     snapshot: &RuntimeProfileUsageSnapshot,
     now: i64,
 ) -> bool {
-    [
-        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
-        (snapshot.weekly_status, snapshot.weekly_reset_at),
-    ]
-    .into_iter()
-    .any(|(status, reset_at)| {
-        matches!(status, RuntimeQuotaWindowStatus::Exhausted)
-            && reset_at != i64::MAX
-            && reset_at > now
-    })
+    runtime_proxy_crate::runtime_proxy_usage_snapshot_hold_active(
+        runtime_usage_snapshot_to_proxy(snapshot),
+        now,
+    )
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_profile_usage_snapshot_hold_expired(
     snapshot: &RuntimeProfileUsageSnapshot,
     now: i64,
 ) -> bool {
-    [
-        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
-        (snapshot.weekly_status, snapshot.weekly_reset_at),
-    ]
-    .into_iter()
-    .any(|(status, reset_at)| {
-        matches!(status, RuntimeQuotaWindowStatus::Exhausted)
-            && reset_at != i64::MAX
-            && reset_at <= now
-    })
+    runtime_proxy_crate::runtime_proxy_usage_snapshot_hold_expired(
+        runtime_usage_snapshot_to_proxy(snapshot),
+        now,
+    )
 }
 
 pub(crate) fn runtime_profile_known_quota_reset_at(
@@ -333,23 +490,18 @@ pub(crate) fn mark_runtime_profile_quota_quarantine(
 }
 
 pub(crate) fn runtime_quota_source_label(source: RuntimeQuotaSource) -> &'static str {
-    match source {
-        RuntimeQuotaSource::LiveProbe => "probe_cache",
-        RuntimeQuotaSource::PersistedSnapshot => "persisted_snapshot",
-    }
+    runtime_proxy_crate::runtime_selection_quota_source_label(runtime_quota_source_to_proxy(source))
 }
 
 pub(crate) fn runtime_usage_snapshot_is_usable(
     snapshot: &RuntimeProfileUsageSnapshot,
     now: i64,
 ) -> bool {
-    if runtime_profile_usage_snapshot_hold_active(snapshot, now) {
-        return true;
-    }
-    if runtime_profile_usage_snapshot_hold_expired(snapshot, now) {
-        return false;
-    }
-    now.saturating_sub(snapshot.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS
+    runtime_proxy_crate::runtime_proxy_usage_snapshot_is_usable(
+        runtime_usage_snapshot_to_proxy(snapshot),
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    )
 }
 
 pub(crate) fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
@@ -381,88 +533,37 @@ pub(crate) fn runtime_quota_pressure_sort_key_for_route(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeQuotaPressureSortKey {
-    let score = ready_profile_score_for_route(usage, route_kind);
-    (
-        runtime_quota_pressure_band_for_route(usage, route_kind),
-        score.total_pressure,
-        score.weekly_pressure,
-        score.five_hour_pressure,
-        Reverse(score.reserve_floor),
-        Reverse(score.weekly_remaining),
-        Reverse(score.five_hour_remaining),
-        score.weekly_reset_at,
-        score.five_hour_reset_at,
+    runtime_quota_sort_key_from_proxy(
+        runtime_proxy_crate::runtime_proxy_quota_pressure_sort_key_for_route(
+            runtime_quota_window_observation(usage, "5h"),
+            runtime_quota_window_observation(usage, "weekly"),
+            runtime_route_kind_to_proxy(route_kind),
+        ),
     )
 }
 
 pub(crate) fn runtime_quota_pressure_sort_key_for_route_from_summary(
     summary: RuntimeQuotaSummary,
 ) -> RuntimeQuotaPressureSortKey {
-    (
-        summary.route_band,
-        match summary.route_band {
-            RuntimeQuotaPressureBand::Healthy => 0,
-            RuntimeQuotaPressureBand::Thin => 1,
-            RuntimeQuotaPressureBand::Critical => 2,
-            RuntimeQuotaPressureBand::Exhausted => 3,
-            RuntimeQuotaPressureBand::Unknown => 4,
-        },
-        match summary.weekly.status {
-            RuntimeQuotaWindowStatus::Ready => 0,
-            RuntimeQuotaWindowStatus::Thin => 1,
-            RuntimeQuotaWindowStatus::Critical => 2,
-            RuntimeQuotaWindowStatus::Exhausted => 3,
-            RuntimeQuotaWindowStatus::Unknown => 4,
-        },
-        match summary.five_hour.status {
-            RuntimeQuotaWindowStatus::Ready => 0,
-            RuntimeQuotaWindowStatus::Thin => 1,
-            RuntimeQuotaWindowStatus::Critical => 2,
-            RuntimeQuotaWindowStatus::Exhausted => 3,
-            RuntimeQuotaWindowStatus::Unknown => 4,
-        },
-        Reverse(
-            summary
-                .weekly
-                .remaining_percent
-                .min(summary.five_hour.remaining_percent),
+    runtime_quota_sort_key_from_proxy(
+        runtime_proxy_crate::runtime_proxy_quota_pressure_sort_key_for_route_from_summary(
+            runtime_quota_summary_to_proxy(summary),
         ),
-        Reverse(summary.weekly.remaining_percent),
-        Reverse(summary.five_hour.remaining_percent),
-        summary.weekly.reset_at,
-        summary.five_hour.reset_at,
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_quota_pressure_band_for_route(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeQuotaPressureBand {
-    let Some(weekly) = required_main_window_snapshot(usage, "weekly") else {
-        return RuntimeQuotaPressureBand::Unknown;
-    };
-    let Some(five_hour) = required_main_window_snapshot(usage, "5h") else {
-        return RuntimeQuotaPressureBand::Unknown;
-    };
-
-    let weekly_remaining = weekly.remaining_percent;
-    let five_hour_remaining = five_hour.remaining_percent;
-    if weekly_remaining == 0 || five_hour_remaining == 0 {
-        return RuntimeQuotaPressureBand::Exhausted;
-    }
-
-    let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) = match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => (20, 10, 10, 5),
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
-    };
-
-    if weekly_remaining <= critical_weekly || five_hour_remaining <= critical_five_hour {
-        RuntimeQuotaPressureBand::Critical
-    } else if weekly_remaining <= thin_weekly || five_hour_remaining <= thin_five_hour {
-        RuntimeQuotaPressureBand::Thin
-    } else {
-        RuntimeQuotaPressureBand::Healthy
-    }
+    runtime_quota_pressure_band_from_proxy(
+        runtime_proxy_crate::runtime_proxy_quota_pressure_band_for_route(
+            runtime_quota_window_observation(usage, "5h"),
+            runtime_quota_window_observation(usage, "weekly"),
+            runtime_route_kind_to_proxy(route_kind),
+        ),
+    )
 }
 
 pub(crate) fn runtime_profile_codex_home(
@@ -624,14 +725,11 @@ pub(crate) fn runtime_quota_summary_requires_precommit_live_probe(
     source: Option<RuntimeQuotaSource>,
     route_kind: RuntimeRouteKind,
 ) -> bool {
-    matches!(
-        route_kind,
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
-        && (matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Critical)
-            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Critical)
-            || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
-            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown))
+    runtime_proxy_crate::runtime_proxy_quota_summary_requires_precommit_live_probe(
+        runtime_quota_summary_to_proxy(summary),
+        runtime_quota_source_option_to_proxy(source),
+        runtime_route_kind_to_proxy(route_kind),
+    )
 }
 
 pub(crate) fn runtime_quota_summary_requires_live_source_after_probe(
@@ -639,12 +737,11 @@ pub(crate) fn runtime_quota_summary_requires_live_source_after_probe(
     source: Option<RuntimeQuotaSource>,
     route_kind: RuntimeRouteKind,
 ) -> bool {
-    matches!(
-        route_kind,
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
-        && (matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
-            || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown))
+    runtime_proxy_crate::runtime_proxy_quota_summary_requires_live_source_after_probe(
+        runtime_quota_summary_to_proxy(summary),
+        runtime_quota_source_option_to_proxy(source),
+        runtime_route_kind_to_proxy(route_kind),
+    )
 }
 
 pub(crate) fn ensure_runtime_profile_precommit_quota_ready(
@@ -681,46 +778,15 @@ pub(crate) enum RuntimePrecommitQuotaGateDecision {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RuntimePrecommitQuotaBlockReason {
-    ExhaustedBeforeSend,
-    CriticalFloorBeforeSend,
-    WindowsUnavailableAfterReprobe,
-}
-
-impl RuntimePrecommitQuotaBlockReason {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend => "quota_exhausted_before_send",
-            RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend => {
-                "quota_critical_floor_before_send"
-            }
-            RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe => {
-                "quota_windows_unavailable_after_reprobe"
-            }
-        }
-    }
-}
-
 fn runtime_precommit_quota_block_reason(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,
 ) -> Option<RuntimePrecommitQuotaBlockReason> {
-    let floor_percent = runtime_quota_precommit_floor_percent(route_kind);
-    if summary.route_band == RuntimeQuotaPressureBand::Exhausted {
-        return Some(RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend);
-    }
-
-    if matches!(
-        route_kind,
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && (runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
-        || runtime_quota_window_precommit_guard(summary.weekly, floor_percent))
-    {
-        return Some(RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend);
-    }
-
-    None
+    runtime_proxy_crate::runtime_proxy_precommit_quota_block_reason(
+        runtime_quota_summary_to_proxy(summary),
+        runtime_route_kind_to_proxy(route_kind),
+        runtime_proxy_responses_quota_critical_floor_percent(),
+    )
 }
 
 pub(crate) fn runtime_precommit_quota_gate(

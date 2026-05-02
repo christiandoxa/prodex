@@ -30,13 +30,19 @@ pub(crate) fn save_runtime_state_snapshot_if_latest(
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
-        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
+        if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
+            latest_revision,
+            revision,
+        ) {
             return Ok(false);
         }
 
         let _lock = acquire_state_file_lock(paths)?;
 
-        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
+        if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
+            latest_revision,
+            revision,
+        ) {
             return Ok(false);
         }
 
@@ -49,7 +55,10 @@ pub(crate) fn save_runtime_state_snapshot_if_latest(
             backoffs,
         )?;
 
-        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
+        if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
+            latest_revision,
+            revision,
+        ) {
             return Ok(false);
         }
 
@@ -73,19 +82,28 @@ pub(crate) fn save_runtime_state_selected_snapshot_if_latest(
     latest_revision: &AtomicU64,
 ) -> Result<bool> {
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
-        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
+        if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
+            latest_revision,
+            revision,
+        ) {
             return Ok(false);
         }
 
         let _lock = acquire_state_file_lock(&snapshot.paths)?;
 
-        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
+        if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
+            latest_revision,
+            revision,
+        ) {
             return Ok(false);
         }
 
         let prepared = prepare_runtime_state_selected_snapshot_save(snapshot)?;
 
-        if !runtime_state_snapshot_is_latest_revision(latest_revision, revision) {
+        if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
+            latest_revision,
+            revision,
+        ) {
             return Ok(false);
         }
 
@@ -101,10 +119,6 @@ pub(crate) fn save_runtime_state_selected_snapshot_if_latest(
         }
     }
     Ok(false)
-}
-
-fn runtime_state_snapshot_is_latest_revision(latest_revision: &AtomicU64, revision: u64) -> bool {
-    latest_revision.load(Ordering::SeqCst) == revision
 }
 
 fn prepare_runtime_state_snapshot_save(
@@ -137,69 +151,94 @@ fn prepare_runtime_state_snapshot_save(
 fn prepare_runtime_state_selected_snapshot_save(
     snapshot: &RuntimeStateSaveSelectedSnapshot,
 ) -> Result<PreparedRuntimeStateSelectedSnapshotSave> {
-    let mut state = None;
-    let mut continuations = None;
-    let profiles = if let Some(state_snapshot) = snapshot.state.as_ref() {
-        if let Some(continuation_snapshot) = snapshot.continuations.as_ref() {
-            let (merged_state, merged_continuations) =
-                merge_runtime_state_and_continuations_for_save(
-                    &snapshot.paths,
-                    state_snapshot,
-                    continuation_snapshot,
-                )?;
-            let profiles = merged_state.profiles.clone();
-            state = Some(merged_state);
-            continuations = Some(merged_continuations);
-            profiles
-        } else {
-            let existing = AppState::load(&snapshot.paths)?;
-            let merged_state = merge_runtime_state_snapshot(existing, state_snapshot);
-            let profiles = merged_state.profiles.clone();
-            state = Some(merged_state);
-            profiles
-        }
+    let now = Local::now().timestamp();
+    let state_policy = app_state_compaction_policy();
+    let continuation_policy = runtime_continuation_compaction_policy();
+    let prepare_plan = prodex_runtime_store::runtime_state_selected_snapshot_prepare_plan(snapshot);
+    let existing_state = if prepare_plan.load.needs_existing_state {
+        Some(AppState::load(&snapshot.paths)?)
     } else {
-        let profiles = match snapshot.profiles.clone() {
-            Some(profiles) => profiles,
-            None => AppState::load(&snapshot.paths)?.profiles,
-        };
-        if let Some(continuation_snapshot) = snapshot.continuations.as_ref() {
-            let existing_continuations =
-                load_runtime_continuations_with_recovery(&snapshot.paths, &profiles)?;
-            continuations = Some(merge_runtime_continuation_store(
-                &existing_continuations.value,
-                continuation_snapshot,
-                &profiles,
-            ));
-        }
-        profiles
+        None
+    };
+    let profiles_for_continuation_load =
+        prodex_runtime_store::runtime_state_selected_snapshot_profiles_for_merge(
+            snapshot,
+            existing_state.as_ref(),
+            now,
+            state_policy,
+        )
+        .context("invalid runtime state selected snapshot merge plan")?;
+    let existing_continuations = if prepare_plan.load.needs_existing_continuations {
+        Some(
+            load_runtime_continuations_with_recovery(
+                &snapshot.paths,
+                &profiles_for_continuation_load,
+            )?
+            .value,
+        )
+    } else {
+        None
+    };
+    let merged = prodex_runtime_store::merge_runtime_state_selected_snapshot_sections(
+        snapshot,
+        existing_state.as_ref(),
+        existing_continuations.as_ref(),
+        now,
+        state_policy,
+        continuation_policy,
+    )
+    .context("invalid runtime state selected snapshot merge plan")?;
+
+    let json = if prepare_plan.writes_state {
+        Some(serialize_runtime_state_snapshot_for_save(
+            merged
+                .state
+                .as_ref()
+                .context("selected snapshot state section missing after merge")?,
+        )?)
+    } else {
+        None
+    };
+    let profile_scores = if prepare_plan.writes_profile_scores {
+        Some(merge_runtime_profile_scores_for_save(
+            &snapshot.paths,
+            &merged.profiles,
+            snapshot
+                .profile_scores
+                .as_ref()
+                .context("selected snapshot profile scores section missing")?,
+        )?)
+    } else {
+        None
+    };
+    let usage_snapshots = if prepare_plan.writes_usage_snapshots {
+        Some(merge_runtime_usage_snapshots_for_save(
+            &snapshot.paths,
+            &merged.profiles,
+            snapshot
+                .usage_snapshots
+                .as_ref()
+                .context("selected snapshot usage snapshots section missing")?,
+        )?)
+    } else {
+        None
+    };
+    let backoffs = if prepare_plan.writes_backoffs {
+        Some(merge_runtime_backoffs_for_save(
+            &snapshot.paths,
+            &merged.profiles,
+            snapshot
+                .backoffs
+                .as_ref()
+                .context("selected snapshot backoffs section missing")?,
+        )?)
+    } else {
+        None
     };
 
-    let json = state
-        .as_ref()
-        .map(serialize_runtime_state_snapshot_for_save)
-        .transpose()?;
-    let profile_scores = snapshot
-        .profile_scores
-        .as_ref()
-        .map(|scores| merge_runtime_profile_scores_for_save(&snapshot.paths, &profiles, scores))
-        .transpose()?;
-    let usage_snapshots = snapshot
-        .usage_snapshots
-        .as_ref()
-        .map(|snapshots| {
-            merge_runtime_usage_snapshots_for_save(&snapshot.paths, &profiles, snapshots)
-        })
-        .transpose()?;
-    let backoffs = snapshot
-        .backoffs
-        .as_ref()
-        .map(|backoffs| merge_runtime_backoffs_for_save(&snapshot.paths, &profiles, backoffs))
-        .transpose()?;
-
     Ok(PreparedRuntimeStateSelectedSnapshotSave {
-        profiles,
-        continuations,
+        profiles: merged.profiles,
+        continuations: merged.continuations,
         json,
         profile_scores,
         usage_snapshots,
@@ -213,19 +252,25 @@ fn merge_runtime_state_and_continuations_for_save(
     continuations: &RuntimeContinuationStore,
 ) -> Result<(AppState, RuntimeContinuationStore)> {
     let existing = AppState::load(paths)?;
-    let mut state = merge_runtime_state_snapshot(existing, snapshot);
-    let existing_continuations = load_runtime_continuations_with_recovery(paths, &state.profiles)?;
-    let continuations = merge_runtime_continuation_store(
+    let now = Local::now().timestamp();
+    let state_for_profiles = prodex_runtime_store::merge_runtime_state_snapshot_for_save(
+        existing.clone(),
+        snapshot,
+        now,
+        app_state_compaction_policy(),
+    );
+    let existing_continuations =
+        load_runtime_continuations_with_recovery(paths, &state_for_profiles.profiles)?;
+    let merged = prodex_runtime_store::merge_runtime_state_and_continuations_for_save(
+        existing,
+        snapshot,
         &existing_continuations.value,
         continuations,
-        &state.profiles,
+        now,
+        app_state_compaction_policy(),
+        runtime_continuation_compaction_policy(),
     );
-    state.response_profile_bindings =
-        prodex_runtime_store::runtime_external_response_profile_bindings(
-            &continuations.response_profile_bindings,
-        );
-    state.session_profile_bindings = continuations.session_profile_bindings.clone();
-    Ok((state, continuations))
+    Ok((merged.state, merged.continuations))
 }
 
 fn serialize_runtime_state_snapshot_for_save(state: &AppState) -> Result<String> {

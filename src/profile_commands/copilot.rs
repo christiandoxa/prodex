@@ -2,9 +2,11 @@ use super::*;
 
 pub(crate) use prodex_profile_export::CopilotUserInfo;
 use prodex_profile_export::{
-    CopilotConfigFile, copilot_account_key, copilot_platform_label, copilot_token_from_config,
-    copilot_user_api_origin, default_copilot_models_api_url, parse_copilot_config_file,
-    parse_copilot_version, select_copilot_logged_in_user,
+    CopilotConfigFile, CopilotProfileImportStatePlan, CopilotProfileImportSummary,
+    copilot_account_key, copilot_platform_label, copilot_profile_import_summary_fields,
+    copilot_token_from_config, copilot_user_api_origin, parse_copilot_config_file,
+    parse_copilot_user_info_json_response, parse_copilot_user_info_value, parse_copilot_version,
+    plan_copilot_profile_import, plan_copilot_profile_import_state, select_copilot_logged_in_user,
 };
 
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
@@ -27,97 +29,81 @@ pub(super) fn is_copilot_import_source(path: &Path) -> bool {
 pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<()> {
     let context = resolve_copilot_import_context()?;
     let user_info = fetch_copilot_user_info(&context)?;
+    let import_plan = plan_copilot_profile_import(&context.host, &context.login, &user_info);
     let provider = ProfileProvider::Copilot {
-        host: context.host.clone(),
-        login: user_info
-            .login
-            .clone()
-            .unwrap_or_else(|| context.login.clone()),
-        api_url: user_info
-            .endpoints
-            .as_ref()
-            .and_then(|endpoints| endpoints.api.clone())
-            .unwrap_or_else(|| default_copilot_models_api_url(&context.host)),
-        access_type_sku: user_info.access_type_sku.clone(),
-        copilot_plan: user_info.copilot_plan.clone(),
+        host: import_plan.host.clone(),
+        login: import_plan.login.clone(),
+        api_url: import_plan.api_url.clone(),
+        access_type_sku: import_plan.access_type_sku.clone(),
+        copilot_plan: import_plan.copilot_plan.clone(),
     };
 
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
+    let existing_profile_name =
+        find_copilot_profile_by_identity(&state, &context.host, &context.login);
+    let import_state_plan = plan_copilot_profile_import_state(
+        &context.login,
+        args.name.as_deref(),
+        existing_profile_name.as_deref(),
+        state.active_profile.is_some(),
+        args.activate,
+        |profile_name| state.profiles.contains_key(profile_name),
+        || default_copilot_profile_name(&paths, &state, &context.login),
+    )?;
 
-    if let Some(existing_name) =
-        find_copilot_profile_by_identity(&state, &context.host, &context.login)
-    {
-        if let Some(requested_name) = args.name.as_deref()
-            && requested_name != existing_name
-        {
-            bail!(
-                "Copilot account '{}' is already imported as profile '{}'",
-                context.login,
-                existing_name
-            );
-        }
-
-        let profile = state
-            .profiles
-            .get_mut(&existing_name)
-            .with_context(|| format!("profile '{}' is missing", existing_name))?;
-        profile.provider = provider.clone();
-        profile.email = Some(context.login.clone());
-        if state.active_profile.is_none() || args.activate {
-            state.active_profile = Some(existing_name.clone());
-        }
-        state.save(&paths)?;
-
-        audit_log_event_best_effort(
-            "profile",
-            "import_copilot",
-            "success",
-            serde_json::json!({
-                "profile_name": existing_name,
-                "provider": provider.label(),
-                "github_host": context.host,
-                "github_login": context.login,
-                "api_url": provider_api_url(&provider),
-                "activated": state.active_profile.as_deref() == Some(existing_name.as_str()),
-                "updated_existing": true,
-            }),
-        );
-
-        let mut fields = vec![
-            (
-                "Result".to_string(),
-                format!("Updated imported Copilot profile '{}'.", existing_name),
-            ),
-            ("Profile".to_string(), existing_name.clone()),
-            ("Provider".to_string(), provider.display_name().to_string()),
-            ("Identity".to_string(), context.login.clone()),
-            ("GitHub host".to_string(), context.host.clone()),
-        ];
-        if let Some(api_url) = provider_api_url(&provider) {
-            fields.push(("API".to_string(), api_url.to_string()));
-        }
-        fields.push((
-            "Storage".to_string(),
-            "Token remains in Copilot's keychain/config store.".to_string(),
-        ));
-        if state.active_profile.as_deref() == Some(existing_name.as_str()) {
-            fields.push(("Active".to_string(), existing_name));
-        }
-        print_panel("Profile Updated", &fields);
-        return Ok(());
-    }
-
-    let profile_name = match args.name.as_deref() {
-        Some(requested) => {
-            validate_profile_name(requested)?;
-            if state.profiles.contains_key(requested) {
-                bail!("profile '{}' already exists", requested);
+    let (profile_name, activate) = match import_state_plan {
+        CopilotProfileImportStatePlan::UpdateExisting {
+            profile_name: existing_name,
+            activate,
+        } => {
+            let profile = state
+                .profiles
+                .get_mut(&existing_name)
+                .with_context(|| format!("profile '{}' is missing", existing_name))?;
+            profile.provider = provider.clone();
+            profile.email = Some(context.login.clone());
+            if activate {
+                state.active_profile = Some(existing_name.clone());
             }
-            requested.to_string()
+            state.save(&paths)?;
+
+            audit_log_event_best_effort(
+                "profile",
+                "import_copilot",
+                "success",
+                serde_json::json!({
+                    "profile_name": existing_name,
+                    "provider": provider.label(),
+                    "github_host": context.host,
+                    "github_login": context.login,
+                    "api_url": import_plan.api_url,
+                    "activated": state.active_profile.as_deref() == Some(existing_name.as_str()),
+                    "updated_existing": true,
+                }),
+            );
+
+            let fields = copilot_profile_import_summary_fields(CopilotProfileImportSummary {
+                profile_name: existing_name.clone(),
+                provider: provider.display_name().to_string(),
+                identity: context.login.clone(),
+                github_host: context.host.clone(),
+                api_url: Some(import_plan.api_url.clone()),
+                codex_home: None,
+                active: state.active_profile.as_deref() == Some(existing_name.as_str()),
+                updated_existing: true,
+            });
+            print_panel("Profile Updated", &fields);
+            return Ok(());
         }
-        None => default_copilot_profile_name(&paths, &state, &context.login),
+        CopilotProfileImportStatePlan::AddNew {
+            profile_name,
+            activate,
+        } => (profile_name, activate),
     };
+    if args.name.is_some() {
+        prodex_profile_identity::validate_profile_name(&profile_name)?;
+    }
 
     let codex_home = managed_profile_home_path(&paths, &profile_name)?;
     ensure_path_is_unique(&state, &codex_home)?;
@@ -139,7 +125,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             provider: provider.clone(),
         },
     );
-    if state.active_profile.is_none() || args.activate {
+    if activate {
         state.active_profile = Some(profile_name.clone());
     }
     state.save(&paths)?;
@@ -153,44 +139,25 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             "provider": provider.label(),
             "github_host": context.host.clone(),
             "github_login": context.login.clone(),
-            "api_url": provider_api_url(&provider),
+            "api_url": import_plan.api_url,
             "activated": state.active_profile.as_deref() == Some(profile_name.as_str()),
             "codex_home": codex_home.display().to_string(),
             "updated_existing": false,
         }),
     );
 
-    let mut fields = vec![
-        (
-            "Result".to_string(),
-            format!("Imported Copilot profile '{}'.", profile_name),
-        ),
-        ("Profile".to_string(), profile_name.clone()),
-        ("Provider".to_string(), provider.display_name().to_string()),
-        ("Identity".to_string(), context.login.clone()),
-        ("GitHub host".to_string(), context.host),
-        ("CODEX_HOME".to_string(), codex_home.display().to_string()),
-    ];
-    if let Some(api_url) = provider_api_url(&provider) {
-        fields.push(("API".to_string(), api_url.to_string()));
-    }
-    fields.push((
-        "Storage".to_string(),
-        "Managed profile home created; token remains in Copilot's keychain/config store."
-            .to_string(),
-    ));
-    if state.active_profile.as_deref() == Some(profile_name.as_str()) {
-        fields.push(("Active".to_string(), profile_name));
-    }
+    let fields = copilot_profile_import_summary_fields(CopilotProfileImportSummary {
+        profile_name: profile_name.clone(),
+        provider: provider.display_name().to_string(),
+        identity: context.login.clone(),
+        github_host: context.host,
+        api_url: Some(import_plan.api_url.clone()),
+        codex_home: Some(codex_home.display().to_string()),
+        active: state.active_profile.as_deref() == Some(profile_name.as_str()),
+        updated_existing: false,
+    });
     print_panel("Profile Added", &fields);
     Ok(())
-}
-
-fn provider_api_url(provider: &ProfileProvider) -> Option<&str> {
-    match provider {
-        ProfileProvider::Openai => None,
-        ProfileProvider::Copilot { api_url, .. } => Some(api_url.as_str()),
-    }
 }
 
 fn find_copilot_profile_by_identity(state: &AppState, host: &str, login: &str) -> Option<String> {
@@ -203,28 +170,9 @@ fn find_copilot_profile_by_identity(state: &AppState, host: &str, login: &str) -
 }
 
 fn default_copilot_profile_name(paths: &AppPaths, state: &AppState, login: &str) -> String {
-    let base_name = profile_name_from_email(&format!("copilot-{login}"));
-    unique_profile_name_from_seed(paths, state, &base_name)
-}
-
-fn unique_profile_name_from_seed(paths: &AppPaths, state: &AppState, base_name: &str) -> String {
-    let base_name = if base_name.trim().is_empty() {
-        "copilot".to_string()
-    } else {
-        base_name.to_string()
-    };
-    if is_available_profile_name(paths, state, &base_name) {
-        return base_name;
-    }
-
-    for suffix in 2.. {
-        let candidate = format!("{base_name}-{suffix}");
-        if is_available_profile_name(paths, state, &candidate) {
-            return candidate;
-        }
-    }
-
-    unreachable!("integer suffix space should not be exhausted")
+    prodex_profile_identity::unique_copilot_profile_name(login, |candidate| {
+        is_available_profile_name(paths, state, candidate)
+    })
 }
 
 fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
@@ -396,12 +344,10 @@ pub(crate) fn fetch_copilot_user_info_json_for_account(
 
 fn fetch_copilot_user_info_with_token(host: &str, token: &str) -> Result<CopilotUserInfo> {
     let value = fetch_copilot_user_info_json_with_token(host, token)?;
-    serde_json::from_value(value).with_context(|| {
-        format!(
-            "failed to parse {}/copilot_internal/user",
-            host.trim_end_matches('/')
-        )
-    })
+    parse_copilot_user_info_value(
+        value,
+        &format!("{}/copilot_internal/user", host.trim_end_matches('/')),
+    )
 }
 
 fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<serde_json::Value> {
@@ -441,5 +387,5 @@ fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<se
             body_text
         );
     }
-    serde_json::from_slice(&body).with_context(|| format!("failed to parse {}", user_url))
+    parse_copilot_user_info_json_response(&body, &user_url)
 }

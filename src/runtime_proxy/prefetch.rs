@@ -319,7 +319,7 @@ pub(crate) fn inspect_runtime_sse_lookahead(
         match prefetch.recv_timeout(remaining) {
             Ok(RuntimePrefetchChunk::Data(chunk)) => {
                 buffered.extend_from_slice(&chunk);
-                match inspect_runtime_sse_buffer(&buffered)? {
+                match inspect_runtime_sse_buffer(&buffered) {
                     RuntimeSseInspectionProgress::Commit {
                         response_ids,
                         turn_state,
@@ -399,7 +399,7 @@ pub(crate) fn inspect_runtime_sse_lookahead(
         }
     }
 
-    match inspect_runtime_sse_buffer(&buffered)? {
+    match inspect_runtime_sse_buffer(&buffered) {
         RuntimeSseInspectionProgress::Commit {
             response_ids,
             turn_state,
@@ -430,107 +430,5 @@ pub(crate) fn inspect_runtime_sse_lookahead(
         RuntimeSseInspectionProgress::PreviousResponseNotFound => {
             Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered))
         }
-    }
-}
-
-pub(crate) fn inspect_runtime_sse_buffer(buffered: &[u8]) -> Result<RuntimeSseInspectionProgress> {
-    let mut line = Vec::new();
-    let mut data_lines = Vec::new();
-    let mut response_ids = BTreeSet::new();
-    let mut saw_commit_ready_event = false;
-    let mut turn_state = None::<String>;
-    let mut process_event = |event: RuntimeParsedSseEvent| {
-        if event.quota_blocked {
-            return Some(RuntimeSseInspectionProgress::QuotaBlocked);
-        }
-        if event.previous_response_not_found {
-            return Some(RuntimeSseInspectionProgress::PreviousResponseNotFound);
-        }
-        response_ids.extend(event.response_ids);
-        if event.turn_state.is_some() {
-            turn_state = event.turn_state;
-        }
-        if !event
-            .event_type
-            .as_deref()
-            .is_some_and(runtime_proxy_precommit_hold_event_kind)
-        {
-            saw_commit_ready_event = true;
-        }
-        None
-    };
-    let mut terminal = None;
-    runtime_sse_consume_chunk(&mut line, &mut data_lines, buffered, |event| {
-        if terminal.is_none() {
-            terminal = process_event(event);
-        }
-    });
-    if terminal.is_none() {
-        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
-            if terminal.is_none() {
-                terminal = process_event(event);
-            }
-        });
-    }
-    if let Some(progress) = terminal {
-        return Ok(progress);
-    }
-
-    if saw_commit_ready_event {
-        Ok(RuntimeSseInspectionProgress::Commit {
-            response_ids: response_ids.into_iter().collect(),
-            turn_state,
-        })
-    } else {
-        Ok(RuntimeSseInspectionProgress::Hold {
-            response_ids: response_ids.into_iter().collect(),
-            turn_state,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn inspect_runtime_sse_buffer_handles_comments_crlf_and_partial_tail() {
-        let progress = inspect_runtime_sse_buffer(
-            concat!(
-                ": keep-alive\r\n",
-                "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
-                "\r\n",
-                "data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-2\"}"
-            )
-            .as_bytes(),
-        )
-        .expect("buffer should inspect");
-
-        match progress {
-            RuntimeSseInspectionProgress::Commit {
-                response_ids,
-                turn_state,
-            } => {
-                assert_eq!(
-                    response_ids,
-                    vec!["resp-1".to_string(), "resp-2".to_string()]
-                );
-                assert_eq!(turn_state.as_deref(), Some("ts-1"));
-            }
-            other => panic!("expected commit progress, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn inspect_runtime_sse_buffer_detects_previous_response_not_found_from_partial_event() {
-        let progress = inspect_runtime_sse_buffer(
-            b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}",
-        )
-        .expect("buffer should inspect");
-
-        assert!(matches!(
-            progress,
-            RuntimeSseInspectionProgress::PreviousResponseNotFound
-        ));
     }
 }

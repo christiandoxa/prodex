@@ -3,7 +3,7 @@ use base64::Engine;
 use chrono::{Local, TimeZone};
 use dirs::home_dir;
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

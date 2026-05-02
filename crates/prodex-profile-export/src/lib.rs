@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use aes_gcm_siv::{
     Aes256GcmSiv, Nonce,
@@ -35,10 +36,65 @@ impl ProfileImportIdentity {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(bound(
+    serialize = "Provider: Serialize",
+    deserialize = "Provider: Deserialize<'de> + Default"
+))]
+pub struct ProfileExportPayload<Provider> {
+    pub exported_at: String,
+    pub source_prodex_version: String,
+    pub active_profile: Option<String>,
+    pub profiles: Vec<ExportedProfile<Provider>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(bound(
+    serialize = "Provider: Serialize",
+    deserialize = "Provider: Deserialize<'de> + Default"
+))]
+pub struct ExportedProfile<Provider> {
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    pub source_managed: bool,
+    #[serde(default)]
+    pub provider: Provider,
+    pub auth_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileImportAuthUpdatePlan {
+    pub target_profile_name: String,
+    pub email: Option<String>,
+    pub auth_json: String,
+}
+
 pub trait ProfileImportPlanProfile {
     fn profile_name(&self) -> &str;
     fn supports_codex_runtime(&self) -> bool;
     fn import_identity(&self) -> ProfileImportIdentity;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileImportPlanInput {
+    pub profile_name: String,
+    pub supports_codex_runtime: bool,
+    pub identity: ProfileImportIdentity,
+}
+
+impl ProfileImportPlanProfile for ProfileImportPlanInput {
+    fn profile_name(&self) -> &str {
+        &self.profile_name
+    }
+
+    fn supports_codex_runtime(&self) -> bool {
+        self.supports_codex_runtime
+    }
+
+    fn import_identity(&self) -> ProfileImportIdentity {
+        self.identity.clone()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +123,86 @@ pub enum ProfileImportPlanAction {
 enum ImportIdentityTarget {
     Existing(String),
     PendingNew(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedImportedProfile<Provider> {
+    pub name: String,
+    pub email: Option<String>,
+    pub staging_home: PathBuf,
+    pub final_home: PathBuf,
+    pub provider: Provider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedImportedProfiles<Provider> {
+    pub staged_profiles: Vec<StagedImportedProfile<Provider>>,
+    pub auth_updates: Vec<ProfileImportAuthUpdatePlan>,
+    pub resolved_profile_names: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedExistingProfileAuthUpdate {
+    pub profile_name: String,
+    pub codex_home: PathBuf,
+    pub previous_auth_json: Option<String>,
+    pub previous_email: Option<String>,
+    pub journal_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedProfilesCommit {
+    pub imported_names: Vec<String>,
+    pub updated_existing_names: Vec<String>,
+    pub committed_homes: Vec<PathBuf>,
+    pub auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
+    pub previous_active_profile: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedProfilesTransaction {
+    pub imported_names: Vec<String>,
+    pub updated_existing_names: Vec<String>,
+    pub committed_homes: Vec<PathBuf>,
+    pub auth_updates: Vec<ImportedExistingProfileAuthUpdate>,
+    pub previous_active_profile: Option<String>,
+}
+
+impl ImportedProfilesTransaction {
+    pub fn new(
+        previous_active_profile: Option<String>,
+        staged_profile_count: usize,
+        auth_update_count: usize,
+    ) -> Self {
+        Self {
+            imported_names: Vec::with_capacity(staged_profile_count),
+            updated_existing_names: Vec::with_capacity(auth_update_count),
+            committed_homes: Vec::with_capacity(staged_profile_count),
+            auth_updates: Vec::with_capacity(auth_update_count),
+            previous_active_profile,
+        }
+    }
+
+    pub fn record_existing_auth_update(&mut self, update: ImportedExistingProfileAuthUpdate) {
+        self.updated_existing_names
+            .push(update.profile_name.clone());
+        self.auth_updates.push(update);
+    }
+
+    pub fn record_imported_profile(&mut self, name: String, final_home: PathBuf) {
+        self.committed_homes.push(final_home);
+        self.imported_names.push(name);
+    }
+
+    pub fn into_commit(self) -> ImportedProfilesCommit {
+        ImportedProfilesCommit {
+            imported_names: self.imported_names,
+            updated_existing_names: self.updated_existing_names,
+            committed_homes: self.committed_homes,
+            auth_updates: self.auth_updates,
+            previous_active_profile: self.previous_active_profile,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,6 +244,59 @@ pub struct CopilotUserInfo {
 pub struct CopilotUserEndpoints {
     #[serde(default)]
     pub api: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopilotProfileImportPlan {
+    pub host: String,
+    pub login: String,
+    pub api_url: String,
+    pub access_type_sku: Option<String>,
+    pub copilot_plan: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CopilotProfileImportStatePlan {
+    UpdateExisting {
+        profile_name: String,
+        activate: bool,
+    },
+    AddNew {
+        profile_name: String,
+        activate: bool,
+    },
+}
+
+impl CopilotProfileImportStatePlan {
+    pub fn profile_name(&self) -> &str {
+        match self {
+            Self::UpdateExisting { profile_name, .. } | Self::AddNew { profile_name, .. } => {
+                profile_name
+            }
+        }
+    }
+
+    pub fn activate(&self) -> bool {
+        match self {
+            Self::UpdateExisting { activate, .. } | Self::AddNew { activate, .. } => *activate,
+        }
+    }
+
+    pub fn updated_existing(&self) -> bool {
+        matches!(self, Self::UpdateExisting { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopilotProfileImportSummary {
+    pub profile_name: String,
+    pub provider: String,
+    pub identity: String,
+    pub github_host: String,
+    pub api_url: Option<String>,
+    pub codex_home: Option<String>,
+    pub active: bool,
+    pub updated_existing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,6 +441,54 @@ pub fn profile_import_result_message(
             format!("Imported {imported} profile(s) and updated {updated} existing profile(s).")
         }
     }
+}
+
+pub fn resolve_profile_export_active_profile<'a>(
+    active_profile: Option<&str>,
+    selected_profile_names: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    let active_profile = active_profile?;
+    selected_profile_names
+        .into_iter()
+        .any(|name| name == active_profile)
+        .then(|| active_profile.to_string())
+}
+
+pub fn copilot_profile_import_summary_fields(
+    summary: CopilotProfileImportSummary,
+) -> SummaryFields {
+    let result = if summary.updated_existing {
+        format!(
+            "Updated imported Copilot profile '{}'.",
+            summary.profile_name
+        )
+    } else {
+        format!("Imported Copilot profile '{}'.", summary.profile_name)
+    };
+    let storage = if summary.updated_existing {
+        "Token remains in Copilot's keychain/config store."
+    } else {
+        "Managed profile home created; token remains in Copilot's keychain/config store."
+    };
+
+    let mut fields = vec![
+        ("Result".to_string(), result),
+        ("Profile".to_string(), summary.profile_name.clone()),
+        ("Provider".to_string(), summary.provider),
+        ("Identity".to_string(), summary.identity),
+        ("GitHub host".to_string(), summary.github_host),
+    ];
+    if let Some(codex_home) = summary.codex_home {
+        fields.push(("CODEX_HOME".to_string(), codex_home));
+    }
+    if let Some(api_url) = summary.api_url {
+        fields.push(("API".to_string(), api_url));
+    }
+    fields.push(("Storage".to_string(), storage.to_string()));
+    if summary.active {
+        fields.push(("Active".to_string(), summary.profile_name));
+    }
+    fields
 }
 
 pub fn resolve_imported_active_profile(
@@ -424,6 +661,58 @@ pub fn profile_import_identity_parts_target_key(
         })
 }
 
+pub fn validate_profile_import_source_names<'a>(
+    profile_names: impl IntoIterator<Item = &'a str>,
+) -> Result<()> {
+    let mut seen_names = BTreeSet::new();
+    for profile_name in profile_names {
+        if !seen_names.insert(profile_name.to_string()) {
+            bail!(
+                "profile export bundle contains duplicate profile '{}'",
+                profile_name
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn resolve_profile_import_identity(
+    mut auth_identity: ProfileImportIdentity,
+    fallback_email: Option<&str>,
+) -> ProfileImportIdentity {
+    if auth_identity.email.is_none() {
+        auth_identity.email = fallback_email
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
+            .map(ToOwned::to_owned);
+    }
+    auth_identity
+}
+
+pub fn queue_profile_import_auth_update(
+    auth_updates: &mut Vec<ProfileImportAuthUpdatePlan>,
+    target_profile_name: &str,
+    email: Option<String>,
+    auth_json: String,
+) {
+    if let Some(existing) = auth_updates
+        .iter_mut()
+        .find(|update| update.target_profile_name == target_profile_name)
+    {
+        existing.auth_json = auth_json;
+        if email.is_some() {
+            existing.email = email;
+        }
+        return;
+    }
+
+    auth_updates.push(ProfileImportAuthUpdatePlan {
+        target_profile_name: target_profile_name.to_string(),
+        email,
+        auth_json,
+    });
+}
+
 pub fn parse_copilot_config_file(raw: &str) -> Result<CopilotConfigFile> {
     serde_json::from_str(raw).context("failed to parse Copilot config")
 }
@@ -541,6 +830,93 @@ pub fn default_copilot_models_api_url(host: &str) -> String {
     }
 
     format!("https://api.{fallback_host}")
+}
+
+pub fn parse_copilot_user_info_json_response(
+    body: &[u8],
+    source_label: &str,
+) -> Result<serde_json::Value> {
+    serde_json::from_slice(body).with_context(|| format!("failed to parse {source_label}"))
+}
+
+pub fn parse_copilot_user_info_value(
+    value: serde_json::Value,
+    source_label: &str,
+) -> Result<CopilotUserInfo> {
+    serde_json::from_value(value).with_context(|| format!("failed to parse {source_label}"))
+}
+
+pub fn parse_copilot_user_info_response(
+    body: &[u8],
+    source_label: &str,
+) -> Result<CopilotUserInfo> {
+    let value = parse_copilot_user_info_json_response(body, source_label)?;
+    parse_copilot_user_info_value(value, source_label)
+}
+
+pub fn plan_copilot_profile_import(
+    host: &str,
+    config_login: &str,
+    user_info: &CopilotUserInfo,
+) -> CopilotProfileImportPlan {
+    CopilotProfileImportPlan {
+        host: host.to_string(),
+        login: user_info
+            .login
+            .clone()
+            .unwrap_or_else(|| config_login.to_string()),
+        api_url: user_info
+            .endpoints
+            .as_ref()
+            .and_then(|endpoints| endpoints.api.clone())
+            .unwrap_or_else(|| default_copilot_models_api_url(host)),
+        access_type_sku: user_info.access_type_sku.clone(),
+        copilot_plan: user_info.copilot_plan.clone(),
+    }
+}
+
+pub fn plan_copilot_profile_import_state(
+    login: &str,
+    requested_name: Option<&str>,
+    existing_profile_name: Option<&str>,
+    has_active_profile: bool,
+    activate_requested: bool,
+    mut profile_name_exists: impl FnMut(&str) -> bool,
+    default_profile_name: impl FnOnce() -> String,
+) -> Result<CopilotProfileImportStatePlan> {
+    let activate = !has_active_profile || activate_requested;
+
+    if let Some(existing_name) = existing_profile_name {
+        if let Some(requested_name) = requested_name
+            && requested_name != existing_name
+        {
+            bail!(
+                "Copilot account '{}' is already imported as profile '{}'",
+                login,
+                existing_name
+            );
+        }
+
+        return Ok(CopilotProfileImportStatePlan::UpdateExisting {
+            profile_name: existing_name.to_string(),
+            activate,
+        });
+    }
+
+    let profile_name = match requested_name {
+        Some(requested_name) => {
+            if profile_name_exists(requested_name) {
+                bail!("profile '{}' already exists", requested_name);
+            }
+            requested_name.to_string()
+        }
+        None => default_profile_name(),
+    };
+
+    Ok(CopilotProfileImportStatePlan::AddNew {
+        profile_name,
+        activate,
+    })
 }
 
 fn authority_host_and_port(authority: &str) -> Option<(&str, bool)> {
@@ -831,6 +1207,22 @@ mod tests {
     }
 
     #[test]
+    fn export_active_profile_only_survives_when_selected() {
+        assert_eq!(
+            resolve_profile_export_active_profile(Some("main"), ["main", "second"]),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            resolve_profile_export_active_profile(Some("other"), ["main", "second"]),
+            None
+        );
+        assert_eq!(
+            resolve_profile_export_active_profile(None, ["main", "second"]),
+            None
+        );
+    }
+
+    #[test]
     fn import_auth_update_journal_constructor_sets_current_version() {
         let journal = ImportedExistingProfileAuthUpdateJournal::new(
             "main".to_string(),
@@ -844,6 +1236,28 @@ mod tests {
         validate_import_auth_update_journal_version(journal.version)
             .expect("current journal version should validate");
         assert!(validate_import_auth_update_journal_version(journal.version + 1).is_err());
+    }
+
+    #[test]
+    fn import_transaction_records_commit_order_and_previous_active() {
+        let mut transaction = ImportedProfilesTransaction::new(Some("previous".to_string()), 2, 1);
+
+        transaction.record_imported_profile("main".to_string(), PathBuf::from("/tmp/main"));
+        transaction.record_existing_auth_update(ImportedExistingProfileAuthUpdate {
+            profile_name: "existing".to_string(),
+            codex_home: PathBuf::from("/tmp/existing"),
+            previous_auth_json: Some("old-auth".to_string()),
+            previous_email: Some("old@example.com".to_string()),
+            journal_path: Some(PathBuf::from("/tmp/journal.json")),
+        });
+
+        let commit = transaction.into_commit();
+
+        assert_eq!(commit.imported_names, vec!["main".to_string()]);
+        assert_eq!(commit.updated_existing_names, vec!["existing".to_string()]);
+        assert_eq!(commit.committed_homes, vec![PathBuf::from("/tmp/main")]);
+        assert_eq!(commit.previous_active_profile.as_deref(), Some("previous"));
+        assert_eq!(commit.auth_updates[0].profile_name, "existing");
     }
 
     #[test]
@@ -943,6 +1357,68 @@ mod tests {
     }
 
     #[test]
+    fn import_source_name_validation_rejects_duplicates() {
+        let err = validate_profile_import_source_names(["main", "backup", "main"])
+            .expect_err("duplicate profile names should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "profile export bundle contains duplicate profile 'main'"
+        );
+    }
+
+    #[test]
+    fn import_identity_falls_back_to_exported_email() {
+        assert_eq!(
+            resolve_profile_import_identity(
+                ProfileImportIdentity {
+                    email: None,
+                    account_id: Some("acct-main".to_string()),
+                },
+                Some(" User@Example.com "),
+            ),
+            ProfileImportIdentity {
+                email: Some("User@Example.com".to_string()),
+                account_id: Some("acct-main".to_string()),
+            }
+        );
+        assert_eq!(
+            resolve_profile_import_identity(
+                ProfileImportIdentity {
+                    email: Some("auth@example.com".to_string()),
+                    account_id: None,
+                },
+                Some("fallback@example.com"),
+            )
+            .email
+            .as_deref(),
+            Some("auth@example.com")
+        );
+    }
+
+    #[test]
+    fn queued_auth_update_keeps_last_token_and_non_empty_email() {
+        let mut updates = Vec::new();
+
+        queue_profile_import_auth_update(
+            &mut updates,
+            "main",
+            Some("first@example.com".to_string()),
+            "first-auth".to_string(),
+        );
+        queue_profile_import_auth_update(&mut updates, "main", None, "second-auth".to_string());
+
+        assert_eq!(
+            updates,
+            vec![ProfileImportAuthUpdatePlan {
+                target_profile_name: "main".to_string(),
+                email: Some("first@example.com".to_string()),
+                auth_json: "second-auth".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn copilot_config_helpers_select_user_and_token() {
         let config = parse_copilot_config_file(
             r#"{
@@ -988,6 +1464,198 @@ mod tests {
         assert_eq!(
             default_copilot_models_api_url("https://enterprise.ghe.com"),
             "https://copilot-api.enterprise.ghe.com"
+        );
+    }
+
+    #[test]
+    fn copilot_user_info_response_parses_metadata() {
+        let info = parse_copilot_user_info_response(
+            br#"{
+                "login": "copilot-user",
+                "access_type_sku": "copilot_standalone_seat_quota",
+                "copilot_plan": "business",
+                "endpoints": { "api": "https://api.example.githubcopilot.test" }
+            }"#,
+            "https://api.github.com/copilot_internal/user",
+        )
+        .expect("Copilot response should parse");
+
+        assert_eq!(info.login.as_deref(), Some("copilot-user"));
+        assert_eq!(
+            info.access_type_sku.as_deref(),
+            Some("copilot_standalone_seat_quota")
+        );
+        assert_eq!(
+            info.endpoints
+                .and_then(|endpoints| endpoints.api)
+                .as_deref(),
+            Some("https://api.example.githubcopilot.test")
+        );
+    }
+
+    #[test]
+    fn copilot_import_plan_uses_user_info_with_api_fallback() {
+        let plan = plan_copilot_profile_import(
+            "https://github.example.test",
+            "config-login",
+            &CopilotUserInfo {
+                login: Some("api-login".to_string()),
+                access_type_sku: Some("sku".to_string()),
+                copilot_plan: Some("business".to_string()),
+                endpoints: Some(CopilotUserEndpoints {
+                    api: Some("https://api.github.example.test".to_string()),
+                }),
+                limited_user_quotas: BTreeMap::new(),
+                monthly_quotas: BTreeMap::new(),
+                limited_user_reset_date: None,
+            },
+        );
+
+        assert_eq!(
+            plan,
+            CopilotProfileImportPlan {
+                host: "https://github.example.test".to_string(),
+                login: "api-login".to_string(),
+                api_url: "https://api.github.example.test".to_string(),
+                access_type_sku: Some("sku".to_string()),
+                copilot_plan: Some("business".to_string()),
+            }
+        );
+
+        let fallback_plan = plan_copilot_profile_import(
+            "https://github.enterprise.test",
+            "config-login",
+            &CopilotUserInfo {
+                login: None,
+                access_type_sku: None,
+                copilot_plan: None,
+                endpoints: None,
+                limited_user_quotas: BTreeMap::new(),
+                monthly_quotas: BTreeMap::new(),
+                limited_user_reset_date: None,
+            },
+        );
+
+        assert_eq!(fallback_plan.login, "config-login");
+        assert_eq!(fallback_plan.api_url, "https://api.github.enterprise.test");
+    }
+
+    #[test]
+    fn copilot_state_plan_updates_existing_or_adds_new_profile() {
+        assert_eq!(
+            plan_copilot_profile_import_state(
+                "octo",
+                Some("copilot-main"),
+                Some("copilot-main"),
+                true,
+                false,
+                |_| false,
+                || "unused".to_string(),
+            )
+            .unwrap(),
+            CopilotProfileImportStatePlan::UpdateExisting {
+                profile_name: "copilot-main".to_string(),
+                activate: false,
+            }
+        );
+
+        assert_eq!(
+            plan_copilot_profile_import_state(
+                "octo",
+                None,
+                None,
+                false,
+                false,
+                |_| false,
+                || "copilot-octo".to_string(),
+            )
+            .unwrap(),
+            CopilotProfileImportStatePlan::AddNew {
+                profile_name: "copilot-octo".to_string(),
+                activate: true,
+            }
+        );
+
+        assert_eq!(
+            plan_copilot_profile_import_state(
+                "octo",
+                Some("other"),
+                Some("copilot-main"),
+                true,
+                true,
+                |_| false,
+                || "unused".to_string(),
+            )
+            .unwrap_err()
+            .to_string(),
+            "Copilot account 'octo' is already imported as profile 'copilot-main'"
+        );
+        assert_eq!(
+            plan_copilot_profile_import_state(
+                "octo",
+                Some("taken"),
+                None,
+                true,
+                false,
+                |name| name == "taken",
+                || "unused".to_string(),
+            )
+            .unwrap_err()
+            .to_string(),
+            "profile 'taken' already exists"
+        );
+    }
+
+    #[test]
+    fn copilot_import_summary_fields_render_new_and_updated_profiles() {
+        assert_eq!(
+            copilot_profile_import_summary_fields(CopilotProfileImportSummary {
+                profile_name: "copilot-main".to_string(),
+                provider: "GitHub Copilot".to_string(),
+                identity: "octo".to_string(),
+                github_host: "https://github.com".to_string(),
+                api_url: Some("https://api.githubcopilot.com".to_string()),
+                codex_home: Some("/tmp/prodex/copilot-main".to_string()),
+                active: true,
+                updated_existing: false,
+            }),
+            vec![
+                (
+                    "Result".to_string(),
+                    "Imported Copilot profile 'copilot-main'.".to_string()
+                ),
+                ("Profile".to_string(), "copilot-main".to_string()),
+                ("Provider".to_string(), "GitHub Copilot".to_string()),
+                ("Identity".to_string(), "octo".to_string()),
+                ("GitHub host".to_string(), "https://github.com".to_string()),
+                (
+                    "CODEX_HOME".to_string(),
+                    "/tmp/prodex/copilot-main".to_string()
+                ),
+                ("API".to_string(), "https://api.githubcopilot.com".to_string()),
+                (
+                    "Storage".to_string(),
+                    "Managed profile home created; token remains in Copilot's keychain/config store."
+                        .to_string()
+                ),
+                ("Active".to_string(), "copilot-main".to_string()),
+            ]
+        );
+
+        assert_eq!(
+            copilot_profile_import_summary_fields(CopilotProfileImportSummary {
+                profile_name: "copilot-main".to_string(),
+                provider: "GitHub Copilot".to_string(),
+                identity: "octo".to_string(),
+                github_host: "https://github.com".to_string(),
+                api_url: None,
+                codex_home: None,
+                active: false,
+                updated_existing: true,
+            })
+            .first()
+            .map(|(_, value)| value.as_str()),
+            Some("Updated imported Copilot profile 'copilot-main'.")
         );
     }
 }

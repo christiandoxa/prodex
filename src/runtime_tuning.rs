@@ -1,9 +1,13 @@
 use super::*;
 
 pub(super) use prodex_runtime_tuning::{
-    RuntimeTuningLaneLimits, RuntimeTuningSnapshot, percent_override_with_policy,
-    runtime_duration_ms, runtime_take_fault_injection,
-    runtime_websocket_dns_resolve_overflow_capacity_default,
+    RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
+    RuntimeTuningSnapshot, RuntimeTuningSnapshotInput, percent_override_with_policy,
+    runtime_probe_refresh_worker_count_default, runtime_proxy_active_request_limit_default,
+    runtime_proxy_async_worker_count_default, runtime_proxy_lane_limits_from_overrides,
+    runtime_proxy_log_queue_capacity_default, runtime_proxy_long_lived_queue_capacity_default,
+    runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default,
+    runtime_take_fault_injection, runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
@@ -29,11 +33,19 @@ pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
     let websocket_connect_worker_count = runtime_websocket_tcp_connect_worker_count();
     let websocket_connect_queue_capacity =
         runtime_websocket_tcp_connect_queue_capacity(websocket_connect_worker_count);
+    let websocket_connect_overflow_capacity = runtime_websocket_tcp_connect_overflow_capacity(
+        websocket_connect_worker_count,
+        websocket_connect_queue_capacity,
+    );
     let websocket_dns_worker_count = runtime_websocket_dns_resolve_worker_count();
     let websocket_dns_queue_capacity =
         runtime_websocket_dns_resolve_queue_capacity(websocket_dns_worker_count);
+    let websocket_dns_overflow_capacity = runtime_websocket_dns_resolve_overflow_capacity(
+        websocket_dns_worker_count,
+        websocket_dns_queue_capacity,
+    );
 
-    RuntimeTuningSnapshot {
+    RuntimeTuningSnapshotInput {
         worker_count,
         long_lived_worker_count,
         async_worker_count: runtime_proxy_async_worker_count(),
@@ -46,12 +58,18 @@ pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
             websocket: lane_limits.websocket,
             standard: lane_limits.standard,
         },
-        precommit_attempt_limit,
-        precommit_budget_ms: runtime_duration_ms(precommit_budget),
-        pressure_precommit_attempt_limit,
-        pressure_precommit_budget_ms: runtime_duration_ms(pressure_precommit_budget),
-        continuation_precommit_attempt_limit,
-        continuation_precommit_budget_ms: runtime_duration_ms(continuation_precommit_budget),
+        precommit: RuntimeTuningPrecommitBudget {
+            attempt_limit: precommit_attempt_limit,
+            budget: precommit_budget,
+        },
+        pressure_precommit: RuntimeTuningPrecommitBudget {
+            attempt_limit: pressure_precommit_attempt_limit,
+            budget: pressure_precommit_budget,
+        },
+        continuation_precommit: RuntimeTuningPrecommitBudget {
+            attempt_limit: continuation_precommit_attempt_limit,
+            budget: continuation_precommit_budget,
+        },
         admission_wait_budget_ms: runtime_proxy_admission_wait_budget_ms(),
         pressure_admission_wait_budget_ms: runtime_proxy_pressure_admission_wait_budget_ms(),
         long_lived_queue_wait_budget_ms: runtime_proxy_long_lived_queue_wait_budget_ms(),
@@ -66,21 +84,16 @@ pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
             runtime_proxy_websocket_precommit_progress_timeout_ms(),
         websocket_connect_worker_count,
         websocket_connect_queue_capacity,
-        websocket_connect_overflow_capacity: runtime_websocket_tcp_connect_overflow_capacity(
-            websocket_connect_worker_count,
-            websocket_connect_queue_capacity,
-        ),
+        websocket_connect_overflow_capacity,
         websocket_dns_worker_count,
         websocket_dns_queue_capacity,
-        websocket_dns_overflow_capacity: runtime_websocket_dns_resolve_overflow_capacity(
-            websocket_dns_worker_count,
-            websocket_dns_queue_capacity,
-        ),
+        websocket_dns_overflow_capacity,
         websocket_previous_response_reuse_stale_ms:
             runtime_proxy_websocket_previous_response_reuse_stale_ms(),
         profile_inflight_soft_limit: runtime_proxy_profile_inflight_soft_limit(),
         profile_inflight_hard_limit: runtime_proxy_profile_inflight_hard_limit(),
     }
+    .into_snapshot()
 }
 
 pub(super) fn runtime_proxy_http_connect_timeout_ms() -> u64 {

@@ -3,8 +3,8 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 
 use prodex_profile_export::{
-    ImportedExistingProfileAuthUpdateJournal, ProfileImportIdentity, ProfileImportPlanAction,
-    ProfileImportPlanProfile,
+    ImportedExistingProfileAuthUpdateJournal, ProfileImportAuthUpdatePlan, ProfileImportIdentity,
+    ProfileImportPlanAction, ProfileImportPlanInput,
 };
 
 use super::*;
@@ -170,10 +170,10 @@ pub(super) fn build_profile_export_payload(
     Ok(ProfileExportPayload {
         exported_at: Local::now().to_rfc3339(),
         source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
-        active_profile: state
-            .active_profile
-            .clone()
-            .filter(|active| profile_names.iter().any(|name| name == active)),
+        active_profile: prodex_profile_export::resolve_profile_export_active_profile(
+            state.active_profile.as_deref(),
+            profile_names.iter().map(String::as_str),
+        ),
         profiles,
     })
 }
@@ -349,7 +349,7 @@ pub(super) fn import_profile_export_payload(
     );
 
     if let Err(err) = apply_imported_profiles(paths, state, payload, &prepared, &mut transaction) {
-        transaction.rollback_partial(state);
+        rollback_partial_imported_profiles(state, &transaction);
         return Err(err);
     }
 
@@ -372,7 +372,7 @@ fn apply_imported_profiles(
 fn apply_imported_existing_auth_updates(
     paths: &AppPaths,
     state: &mut AppState,
-    prepared_updates: &[PreparedImportedProfileAuthUpdate],
+    prepared_updates: &[ProfileImportAuthUpdatePlan],
     transaction: &mut ImportedProfilesTransaction,
 ) -> Result<()> {
     for update in prepared_updates {
@@ -485,6 +485,18 @@ fn rollback_imported_profiles(state: &mut AppState, commit: &ImportedProfilesCom
     remove_committed_import_homes(&commit.committed_homes);
 }
 
+fn rollback_partial_imported_profiles(
+    state: &mut AppState,
+    transaction: &ImportedProfilesTransaction,
+) {
+    for name in &transaction.imported_names {
+        state.profiles.remove(name);
+    }
+    rollback_imported_auth_updates(state, &transaction.auth_updates);
+    state.active_profile = transaction.previous_active_profile.clone();
+    remove_committed_import_homes(&transaction.committed_homes);
+}
+
 pub(super) fn rollback_imported_auth_updates(
     state: &mut AppState,
     auth_updates: &[ImportedExistingProfileAuthUpdate],
@@ -592,26 +604,6 @@ pub(super) fn remove_committed_import_homes(committed_homes: &[PathBuf]) {
     }
 }
 
-struct ExportedProfileImportPlanInput<'a> {
-    exported: &'a ExportedProfile,
-    identity: ProfileImportIdentity,
-    supports_codex_runtime: bool,
-}
-
-impl ProfileImportPlanProfile for ExportedProfileImportPlanInput<'_> {
-    fn profile_name(&self) -> &str {
-        &self.exported.name
-    }
-
-    fn supports_codex_runtime(&self) -> bool {
-        self.supports_codex_runtime
-    }
-
-    fn import_identity(&self) -> ProfileImportIdentity {
-        self.identity.clone()
-    }
-}
-
 pub(super) fn stage_imported_profiles(
     paths: &AppPaths,
     state: &mut AppState,
@@ -620,20 +612,20 @@ pub(super) fn stage_imported_profiles(
     if payload.profiles.is_empty() {
         bail!("profile export bundle does not contain any profiles");
     }
+    for exported in &payload.profiles {
+        prodex_profile_identity::validate_profile_name(&exported.name)?;
+    }
+    prodex_profile_export::validate_profile_import_source_names(
+        payload
+            .profiles
+            .iter()
+            .map(|exported| exported.name.as_str()),
+    )?;
 
     ensure_managed_profiles_root(paths)?;
 
-    let mut seen_names = BTreeSet::new();
     let mut plan_inputs = Vec::with_capacity(payload.profiles.len());
     for exported in &payload.profiles {
-        validate_profile_name(&exported.name)?;
-        if !seen_names.insert(exported.name.clone()) {
-            bail!(
-                "profile export bundle contains duplicate profile '{}'",
-                exported.name
-            );
-        }
-
         let supports_codex_runtime = exported.provider.supports_codex_runtime();
         if supports_codex_runtime {
             let _: StoredAuth = serde_json::from_str(&exported.auth_json).with_context(|| {
@@ -643,13 +635,17 @@ pub(super) fn stage_imported_profiles(
                 )
             })?;
         }
-        let resolved_identity = resolved_exported_profile_identity(exported);
-        plan_inputs.push(ExportedProfileImportPlanInput {
-            exported,
-            identity: ProfileImportIdentity {
-                email: resolved_identity.email,
-                account_id: resolved_identity.account_id,
+        let auth_identity = parse_identity_from_auth_json(&exported.auth_json).unwrap_or_default();
+        let resolved_identity = prodex_profile_export::resolve_profile_import_identity(
+            ProfileImportIdentity {
+                email: auth_identity.email,
+                account_id: auth_identity.account_id,
             },
+            exported.email.as_deref(),
+        );
+        plan_inputs.push(ProfileImportPlanInput {
+            profile_name: exported.name.clone(),
+            identity: resolved_identity,
             supports_codex_runtime,
         });
     }
@@ -685,7 +681,7 @@ pub(super) fn stage_imported_profiles(
                     let exported = payload.profiles.get(*source_index).with_context(|| {
                         format!("import plan source index {} is missing", source_index)
                     })?;
-                    queue_existing_profile_auth_update(
+                    prodex_profile_export::queue_profile_import_auth_update(
                         &mut auth_updates,
                         target_profile_name,
                         plan_inputs[*source_index].identity.email.clone(),

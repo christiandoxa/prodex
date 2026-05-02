@@ -424,8 +424,7 @@ fn compat_replay_codex_sse_fixture_matches_golden_surface_and_stream_parse() {
         compat_replay_sse_payload_values(stream),
         "codex_sse_expected_payloads.json",
     );
-    let inspection =
-        inspect_runtime_sse_buffer(stream.as_bytes()).expect("Codex SSE fixture should inspect");
+    let inspection = inspect_runtime_sse_buffer(stream.as_bytes());
     compat_replay_assert_golden(
         compat_replay_sse_inspection_value(inspection),
         "codex_sse_expected_inspection.json",

@@ -1,12 +1,9 @@
 pub(crate) use super::shared_codex_fs::{persist_login_home, remove_dir_if_exists};
 use super::*;
 
-#[allow(unused_imports)]
-pub(crate) use prodex_profile_identity::{
-    ProfileIdentity, normalize_account_id, normalize_email, parse_account_id_from_access_token,
-    parse_email_from_auth_json, parse_email_from_id_token, parse_identity_from_auth_json,
-    parse_identity_from_id_token, parse_jwt_payload, profile_name_from_email,
-};
+pub(crate) use prodex_profile_identity::{ProfileIdentity, parse_identity_from_auth_json};
+#[cfg(test)]
+pub(crate) use prodex_profile_identity::{parse_email_from_id_token, profile_name_from_email};
 
 #[derive(Debug)]
 struct ProfileIdentityLookupJob {
@@ -121,42 +118,11 @@ pub(crate) fn find_profile_by_identity(
     state: &mut AppState,
     target: &ProfileIdentity,
 ) -> Result<Option<String>> {
-    let target_account_id = target.account_id.as_deref().map(normalize_account_id);
-    let target_email = target.email.as_deref().map(normalize_email);
     let discovered = collect_profile_identities(state);
-
-    if let Some(target_account_id) = target_account_id.as_deref() {
-        for (name, identity) in &discovered {
-            if identity
-                .account_id
-                .as_deref()
-                .is_some_and(|account_id| normalize_account_id(account_id) == target_account_id)
-            {
-                return Ok(Some(name.clone()));
-            }
-        }
-    }
-
-    let Some(target_email) = target_email.as_deref() else {
-        return Ok(None);
-    };
-    let legacy_email_matches = discovered
-        .iter()
-        .filter(|(_, identity)| {
-            identity.account_id.is_none()
-                && identity
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| normalize_email(email) == target_email)
-        })
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-
-    if legacy_email_matches.len() == 1 {
-        Ok(legacy_email_matches.into_iter().next())
-    } else {
-        Ok(None)
-    }
+    Ok(prodex_profile_identity::find_matching_profile_identity(
+        &discovered,
+        target,
+    ))
 }
 
 fn collect_profile_identities(state: &mut AppState) -> Vec<(String, ProfileIdentity)> {
@@ -210,21 +176,10 @@ pub(crate) fn unique_profile_name_for_email(
     state: &AppState,
     email: &str,
 ) -> String {
-    let base_name = profile_name_from_email(email);
-    reclaim_stale_managed_profile_path(paths, state, &base_name);
-    if is_available_profile_name(paths, state, &base_name) {
-        return base_name;
-    }
-
-    for suffix in 2.. {
-        let candidate = format!("{base_name}-{suffix}");
-        reclaim_stale_managed_profile_path(paths, state, &candidate);
-        if is_available_profile_name(paths, state, &candidate) {
-            return candidate;
-        }
-    }
-
-    unreachable!("integer suffix space should not be exhausted")
+    prodex_profile_identity::unique_profile_name_for_email(email, |candidate| {
+        reclaim_stale_managed_profile_path(paths, state, candidate);
+        is_available_profile_name(paths, state, candidate)
+    })
 }
 
 fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
@@ -288,43 +243,6 @@ mod tests {
 
         assert!(message.contains("amazon-bedrock"));
         assert!(message.contains("quota email fallback is unavailable"));
-    }
-
-    #[test]
-    fn parse_identity_from_auth_json_reads_email_and_workspace_account_id() {
-        let identity = parse_identity_from_auth_json(&format!(
-            r#"{{
-                "tokens": {{
-                    "id_token": "{}",
-                    "access_token": "{}",
-                    "account_id": "stored-account"
-                }}
-            }}"#,
-            chatgpt_id_token("user@example.com", Some("id-token-account")),
-            chatgpt_access_token("access-token-account"),
-        ))
-        .unwrap();
-
-        assert_eq!(identity.email.as_deref(), Some("user@example.com"));
-        assert_eq!(identity.account_id.as_deref(), Some("id-token-account"));
-    }
-
-    #[test]
-    fn parse_identity_from_auth_json_uses_access_token_before_stored_account_id() {
-        let identity = parse_identity_from_auth_json(&format!(
-            r#"{{
-                "tokens": {{
-                    "id_token": "{}",
-                    "access_token": "{}",
-                    "account_id": "stored-account"
-                }}
-            }}"#,
-            chatgpt_id_token("user@example.com", None),
-            chatgpt_access_token("access-token-account"),
-        ))
-        .unwrap();
-
-        assert_eq!(identity.account_id.as_deref(), Some("access-token-account"));
     }
 
     #[test]
@@ -425,20 +343,6 @@ mod tests {
                     "email": email
                 },
                 "https://api.openai.com/auth": auth,
-            })
-            .to_string(),
-        );
-        format!("{header}.{payload}.sig")
-    }
-
-    fn chatgpt_access_token(account_id: &str) -> String {
-        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(br#"{"alg":"none","typ":"JWT"}"#);
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-            serde_json::json!({
-                "https://api.openai.com/auth": {
-                    "chatgpt_account_id": account_id,
-                },
             })
             .to_string(),
         );

@@ -1,9 +1,8 @@
 use super::*;
 use prodex_runtime_broker::{
-    runtime_broker_continuation_metrics as aggregate_runtime_broker_continuation_metrics,
+    runtime_broker_continuity_failure_reason_metrics_from_log_bytes,
+    runtime_broker_continuity_failure_reason_metrics_with_live,
     runtime_broker_merge_continuity_failure_reason_metrics,
-    runtime_broker_previous_response_continuity_metrics as aggregate_previous_response_continuity_metrics,
-    runtime_broker_subtract_continuity_failure_reason_metrics,
 };
 use std::io::{Read, Seek, SeekFrom};
 
@@ -131,12 +130,7 @@ fn runtime_broker_continuity_failure_reason_cache_fingerprint(
 fn runtime_broker_continuity_failure_reason_metrics_from_bytes(
     log: &[u8],
 ) -> RuntimeBrokerContinuityFailureReasonMetrics {
-    let summary = summarize_runtime_log_tail(log);
-    RuntimeBrokerContinuityFailureReasonMetrics {
-        chain_retried_owner: summary.chain_retried_owner_by_reason,
-        chain_dead_upstream_confirmed: summary.chain_dead_upstream_confirmed_by_reason,
-        stale_continuation: summary.stale_continuation_by_reason,
-    }
+    runtime_broker_continuity_failure_reason_metrics_from_log_bytes(log)
 }
 
 fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
@@ -234,198 +228,11 @@ fn runtime_broker_live_continuity_failure_reason_metrics(
     parsed_metrics: &RuntimeBrokerContinuityFailureReasonMetrics,
 ) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
     let snapshot = runtime_proxy_continuity_failure_reason_metrics_snapshot(log_path)?;
-    let persisted_since_baseline = runtime_broker_subtract_continuity_failure_reason_metrics(
+    Some(runtime_broker_continuity_failure_reason_metrics_with_live(
         parsed_metrics.clone(),
         &snapshot.baseline_metrics,
-    );
-    let pending_live = runtime_broker_subtract_continuity_failure_reason_metrics(
         snapshot.live_metrics,
-        &persisted_since_baseline,
-    );
-    let mut merged = parsed_metrics.clone();
-    runtime_broker_merge_continuity_failure_reason_metrics(&mut merged, pending_live);
-    Some(merged)
-}
-
-pub(crate) fn runtime_broker_prometheus_snapshot(
-    metadata: &RuntimeBrokerMetadata,
-    metrics: &RuntimeBrokerMetrics,
-) -> runtime_metrics::RuntimeBrokerSnapshot {
-    RuntimeBrokerSnapshotBuilder::new(metadata, metrics).build()
-}
-
-struct RuntimeBrokerSnapshotBuilder<'a> {
-    metadata: &'a RuntimeBrokerMetadata,
-    metrics: &'a RuntimeBrokerMetrics,
-}
-
-impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
-    fn new(metadata: &'a RuntimeBrokerMetadata, metrics: &'a RuntimeBrokerMetrics) -> Self {
-        Self { metadata, metrics }
-    }
-
-    fn build(&self) -> runtime_metrics::RuntimeBrokerSnapshot {
-        runtime_metrics::RuntimeBrokerSnapshot {
-            broker_key: self.metadata.broker_key.clone(),
-            listen_addr: self.metadata.listen_addr.clone(),
-            pid: self.metrics.health.pid,
-            started_at_unix_seconds: self.metrics.health.started_at,
-            current_profile: self.metrics.health.current_profile.clone(),
-            include_code_review: self.metrics.health.include_code_review,
-            persistence_role: self.metrics.health.persistence_role.clone(),
-            prodex_version: self.metrics.health.prodex_version.clone(),
-            executable_path: self.metrics.health.executable_path.clone(),
-            executable_sha256: self.metrics.health.executable_sha256.clone(),
-            active_requests: self.metrics.health.active_requests as u64,
-            active_request_limit: self.metrics.active_request_limit as u64,
-            local_overload_backoff_remaining_seconds: self
-                .metrics
-                .local_overload_backoff_remaining_seconds,
-            runtime_state_lock_wait: runtime_metrics::RuntimeBrokerStateLockWaitMetrics {
-                wait_total_ns: self.metrics.runtime_state_lock_wait.wait_total_ns,
-                wait_count: self.metrics.runtime_state_lock_wait.wait_count,
-                wait_max_ns: self.metrics.runtime_state_lock_wait.wait_max_ns,
-            },
-            traffic: self.build_traffic(),
-            profile_inflight: self.build_profile_inflight(),
-            active_request_release_underflows_total: self
-                .metrics
-                .active_request_release_underflows_total,
-            profile_inflight_admissions_total: self.metrics.profile_inflight_admissions_total,
-            profile_inflight_releases_total: self.metrics.profile_inflight_releases_total,
-            profile_inflight_release_underflows_total: self
-                .metrics
-                .profile_inflight_release_underflows_total,
-            retry_backoffs: self.metrics.retry_backoffs as u64,
-            transport_backoffs: self.metrics.transport_backoffs as u64,
-            route_circuits: self.metrics.route_circuits as u64,
-            degraded_profiles: self.metrics.degraded_profiles as u64,
-            degraded_routes: self.metrics.degraded_routes as u64,
-            continuations: self.build_continuations(),
-            previous_response_continuity: self.build_previous_response_continuity(),
-            continuity_failure_reasons: self.build_continuity_failure_reasons(),
-        }
-    }
-
-    fn build_traffic(&self) -> runtime_metrics::RuntimeBrokerTrafficMetrics {
-        runtime_metrics::RuntimeBrokerTrafficMetrics {
-            responses: Self::build_lane(&self.metrics.traffic.responses),
-            compact: Self::build_lane(&self.metrics.traffic.compact),
-            websocket: Self::build_lane(&self.metrics.traffic.websocket),
-            standard: Self::build_lane(&self.metrics.traffic.standard),
-        }
-    }
-
-    fn build_profile_inflight(&self) -> std::collections::BTreeMap<String, u64> {
-        self.metrics
-            .profile_inflight
-            .iter()
-            .map(|(profile, count)| (profile.clone(), *count as u64))
-            .collect()
-    }
-
-    fn build_continuations(&self) -> runtime_metrics::RuntimeBrokerContinuationMetrics {
-        runtime_metrics::RuntimeBrokerContinuationMetrics {
-            response_bindings: self.metrics.continuations.response_bindings as u64,
-            turn_state_bindings: self.metrics.continuations.turn_state_bindings as u64,
-            session_id_bindings: self.metrics.continuations.session_id_bindings as u64,
-            warm: self.metrics.continuations.warm as u64,
-            verified: self.metrics.continuations.verified as u64,
-            suspect: self.metrics.continuations.suspect as u64,
-            dead: self.metrics.continuations.dead as u64,
-            failure_counts: runtime_metrics::RuntimeBrokerContinuationSignalMetrics {
-                response: self.metrics.continuations.failure_counts.response as u64,
-                turn_state: self.metrics.continuations.failure_counts.turn_state as u64,
-                session_id: self.metrics.continuations.failure_counts.session_id as u64,
-            },
-            not_found_streaks: runtime_metrics::RuntimeBrokerContinuationSignalMetrics {
-                response: self.metrics.continuations.not_found_streaks.response as u64,
-                turn_state: self.metrics.continuations.not_found_streaks.turn_state as u64,
-                session_id: self.metrics.continuations.not_found_streaks.session_id as u64,
-            },
-            stale_verified_bindings: runtime_metrics::RuntimeBrokerContinuationSignalMetrics {
-                response: self.metrics.continuations.stale_verified_bindings.response as u64,
-                turn_state: self
-                    .metrics
-                    .continuations
-                    .stale_verified_bindings
-                    .turn_state as u64,
-                session_id: self
-                    .metrics
-                    .continuations
-                    .stale_verified_bindings
-                    .session_id as u64,
-            },
-        }
-    }
-
-    fn build_previous_response_continuity(
-        &self,
-    ) -> runtime_metrics::RuntimeBrokerPreviousResponseContinuityMetrics {
-        runtime_metrics::RuntimeBrokerPreviousResponseContinuityMetrics {
-            negative_cache_entries: Self::build_route_continuity(
-                &self
-                    .metrics
-                    .previous_response_continuity
-                    .negative_cache_entries,
-            ),
-            negative_cache_failures: Self::build_route_continuity(
-                &self
-                    .metrics
-                    .previous_response_continuity
-                    .negative_cache_failures,
-            ),
-        }
-    }
-
-    fn build_continuity_failure_reasons(
-        &self,
-    ) -> runtime_metrics::RuntimeBrokerContinuityFailureReasonMetrics {
-        runtime_metrics::RuntimeBrokerContinuityFailureReasonMetrics {
-            chain_retried_owner: Self::build_reason_counts(
-                &self.metrics.continuity_failure_reasons.chain_retried_owner,
-            ),
-            chain_dead_upstream_confirmed: Self::build_reason_counts(
-                &self
-                    .metrics
-                    .continuity_failure_reasons
-                    .chain_dead_upstream_confirmed,
-            ),
-            stale_continuation: Self::build_reason_counts(
-                &self.metrics.continuity_failure_reasons.stale_continuation,
-            ),
-        }
-    }
-
-    fn build_lane(lane: &RuntimeBrokerLaneMetrics) -> runtime_metrics::RuntimeBrokerLaneMetrics {
-        runtime_metrics::RuntimeBrokerLaneMetrics {
-            active: lane.active as u64,
-            limit: lane.limit as u64,
-            admissions_total: lane.admissions_total,
-            releases_total: lane.releases_total,
-            global_limit_rejections_total: lane.global_limit_rejections_total,
-            lane_limit_rejections_total: lane.lane_limit_rejections_total,
-            release_underflows_total: lane.release_underflows_total,
-        }
-    }
-
-    fn build_route_continuity(
-        metrics: &RuntimeBrokerRouteContinuityMetrics,
-    ) -> runtime_metrics::RuntimeBrokerRouteContinuityMetrics {
-        runtime_metrics::RuntimeBrokerRouteContinuityMetrics {
-            responses: metrics.responses as u64,
-            compact: metrics.compact as u64,
-            websocket: metrics.websocket as u64,
-            standard: metrics.standard as u64,
-        }
-    }
-
-    fn build_reason_counts(metrics: &BTreeMap<String, usize>) -> BTreeMap<String, u64> {
-        metrics
-            .iter()
-            .map(|(reason, count)| (reason.clone(), *count as u64))
-            .collect()
-    }
+    ))
 }
 
 fn runtime_broker_live_lane_metrics(
@@ -471,105 +278,72 @@ pub(crate) fn runtime_broker_metrics_snapshot(
         .lock_runtime_state()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
 
-    let health = RuntimeBrokerHealth {
-        pid: std::process::id(),
-        started_at: metadata.started_at,
-        current_profile: metadata.current_profile.clone(),
-        include_code_review: metadata.include_code_review,
-        active_requests: shared.active_request_count.load(Ordering::SeqCst),
-        instance_token: metadata.instance_token.clone(),
-        persistence_role: if runtime_proxy_persistence_enabled(shared) {
-            "owner".to_string()
-        } else {
-            "follower".to_string()
-        },
-        prodex_version: metadata.prodex_version.clone(),
-        executable_path: metadata.executable_path.clone(),
-        executable_sha256: metadata.executable_sha256.clone(),
-    };
-
-    let degraded_profiles = runtime
-        .profile_health
-        .iter()
-        .filter(|(key, entry)| {
-            !key.starts_with("__") && runtime_profile_effective_health_score(entry, now) > 0
-        })
-        .count();
-    let degraded_routes = runtime
-        .profile_health
-        .iter()
-        .filter(|(key, entry)| {
-            key.starts_with("__route_health__:")
-                && runtime_profile_effective_health_score(entry, now) > 0
-        })
-        .count();
     let parsed_continuity_failure_reasons =
         runtime_broker_continuity_failure_reason_metrics(&shared.log_path);
+    let continuity_failure_reasons = runtime_broker_live_continuity_failure_reason_metrics(
+        &shared.log_path,
+        &parsed_continuity_failure_reasons,
+    )
+    .unwrap_or(parsed_continuity_failure_reasons);
 
-    Ok(RuntimeBrokerMetrics {
-        health,
-        active_request_limit: shared.active_request_limit,
-        local_overload_backoff_remaining_seconds: shared
-            .local_overload_backoff_until
-            .load(Ordering::SeqCst)
-            .saturating_sub(now_u64),
-        runtime_state_lock_wait: shared.runtime_state_lock_wait_metrics(),
-        traffic: RuntimeBrokerTrafficMetrics {
-            responses: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Responses),
-            compact: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Compact),
-            websocket: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Websocket),
-            standard: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Standard),
-        },
-        profile_inflight: runtime.profile_inflight.clone(),
-        active_request_release_underflows_total: shared
-            .lane_admission
-            .active_request_release_underflows_total
-            .load(Ordering::Relaxed),
-        profile_inflight_admissions_total: shared
-            .lane_admission
-            .profile_inflight_admissions_total
-            .load(Ordering::Relaxed),
-        profile_inflight_releases_total: shared
-            .lane_admission
-            .profile_inflight_releases_total
-            .load(Ordering::Relaxed),
-        profile_inflight_release_underflows_total: shared
-            .lane_admission
-            .profile_inflight_release_underflows_total
-            .load(Ordering::Relaxed),
-        retry_backoffs: runtime
-            .profile_retry_backoff_until
-            .values()
-            .filter(|until| **until > now)
-            .count(),
-        transport_backoffs: runtime
-            .profile_transport_backoff_until
-            .values()
-            .filter(|until| **until > now)
-            .count(),
-        route_circuits: runtime
-            .profile_route_circuit_open_until
-            .values()
-            .filter(|until| **until > now)
-            .count(),
-        degraded_profiles,
-        degraded_routes,
-        continuations: aggregate_runtime_broker_continuation_metrics(
-            &runtime.continuation_statuses,
-            now,
-            RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS,
-        ),
-        previous_response_continuity: aggregate_previous_response_continuity_metrics(
-            &runtime.profile_health,
-            now,
-            RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
-        ),
-        continuity_failure_reasons: runtime_broker_live_continuity_failure_reason_metrics(
-            &shared.log_path,
-            &parsed_continuity_failure_reasons,
+    Ok(
+        prodex_runtime_broker::runtime_broker_metrics_from_snapshot_input(
+            prodex_runtime_broker::RuntimeBrokerMetricsSnapshotInput {
+                metadata,
+                pid: std::process::id(),
+                active_requests: shared.active_request_count.load(Ordering::SeqCst),
+                persistence_owner: runtime_proxy_persistence_enabled(shared),
+                active_request_limit: shared.active_request_limit,
+                local_overload_backoff_remaining_seconds: shared
+                    .local_overload_backoff_until
+                    .load(Ordering::SeqCst)
+                    .saturating_sub(now_u64),
+                runtime_state_lock_wait: shared.runtime_state_lock_wait_metrics(),
+                traffic: RuntimeBrokerTrafficMetrics {
+                    responses: runtime_broker_live_lane_metrics(
+                        shared,
+                        RuntimeRouteKind::Responses,
+                    ),
+                    compact: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Compact),
+                    websocket: runtime_broker_live_lane_metrics(
+                        shared,
+                        RuntimeRouteKind::Websocket,
+                    ),
+                    standard: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Standard),
+                },
+                profile_inflight: &runtime.profile_inflight,
+                profile_retry_backoff_until: &runtime.profile_retry_backoff_until,
+                profile_transport_backoff_until: &runtime.profile_transport_backoff_until,
+                profile_route_circuit_open_until: &runtime.profile_route_circuit_open_until,
+                profile_health: &runtime.profile_health,
+                continuation_statuses: &runtime.continuation_statuses,
+                continuity_failure_reasons,
+                now,
+                health_decay_seconds: RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+                stale_verified_seconds: RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS,
+                previous_response_negative_cache_seconds:
+                    RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
+            },
         )
-        .unwrap_or(parsed_continuity_failure_reasons),
-    })
+        .with_guard_counters(prodex_runtime_broker::RuntimeBrokerMetricsGuardCounters {
+            active_request_release_underflows_total: shared
+                .lane_admission
+                .active_request_release_underflows_total
+                .load(Ordering::Relaxed),
+            profile_inflight_admissions_total: shared
+                .lane_admission
+                .profile_inflight_admissions_total
+                .load(Ordering::Relaxed),
+            profile_inflight_releases_total: shared
+                .lane_admission
+                .profile_inflight_releases_total
+                .load(Ordering::Relaxed),
+            profile_inflight_release_underflows_total: shared
+                .lane_admission
+                .profile_inflight_release_underflows_total
+                .load(Ordering::Relaxed),
+        }),
+    )
 }
 
 #[cfg(test)]

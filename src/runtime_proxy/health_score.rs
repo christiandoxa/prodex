@@ -1,5 +1,28 @@
 use super::*;
 
+fn runtime_route_kind_to_proxy(
+    route_kind: RuntimeRouteKind,
+) -> runtime_proxy_crate::RuntimeRouteKind {
+    match route_kind {
+        RuntimeRouteKind::Responses => runtime_proxy_crate::RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Compact => runtime_proxy_crate::RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Websocket => runtime_proxy_crate::RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Standard => runtime_proxy_crate::RuntimeRouteKind::Standard,
+    }
+}
+
+fn runtime_profile_health_snapshot(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    key: &str,
+) -> Option<runtime_proxy_crate::RuntimeProfileHealthSnapshot> {
+    profile_health
+        .get(key)
+        .map(|entry| runtime_proxy_crate::RuntimeProfileHealthSnapshot {
+            score: entry.score,
+            updated_at: entry.updated_at,
+        })
+}
+
 pub(crate) fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {
     Ok(shared
         .runtime
@@ -77,14 +100,10 @@ pub(crate) fn runtime_profile_in_selection_backoff(
 }
 
 pub(crate) fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
-    match route_kind {
-        RuntimeRouteKind::Responses => "responses",
-        RuntimeRouteKind::Compact => "compact",
-        RuntimeRouteKind::Websocket => "websocket",
-        RuntimeRouteKind::Standard => "standard",
-    }
+    runtime_proxy_crate::runtime_route_kind_label(runtime_route_kind_to_proxy(route_kind))
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_route_coupled_kinds(
     route_kind: RuntimeRouteKind,
 ) -> &'static [RuntimeRouteKind] {
@@ -103,6 +122,7 @@ pub(crate) fn runtime_profile_effective_health_score(
     runtime_profile_effective_score(entry, now, RUNTIME_PROFILE_HEALTH_DECAY_SECONDS)
 }
 
+#[allow(dead_code)]
 pub(crate) fn runtime_profile_effective_score(
     entry: &RuntimeProfileHealth,
     now: i64,
@@ -120,10 +140,11 @@ pub(crate) fn runtime_profile_effective_health_score_from_map(
     key: &str,
     now: i64,
 ) -> u32 {
-    profile_health
-        .get(key)
-        .map(|entry| runtime_profile_effective_health_score(entry, now))
-        .unwrap_or(0)
+    runtime_proxy_crate::runtime_profile_effective_health_score_by_key(
+        |key| runtime_profile_health_snapshot(profile_health, key),
+        key,
+        now,
+    )
 }
 
 pub(crate) fn runtime_profile_effective_score_from_map(
@@ -132,10 +153,12 @@ pub(crate) fn runtime_profile_effective_score_from_map(
     now: i64,
     decay_seconds: i64,
 ) -> u32 {
-    profile_health
-        .get(key)
-        .map(|entry| runtime_profile_effective_score(entry, now, decay_seconds))
-        .unwrap_or(0)
+    runtime_proxy_crate::runtime_profile_effective_score_by_key(
+        |key| runtime_profile_health_snapshot(profile_health, key),
+        key,
+        now,
+        decay_seconds,
+    )
 }
 
 pub(crate) fn runtime_profile_global_health_score(
@@ -150,9 +173,9 @@ pub(crate) fn runtime_profile_route_health_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    format!(
-        "__route_health__:{}:{profile_name}",
-        runtime_route_kind_label(route_kind)
+    runtime_proxy_crate::runtime_profile_route_health_key(
+        profile_name,
+        runtime_route_kind_to_proxy(route_kind),
     )
 }
 
@@ -160,9 +183,9 @@ pub(crate) fn runtime_profile_route_bad_pairing_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    format!(
-        "__route_bad_pairing__:{}:{profile_name}",
-        runtime_route_kind_label(route_kind)
+    runtime_proxy_crate::runtime_profile_route_bad_pairing_key(
+        profile_name,
+        runtime_route_kind_to_proxy(route_kind),
     )
 }
 
@@ -170,9 +193,9 @@ pub(crate) fn runtime_profile_route_success_streak_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    format!(
-        "__route_success__:{}:{profile_name}",
-        runtime_route_kind_label(route_kind)
+    runtime_proxy_crate::runtime_profile_route_success_streak_key(
+        profile_name,
+        runtime_route_kind_to_proxy(route_kind),
     )
 }
 
@@ -180,9 +203,9 @@ pub(crate) fn runtime_profile_route_performance_key(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> String {
-    format!(
-        "__route_performance__:{}:{profile_name}",
-        runtime_route_kind_label(route_kind)
+    runtime_proxy_crate::runtime_profile_route_performance_key(
+        profile_name,
+        runtime_route_kind_to_proxy(route_kind),
     )
 }
 
@@ -219,26 +242,12 @@ pub(crate) fn runtime_profile_route_coupling_score_from_map(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_route_coupled_kinds(route_kind)
-        .iter()
-        .copied()
-        .map(|coupled_kind| {
-            let route_score = runtime_profile_effective_health_score_from_map(
-                profile_health,
-                &runtime_profile_route_health_key(profile_name, coupled_kind),
-                now,
-            );
-            let bad_pairing_score = runtime_profile_effective_score_from_map(
-                profile_health,
-                &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
-                now,
-                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-            );
-            route_score
-                .saturating_add(bad_pairing_score)
-                .saturating_div(2)
-        })
-        .fold(0, u32::saturating_add)
+    runtime_proxy_crate::runtime_profile_route_coupling_score_by_key(
+        |key| runtime_profile_health_snapshot(profile_health, key),
+        profile_name,
+        now,
+        runtime_route_kind_to_proxy(route_kind),
+    )
 }
 
 pub(crate) fn runtime_profile_route_performance_score(
@@ -247,26 +256,12 @@ pub(crate) fn runtime_profile_route_performance_score(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    let route_score = runtime_profile_effective_score_from_map(
-        profile_health,
-        &runtime_profile_route_performance_key(profile_name, route_kind),
+    runtime_proxy_crate::runtime_profile_route_performance_score_by_key(
+        |key| runtime_profile_health_snapshot(profile_health, key),
+        profile_name,
         now,
-        RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-    );
-    let coupled_score = runtime_route_coupled_kinds(route_kind)
-        .iter()
-        .copied()
-        .map(|coupled_kind| {
-            runtime_profile_effective_score_from_map(
-                profile_health,
-                &runtime_profile_route_performance_key(profile_name, coupled_kind),
-                now,
-                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-            )
-            .saturating_div(2)
-        })
-        .fold(0, u32::saturating_add);
-    route_score.saturating_add(coupled_score)
+        runtime_route_kind_to_proxy(route_kind),
+    )
 }
 
 pub(crate) fn runtime_profile_health_score(
@@ -311,65 +306,38 @@ pub(crate) fn runtime_profile_health_sort_key(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_profile_effective_health_score_from_map(profile_health, profile_name, now)
-        .saturating_add(runtime_profile_effective_health_score_from_map(
-            profile_health,
-            &runtime_profile_route_health_key(profile_name, route_kind),
-            now,
-        ))
-        .saturating_add(runtime_profile_effective_score_from_map(
-            profile_health,
-            &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
-            now,
-            RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-        ))
-        .saturating_add(runtime_profile_route_coupling_score_from_map(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-        .saturating_add(runtime_profile_route_performance_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
+    runtime_proxy_crate::runtime_profile_health_sort_key_by_key(
+        profile_name,
+        |key| runtime_profile_health_snapshot(profile_health, key),
+        now,
+        runtime_route_kind_to_proxy(route_kind),
+    )
 }
 
 pub(crate) fn runtime_profile_inflight_sort_key(
     profile_name: &str,
     profile_inflight: &BTreeMap<String, usize>,
 ) -> usize {
-    profile_inflight.get(profile_name).copied().unwrap_or(0)
+    runtime_proxy_crate::runtime_profile_inflight_sort_key(profile_name, profile_inflight)
 }
 
 pub(crate) fn runtime_profile_inflight_weight(context: &str) -> usize {
-    match context {
-        "websocket_session" | "responses_http" => 2,
-        _ => 1,
-    }
+    runtime_proxy_crate::runtime_profile_inflight_weight(context)
 }
 
 pub(crate) fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {
-    match route_kind {
-        RuntimeRouteKind::Responses => "responses_http",
-        RuntimeRouteKind::Compact => "compact_http",
-        RuntimeRouteKind::Websocket => "websocket_session",
-        RuntimeRouteKind::Standard => "standard_http",
-    }
+    runtime_proxy_crate::runtime_route_kind_inflight_context(runtime_route_kind_to_proxy(
+        route_kind,
+    ))
 }
 
 pub(crate) fn runtime_profile_inflight_soft_limit(
     route_kind: RuntimeRouteKind,
     pressure_mode: bool,
 ) -> usize {
-    let base = runtime_proxy_profile_inflight_soft_limit().max(1);
-    if !pressure_mode {
-        return base;
-    }
-    match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => base.saturating_sub(1).max(1),
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => base.saturating_sub(2).max(1),
-    }
+    runtime_proxy_crate::runtime_profile_inflight_soft_limit(
+        runtime_route_kind_to_proxy(route_kind),
+        pressure_mode,
+        runtime_proxy_profile_inflight_soft_limit(),
+    )
 }

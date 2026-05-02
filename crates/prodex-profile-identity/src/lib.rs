@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use serde::Deserialize;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileIdentity {
@@ -20,6 +21,40 @@ impl ProfileIdentity {
             .as_deref()
             .is_some_and(|account_id| !account_id.trim().is_empty())
     }
+}
+
+pub fn find_matching_profile_identity(
+    discovered: &[(String, ProfileIdentity)],
+    target: &ProfileIdentity,
+) -> Option<String> {
+    let target_account_id = target.account_id.as_deref().map(normalize_account_id);
+    let target_email = target.email.as_deref().map(normalize_email);
+
+    if let Some(target_account_id) = target_account_id.as_deref() {
+        for (name, identity) in discovered {
+            if identity
+                .account_id
+                .as_deref()
+                .is_some_and(|account_id| normalize_account_id(account_id) == target_account_id)
+            {
+                return Some(name.clone());
+            }
+        }
+    }
+
+    let target_email = target_email.as_deref()?;
+    let mut legacy_email_matches = discovered
+        .iter()
+        .filter(|(_, identity)| {
+            identity.account_id.is_none()
+                && identity
+                    .email
+                    .as_deref()
+                    .is_some_and(|email| normalize_email(email) == target_email)
+        })
+        .map(|(name, _)| name.clone());
+    let match_name = legacy_email_matches.next()?;
+    legacy_email_matches.next().is_none().then_some(match_name)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -211,6 +246,214 @@ pub fn profile_name_from_email(email: &str) -> String {
     }
 }
 
+pub fn validate_profile_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("profile name cannot be empty");
+    }
+
+    if name.contains(std::path::MAIN_SEPARATOR) {
+        bail!("profile name cannot contain path separators");
+    }
+
+    if name == "." || name == ".." {
+        bail!("profile name cannot be '.' or '..'");
+    }
+
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        bail!("profile name may only contain letters, numbers, '.', '_' or '-'");
+    }
+
+    Ok(())
+}
+
+pub fn validate_add_profile_options(
+    codex_home_provided: bool,
+    copy_from_provided: bool,
+    copy_current: bool,
+) -> Result<()> {
+    if codex_home_provided && (copy_from_provided || copy_current) {
+        bail!("--codex-home cannot be combined with --copy-from or --copy-current");
+    }
+
+    if copy_from_provided && copy_current {
+        bail!("use either --copy-from or --copy-current");
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddProfileSourceKind {
+    ExternalHome,
+    CopyFrom,
+    CopyCurrent,
+    EmptyManaged,
+}
+
+impl AddProfileSourceKind {
+    pub fn managed(self) -> bool {
+        !matches!(self, Self::ExternalHome)
+    }
+}
+
+pub fn resolve_add_profile_source_kind(
+    codex_home_provided: bool,
+    copy_from_provided: bool,
+    copy_current: bool,
+) -> Result<AddProfileSourceKind> {
+    validate_add_profile_options(codex_home_provided, copy_from_provided, copy_current)?;
+    Ok(if codex_home_provided {
+        AddProfileSourceKind::ExternalHome
+    } else if copy_current {
+        AddProfileSourceKind::CopyCurrent
+    } else if copy_from_provided {
+        AddProfileSourceKind::CopyFrom
+    } else {
+        AddProfileSourceKind::EmptyManaged
+    })
+}
+
+pub fn should_activate_profile(active_profile_exists: bool, activate_requested: bool) -> bool {
+    !active_profile_exists || activate_requested
+}
+
+pub fn unique_profile_name_for_email(
+    email: &str,
+    is_available: impl FnMut(&str) -> bool,
+) -> String {
+    unique_profile_name_from_base(&profile_name_from_email(email), "profile", is_available)
+}
+
+pub fn copilot_profile_name_base(login: &str) -> String {
+    profile_name_from_email(&format!("copilot-{login}"))
+}
+
+pub fn unique_copilot_profile_name(login: &str, is_available: impl FnMut(&str) -> bool) -> String {
+    unique_profile_name_from_base(&copilot_profile_name_base(login), "copilot", is_available)
+}
+
+pub fn unique_profile_name_from_base(
+    base_name: &str,
+    fallback_name: &str,
+    mut is_available: impl FnMut(&str) -> bool,
+) -> String {
+    let base_name = if base_name.trim().is_empty() {
+        fallback_name.to_string()
+    } else {
+        base_name.to_string()
+    };
+    if is_available(&base_name) {
+        return base_name;
+    }
+
+    for suffix in 2.. {
+        let candidate = format!("{base_name}-{suffix}");
+        if is_available(&candidate) {
+            return candidate;
+        }
+    }
+
+    unreachable!("integer suffix space should not be exhausted")
+}
+
+pub fn resolve_remove_profile_targets<'a>(
+    profiles: impl IntoIterator<Item = (&'a str, bool)>,
+    remove_all: bool,
+    requested_name: Option<&str>,
+    delete_home: bool,
+) -> Result<Vec<String>> {
+    let profiles = profiles
+        .into_iter()
+        .map(|(name, managed)| (name.to_string(), managed))
+        .collect::<Vec<_>>();
+
+    let target_names = if remove_all {
+        profiles
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>()
+    } else {
+        let Some(name) = requested_name else {
+            bail!("provide a profile name or pass --all");
+        };
+        if !profiles
+            .iter()
+            .any(|(profile_name, _)| profile_name == name)
+        {
+            bail!("profile '{}' does not exist", name);
+        }
+        vec![name.to_string()]
+    };
+
+    if remove_all && delete_home {
+        let external_profiles = profiles
+            .iter()
+            .filter(|(name, managed)| !managed && target_names.contains(name))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if !external_profiles.is_empty() {
+            bail!(
+                "--delete-home with --all refuses to delete external profiles: {}",
+                external_profiles.join(", ")
+            );
+        }
+    }
+
+    Ok(target_names)
+}
+
+pub fn should_delete_profile_home(
+    managed_profile: bool,
+    delete_home: bool,
+    codex_home_label: impl std::fmt::Display,
+) -> Result<bool> {
+    let should_delete_home = managed_profile || delete_home;
+    if !should_delete_home {
+        return Ok(false);
+    }
+
+    if !managed_profile && delete_home {
+        bail!("refusing to delete external path {}", codex_home_label);
+    }
+
+    Ok(true)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedProfileStatePlan {
+    pub removed_names: BTreeSet<String>,
+    pub active_profile: Option<String>,
+}
+
+pub fn plan_removed_profile_state<'a>(
+    remaining_profile_names: impl IntoIterator<Item = &'a str>,
+    current_active_profile: Option<&str>,
+    removed_names: impl IntoIterator<Item = &'a str>,
+) -> RemovedProfileStatePlan {
+    let removed_names = removed_names
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>();
+    let active_profile = if current_active_profile
+        .is_some_and(|profile_name| removed_names.contains(profile_name))
+    {
+        remaining_profile_names
+            .into_iter()
+            .next()
+            .map(ToOwned::to_owned)
+    } else {
+        current_active_profile.map(ToOwned::to_owned)
+    };
+
+    RemovedProfileStatePlan {
+        removed_names,
+        active_profile,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +560,209 @@ mod tests {
             Some("acct-two")
         );
         assert_eq!(normalize_optional_account_id("   "), None);
+    }
+
+    #[test]
+    fn identity_match_prefers_account_id_then_single_legacy_email() {
+        let discovered = vec![
+            (
+                "legacy".to_string(),
+                ProfileIdentity {
+                    email: Some("User@Example.com".to_string()),
+                    account_id: None,
+                },
+            ),
+            (
+                "workspace".to_string(),
+                ProfileIdentity {
+                    email: Some("other@example.com".to_string()),
+                    account_id: Some(" acct-one ".to_string()),
+                },
+            ),
+        ];
+
+        assert_eq!(
+            find_matching_profile_identity(
+                &discovered,
+                &ProfileIdentity {
+                    email: Some("different@example.com".to_string()),
+                    account_id: Some("acct-one".to_string()),
+                },
+            )
+            .as_deref(),
+            Some("workspace")
+        );
+        assert_eq!(
+            find_matching_profile_identity(
+                &discovered,
+                &ProfileIdentity {
+                    email: Some("user@example.com".to_string()),
+                    account_id: Some("missing-account".to_string()),
+                },
+            )
+            .as_deref(),
+            Some("legacy")
+        );
+    }
+
+    #[test]
+    fn identity_match_rejects_ambiguous_legacy_email() {
+        let discovered = vec![
+            (
+                "first".to_string(),
+                ProfileIdentity {
+                    email: Some("user@example.com".to_string()),
+                    account_id: None,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileIdentity {
+                    email: Some("USER@example.com".to_string()),
+                    account_id: None,
+                },
+            ),
+        ];
+
+        assert_eq!(
+            find_matching_profile_identity(
+                &discovered,
+                &ProfileIdentity {
+                    email: Some("user@example.com".to_string()),
+                    account_id: None,
+                },
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn unique_profile_name_helpers_pick_first_available_candidate() {
+        assert_eq!(
+            unique_profile_name_for_email("User+Work@example.com", |candidate| {
+                candidate == "user-work_example.com-3"
+            }),
+            "user-work_example.com-3"
+        );
+        assert_eq!(copilot_profile_name_base("User.Name"), "copilot-user.name");
+        assert_eq!(
+            unique_copilot_profile_name("User Name", |candidate| candidate
+                == "copilot-user-name-2"),
+            "copilot-user-name-2"
+        );
+        assert_eq!(
+            unique_profile_name_from_base("", "copilot", |candidate| candidate == "copilot-2"),
+            "copilot-2"
+        );
+    }
+
+    #[test]
+    fn profile_name_validation_matches_cli_rules() {
+        validate_profile_name("main.profile_1").expect("valid profile name");
+
+        assert_eq!(
+            validate_profile_name("").unwrap_err().to_string(),
+            "profile name cannot be empty"
+        );
+        assert_eq!(
+            validate_profile_name("bad/name").unwrap_err().to_string(),
+            "profile name cannot contain path separators"
+        );
+        assert_eq!(
+            validate_profile_name("..").unwrap_err().to_string(),
+            "profile name cannot be '.' or '..'"
+        );
+        assert_eq!(
+            validate_profile_name("bad name").unwrap_err().to_string(),
+            "profile name may only contain letters, numbers, '.', '_' or '-'"
+        );
+    }
+
+    #[test]
+    fn add_profile_option_validation_rejects_conflicting_sources() {
+        assert_eq!(
+            validate_add_profile_options(true, false, true)
+                .unwrap_err()
+                .to_string(),
+            "--codex-home cannot be combined with --copy-from or --copy-current"
+        );
+        assert_eq!(
+            validate_add_profile_options(false, true, true)
+                .unwrap_err()
+                .to_string(),
+            "use either --copy-from or --copy-current"
+        );
+        validate_add_profile_options(false, true, false).expect("copy-from alone should pass");
+    }
+
+    #[test]
+    fn add_profile_source_kind_and_activation_are_planned() {
+        assert_eq!(
+            resolve_add_profile_source_kind(true, false, false).unwrap(),
+            AddProfileSourceKind::ExternalHome
+        );
+        assert_eq!(
+            resolve_add_profile_source_kind(false, true, false).unwrap(),
+            AddProfileSourceKind::CopyFrom
+        );
+        assert_eq!(
+            resolve_add_profile_source_kind(false, false, true).unwrap(),
+            AddProfileSourceKind::CopyCurrent
+        );
+        assert_eq!(
+            resolve_add_profile_source_kind(false, false, false).unwrap(),
+            AddProfileSourceKind::EmptyManaged
+        );
+        assert!(AddProfileSourceKind::EmptyManaged.managed());
+        assert!(!AddProfileSourceKind::ExternalHome.managed());
+        assert!(should_activate_profile(false, false));
+        assert!(should_activate_profile(true, true));
+        assert!(!should_activate_profile(true, false));
+    }
+
+    #[test]
+    fn remove_profile_target_planning_validates_bulk_delete() {
+        let profiles = [("main", true), ("external", false)];
+
+        assert_eq!(
+            resolve_remove_profile_targets(profiles, false, Some("main"), false).unwrap(),
+            vec!["main".to_string()]
+        );
+        assert_eq!(
+            resolve_remove_profile_targets(profiles, false, Some("missing"), false)
+                .unwrap_err()
+                .to_string(),
+            "profile 'missing' does not exist"
+        );
+        assert_eq!(
+            resolve_remove_profile_targets(profiles, true, None, false).unwrap(),
+            vec!["main".to_string(), "external".to_string()]
+        );
+        assert_eq!(
+            resolve_remove_profile_targets(profiles, true, None, true)
+                .unwrap_err()
+                .to_string(),
+            "--delete-home with --all refuses to delete external profiles: external"
+        );
+    }
+
+    #[test]
+    fn profile_home_delete_and_removed_state_are_planned() {
+        assert!(should_delete_profile_home(true, false, "/tmp/managed").unwrap());
+        assert!(!should_delete_profile_home(false, false, "/tmp/external").unwrap());
+        assert_eq!(
+            should_delete_profile_home(false, true, "/tmp/external")
+                .unwrap_err()
+                .to_string(),
+            "refusing to delete external path /tmp/external"
+        );
+
+        let plan = plan_removed_profile_state(["backup"], Some("main"), ["main"]);
+        assert_eq!(plan.active_profile.as_deref(), Some("backup"));
+        assert!(plan.removed_names.contains("main"));
+
+        let plan = plan_removed_profile_state(["main", "backup"], Some("backup"), ["main"]);
+        assert_eq!(plan.active_profile.as_deref(), Some("backup"));
     }
 
     fn chatgpt_id_token(email: &str, account_id: Option<&str>) -> String {

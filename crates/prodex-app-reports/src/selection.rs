@@ -114,6 +114,28 @@ pub fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     schedule_ready_profile_candidates_with_view(candidates, selection, preferred_profile)
 }
 
+pub fn run_profile_probe_is_ready(
+    report: &RunProfileProbeReport,
+    include_code_review: bool,
+) -> bool {
+    match report.result.as_ref() {
+        Ok(usage) => collect_blocked_limits(usage, include_code_review).is_empty(),
+        Err(_) => false,
+    }
+}
+
+pub fn merge_run_preflight_reports_with_current_first(
+    current_report: RunProfileProbeReport,
+    rotation_reports: impl IntoIterator<Item = RunProfileProbeReport>,
+) -> Vec<RunProfileProbeReport> {
+    let mut reports = vec![current_report];
+    reports.extend(rotation_reports.into_iter().map(|mut report| {
+        report.order_index += 1;
+        report
+    }));
+    reports
+}
+
 pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     mut candidates: Vec<ReadyProfileCandidate>,
     selection: S,

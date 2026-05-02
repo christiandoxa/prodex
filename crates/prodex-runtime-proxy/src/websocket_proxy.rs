@@ -1,3 +1,32 @@
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+
+pub fn runtime_interleave_socket_addrs(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let (mut primary, mut secondary): (VecDeque<_>, VecDeque<_>) =
+        addrs.into_iter().partition(|addr| addr.is_ipv6());
+    let prefer_ipv6 = primary.front().is_some();
+    if !prefer_ipv6 {
+        std::mem::swap(&mut primary, &mut secondary);
+    }
+
+    let mut ordered = Vec::with_capacity(primary.len().saturating_add(secondary.len()));
+    loop {
+        let mut progressed = false;
+        if let Some(addr) = primary.pop_front() {
+            ordered.push(addr);
+            progressed = true;
+        }
+        if let Some(addr) = secondary.pop_front() {
+            ordered.push(addr);
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
+    }
+    ordered
+}
+
 pub fn runtime_websocket_no_proxy_pattern_matches(pattern: &str, host: &str, port: u16) -> bool {
     let pattern = pattern.trim();
     if pattern.is_empty() {
@@ -100,5 +129,22 @@ mod tests {
             "api.openai.com:443"
         );
         assert_eq!(runtime_websocket_authority("::1", 8080), "[::1]:8080");
+    }
+
+    #[test]
+    fn interleaves_socket_addrs_with_ipv6_preferred_when_available() {
+        let v4_a: SocketAddr = "127.0.0.1:443".parse().expect("v4");
+        let v4_b: SocketAddr = "127.0.0.2:443".parse().expect("v4");
+        let v6_a: SocketAddr = "[::1]:443".parse().expect("v6");
+        let v6_b: SocketAddr = "[::2]:443".parse().expect("v6");
+
+        assert_eq!(
+            runtime_interleave_socket_addrs(vec![v4_a, v4_b, v6_a, v6_b]),
+            vec![v6_a, v4_a, v6_b, v4_b]
+        );
+        assert_eq!(
+            runtime_interleave_socket_addrs(vec![v6_a, v6_b, v4_a, v4_b]),
+            vec![v6_a, v4_a, v6_b, v4_b]
+        );
     }
 }

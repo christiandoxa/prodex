@@ -1,3 +1,37 @@
+use crate::{
+    RuntimeTokenUsage, RuntimeWebsocketErrorPayload,
+    extract_runtime_proxy_overload_message_from_value,
+    extract_runtime_proxy_previous_response_message,
+    extract_runtime_proxy_previous_response_message_from_value,
+    extract_runtime_proxy_quota_message_from_value, extract_runtime_response_ids_from_value,
+    extract_runtime_token_usage_from_value, extract_runtime_turn_state_from_value,
+    runtime_proxy_stale_continuation_message, runtime_response_event_type_from_value,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeBufferedWebsocketTextFrame {
+    pub text: String,
+    pub response_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeWebsocketRetryInspectionKind {
+    QuotaBlocked,
+    Overloaded,
+    PreviousResponseNotFound,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeInspectedWebsocketTextFrame {
+    pub event_type: Option<String>,
+    pub turn_state: Option<String>,
+    pub response_ids: Vec<String>,
+    pub token_usage: Option<RuntimeTokenUsage>,
+    pub retry_kind: Option<RuntimeWebsocketRetryInspectionKind>,
+    pub precommit_hold: bool,
+    pub terminal_event: bool,
+}
+
 pub fn runtime_websocket_should_promote_committed_profile(
     previous_response_id: Option<&str>,
     bound_profile: Option<&str>,
@@ -38,6 +72,146 @@ impl RuntimeWebsocketDirectCurrentFallbackReason {
     pub fn reset_previous_response_retry_index_on_local_block(self) -> bool {
         matches!(self, Self::PrecommitBudgetExhausted)
     }
+}
+
+pub fn runtime_websocket_error_payload_from_http_body(body: &[u8]) -> RuntimeWebsocketErrorPayload {
+    if body.is_empty() {
+        return RuntimeWebsocketErrorPayload::Empty;
+    }
+
+    match std::str::from_utf8(body) {
+        Ok(text) => RuntimeWebsocketErrorPayload::Text(text.to_string()),
+        Err(_) => RuntimeWebsocketErrorPayload::Binary(body.to_vec()),
+    }
+}
+
+pub fn runtime_proxy_websocket_error_payload_text(
+    status: u16,
+    code: &str,
+    message: &str,
+) -> String {
+    serde_json::json!({
+        "type": "error",
+        "status": status,
+        "error": {
+            "code": code,
+            "message": message,
+        }
+    })
+    .to_string()
+}
+
+pub fn runtime_translate_previous_response_websocket_text_frame(payload: &str) -> String {
+    payload.to_string()
+}
+
+pub fn runtime_translate_precommit_previous_response_websocket_text_frame(payload: &str) -> String {
+    if extract_runtime_proxy_previous_response_message(payload.as_bytes()).is_none() {
+        return payload.to_string();
+    }
+
+    let message = runtime_proxy_stale_continuation_message();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message);
+    };
+
+    let event_type = runtime_response_event_type_from_value(&value);
+    if event_type.as_deref() == Some("response.failed") {
+        if value.get("response").is_some() {
+            return serde_json::json!({
+                "type": "response.failed",
+                "status": 409,
+                "response": {
+                    "error": {
+                        "code": "stale_continuation",
+                        "message": message,
+                    }
+                }
+            })
+            .to_string();
+        }
+
+        return serde_json::json!({
+            "type": "response.failed",
+            "status": 409,
+            "error": {
+                "code": "stale_continuation",
+                "message": message,
+            }
+        })
+        .to_string();
+    }
+
+    runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
+}
+
+pub fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWebsocketTextFrame {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return RuntimeInspectedWebsocketTextFrame::default();
+    };
+
+    let event_type = runtime_response_event_type_from_value(&value);
+    let retry_kind = if extract_runtime_proxy_previous_response_message_from_value(&value).is_some()
+    {
+        Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
+    } else if extract_runtime_proxy_overload_message_from_value(&value).is_some() {
+        Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
+    } else if extract_runtime_proxy_quota_message_from_value(&value).is_some() {
+        Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
+    } else {
+        None
+    };
+    let precommit_hold = event_type
+        .as_deref()
+        .is_some_and(runtime_proxy_precommit_hold_event_kind);
+    let terminal_event = event_type
+        .as_deref()
+        .is_some_and(|kind| matches!(kind, "response.completed" | "response.failed"));
+
+    RuntimeInspectedWebsocketTextFrame {
+        event_type,
+        turn_state: extract_runtime_turn_state_from_value(&value),
+        response_ids: extract_runtime_response_ids_from_value(&value),
+        token_usage: extract_runtime_token_usage_from_value(&value),
+        retry_kind,
+        precommit_hold,
+        terminal_event,
+    }
+}
+
+pub fn runtime_response_event_type(payload: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| runtime_response_event_type_from_value(&value))
+}
+
+pub fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "response.created"
+            | "response.in_progress"
+            | "response.queued"
+            | "response.output_item.added"
+            | "response.content_part.added"
+            | "response.reasoning_summary_part.added"
+    )
+}
+
+pub fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "session.updated"
+            | "conversation.item.added"
+            | "conversation.item.done"
+            | "response.cancelled"
+            | "response.done"
+            | "error"
+    )
+}
+
+pub fn is_runtime_terminal_event(payload: &str) -> bool {
+    runtime_response_event_type(payload)
+        .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))
 }
 
 #[cfg(test)]
@@ -92,5 +266,100 @@ mod tests {
             !RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted
                 .reset_previous_response_retry_index_on_local_block()
         );
+    }
+
+    #[test]
+    fn websocket_error_payload_preserves_text_binary_and_empty() {
+        assert_eq!(
+            runtime_websocket_error_payload_from_http_body(b""),
+            RuntimeWebsocketErrorPayload::Empty
+        );
+        assert_eq!(
+            runtime_websocket_error_payload_from_http_body(b"quota"),
+            RuntimeWebsocketErrorPayload::Text("quota".to_string())
+        );
+        assert_eq!(
+            runtime_websocket_error_payload_from_http_body(b"\xff"),
+            RuntimeWebsocketErrorPayload::Binary(vec![0xff])
+        );
+    }
+
+    #[test]
+    fn websocket_precommit_previous_response_frame_translation_preserves_failed_event_shape() {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "status": 400,
+            "error": {
+                "code": "previous_response_not_found",
+                "message": "Previous response with id 'resp-123' not found.",
+            }
+        })
+        .to_string();
+
+        let translated =
+            runtime_translate_precommit_previous_response_websocket_text_frame(&payload);
+        let value = serde_json::from_str::<serde_json::Value>(&translated).expect("json");
+
+        assert_eq!(
+            value.get("type").and_then(serde_json::Value::as_str),
+            Some("response.failed")
+        );
+        assert_eq!(
+            value.get("status").and_then(serde_json::Value::as_u64),
+            Some(409)
+        );
+        assert_eq!(
+            value
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(serde_json::Value::as_str),
+            Some("stale_continuation")
+        );
+        assert!(
+            !translated.contains("previous_response_not_found"),
+            "translated frame should not leak raw previous_response_not_found: {translated}"
+        );
+    }
+
+    #[test]
+    fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "error": {
+                "code": "insufficient_quota",
+                "message": "quota exceeded",
+            },
+            "response": {
+                "id": "resp_1",
+                "headers": {
+                    "x-codex-turn-state": "turn-1"
+                }
+            }
+        })
+        .to_string();
+
+        let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+        assert_eq!(
+            inspected.retry_kind,
+            Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
+        );
+        assert_eq!(inspected.response_ids, vec!["resp_1".to_string()]);
+        assert_eq!(inspected.turn_state.as_deref(), Some("turn-1"));
+        assert!(inspected.terminal_event);
+    }
+
+    #[test]
+    fn websocket_event_kind_helpers_match_stream_boundaries() {
+        assert!(runtime_proxy_precommit_hold_event_kind("response.created"));
+        assert!(!runtime_proxy_precommit_hold_event_kind(
+            "response.completed"
+        ));
+        assert!(runtime_realtime_websocket_terminal_event_kind(
+            "response.done"
+        ));
+        assert!(is_runtime_terminal_event(
+            r#"{"type":"response.completed"}"#
+        ));
     }
 }

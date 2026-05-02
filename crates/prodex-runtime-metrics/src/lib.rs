@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use prodex_runtime_broker as broker;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeBrokerLaneMetrics {
     pub active: u64,
@@ -112,6 +114,20 @@ impl Default for PrometheusTextOptions {
     }
 }
 
+pub fn runtime_broker_prometheus_snapshot(
+    metadata: &broker::RuntimeBrokerMetadata,
+    metrics: &broker::RuntimeBrokerMetrics,
+) -> RuntimeBrokerSnapshot {
+    RuntimeBrokerSnapshotBuilder::new(metadata, metrics).build()
+}
+
+pub fn render_runtime_broker_prometheus_from_metrics(
+    metadata: &broker::RuntimeBrokerMetadata,
+    metrics: &broker::RuntimeBrokerMetrics,
+) -> String {
+    render_runtime_broker_prometheus(&runtime_broker_prometheus_snapshot(metadata, metrics))
+}
+
 pub fn render_runtime_broker_prometheus(snapshot: &RuntimeBrokerSnapshot) -> String {
     render_runtime_broker_prometheus_with_options(snapshot, PrometheusTextOptions::default())
 }
@@ -121,6 +137,179 @@ pub fn render_runtime_broker_prometheus_with_options(
     options: PrometheusTextOptions,
 ) -> String {
     RuntimeBrokerPrometheusRenderer::new(snapshot, options).render()
+}
+
+struct RuntimeBrokerSnapshotBuilder<'a> {
+    metadata: &'a broker::RuntimeBrokerMetadata,
+    metrics: &'a broker::RuntimeBrokerMetrics,
+}
+
+impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
+    fn new(
+        metadata: &'a broker::RuntimeBrokerMetadata,
+        metrics: &'a broker::RuntimeBrokerMetrics,
+    ) -> Self {
+        Self { metadata, metrics }
+    }
+
+    fn build(&self) -> RuntimeBrokerSnapshot {
+        RuntimeBrokerSnapshot {
+            broker_key: self.metadata.broker_key.clone(),
+            listen_addr: self.metadata.listen_addr.clone(),
+            pid: self.metrics.health.pid,
+            started_at_unix_seconds: self.metrics.health.started_at,
+            current_profile: self.metrics.health.current_profile.clone(),
+            include_code_review: self.metrics.health.include_code_review,
+            persistence_role: self.metrics.health.persistence_role.clone(),
+            prodex_version: self.metrics.health.prodex_version.clone(),
+            executable_path: self.metrics.health.executable_path.clone(),
+            executable_sha256: self.metrics.health.executable_sha256.clone(),
+            active_requests: self.metrics.health.active_requests as u64,
+            active_request_limit: self.metrics.active_request_limit as u64,
+            local_overload_backoff_remaining_seconds: self
+                .metrics
+                .local_overload_backoff_remaining_seconds,
+            runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics {
+                wait_total_ns: self.metrics.runtime_state_lock_wait.wait_total_ns,
+                wait_count: self.metrics.runtime_state_lock_wait.wait_count,
+                wait_max_ns: self.metrics.runtime_state_lock_wait.wait_max_ns,
+            },
+            traffic: self.build_traffic(),
+            profile_inflight: self.build_profile_inflight(),
+            active_request_release_underflows_total: self
+                .metrics
+                .active_request_release_underflows_total,
+            profile_inflight_admissions_total: self.metrics.profile_inflight_admissions_total,
+            profile_inflight_releases_total: self.metrics.profile_inflight_releases_total,
+            profile_inflight_release_underflows_total: self
+                .metrics
+                .profile_inflight_release_underflows_total,
+            retry_backoffs: self.metrics.retry_backoffs as u64,
+            transport_backoffs: self.metrics.transport_backoffs as u64,
+            route_circuits: self.metrics.route_circuits as u64,
+            degraded_profiles: self.metrics.degraded_profiles as u64,
+            degraded_routes: self.metrics.degraded_routes as u64,
+            continuations: self.build_continuations(),
+            previous_response_continuity: self.build_previous_response_continuity(),
+            continuity_failure_reasons: self.build_continuity_failure_reasons(),
+        }
+    }
+
+    fn build_traffic(&self) -> RuntimeBrokerTrafficMetrics {
+        RuntimeBrokerTrafficMetrics {
+            responses: Self::build_lane(&self.metrics.traffic.responses),
+            compact: Self::build_lane(&self.metrics.traffic.compact),
+            websocket: Self::build_lane(&self.metrics.traffic.websocket),
+            standard: Self::build_lane(&self.metrics.traffic.standard),
+        }
+    }
+
+    fn build_profile_inflight(&self) -> BTreeMap<String, u64> {
+        self.metrics
+            .profile_inflight
+            .iter()
+            .map(|(profile, count)| (profile.clone(), *count as u64))
+            .collect()
+    }
+
+    fn build_continuations(&self) -> RuntimeBrokerContinuationMetrics {
+        RuntimeBrokerContinuationMetrics {
+            response_bindings: self.metrics.continuations.response_bindings as u64,
+            turn_state_bindings: self.metrics.continuations.turn_state_bindings as u64,
+            session_id_bindings: self.metrics.continuations.session_id_bindings as u64,
+            warm: self.metrics.continuations.warm as u64,
+            verified: self.metrics.continuations.verified as u64,
+            suspect: self.metrics.continuations.suspect as u64,
+            dead: self.metrics.continuations.dead as u64,
+            failure_counts: RuntimeBrokerContinuationSignalMetrics {
+                response: self.metrics.continuations.failure_counts.response as u64,
+                turn_state: self.metrics.continuations.failure_counts.turn_state as u64,
+                session_id: self.metrics.continuations.failure_counts.session_id as u64,
+            },
+            not_found_streaks: RuntimeBrokerContinuationSignalMetrics {
+                response: self.metrics.continuations.not_found_streaks.response as u64,
+                turn_state: self.metrics.continuations.not_found_streaks.turn_state as u64,
+                session_id: self.metrics.continuations.not_found_streaks.session_id as u64,
+            },
+            stale_verified_bindings: RuntimeBrokerContinuationSignalMetrics {
+                response: self.metrics.continuations.stale_verified_bindings.response as u64,
+                turn_state: self
+                    .metrics
+                    .continuations
+                    .stale_verified_bindings
+                    .turn_state as u64,
+                session_id: self
+                    .metrics
+                    .continuations
+                    .stale_verified_bindings
+                    .session_id as u64,
+            },
+        }
+    }
+
+    fn build_previous_response_continuity(&self) -> RuntimeBrokerPreviousResponseContinuityMetrics {
+        RuntimeBrokerPreviousResponseContinuityMetrics {
+            negative_cache_entries: Self::build_route_continuity(
+                &self
+                    .metrics
+                    .previous_response_continuity
+                    .negative_cache_entries,
+            ),
+            negative_cache_failures: Self::build_route_continuity(
+                &self
+                    .metrics
+                    .previous_response_continuity
+                    .negative_cache_failures,
+            ),
+        }
+    }
+
+    fn build_continuity_failure_reasons(&self) -> RuntimeBrokerContinuityFailureReasonMetrics {
+        RuntimeBrokerContinuityFailureReasonMetrics {
+            chain_retried_owner: Self::build_reason_counts(
+                &self.metrics.continuity_failure_reasons.chain_retried_owner,
+            ),
+            chain_dead_upstream_confirmed: Self::build_reason_counts(
+                &self
+                    .metrics
+                    .continuity_failure_reasons
+                    .chain_dead_upstream_confirmed,
+            ),
+            stale_continuation: Self::build_reason_counts(
+                &self.metrics.continuity_failure_reasons.stale_continuation,
+            ),
+        }
+    }
+
+    fn build_lane(lane: &broker::RuntimeBrokerLaneMetrics) -> RuntimeBrokerLaneMetrics {
+        RuntimeBrokerLaneMetrics {
+            active: lane.active as u64,
+            limit: lane.limit as u64,
+            admissions_total: lane.admissions_total,
+            releases_total: lane.releases_total,
+            global_limit_rejections_total: lane.global_limit_rejections_total,
+            lane_limit_rejections_total: lane.lane_limit_rejections_total,
+            release_underflows_total: lane.release_underflows_total,
+        }
+    }
+
+    fn build_route_continuity(
+        metrics: &broker::RuntimeBrokerRouteContinuityMetrics,
+    ) -> RuntimeBrokerRouteContinuityMetrics {
+        RuntimeBrokerRouteContinuityMetrics {
+            responses: metrics.responses as u64,
+            compact: metrics.compact as u64,
+            websocket: metrics.websocket as u64,
+            standard: metrics.standard as u64,
+        }
+    }
+
+    fn build_reason_counts(metrics: &BTreeMap<String, usize>) -> BTreeMap<String, u64> {
+        metrics
+            .iter()
+            .map(|(reason, count)| (reason.clone(), *count as u64))
+            .collect()
+    }
 }
 
 struct RuntimeBrokerPrometheusRenderer<'a> {
@@ -888,6 +1077,149 @@ mod tests {
                 ]),
             },
         }
+    }
+
+    fn sample_broker_metadata() -> broker::RuntimeBrokerMetadata {
+        broker::RuntimeBrokerMetadata {
+            broker_key: "broker-123".to_string(),
+            listen_addr: "127.0.0.1:8080".to_string(),
+            started_at: 1_715_000_000,
+            current_profile: "main".to_string(),
+            include_code_review: false,
+            upstream_no_proxy: false,
+            instance_token: "instance".to_string(),
+            admin_token: "admin".to_string(),
+            prodex_version: Some("0.29.0".to_string()),
+            executable_path: Some("/tmp/prodex".to_string()),
+            executable_sha256: Some("abcd1234".to_string()),
+        }
+    }
+
+    fn sample_broker_lane(active: usize, limit: usize) -> broker::RuntimeBrokerLaneMetrics {
+        broker::RuntimeBrokerLaneMetrics {
+            active,
+            limit,
+            admissions_total: 42,
+            releases_total: 40,
+            global_limit_rejections_total: 2,
+            lane_limit_rejections_total: 5,
+            release_underflows_total: 1,
+        }
+    }
+
+    fn sample_broker_metrics() -> broker::RuntimeBrokerMetrics {
+        broker::RuntimeBrokerMetrics {
+            health: broker::RuntimeBrokerHealth {
+                pid: 4242,
+                started_at: 1_715_000_000,
+                current_profile: "main".to_string(),
+                include_code_review: false,
+                active_requests: 5,
+                instance_token: "instance".to_string(),
+                persistence_role: "owner".to_string(),
+                prodex_version: Some("0.29.0".to_string()),
+                executable_path: Some("/tmp/prodex".to_string()),
+                executable_sha256: Some("abcd1234".to_string()),
+            },
+            active_request_limit: 12,
+            local_overload_backoff_remaining_seconds: 0,
+            runtime_state_lock_wait: Default::default(),
+            traffic: broker::RuntimeBrokerTrafficMetrics {
+                responses: sample_broker_lane(3, 9),
+                compact: sample_broker_lane(1, 3),
+                websocket: sample_broker_lane(0, 4),
+                standard: sample_broker_lane(1, 2),
+            },
+            profile_inflight: BTreeMap::from([("main".to_string(), 3), ("second".to_string(), 1)]),
+            active_request_release_underflows_total: 1,
+            profile_inflight_admissions_total: 17,
+            profile_inflight_releases_total: 16,
+            profile_inflight_release_underflows_total: 1,
+            retry_backoffs: 2,
+            transport_backoffs: 1,
+            route_circuits: 4,
+            degraded_profiles: 1,
+            degraded_routes: 2,
+            continuations: broker::RuntimeBrokerContinuationMetrics {
+                response_bindings: 7,
+                turn_state_bindings: 2,
+                session_id_bindings: 1,
+                warm: 1,
+                verified: 3,
+                suspect: 2,
+                dead: 1,
+                failure_counts: broker::RuntimeBrokerContinuationSignalMetrics {
+                    response: 5,
+                    turn_state: 2,
+                    session_id: 1,
+                },
+                not_found_streaks: broker::RuntimeBrokerContinuationSignalMetrics {
+                    response: 3,
+                    turn_state: 1,
+                    session_id: 0,
+                },
+                stale_verified_bindings: broker::RuntimeBrokerContinuationSignalMetrics {
+                    response: 1,
+                    turn_state: 0,
+                    session_id: 1,
+                },
+            },
+            previous_response_continuity: broker::RuntimeBrokerPreviousResponseContinuityMetrics {
+                negative_cache_entries: broker::RuntimeBrokerRouteContinuityMetrics {
+                    responses: 2,
+                    compact: 1,
+                    websocket: 1,
+                    standard: 0,
+                },
+                negative_cache_failures: broker::RuntimeBrokerRouteContinuityMetrics {
+                    responses: 4,
+                    compact: 2,
+                    websocket: 1,
+                    standard: 0,
+                },
+            },
+            continuity_failure_reasons: broker::RuntimeBrokerContinuityFailureReasonMetrics {
+                chain_retried_owner: BTreeMap::from([(
+                    "previous_response_not_found_locked_affinity".to_string(),
+                    2,
+                )]),
+                chain_dead_upstream_confirmed: BTreeMap::from([(
+                    "previous_response_not_found_locked_affinity".to_string(),
+                    1,
+                )]),
+                stale_continuation: BTreeMap::from([
+                    ("previous_response_not_found".to_string(), 3),
+                    ("websocket_reuse_watchdog_locked_affinity".to_string(), 1),
+                ]),
+            },
+        }
+    }
+
+    #[test]
+    fn builds_prometheus_snapshot_from_broker_metrics() {
+        let snapshot =
+            runtime_broker_prometheus_snapshot(&sample_broker_metadata(), &sample_broker_metrics());
+
+        assert_eq!(snapshot.broker_key, "broker-123");
+        assert_eq!(snapshot.pid, 4242);
+        assert_eq!(snapshot.traffic.responses.active, 3);
+        assert_eq!(snapshot.traffic.responses.limit, 9);
+        assert_eq!(snapshot.profile_inflight.get("main"), Some(&3));
+        assert_eq!(snapshot.continuations.response_bindings, 7);
+        assert_eq!(
+            snapshot
+                .continuity_failure_reasons
+                .stale_continuation
+                .get("previous_response_not_found"),
+            Some(&3)
+        );
+
+        let rendered = render_runtime_broker_prometheus_from_metrics(
+            &sample_broker_metadata(),
+            &sample_broker_metrics(),
+        );
+        assert!(rendered.contains("prodex_runtime_broker_active_requests"));
+        assert!(rendered.contains("broker_key=\"broker-123\""));
     }
 
     #[test]

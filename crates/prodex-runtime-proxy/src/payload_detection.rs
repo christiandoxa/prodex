@@ -26,6 +26,20 @@ pub struct RuntimeParsedSseEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeSseInspectionProgress {
+    Hold {
+        response_ids: Vec<String>,
+        turn_state: Option<String>,
+    },
+    Commit {
+        response_ids: Vec<String>,
+        turn_state: Option<String>,
+    },
+    QuotaBlocked,
+    PreviousResponseNotFound,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeWebsocketErrorPayload {
     Text(String),
     Binary(Vec<u8>),
@@ -143,6 +157,62 @@ pub fn runtime_sse_finish_pending<F>(
         runtime_sse_finish_line(line, data_lines, &mut on_event);
     }
     runtime_sse_emit_event(data_lines, &mut on_event);
+}
+
+pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgress {
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+    let mut response_ids = std::collections::BTreeSet::new();
+    let mut saw_commit_ready_event = false;
+    let mut turn_state = None::<String>;
+    let mut process_event = |event: RuntimeParsedSseEvent| {
+        if event.quota_blocked {
+            return Some(RuntimeSseInspectionProgress::QuotaBlocked);
+        }
+        if event.previous_response_not_found {
+            return Some(RuntimeSseInspectionProgress::PreviousResponseNotFound);
+        }
+        response_ids.extend(event.response_ids);
+        if event.turn_state.is_some() {
+            turn_state = event.turn_state;
+        }
+        if !event
+            .event_type
+            .as_deref()
+            .is_some_and(crate::runtime_proxy_precommit_hold_event_kind)
+        {
+            saw_commit_ready_event = true;
+        }
+        None
+    };
+    let mut terminal = None;
+    runtime_sse_consume_chunk(&mut line, &mut data_lines, buffered, |event| {
+        if terminal.is_none() {
+            terminal = process_event(event);
+        }
+    });
+    if terminal.is_none() {
+        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
+            if terminal.is_none() {
+                terminal = process_event(event);
+            }
+        });
+    }
+    if let Some(progress) = terminal {
+        return progress;
+    }
+
+    if saw_commit_ready_event {
+        RuntimeSseInspectionProgress::Commit {
+            response_ids: response_ids.into_iter().collect(),
+            turn_state,
+        }
+    } else {
+        RuntimeSseInspectionProgress::Hold {
+            response_ids: response_ids.into_iter().collect(),
+            turn_state,
+        }
+    }
 }
 
 pub fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {
@@ -936,6 +1006,45 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
             extract_runtime_proxy_overload_message(500, b"\xff"),
             Some("Upstream Codex backend is currently experiencing high demand.".to_string())
         );
+    }
+
+    #[test]
+    fn inspect_sse_buffer_handles_comments_crlf_and_partial_tail() {
+        let progress = inspect_runtime_sse_buffer(
+            concat!(
+                ": keep-alive\r\n",
+                "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
+                "\r\n",
+                "data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-2\"}"
+            )
+            .as_bytes(),
+        );
+
+        match progress {
+            RuntimeSseInspectionProgress::Commit {
+                response_ids,
+                turn_state,
+            } => {
+                assert_eq!(
+                    response_ids,
+                    vec!["resp-1".to_string(), "resp-2".to_string()]
+                );
+                assert_eq!(turn_state.as_deref(), Some("ts-1"));
+            }
+            other => panic!("expected commit progress, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inspect_sse_buffer_detects_previous_response_not_found_from_partial_event() {
+        let progress = inspect_runtime_sse_buffer(
+            b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}",
+        );
+
+        assert!(matches!(
+            progress,
+            RuntimeSseInspectionProgress::PreviousResponseNotFound
+        ));
     }
 
     #[test]

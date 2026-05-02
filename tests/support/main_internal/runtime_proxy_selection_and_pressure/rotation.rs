@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::profile_identity::{parse_email_from_id_token, profile_name_from_email};
+
 #[test]
 fn rotates_profiles_after_current_profile() {
     let state = AppState {

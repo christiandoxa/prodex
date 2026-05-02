@@ -7,7 +7,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -388,6 +388,120 @@ pub fn runtime_proxy_queue_pressure_active(
         || probe_refresh_backlog >= thresholds.probe_refresh
 }
 
+pub fn runtime_background_enqueue_backlog(pending_len_after_enqueue: usize) -> usize {
+    pending_len_after_enqueue.saturating_sub(1)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBackgroundQueueKind {
+    StateSave,
+    ContinuationJournal,
+    ProbeRefresh,
+}
+
+impl RuntimeBackgroundQueuePressureThresholds {
+    pub fn threshold_for(self, kind: RuntimeBackgroundQueueKind) -> usize {
+        match kind {
+            RuntimeBackgroundQueueKind::StateSave => self.state_save,
+            RuntimeBackgroundQueueKind::ContinuationJournal => self.continuation_journal,
+            RuntimeBackgroundQueueKind::ProbeRefresh => self.probe_refresh,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeBackgroundQueueEnqueuePlan {
+    pub backlog: usize,
+    pub pressure_active: bool,
+}
+
+pub fn runtime_background_queue_enqueue_plan(
+    kind: RuntimeBackgroundQueueKind,
+    pending_len_after_enqueue: usize,
+    thresholds: RuntimeBackgroundQueuePressureThresholds,
+) -> RuntimeBackgroundQueueEnqueuePlan {
+    let backlog = runtime_background_enqueue_backlog(pending_len_after_enqueue);
+    RuntimeBackgroundQueueEnqueuePlan {
+        backlog,
+        pressure_active: backlog >= thresholds.threshold_for(kind),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStateSaveSchedulePlan {
+    pub sections: RuntimeStateSaveSections,
+    pub debounce: Duration,
+    pub requires_continuation_journal: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeScheduledSaveEnqueuePlan {
+    pub queued_at: Instant,
+    pub ready_at: Instant,
+}
+
+impl RuntimeScheduledSaveEnqueuePlan {
+    pub fn ready_in(self) -> Duration {
+        self.ready_at.saturating_duration_since(self.queued_at)
+    }
+
+    pub fn ready_in_ms(self) -> u128 {
+        self.ready_in().as_millis()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStateSaveEnqueuePlan {
+    pub schedule: RuntimeStateSaveSchedulePlan,
+    pub queue: RuntimeScheduledSaveEnqueuePlan,
+}
+
+pub fn runtime_scheduled_save_enqueue_plan(
+    queued_at: Instant,
+    debounce: Duration,
+) -> RuntimeScheduledSaveEnqueuePlan {
+    RuntimeScheduledSaveEnqueuePlan {
+        queued_at,
+        ready_at: queued_at + debounce,
+    }
+}
+
+pub fn runtime_state_save_schedule_plan(
+    reason: &str,
+    debounce: Duration,
+) -> RuntimeStateSaveSchedulePlan {
+    RuntimeStateSaveSchedulePlan {
+        sections: runtime_state_save_sections_for_reason(reason),
+        debounce: runtime_state_save_debounce(reason, debounce),
+        requires_continuation_journal: runtime_state_save_reason_requires_continuation_journal(
+            reason,
+        ),
+    }
+}
+
+pub fn runtime_state_save_enqueue_plan(
+    reason: &str,
+    queued_at: Instant,
+    debounce: Duration,
+) -> RuntimeStateSaveEnqueuePlan {
+    let schedule = runtime_state_save_schedule_plan(reason, debounce);
+    RuntimeStateSaveEnqueuePlan {
+        schedule,
+        queue: runtime_scheduled_save_enqueue_plan(queued_at, schedule.debounce),
+    }
+}
+
+pub fn runtime_continuation_journal_save_enqueue_plan(
+    reason: &str,
+    queued_at: Instant,
+    debounce: Duration,
+) -> RuntimeScheduledSaveEnqueuePlan {
+    runtime_scheduled_save_enqueue_plan(
+        queued_at,
+        runtime_continuation_journal_save_debounce(reason, debounce),
+    )
+}
+
 pub fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
     [
         "response_ids:",
@@ -537,6 +651,247 @@ pub fn runtime_continuation_journal_save_debounce(reason: &str, debounce: Durati
     }
 }
 
+pub fn runtime_timestamp_touch_should_persist(
+    timestamp: i64,
+    now: i64,
+    persist_interval_seconds: i64,
+) -> bool {
+    // Timestamps are persisted with second precision. Require strictly more
+    // than interval so boundary crossings do not persist almost a second early.
+    now.saturating_sub(timestamp) > persist_interval_seconds
+}
+
+pub fn runtime_probe_cache_freshness(
+    checked_at: i64,
+    now: i64,
+    fresh_seconds: i64,
+    stale_grace_seconds: i64,
+) -> RuntimeProbeCacheFreshness {
+    let age = now.saturating_sub(checked_at);
+    if age <= fresh_seconds {
+        RuntimeProbeCacheFreshness::Fresh
+    } else if age <= stale_grace_seconds {
+        RuntimeProbeCacheFreshness::StaleUsable
+    } else {
+        RuntimeProbeCacheFreshness::Expired
+    }
+}
+
+pub fn runtime_profile_usage_snapshot_hold_active<W, F>(
+    snapshot: &RuntimeProfileUsageSnapshot<W>,
+    now: i64,
+    is_exhausted: F,
+) -> bool
+where
+    W: Copy,
+    F: Fn(W) -> bool + Copy,
+{
+    [
+        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
+        (snapshot.weekly_status, snapshot.weekly_reset_at),
+    ]
+    .into_iter()
+    .any(|(status, reset_at)| is_exhausted(status) && reset_at != i64::MAX && reset_at > now)
+}
+
+pub fn runtime_profile_usage_snapshot_hold_expired<W, F>(
+    snapshot: &RuntimeProfileUsageSnapshot<W>,
+    now: i64,
+    is_exhausted: F,
+) -> bool
+where
+    W: Copy,
+    F: Fn(W) -> bool + Copy,
+{
+    [
+        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
+        (snapshot.weekly_status, snapshot.weekly_reset_at),
+    ]
+    .into_iter()
+    .any(|(status, reset_at)| is_exhausted(status) && reset_at != i64::MAX && reset_at <= now)
+}
+
+pub fn runtime_profile_usage_snapshot_is_usable<W, F>(
+    snapshot: &RuntimeProfileUsageSnapshot<W>,
+    now: i64,
+    stale_grace_seconds: i64,
+    is_exhausted: F,
+) -> bool
+where
+    W: Copy,
+    F: Fn(W) -> bool + Copy,
+{
+    if runtime_profile_usage_snapshot_hold_active(snapshot, now, is_exhausted) {
+        return true;
+    }
+    if runtime_profile_usage_snapshot_hold_expired(snapshot, now, is_exhausted) {
+        return false;
+    }
+    now.saturating_sub(snapshot.checked_at) <= stale_grace_seconds
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStartupProbeRefreshCandidate<N> {
+    pub profile_name: N,
+    pub probe_fresh: bool,
+    pub snapshot_usable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStartupProbeRefreshPlan {
+    pub now: i64,
+    pub probe_fresh_seconds: i64,
+    pub stale_grace_seconds: i64,
+    pub warm_limit: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeStartupProbeRefreshInput<'a, N, W> {
+    pub profile_name: N,
+    pub probe_checked_at: Option<i64>,
+    pub usage_snapshot: Option<&'a RuntimeProfileUsageSnapshot<W>>,
+}
+
+pub fn runtime_profiles_needing_startup_probe_refresh<N, I>(
+    candidates: I,
+    warm_limit: usize,
+) -> Vec<N>
+where
+    I: IntoIterator<Item = RuntimeStartupProbeRefreshCandidate<N>>,
+{
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            (!candidate.probe_fresh && !candidate.snapshot_usable).then_some(candidate.profile_name)
+        })
+        .take(warm_limit)
+        .collect()
+}
+
+pub fn runtime_profiles_needing_startup_probe_refresh_from_snapshots<'a, N, W, I, F>(
+    inputs: I,
+    plan: RuntimeStartupProbeRefreshPlan,
+    is_exhausted: F,
+) -> Vec<N>
+where
+    W: Copy + 'a,
+    I: IntoIterator<Item = RuntimeStartupProbeRefreshInput<'a, N, W>>,
+    F: Fn(W) -> bool + Copy,
+{
+    runtime_profiles_needing_startup_probe_refresh(
+        inputs.into_iter().map(|input| {
+            let probe_fresh = input.probe_checked_at.is_some_and(|checked_at| {
+                runtime_probe_cache_freshness(
+                    checked_at,
+                    plan.now,
+                    plan.probe_fresh_seconds,
+                    plan.stale_grace_seconds,
+                ) == RuntimeProbeCacheFreshness::Fresh
+            });
+            let snapshot_usable = input.usage_snapshot.is_some_and(|snapshot| {
+                runtime_profile_usage_snapshot_is_usable(
+                    snapshot,
+                    plan.now,
+                    plan.stale_grace_seconds,
+                    is_exhausted,
+                )
+            });
+            RuntimeStartupProbeRefreshCandidate {
+                profile_name: input.profile_name,
+                probe_fresh,
+                snapshot_usable,
+            }
+        }),
+        plan.warm_limit,
+    )
+}
+
+pub fn runtime_profile_usage_snapshot_materially_matches<W: PartialEq>(
+    previous: &RuntimeProfileUsageSnapshot<W>,
+    next: &RuntimeProfileUsageSnapshot<W>,
+) -> bool {
+    previous.five_hour_status == next.five_hour_status
+        && previous.five_hour_remaining_percent == next.five_hour_remaining_percent
+        && previous.five_hour_reset_at == next.five_hour_reset_at
+        && previous.weekly_status == next.weekly_status
+        && previous.weekly_remaining_percent == next.weekly_remaining_percent
+        && previous.weekly_reset_at == next.weekly_reset_at
+}
+
+pub fn runtime_profile_usage_snapshot_should_persist<W: PartialEq>(
+    previous: Option<&RuntimeProfileUsageSnapshot<W>>,
+    next: &RuntimeProfileUsageSnapshot<W>,
+    now: i64,
+    touch_persist_interval_seconds: i64,
+) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+
+    !runtime_profile_usage_snapshot_materially_matches(previous, next)
+        || runtime_timestamp_touch_should_persist(
+            previous.checked_at,
+            now,
+            touch_persist_interval_seconds,
+        )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProbeUsageSnapshotApplyPlan {
+    pub snapshot_should_persist: bool,
+    pub blocking_reset_at: Option<i64>,
+    pub retry_backoff_until: Option<i64>,
+    pub retry_backoff_changed: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeProbeUsageSnapshotApplyInput<'a, W> {
+    pub previous_snapshot: Option<&'a RuntimeProfileUsageSnapshot<W>>,
+    pub previous_retry_backoff_until: Option<i64>,
+    pub next_snapshot: &'a RuntimeProfileUsageSnapshot<W>,
+    pub quota_blocked: bool,
+    pub blocking_reset_at: Option<i64>,
+    pub now: i64,
+    pub quota_quarantine_fallback_seconds: i64,
+    pub touch_persist_interval_seconds: i64,
+}
+
+pub fn runtime_probe_usage_snapshot_apply_plan<W: PartialEq>(
+    input: RuntimeProbeUsageSnapshotApplyInput<'_, W>,
+) -> RuntimeProbeUsageSnapshotApplyPlan {
+    let snapshot_should_persist = runtime_profile_usage_snapshot_should_persist(
+        input.previous_snapshot,
+        input.next_snapshot,
+        input.now,
+        input.touch_persist_interval_seconds,
+    );
+    let blocking_reset_at = input
+        .blocking_reset_at
+        .filter(|reset_at| *reset_at > input.now);
+    let quarantine_until = input.quota_blocked.then(|| {
+        blocking_reset_at.unwrap_or_else(|| {
+            input
+                .now
+                .saturating_add(input.quota_quarantine_fallback_seconds)
+        })
+    });
+    let retry_backoff_until = quarantine_until.map(|until| {
+        input
+            .previous_retry_backoff_until
+            .unwrap_or(until)
+            .max(until)
+    });
+    let retry_backoff_changed =
+        retry_backoff_until.is_some_and(|until| Some(until) != input.previous_retry_backoff_until);
+
+    RuntimeProbeUsageSnapshotApplyPlan {
+        snapshot_should_persist,
+        blocking_reset_at,
+        retry_backoff_until,
+        retry_backoff_changed,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeStateSaveSelectedSnapshot<P, S, E, C, H, U, B> {
     pub paths: P,
@@ -594,6 +949,13 @@ pub struct RuntimeContinuationJournalSaveJob<P> {
 
 pub trait RuntimeScheduledSaveJob {
     fn ready_at(&self) -> Instant;
+}
+
+pub fn runtime_state_snapshot_is_latest_revision(
+    latest_revision: &AtomicU64,
+    revision: u64,
+) -> bool {
+    latest_revision.load(Ordering::SeqCst) == revision
 }
 
 impl<P> RuntimeScheduledSaveJob for RuntimeStateSaveJob<P> {
@@ -783,6 +1145,38 @@ mod tests {
     }
 
     #[test]
+    fn schedule_plan_combines_sections_debounce_and_journal_need() {
+        let queued_at = Instant::now();
+        let plan = runtime_state_save_enqueue_plan(
+            "turn_state:abc",
+            queued_at,
+            Duration::from_millis(150),
+        );
+
+        assert_eq!(
+            plan.schedule.sections,
+            RuntimeStateSaveSections {
+                state: RuntimeStateSaveStateSection::Core,
+                continuations: true,
+                profile_scores: false,
+                usage_snapshots: false,
+                backoffs: false,
+            }
+        );
+        assert_eq!(plan.schedule.debounce, Duration::from_millis(150));
+        assert!(plan.schedule.requires_continuation_journal);
+        assert_eq!(plan.queue.queued_at, queued_at);
+        assert_eq!(plan.queue.ready_in_ms(), 150);
+
+        let journal_plan = runtime_continuation_journal_save_enqueue_plan(
+            "profile_commit:main",
+            queued_at,
+            Duration::from_millis(150),
+        );
+        assert_eq!(journal_plan.ready_in(), Duration::ZERO);
+    }
+
+    #[test]
     fn pressure_helper_checks_each_queue_threshold() {
         let thresholds = RuntimeBackgroundQueuePressureThresholds {
             state_save: 8,
@@ -794,5 +1188,211 @@ mod tests {
         assert!(runtime_proxy_queue_pressure_active(0, 8, 0, thresholds));
         assert!(runtime_proxy_queue_pressure_active(0, 0, 16, thresholds));
         assert!(!runtime_proxy_queue_pressure_active(7, 7, 15, thresholds));
+        assert_eq!(runtime_background_enqueue_backlog(0), 0);
+        assert_eq!(runtime_background_enqueue_backlog(1), 0);
+        assert_eq!(runtime_background_enqueue_backlog(3), 2);
+        assert_eq!(
+            runtime_background_queue_enqueue_plan(
+                RuntimeBackgroundQueueKind::ProbeRefresh,
+                18,
+                thresholds
+            ),
+            RuntimeBackgroundQueueEnqueuePlan {
+                backlog: 17,
+                pressure_active: true,
+            }
+        );
+    }
+
+    #[test]
+    fn startup_probe_refresh_filters_stale_profiles_to_warm_limit() {
+        let exhausted_hold = RuntimeProfileUsageSnapshot {
+            checked_at: 0,
+            five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+            five_hour_remaining_percent: 0,
+            five_hour_reset_at: 300,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 90,
+            weekly_reset_at: 0,
+        };
+        let expired_hold = RuntimeProfileUsageSnapshot {
+            five_hour_reset_at: 100,
+            ..exhausted_hold.clone()
+        };
+        assert!(runtime_profile_usage_snapshot_is_usable(
+            &exhausted_hold,
+            200,
+            60,
+            |status| status == RuntimeQuotaWindowStatus::Exhausted,
+        ));
+        assert!(!runtime_profile_usage_snapshot_is_usable(
+            &expired_hold,
+            200,
+            60,
+            |status| status == RuntimeQuotaWindowStatus::Exhausted,
+        ));
+
+        let candidates = [
+            RuntimeStartupProbeRefreshCandidate {
+                profile_name: "fresh-probe",
+                probe_fresh: true,
+                snapshot_usable: false,
+            },
+            RuntimeStartupProbeRefreshCandidate {
+                profile_name: "usable-snapshot",
+                probe_fresh: false,
+                snapshot_usable: true,
+            },
+            RuntimeStartupProbeRefreshCandidate {
+                profile_name: "alpha",
+                probe_fresh: false,
+                snapshot_usable: false,
+            },
+            RuntimeStartupProbeRefreshCandidate {
+                profile_name: "bravo",
+                probe_fresh: false,
+                snapshot_usable: false,
+            },
+            RuntimeStartupProbeRefreshCandidate {
+                profile_name: "charlie",
+                probe_fresh: false,
+                snapshot_usable: false,
+            },
+        ];
+
+        assert_eq!(
+            runtime_profiles_needing_startup_probe_refresh(candidates, 2),
+            vec!["alpha", "bravo"]
+        );
+
+        let usable_snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 190,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 90,
+            five_hour_reset_at: 0,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: 0,
+        };
+        let stale_snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 100,
+            ..usable_snapshot.clone()
+        };
+        let inputs = [
+            RuntimeStartupProbeRefreshInput {
+                profile_name: "fresh-probe",
+                probe_checked_at: Some(195),
+                usage_snapshot: None,
+            },
+            RuntimeStartupProbeRefreshInput {
+                profile_name: "usable-snapshot",
+                probe_checked_at: None,
+                usage_snapshot: Some(&usable_snapshot),
+            },
+            RuntimeStartupProbeRefreshInput {
+                profile_name: "alpha",
+                probe_checked_at: None,
+                usage_snapshot: Some(&stale_snapshot),
+            },
+            RuntimeStartupProbeRefreshInput {
+                profile_name: "bravo",
+                probe_checked_at: None,
+                usage_snapshot: None,
+            },
+        ];
+
+        assert_eq!(
+            runtime_profiles_needing_startup_probe_refresh_from_snapshots(
+                inputs,
+                RuntimeStartupProbeRefreshPlan {
+                    now: 200,
+                    probe_fresh_seconds: 10,
+                    stale_grace_seconds: 60,
+                    warm_limit: 8,
+                },
+                |status| status == RuntimeQuotaWindowStatus::Exhausted,
+            ),
+            vec!["alpha", "bravo"]
+        );
+    }
+
+    #[test]
+    fn usage_snapshot_persist_requires_material_change_or_stale_touch() {
+        let previous = RuntimeProfileUsageSnapshot {
+            checked_at: 100,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 90,
+            five_hour_reset_at: 0,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: 0,
+        };
+        let mut next = previous.clone();
+        next.checked_at = 101;
+
+        assert!(!runtime_profile_usage_snapshot_should_persist(
+            Some(&previous),
+            &next,
+            110,
+            60,
+        ));
+        assert!(runtime_profile_usage_snapshot_should_persist(
+            Some(&previous),
+            &next,
+            161,
+            60,
+        ));
+        next.weekly_remaining_percent = 70;
+        assert!(runtime_profile_usage_snapshot_should_persist(
+            Some(&previous),
+            &next,
+            110,
+            60,
+        ));
+    }
+
+    #[test]
+    fn probe_usage_apply_plan_sets_quarantine_and_persist_flags() {
+        let previous = RuntimeProfileUsageSnapshot {
+            checked_at: 100,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 90,
+            five_hour_reset_at: 0,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: 0,
+        };
+        let mut next = previous.clone();
+        next.checked_at = 120;
+
+        let plan = runtime_probe_usage_snapshot_apply_plan(RuntimeProbeUsageSnapshotApplyInput {
+            previous_snapshot: Some(&previous),
+            previous_retry_backoff_until: Some(130),
+            next_snapshot: &next,
+            quota_blocked: true,
+            blocking_reset_at: Some(200),
+            now: 120,
+            quota_quarantine_fallback_seconds: 60,
+            touch_persist_interval_seconds: 60,
+        });
+
+        assert!(!plan.snapshot_should_persist);
+        assert_eq!(plan.blocking_reset_at, Some(200));
+        assert_eq!(plan.retry_backoff_until, Some(200));
+        assert!(plan.retry_backoff_changed);
+
+        let plan = runtime_probe_usage_snapshot_apply_plan(RuntimeProbeUsageSnapshotApplyInput {
+            previous_snapshot: Some(&previous),
+            previous_retry_backoff_until: Some(250),
+            next_snapshot: &next,
+            quota_blocked: true,
+            blocking_reset_at: Some(200),
+            now: 120,
+            quota_quarantine_fallback_seconds: 60,
+            touch_persist_interval_seconds: 60,
+        });
+
+        assert_eq!(plan.retry_backoff_until, Some(250));
+        assert!(!plan.retry_backoff_changed);
     }
 }

@@ -1,20 +1,24 @@
 //! Runtime proxy boundary primitives.
 //!
-//! This crate intentionally starts with side-effect-free types and helpers only.
-//! The live proxy keeps owning transport, affinity, rotation, and persistence
-//! until those dependencies can be split without changing hot-path behavior.
+//! Most modules are side-effect-free boundary types and helpers.
+//! The bounded WebSocket TCP/DNS executor also lives here so the binary can keep
+//! transport policy wiring thin while still owning runtime state and persistence.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+mod admission;
 mod attempt_outcome;
 mod buffered_response;
+mod continuation;
 mod error_policy;
 mod failure_response;
 mod health;
+mod lineage;
 mod payload_detection;
 mod previous_response_log;
 mod previous_response_orchestration;
+mod quota;
 mod response_forwarding;
 mod selection_plan;
 mod selection_policy;
@@ -24,14 +28,18 @@ mod websocket_message;
 mod websocket_proxy;
 mod websocket_tcp_connect_executor;
 
+pub use self::admission::*;
 pub use self::attempt_outcome::*;
 pub use self::buffered_response::*;
+pub use self::continuation::*;
 pub use self::error_policy::*;
 pub use self::failure_response::*;
 pub use self::health::*;
+pub use self::lineage::*;
 pub use self::payload_detection::*;
 pub use self::previous_response_log::*;
 pub use self::previous_response_orchestration::*;
+pub use self::quota::*;
 pub use self::response_forwarding::*;
 pub use self::selection_plan::*;
 pub use self::selection_policy::*;

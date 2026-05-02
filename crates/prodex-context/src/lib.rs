@@ -88,6 +88,29 @@ impl Default for CommandOutputCompactOptions {
     }
 }
 
+impl CommandOutputCompactOptions {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_limits(
+        kind: CommandOutputKind,
+        max_lines: usize,
+        head_lines: usize,
+        tail_lines: usize,
+        max_line_chars: usize,
+        max_search_matches_per_file: usize,
+        max_path_entries: usize,
+    ) -> Self {
+        Self {
+            kind,
+            max_lines,
+            head_lines,
+            tail_lines,
+            max_line_chars,
+            max_search_matches_per_file,
+            max_path_entries,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandOutputCompactReport {
     pub requested_kind: CommandOutputKind,

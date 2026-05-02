@@ -106,6 +106,7 @@ pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows(usage)
 }
 
+#[allow(dead_code)]
 pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows_compact(usage)
 }
@@ -146,6 +147,7 @@ pub(crate) fn format_reset_time(epoch: Option<i64>) -> String {
     prodex_quota::format_reset_time(epoch)
 }
 
+#[allow(dead_code)]
 pub(crate) fn format_precise_reset_time(epoch: Option<i64>) -> String {
     prodex_quota::format_precise_reset_time(epoch)
 }
