@@ -31,6 +31,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-runtime-broker/`: side-effect-free runtime broker registry, health, and metrics DTOs
 - `crates/prodex-runtime-capabilities/`: runtime request compatibility surface detection
 - `crates/prodex-runtime-claude/`: Claude Code runtime launch configuration helpers
+- `crates/prodex-runtime-cookies/`: runtime proxy profile-scoped cookie relay helpers
 - `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers
 - `crates/prodex-runtime-launch/`: child process and runtime launch planning primitives
 - `crates/prodex-runtime-mem/`: runtime memory mode helpers

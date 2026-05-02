@@ -1389,6 +1389,7 @@ dependencies = [
  "prodex-runtime-broker",
  "prodex-runtime-capabilities",
  "prodex-runtime-claude",
+ "prodex-runtime-cookies",
  "prodex-runtime-doctor",
  "prodex-runtime-launch",
  "prodex-runtime-mem",
@@ -1554,6 +1555,15 @@ dependencies = [
  "prodex-runtime-launch",
  "prodex-shared-codex-fs",
  "serde_json",
+]
+
+[[package]]
+name = "prodex-runtime-cookies"
+version = "0.69.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "tungstenite",
 ]
 
 [[package]]

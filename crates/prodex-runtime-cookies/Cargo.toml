@@ -1,0 +1,17 @@
+[package]
+name = "prodex-runtime-cookies"
+version.workspace = true
+edition.workspace = true
+description = "Runtime proxy cookie relay helpers for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_runtime_cookies"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { version = "0.4.44", features = ["clock"] }
+reqwest = { version = "0.13.2", default-features = false }
+tungstenite = { version = "0.29.0", default-features = false, features = ["handshake"] }
