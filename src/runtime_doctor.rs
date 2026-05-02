@@ -4,13 +4,13 @@ mod state;
 
 #[allow(unused_imports)]
 pub(crate) use prodex_runtime_doctor::RuntimeDoctorRequestTimelineEvent;
+#[cfg(test)]
+pub(crate) use prodex_runtime_doctor::RuntimeDoctorRouteSummary;
 pub(crate) use prodex_runtime_doctor::{
     RuntimeDoctorProfileSummary, RuntimeDoctorSummary, read_runtime_log_tail,
     runtime_doctor_fields_for_summary, runtime_doctor_json_value,
     runtime_doctor_policy_suggestion_lines, summarize_runtime_log_tail,
 };
-#[cfg(test)]
-pub(crate) use prodex_runtime_doctor::RuntimeDoctorRouteSummary;
 pub(crate) use state::collect_runtime_doctor_summary_with_tail_bytes;
 
 #[cfg(test)]
