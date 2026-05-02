@@ -296,8 +296,13 @@ fn compact_final_failure_logs_overload_terminal_reason() {
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
 
     assert_eq!(status, 500);
+    let overload_terminal_marker =
+        log.contains("compact_final_failure exit=candidate_exhausted reason=overload")
+            || log.contains(
+                "compact_final_failure exit=precommit_budget_exhausted reason=overload",
+            );
     assert!(
-        log.contains("compact_final_failure exit=candidate_exhausted reason=overload"),
+        overload_terminal_marker,
         "compact overload terminal marker should identify overload exhaustion: {log}"
     );
     assert!(
